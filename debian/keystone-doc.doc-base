@@ -1,0 +1,10 @@
+Document: keystone-doc
+Title: Keystone Documentation
+Author: OpenStack
+Abstract: Sphinx documentation for Keystone
+Section: Network/File Transfer
+
+Format: HTML
+Index: /usr/share/doc/keystone-doc/html/index.html
+Files: /usr/share/doc/keystone-doc/html/*
+

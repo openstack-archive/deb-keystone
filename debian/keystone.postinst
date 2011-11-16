@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "configure" ]
+then
+    adduser --system \
+            --home /var/lib/keystone \
+            --no-create-home \
+            --quiet \
+            --disabled-password \
+            --group keystone
+    chown keystone:keystone -R /var/lib/keystone /var/log/keystone
+    chown 0700 /var/log/keystone
+    chmod 0700 /var/log/keystone
+
+    if grep -q -e "^sql_connection\s*=\s*sqlite://"
+    then
+	su -c 'keystone-manage db sync' keystone
+    fi
+fi
+
+#DEBHELPER#

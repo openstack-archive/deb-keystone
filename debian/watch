@@ -1,0 +1,4 @@
+version=3
+http://launchpad.net/keystone/+download http://launchpad.net/keystone/.*/keystone-(.*)\.tar\.gz
+http://keystone.openstack.org/tarballs/ keystone-(.*).tar.gz
+
