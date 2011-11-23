@@ -3,7 +3,7 @@
 export DH_VERBOSE=1
 
 %:
-	dh $@
+	dh $@ --with python2
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:

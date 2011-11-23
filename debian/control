@@ -20,6 +20,7 @@ Build-Depends: debhelper (>= 7.0.50),
  python-sqlalchemy,
  python-passlib,
  python-ldap
+X-Python-Version: 2.6-
 Standards-Version: 3.9.2
 Homepage: http://launchpad.net/keystone
 
