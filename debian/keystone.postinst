@@ -14,10 +14,13 @@ then
     chown 0700 /var/log/keystone
     chmod 0700 /var/log/keystone
 
-    if grep -q -e "^sql_connection\s*=\s*sqlite://"
+    if grep -q -e "^sql_connection\s*=\s*sqlite://" /etc/keystone/keystone.conf
     then
-	su -c 'keystone-manage db sync' keystone
+        # Do not fail to install even if the db sync fails
+	su -c 'keystone-manage db sync' keystone || true
     fi
 fi
 
 #DEBHELPER#
+
+exit 0

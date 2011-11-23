@@ -20,11 +20,17 @@ else
 	touch $(CURDIR)/build/sphinx/man/keystone-manage.1
 endif
 
+override_dh_install:
+	dh_install
+	# Needed until this is fixed in later versions (upstream git is fixed)
+	chmod -x $(CURDIR)/debian/keystone/etc/keystone/keystone.conf
+	chmod -x $(CURDIR)/debian/python-keystone/usr/lib/python*/dist-packages/keystone/test/etc/ldap.conf.template
+	sed -i 's|^log_file = keystone.log$$|log_file = /var/log/keystone/keystone.log|' \
+		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
+	sed -i 's|^sqlite = sqlite:///keystone.db$$|sqlite = sqlite:///var/lib/keystone/keystone.db|' \
+		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
+
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
 	rm -rf $(CURDIR)/keystone/test/*.log
 	dh_clean
-
-override_dh_installdocs:
-	rm -rf $(CURDIR)/build/sphinx/html/_sources
-	dh_installdocs
