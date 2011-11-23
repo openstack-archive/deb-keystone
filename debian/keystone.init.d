@@ -14,7 +14,7 @@
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC=OpenStack Identity service
+DESC="OpenStack Identity service"
 NAME=keystone
 DAEMON=/usr/bin/keystone
 DAEMON_ARGS=""             # Arguments to run the daemon with
