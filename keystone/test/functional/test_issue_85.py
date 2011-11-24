@@ -24,9 +24,11 @@ class TestIssue85(common.FunctionalTestCase):
         self.assertEqual(tenant_id, tenant['id'])
 
         # Disable tenant
-        r = self.admin_request(method='PUT', path='/tenants/%s' % tenant['id'],
+        r = self.admin_request(method='POST',
+            path='/tenants/%s' % tenant['id'],
             as_json={
                 'tenant': {
+                    'name': tenant['name'],
                     'description': 'description',
                     'enabled': False}})
         self.assertFalse(r.json['tenant']['enabled'])

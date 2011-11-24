@@ -14,9 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from setuptools import setup, find_packages
+import keystone
+import os
+import subprocess
 
-version = '1.0'
+from setuptools import setup, find_packages
 
 cmdclass = {}
 
@@ -28,6 +30,9 @@ try:
 
     class local_BuildDoc(BuildDoc):
         def run(self):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            subprocess.Popen(["python", "generate_autodoc_index.py"],
+                             cwd=os.path.join(base_dir, "doc")).communicate()
             for builder in ['html', 'man']:
                 self.builder = builder
                 self.finalize_options()
@@ -39,7 +44,7 @@ except:
 
 setup(
     name='keystone',
-    version=version,
+    version=keystone.canonical_version(),
     description="Authentication service - proposed for OpenStack",
     license='Apache License (2.0)',
     classifiers=["Programming Language :: Python"],
@@ -50,7 +55,8 @@ setup(
     include_package_data=True,
     packages=find_packages(exclude=['test', 'bin']),
     scripts=['bin/keystone', 'bin/keystone-auth', 'bin/keystone-admin',
-             'bin/keystone-manage'],
+             'bin/keystone-manage', 'bin/keystone-import',
+             'bin/keystone-control'],
     zip_safe=False,
     cmdclass=cmdclass,
     install_requires=['setuptools'],

@@ -20,32 +20,48 @@
 TOKEN-BASED AUTH MIDDLEWARE
 
 This WSGI component performs multiple jobs:
-- it verifies that incoming client requests have valid tokens by verifying
-    tokens with the auth service.
-- it will reject unauthenticated requests UNLESS it is in 'delay_auth_decision'
-    mode, which means the final decision is delegated to the downstream WSGI
-    component (usually the OpenStack service)
-- it will collect and forward identity information from a valid token
-    such as user name etc...
+
+* it verifies that incoming client requests have valid tokens by verifying
+  tokens with the auth service.
+* it will reject unauthenticated requests UNLESS it is in 'delay_auth_decision'
+  mode, which means the final decision is delegated to the downstream WSGI
+  component (usually the OpenStack service)
+* it will collect and forward identity information from a valid token
+  such as user name etc...
 
 Refer to: http://wiki.openstack.org/openstack-authn
 
 
 HEADERS
 -------
-Headers starting with HTTP_ is a standard http header
-Headers starting with HTTP_X is an extended http header
 
-> Coming in from initial call from client or customer
-HTTP_X_AUTH_TOKEN   : the client token being passed in
-HTTP_X_STORAGE_TOKEN: the client token being passed in (legacy Rackspace use)
-                      to support cloud files
-> Used for communication between components
-www-authenticate    : only used if this component is being used remotely
-HTTP_AUTHORIZATION  : basic auth password used to validate the connection
+* Headers starting with HTTP\_ is a standard http header
+* Headers starting with HTTP_X is an extended http header
 
-> What we add to the request for use by the OpenStack service
-HTTP_X_AUTHORIZATION: the client identity being passed in
+Coming in from initial call from client or customer
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+HTTP_X_AUTH_TOKEN
+    the client token being passed in
+
+HTTP_X_STORAGE_TOKEN
+    the client token being passed in (legacy Rackspace use) to support
+    cloud files
+
+Used for communication between components
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+www-authenticate
+    only used if this component is being used remotely
+
+HTTP_AUTHORIZATION
+    basic auth password used to validate the connection
+
+What we add to the request for use by the OpenStack service
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+HTTP_X_AUTHORIZATION
+    the client identity being passed in
 
 """
 
@@ -111,11 +127,30 @@ class AuthProtocol(object):
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
         self.admin_token = conf.get('admin_token')
+        # Certificate file and key file used to authenticate with Keystone
+        # server
+        self.cert_file = conf.get('certfile', None)
+        self.key_file = conf.get('keyfile', None)
 
     def __init__(self, app, conf):
         """ Common initialization code """
-
         #TODO(ziad): maybe we refactor this into a superclass
+        # Defining instance variables here for improving pylint score
+        # NOTE(salvatore-orlando): the following vars are assigned values
+        # either in init_protocol or init_protocol_common. We should not
+        # worry about them being initialized to None
+        self.admin_password = None
+        self.admin_token = None
+        self.admin_user = None
+        self.auth_api_version = None
+        self.auth_host = None
+        self.auth_location = None
+        self.auth_port = None
+        self.auth_protocol = None
+        self.service_host = None
+        self.service_port = None
+        self.service_protocol = None
+        self.service_url = None
         self._init_protocol_common(app, conf)  # Applies to all protocols
         self._init_protocol(conf)  # Specific to this protocol
 
@@ -165,8 +200,18 @@ class AuthProtocol(object):
                 if claims:
                     self._decorate_request('X_AUTHORIZATION', "Proxy %s" %
                         claims['user'], env, proxy_headers)
+
+                    # For legacy compatibility before we had ID and Name
                     self._decorate_request('X_TENANT',
                         claims['tenant'], env, proxy_headers)
+
+                    # Services should use these
+                    self._decorate_request('X_TENANT_NAME',
+                        claims.get('tenant_name', claims['tenant']),
+                        env, proxy_headers)
+                    self._decorate_request('X_TENANT_ID',
+                        claims['tenant'], env, proxy_headers)
+
                     self._decorate_request('X_USER',
                         claims['user'], env, proxy_headers)
                     if 'roles' in claims and len(claims['roles']) > 0:
@@ -184,25 +229,6 @@ class AuthProtocol(object):
 
         #Send request downstream
         return self._forward_request(env, start_response, proxy_headers)
-
-    # NOTE(todd): unused
-    def get_admin_auth_token(self, username, password):
-        """
-        This function gets an admin auth token to be used by this service to
-        validate a user's token. Validate_token is a priviledged call so
-        it needs to be authenticated by a service that is calling it
-        """
-        headers = {"Content-type": "application/json", "Accept": "text/json"}
-        params = {"passwordCredentials": {"username": username,
-                                          "password": password,
-                                          "tenantId": "1"}}
-        conn = httplib.HTTPConnection("%s:%s" \
-            % (self.auth_host, self.auth_port))
-        conn.request("POST", "/v2.0/tokens", json.dumps(params), \
-            headers=headers)
-        response = conn.getresponse()
-        data = response.read()
-        return data
 
     def _get_claims(self, env):
         """Get claims from request"""
@@ -235,15 +261,17 @@ class AuthProtocol(object):
         # since this is a priviledged op,m we need to auth ourselves
         # by using an admin token
         headers = {"Content-type": "application/json",
-                    "Accept": "text/json",
+                    "Accept": "application/json",
                     "X-Auth-Token": self.admin_token}
                     ##TODO(ziad):we need to figure out how to auth to keystone
                     #since validate_token is a priviledged call
                     #Khaled's version uses creds to get a token
                     # "X-Auth-Token": admin_token}
                     # we're using a test token from the ini file for now
-        conn = http_connect(self.auth_host, self.auth_port, 'GET',
-                            '/v2.0/tokens/%s' % claims, headers=headers)
+        conn = http_connect(self.auth_host, self.auth_port, 'HEAD',
+                            '/v2.0/tokens/%s' % claims, headers=headers,
+                            ssl=(self.auth_protocol == 'https'),
+                            key_file=self.key_file, cert_file=self.cert_file)
         resp = conn.getresponse()
         # data = resp.read()
         conn.close()
@@ -261,7 +289,7 @@ class AuthProtocol(object):
         # Valid token. Get user data and put it in to the call
         # so the downstream service can use it
         headers = {"Content-type": "application/json",
-                    "Accept": "text/json",
+                    "Accept": "application/json",
                     "X-Auth-Token": self.admin_token}
                     ##TODO(ziad):we need to figure out how to auth to keystone
                     #since validate_token is a priviledged call
@@ -269,7 +297,9 @@ class AuthProtocol(object):
                     # "X-Auth-Token": admin_token}
                     # we're using a test token from the ini file for now
         conn = http_connect(self.auth_host, self.auth_port, 'GET',
-                            '/v2.0/tokens/%s' % claims, headers=headers)
+                            '/v2.0/tokens/%s' % claims, headers=headers,
+                            ssl=(self.auth_protocol == 'https'),
+                            key_file=self.key_file, cert_file=self.cert_file)
         resp = conn.getresponse()
         data = resp.read()
         conn.close()
@@ -288,13 +318,18 @@ class AuthProtocol(object):
 
         try:
             tenant = token_info['access']['token']['tenant']['id']
+            tenant_name = token_info['access']['token']['tenant']['name']
         except:
             tenant = None
+            tenant_name = None
         if not tenant:
             tenant = token_info['access']['user'].get('tenantId')
+            tenant_name = token_info['access']['user'].get('tenantName')
         verified_claims = {'user': token_info['access']['user']['username'],
                     'tenant': tenant,
                     'roles': roles}
+        if tenant_name:
+            verified_claims['tenantName'] = tenant_name
         return verified_claims
 
     def _decorate_request(self, index, value, env, proxy_headers):

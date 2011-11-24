@@ -68,7 +68,7 @@ class CreateUserTest(UserTest):
 
     def test_create_user_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.create_user(assert_status=404)
+        self.create_user(assert_status=401)
 
 
 class GetUserTest(UserTest):
@@ -109,11 +109,11 @@ class GetUserTest(UserTest):
 
     def test_get_user_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.fetch_user(self.user['id'], assert_status=404)
+        self.fetch_user(self.user['id'], assert_status=401)
 
     def test_query_user_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.fetch_user_by_name(self.user['name'], assert_status=404)
+        self.fetch_user_by_name(self.user['name'], assert_status=401)
 
     def test_get_disabled_user(self):
         self.disable_user(self.user['id'])
@@ -144,7 +144,7 @@ class DeleteUserTest(UserTest):
 
     def test_user_delete_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.remove_user(self.user['id'], assert_status=404)
+        self.remove_user(self.user['id'], assert_status=401)
 
 
 class GetAllUsersTest(UserTest):
@@ -171,7 +171,7 @@ class GetAllUsersTest(UserTest):
 
     def test_list_users_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.list_users(assert_status=404)
+        self.list_users(assert_status=401)
 
 
 class UpdateUserTest(UserTest):
@@ -182,9 +182,18 @@ class UpdateUserTest(UserTest):
 
     def test_update_user_email(self):
         new_user_email = common.unique_email()
-        self.update_user(self.user['id'], user_email=new_user_email)
+        self.update_user(self.user['id'], user_name=self.user['name'],
+                         user_email=new_user_email)
         r = self.fetch_user(self.user['id'])
         self.assertTrue(r.json['user']['email'], new_user_email)
+
+    def test_update_user_name(self):
+        new_user_name = common.unique_str()
+        new_user_email = common.unique_email()
+        self.update_user(self.user['id'], user_name=new_user_name,
+            user_email=new_user_email)
+        r = self.fetch_user(self.user['id'])
+        self.assertTrue(r.json['user']['name'], new_user_name)
 
     def test_enable_disable_user(self):
         self.assertFalse(self.disable_user(self.user['id']).\
@@ -198,7 +207,8 @@ class UpdateUserTest(UserTest):
 
     def test_update_user_bad_request(self):
         data = '{"user_bad": { "bad": "%s"}}' % (common.unique_email(),)
-        self.put_user(self.user['id'], assert_status=400, body=data, headers={
+        self.post_user_for_update(
+            self.user['id'], assert_status=400, body=data, headers={
             "Content-Type": "application/json"})
 
     def test_update_user_expired_token(self):
@@ -212,7 +222,7 @@ class UpdateUserTest(UserTest):
 
     def test_update_user_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.update_user(self.user['id'], assert_status=404)
+        self.update_user(self.user['id'], assert_status=401)
 
     def test_update_user_missing_token(self):
         self.admin_token = ''
@@ -230,6 +240,7 @@ class TestUpdateConflict(UserTest):
     def test_update_user_email_conflict(self):
         """Replace the second user's email with that of the first"""
         self.update_user(user_id=self.users[1]['id'],
+                user_name=self.users[1]['name'],
             user_email=self.users[0]['email'], assert_status=409)
 
 
@@ -266,7 +277,7 @@ class SetPasswordTest(UserTest):
 
     def test_user_password_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.update_user_password(self.user['id'], assert_status=404)
+        self.update_user_password(self.user['id'], assert_status=401)
 
     def test_user_password_missing_token(self):
         self.admin_token = ''
@@ -321,7 +332,7 @@ class TenantUpdateTest(UserTest):
     def test_update_user_tenant_using_invalid_token(self):
         self.admin_token = common.unique_str()
         self.update_user_tenant(self.user['id'], self.tenant['id'],
-            assert_status=404)
+            assert_status=401)
 
     def test_update_user_tenant_using_disabled_token(self):
         self.admin_token = self.disabled_admin_token
@@ -352,7 +363,7 @@ class AddUserTest(UserTest):
 
     def test_add_user_tenant_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.create_user(assert_status=404)
+        self.create_user(assert_status=401)
 
     def test_add_user_tenant_missing_token(self):
         self.admin_token = ''

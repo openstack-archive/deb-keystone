@@ -20,7 +20,7 @@ import routes
 from keystone.common import wsgi
 import keystone.backends as db
 from keystone.controllers.auth import AuthController
-from keystone.controllers.endpointtemplates import EndpointTemplatesController
+from keystone.controllers.roles import RolesController
 from keystone.controllers.staticfiles import StaticFilesController
 from keystone.controllers.tenant import TenantController
 from keystone.controllers.user import UserController
@@ -48,6 +48,7 @@ class AdminApi(wsgi.Router):
         mapper.connect("/tokens/{token_id}", controller=auth_controller,
                         action="check_token",
                         conditions=dict(method=["HEAD"]))
+        # Do we need this.API doesn't have delete token.
         mapper.connect("/tokens/{token_id}", controller=auth_controller,
                         action="delete_token",
                         conditions=dict(method=["DELETE"]))
@@ -59,96 +60,23 @@ class AdminApi(wsgi.Router):
         # Tenant Operations
         tenant_controller = TenantController(options)
         mapper.connect("/tenants", controller=tenant_controller,
-                    action="create_tenant",
-                    conditions=dict(method=["POST"]))
-        mapper.connect("/tenants", controller=tenant_controller,
                     action="get_tenants", conditions=dict(method=["GET"]))
         mapper.connect("/tenants/{tenant_id}",
                     controller=tenant_controller,
-                    action="update_tenant", conditions=dict(method=["PUT"]))
-        mapper.connect("/tenants/{tenant_id}",
-                    controller=tenant_controller,
                     action="get_tenant", conditions=dict(method=["GET"]))
-        mapper.connect("/tenants/{tenant_id}",
-                    controller=tenant_controller,
-                    action="delete_tenant", conditions=dict(method=["DELETE"]))
-
+        roles_controller = RolesController(options)
+        mapper.connect("/tenants/{tenant_id}/users/{user_id}/roles",
+            controller=roles_controller, action="get_user_roles",
+            conditions=dict(method=["GET"]))
         # User Operations
         user_controller = UserController(options)
-        mapper.connect("/users",
-                    controller=user_controller,
-                    action="create_user",
-                    conditions=dict(method=["POST"]))
-        mapper.connect("/users",
-                    controller=user_controller,
-                    action="get_users",
-                    conditions=dict(method=["GET"]))
         mapper.connect("/users/{user_id}",
                     controller=user_controller,
                     action="get_user",
                     conditions=dict(method=["GET"]))
-        mapper.connect("/users/{user_id}",
-                    controller=user_controller,
-                    action="update_user",
-                    conditions=dict(method=["PUT"]))
-        mapper.connect("/users/{user_id}",
-                    controller=user_controller,
-                    action="delete_user",
-                    conditions=dict(method=["DELETE"]))
-        mapper.connect("/users/{user_id}/password",
-                    controller=user_controller,
-                    action="set_user_password",
-                    conditions=dict(method=["PUT"]))
-        mapper.connect("/users/{user_id}/tenant",
-                    controller=user_controller,
-                    action="update_user_tenant",
-                    conditions=dict(method=["PUT"]))
-        # Test this, test failed
-        mapper.connect("/users/{user_id}/enabled",
-                    controller=user_controller,
-                    action="set_user_enabled",
-                    conditions=dict(method=["PUT"]))
-        mapper.connect("/tenants/{tenant_id}/users",
-                    controller=user_controller,
-                    action="get_tenant_users",
-                    conditions=dict(method=["GET"]))
-
-        #EndpointTemplatesControllers and Endpoints
-        endpoint_templates_controller = EndpointTemplatesController(options)
-        mapper.connect("/endpointTemplates",
-            controller=endpoint_templates_controller,
-                action="get_endpoint_templates",
-                    conditions=dict(method=["GET"]))
-        mapper.connect("/endpointTemplates",
-            controller=endpoint_templates_controller,
-                action="add_endpoint_template",
-                    conditions=dict(method=["POST"]))
-        mapper.connect("/endpointTemplates/{endpoint_template_id}",
-                controller=endpoint_templates_controller,
-                    action="get_endpoint_template",
-                        conditions=dict(method=["GET"]))
-        mapper.connect("/endpointTemplates/{endpoint_template_id}",
-                controller=endpoint_templates_controller,
-                    action="modify_endpoint_template",
-                        conditions=dict(method=["PUT"]))
-        mapper.connect("/endpointTemplates/{endpoint_template_id}",
-                controller=endpoint_templates_controller,
-                    action="delete_endpoint_template",
-                        conditions=dict(method=["DELETE"]))
-        mapper.connect("/tenants/{tenant_id}/endpoints",
-                       controller=endpoint_templates_controller,
-                    action="get_endpoints_for_tenant",
-                    conditions=dict(method=["GET"]))
-        mapper.connect("/tenants/{tenant_id}/endpoints",
-                       controller=endpoint_templates_controller,
-                     action="add_endpoint_to_tenant",
-                     conditions=dict(method=["POST"]))
-        mapper.connect(
-                "/tenants/{tenant_id}/endpoints/{endpoint_id}",
-                controller=endpoint_templates_controller,
-                action="remove_endpoint_from_tenant",
-                conditions=dict(method=["DELETE"]))
-
+        mapper.connect("/users/{user_id}/roles",
+            controller=roles_controller, action="get_user_roles",
+            conditions=dict(method=["GET"]))
         # Miscellaneous Operations
         version_controller = VersionController(options)
         mapper.connect("/", controller=version_controller,
@@ -212,5 +140,5 @@ class AdminApi(wsgi.Router):
                     action="get_static_file",
                     root="content/common/", path="samples/",
                     conditions=dict(method=["GET"]))
-        extension.configure_extensions(mapper, options)
+        extension.get_extension_configurer().configure(mapper, options)
         super(AdminApi, self).__init__(mapper)

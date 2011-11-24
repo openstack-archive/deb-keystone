@@ -25,6 +25,7 @@ import json
 import logging
 import sys
 import datetime
+import ssl
 
 import eventlet.wsgi
 eventlet.patcher.monkey_patch(all=False, socket=True)
@@ -111,6 +112,24 @@ class Server(object):
                              log=WritableLogger(logger, logging.root.level))
 
 
+class SslServer(Server):
+    """SSL Server class to manage multiple WSGI sockets and applications."""
+    def start(self, application, port, host='0.0.0.0', backlog=128,
+              certfile=None, keyfile=None, ca_certs=None,
+              cert_required='True'):
+        """Run a 2-way SSL WSGI server with the given application."""
+        socket = eventlet.listen((host, port), backlog=backlog)
+        if cert_required == 'True':
+            cert_reqs = ssl.CERT_REQUIRED
+        else:
+            cert_reqs = ssl.CERT_NONE
+        sslsocket = eventlet.wrap_ssl(socket, certfile=certfile,
+                                      keyfile=keyfile,
+                                      server_side=True, cert_reqs=cert_reqs,
+                                      ca_certs=ca_certs)
+        self.pool.spawn_n(self._run, application, sslsocket)
+
+
 class Middleware(object):
     """
     Base WSGI middleware wrapper. These classes require an application to be
@@ -181,6 +200,14 @@ class Debug(Middleware):
             sys.stdout.flush()
             yield part
         print
+
+
+def debug_filter_factory(global_conf):
+    """Filter factor to easily insert a debugging middleware into the
+    paste.deploy pipeline"""
+    def filter(app):
+        return Debug(app)
+    return filter
 
 
 class Router(object):

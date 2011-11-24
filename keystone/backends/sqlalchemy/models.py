@@ -153,7 +153,7 @@ class Credentials(Base, KeystoneBase):
 
 
 class Token(Base, KeystoneBase):
-    __tablename__ = 'token'
+    __tablename__ = 'tokens'
     __api__ = 'token'
     id = Column(String(255), primary_key=True, unique=True)
     user_id = Column(Integer)
@@ -172,3 +172,6 @@ class EndpointTemplates(Base, KeystoneBase):
     internal_url = Column(String(2000))
     enabled = Column(Boolean)
     is_global = Column(Boolean)
+    version_id = Column(String(20))
+    version_list = Column(String(2000))
+    version_info = Column(String(500))

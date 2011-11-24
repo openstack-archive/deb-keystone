@@ -1,5 +1,6 @@
 import ldap
 import ldap.filter
+import uuid
 
 import keystone.backends.backendutils as utils
 from keystone.backends.api import BaseUserAPI
@@ -20,6 +21,7 @@ class UserAPI(BaseLdapAPI, BaseUserAPI):
         'password': 'userPassword',
         'email': 'mail',
         'enabled': 'keystoneEnabled',
+        'name': 'keystoneName',
     }
     attribute_ignore = ['tenant_id']
 
@@ -31,12 +33,15 @@ class UserAPI(BaseLdapAPI, BaseUserAPI):
         return obj
 
     def get_by_name(self, name, filter=None):
-        return self.get(name, filter)
+        users = self.get_all('(keystoneName=%s)' % \
+                            (ldap.filter.escape_filter_chars(name),))
+        try:
+            return users[0]
+        except IndexError:
+            return None
 
     def create(self, values):
-        # Persist the 'name' as the UID
-        values['id'] = values['name']
-        delattr(values, 'name')
+        values['id'] = str(uuid.uuid4())
         utils.set_hashed_password(values)
         values = super(UserAPI, self).create(values)
         if values['tenant_id'] is not None:
@@ -105,13 +110,14 @@ class UserAPI(BaseLdapAPI, BaseUserAPI):
     def users_get_page_markers(self, marker, limit):
         return self.get_page_markers(marker, limit)
 
-    def users_get_by_tenant_get_page(self, tenant_id, marker, limit):
+    def users_get_by_tenant_get_page(self, tenant_id, role_id, marker, limit):
         return self._get_page(marker, limit,
-                self.api.tenant.get_users(tenant_id))
+                self.api.tenant.get_users(tenant_id, role_id))
 
-    def users_get_by_tenant_get_page_markers(self, tenant_id, marker, limit):
+    def users_get_by_tenant_get_page_markers(self, tenant_id,
+        role_id, marker, limit):
         return self._get_page_markers(marker, limit,
-                self.api.tenant.get_users(tenant_id))
+                self.api.tenant.get_users(tenant_id, role_id))
 
     def check_password(self, user, password):
         return utils.check_password(password, user.password)

@@ -20,6 +20,7 @@ from keystone.backends.api import BaseRoleAPI
 
 
 class RoleAPI(BaseRoleAPI):
+    # pylint: disable=W0221
     def create(self, values):
         role = models.Role()
         role.update(values)
@@ -67,18 +68,21 @@ class RoleAPI(BaseRoleAPI):
             return session.query(models.Role).order_by(\
                                 models.Role.id.desc()).limit(limit).all()
 
-    def ref_get_page(self, marker, limit, user_id, session=None):
+    def ref_get_page(self, marker, limit, user_id, tenant_id, session=None):
         if not session:
             session = get_session()
-
+        query = session.query(models.UserRoleAssociation).\
+                filter_by(user_id=user_id)
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        else:
+            query = query.filter("tenant_id is null")
         if marker:
-            return session.query(models.UserRoleAssociation).\
-                    filter("id>:marker").params(\
-                    marker='%s' % marker).filter_by(user_id=user_id).order_by(\
+            return query.filter("id>:marker").params(\
+                    marker='%s' % marker).order_by(\
                     models.UserRoleAssociation.id.desc()).limit(limit).all()
         else:
-            return session.query(models.UserRoleAssociation).\
-                    filter_by(user_id=user_id).order_by(\
+            return query.order_by(\
                     models.UserRoleAssociation.id.desc()).limit(limit).all()
 
     def ref_get_all_global_roles(self, user_id, session=None):
@@ -144,28 +148,31 @@ class RoleAPI(BaseRoleAPI):
             next_page = next_page.id
         return (prev_page, next_page)
 
-    def ref_get_page_markers(self, user_id, marker, limit, session=None):
+    def ref_get_page_markers(self, user_id, tenant_id, marker,
+        limit, session=None):
         if not session:
             session = get_session()
-        first = session.query(models.UserRoleAssociation).filter_by(\
-                                            user_id=user_id).order_by(\
+        query = session.query(models.UserRoleAssociation).filter_by(\
+                                            user_id=user_id)
+        if tenant_id:
+            query = query.filter_by(tenant_id=tenant_id)
+        else:
+            query = query.filter("tenant_id is null")
+        first = query.order_by(\
                             models.UserRoleAssociation.id).first()
-        last = session.query(models.UserRoleAssociation).filter_by(\
-                                            user_id=user_id).order_by(\
+        last = query.order_by(\
                             models.UserRoleAssociation.id.desc()).first()
         if first is None:
             return (None, None)
         if marker is None:
             marker = first.id
-        next_page = session.query(models.UserRoleAssociation).\
-            filter_by(user_id=user_id).\
+        next_page = query.\
             filter("id > :marker").\
             params(marker='%s' % marker).\
             order_by(models.UserRoleAssociation.id).\
             limit(limit).\
             all()
-        prev_page = session.query(models.UserRoleAssociation).\
-            filter_by(user_id=user_id).\
+        prev_page = query.\
             filter("id < :marker").\
             params(marker='%s' % marker).\
             order_by(models.UserRoleAssociation.id.desc()).\
@@ -197,6 +204,19 @@ class RoleAPI(BaseRoleAPI):
             session = get_session()
         result = session.query(models.UserRoleAssociation).\
             filter_by(role_id=role_id).all()
+        return result
+
+    def ref_get_by_user(self, user_id, role_id, tenant_id, session=None):
+        if not session:
+            session = get_session()
+        if tenant_id is None:
+            result = session.query(models.UserRoleAssociation).\
+                filter_by(user_id=user_id).filter("tenant_id is null").\
+                filter_by(role_id=role_id).first()
+        else:
+            result = session.query(models.UserRoleAssociation).\
+                filter_by(user_id=user_id).filter_by(tenant_id=tenant_id).\
+                filter_by(role_id=role_id).first()
         return result
 
 

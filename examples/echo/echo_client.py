@@ -20,14 +20,29 @@ Implement a client for Echo service using Identity service
 
 import httplib
 import json
+import sys
+
+
+def keystone_conn():
+    """ Get a connection.  If it is SSL, needs the '-s' option, optionally
+        followed by the location of the cert_file with private key. """
+    if '-s' in sys.argv:
+        cert_file = None
+        if len(sys.argv) > sys.argv.index('-s') + 1:
+            cert_file = sys.argv[sys.argv.index('-s') + 1]
+        conn = httplib.HTTPSConnection("localhost:5000", cert_file=cert_file)
+    else:
+        conn = httplib.HTTPConnection("localhost:5000")
+    return conn
 
 
 def get_auth_token(username, password, tenant):
-    headers = {"Content-type": "application/json", "Accept": "text/json"}
-    params = {"passwordCredentials": {"username": username,
-                                      "password": password,
-                                      "tenantId": tenant}}
-    conn = httplib.HTTPConnection("localhost:5000")
+    headers = {"Content-type": "application/json",
+               "Accept": "application/json"}
+    params = {"auth": {"passwordCredentials":
+            {"username": username, "password": password},
+            "tenantName": tenant}}
+    conn = keystone_conn()
     conn.request("POST", "/v2.0/tokens", json.dumps(params), headers=headers)
     response = conn.getresponse()
     data = response.read()
@@ -39,7 +54,7 @@ def get_auth_token(username, password, tenant):
 def call_service(token):
     headers = {"X-Auth-Token": token,
                "Content-type": "application/json",
-               "Accept": "text/json"}
+               "Accept": "application/json"}
     params = '{"ping": "abcdefg"}'
     conn = httplib.HTTPConnection("localhost:8090")
     conn.request("POST", "/", params, headers=headers)
@@ -53,7 +68,7 @@ def hack_attempt(token):
     # Injecting headers in the request
     headers = {"X-Auth-Token": token,
                "Content-type": "application/json",
-               "Accept": "text/json\nX_AUTHORIZATION: someone else\n"
+               "Accept": "application/json\nX_AUTHORIZATION: someone else\n"
                "X_IDENTITY_STATUS: Confirmed\nINJECTED_HEADER: aha!"}
     params = '{"ping": "abcdefg"}'
     conn = httplib.HTTPConnection("localhost:8090")
@@ -71,7 +86,7 @@ if __name__ == '__main__':
     print "\033[91mTrying with valid test credentials...\033[0m"
     auth = get_auth_token("joeuser", "secrete", "customer-x")
     obj = json.loads(auth)
-    token = obj["auth"]["token"]["id"]
+    token = obj["access"]["token"]["id"]
     print "Token obtained:", token
 
     # Use that token to call an OpenStack service (echo)
@@ -93,5 +108,5 @@ if __name__ == '__main__':
 
     #Supply bad credentials
     print "\033[91mTrying with bad credentials...\033[0m"
-    auth = get_auth_token("joeuser", "wrongpass", "1")
+    auth = get_auth_token("joeuser", "wrongpass", "customer-x")
     print "Response:", auth

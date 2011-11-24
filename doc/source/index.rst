@@ -14,45 +14,75 @@
       License for the specific language governing permissions and limitations
       under the License.
 
-Welcome to Keystone's documentation!
-====================================
+=========================
+Keystone for Contributors
+=========================
 
-The Keystone project provides services for authenticating and managing 
-user, account, and role information.
+Keystone is a cloud identity service written in Python, which provides
+authentication, authorization, and an OpenStack service catalog. It
+implements `OpenStack's Identity API`_.
 
-Concepts
-========
+This document describes Keystone for contributors of the project, and assumes
+that you are already familiar with Keystone from an `end-user perspective`_.
 
-.. toctree::
-   :maxdepth: 1
+.. _`OpenStack's Identity API`: https://github.com/openstack/identity-api
+.. _`end-user perspective`: http://docs.openstack.org/
 
-   users
-   tenants
-   groups
-   roles
-
-Using Keystone
-==============
+Getting Started
+===============
 
 .. toctree::
-   :maxdepth: 1
+    :maxdepth: 1
 
-   installing  
-   gettingstarted
-   
+    setup
+    testing
+    migration
+    configuration
+    community
+    usingkeystone
+
+API Use Case Examples
+=====================
+
+.. toctree::
+    :maxdepth: 1
+
+    adminAPI_curl_examples
+    serviceAPI_curl_examples
+
+Configuration File Examples
+===========================
+
+.. toctree::
+    :maxdepth: 1
+
+    nova-api-paste
+    keystone.conf
+
+Man Pages
+=========
+
+.. toctree::
+    :maxdepth: 1
+
+    man/keystone-manage
+    man/keystone
+    man/keystone-auth
+    man/keystone-admin
+    man/keystone-import
+    man/keystone-control
+    man/sampledata
+
 Developer Docs
 ==============
 
 .. toctree::
-   :maxdepth: 1
+    :maxdepth: 1
 
-   architecture
-   community
-
-Outstanding Documentation Tasks
-===============================
-
-.. todolist::
+    developing
+    architecture
+    middleware
+    sourcecode/autoindex
 
 Indices and tables
 ==================

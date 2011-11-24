@@ -2,11 +2,26 @@ import unittest2 as unittest
 import httplib
 import uuid
 import json
+import os
 from xml.etree import ElementTree
 
 
+def isSsl():
+    """ See if we are testing with SSL.  If cert is non-empty, we are! """
+    if 'cert_file' in os.environ:
+        return os.environ['cert_file']
+    return None
+
+
 class HttpTestCase(unittest.TestCase):
-    """Performs generic HTTP request testing"""
+    """Performs generic HTTP request testing.
+
+    Defines a ``request`` method for use in test cases that makes
+    HTTP requests, and two new asserts:
+
+    * assertResponseSuccessful
+    * assertResponseStatus
+    """
 
     def request(self, host='127.0.0.1', port=80, method='GET', path='/',
             headers=None, body=None, assert_status=None):
@@ -16,7 +31,13 @@ class HttpTestCase(unittest.TestCase):
         headers = {} if not headers else headers
 
         # Initialize a connection
-        connection = httplib.HTTPConnection(host, port, timeout=20)
+        cert_file = isSsl()
+        if (cert_file != None):
+            connection = httplib.HTTPSConnection(host, port,
+                                            cert_file=cert_file,
+                                            timeout=20)
+        else:
+            connection = httplib.HTTPConnection(host, port, timeout=20)
 
         # Perform the request
         connection.request(method, path, body, headers)
@@ -38,13 +59,29 @@ class HttpTestCase(unittest.TestCase):
         return response
 
     def assertResponseSuccessful(self, response):
-        """Asserts that a status code lies inside the 2xx range"""
+        """Asserts that a status code lies inside the 2xx range
+
+        :param response: :py:class:`httplib.HTTPResponse` to be
+        verified to have a status code between 200 and 299.
+
+        example::
+
+            >>> self.assertResponseSuccessful(response, 203)
+        """
         self.assertTrue(response.status >= 200 and response.status <= 299,
             'Status code %d is outside of the expected range (2xx)\n\n%s' %
             (response.status, response.body))
 
     def assertResponseStatus(self, response, assert_status):
-        """Asserts a specific status code on the response"""
+        """Asserts a specific status code on the response
+
+        :param response: :py:class:`httplib.HTTPResponse`
+        :param assert_status: The specific ``status`` result expected
+
+        example::
+
+            >>> self.assertResponseStatus(response, 203)
+        """
         self.assertEqual(response.status, assert_status,
             'Status code %s is not %s, as expected)\n\n%s' %
             (response.status, assert_status, response.body))
@@ -59,16 +96,18 @@ class RestfulTestCase(HttpTestCase):
 
         Dynamically encodes json or xml as request body if one is provided.
 
-        WARNING: Existing Content-Type header will be overwritten.
-        WARNING: If both as_json and as_xml are provided, as_xml is ignored.
-        WARNING: If either as_json or as_xml AND a body is provided, the body
-            is ignored.
+        .. WARNING::
+           * Existing Content-Type header will be overwritten.
+           * If both as_json and as_xml are provided, as_xml is ignored.
+           * If either as_json or as_xml AND a body is provided, the body
+             is ignored.
 
         Dynamically returns 'as_json' or 'as_xml' attribute based on the
         detected response type, and fails the current test case if
         unsuccessful.
 
         response.as_json: standard python dictionary
+
         response.as_xml: as_etree.ElementTree
         """
 
@@ -102,11 +141,27 @@ class RestfulTestCase(HttpTestCase):
 
     @staticmethod
     def _encode_json(data):
-        """Returns a JSON-encoded string of the given python dictionary"""
+        """Returns a JSON-encoded string of the given python dictionary
+
+        :param data: python object to be encoded into JSON
+        :returns: string of JSON encoded data
+        """
         return json.dumps(data)
 
     def _decode_response_body(self, response):
-        """Detects response body type, and attempts to decode it"""
+        """Detects response body type, and attempts to decode it
+
+        :param response: :py:class:`httplib.HTTPResponse`
+        :returns: response object with additions:
+
+        If context type is application/json, the response will have an
+        additional attribute ``json`` that will have the decoded JSON
+        result (typically a dict)
+
+        If context type is application/xml, the response will have an
+        additional attribute ``xml`` that will have the an ElementTree
+        result.
+        """
         if response.body != None and response.body.strip():
             if 'application/json' in response.getheader('Content-Type', ''):
                 response.json = self._decode_json(response.body)
@@ -220,15 +275,26 @@ class ApiTestCase(RestfulTestCase):
         return self.admin_request(method='GET',
             path='/tenants/%s' % (tenant_id,), **kwargs)
 
-    def put_tenant(self, tenant_id, **kwargs):
+    def get_tenant_by_name(self, tenant_name, **kwargs):
+        """GET /tenants?name=tenant_name"""
+        return self.admin_request(method='GET',
+            path='/tenants?name=%s' % (tenant_name,), **kwargs)
+
+    def post_tenant_for_update(self, tenant_id, **kwargs):
         """GET /tenants/{tenant_id}"""
-        return self.admin_request(method='PUT',
+        return self.admin_request(method='POST',
             path='/tenants/%s' % (tenant_id,), **kwargs)
 
     def get_tenant_users(self, tenant_id, **kwargs):
         """GET /tenants/{tenant_id}/users"""
         return self.admin_request(method='GET',
-            path='/tenants/%s' % (tenant_id,), **kwargs)
+            path='/tenants/%s/users' % (tenant_id,), **kwargs)
+
+    def get_tenant_users_by_role(self, tenant_id, role_id, **kwargs):
+        """GET /tenants/{tenant_id}/users?roleId={roleId}"""
+        return self.admin_request(method='GET',
+            path='/tenants/%s/users?roleId=%s' % (\
+                tenant_id, role_id), **kwargs)
 
     def delete_tenant(self, tenant_id, **kwargs):
         """DELETE /tenants/{tenant_id}"""
@@ -249,13 +315,13 @@ class ApiTestCase(RestfulTestCase):
             path='/users/%s' % (user_id,), **kwargs)
 
     def query_user(self, user_name, **kwargs):
-        """GET /users?username={user_name}"""
+        """GET /users?name={user_name}"""
         return self.admin_request(method='GET',
-            path='/users?username=%s' % (user_name,), **kwargs)
+            path='/users?name=%s' % (user_name,), **kwargs)
 
-    def put_user(self, user_id, **kwargs):
-        """PUT /users/{user_id}"""
-        return self.admin_request(method='PUT',
+    def post_user_for_update(self, user_id, **kwargs):
+        """POST /users/{user_id}"""
+        return self.admin_request(method='POST',
             path='/users/%s' % (user_id,), **kwargs)
 
     def put_user_password(self, user_id, **kwargs):
@@ -279,19 +345,33 @@ class ApiTestCase(RestfulTestCase):
             path='/users/%s' % (user_id,), **kwargs)
 
     def get_user_roles(self, user_id, **kwargs):
-        """GET /users/{user_id}/roleRefs"""
+        """GET /users/{user_id}/roles"""
         return self.admin_request(method='GET',
-            path='/users/%s/roleRefs' % (user_id,), **kwargs)
+            path='/users/%s/roles' % (user_id,), **kwargs)
 
-    def post_user_role(self, user_id, **kwargs):
-        """POST /users/{user_id}/roleRefs"""
-        return self.admin_request(method='POST',
-            path='/users/%s/roleRefs' % (user_id,), **kwargs)
+    def put_user_role(self, user_id, role_id, tenant_id, **kwargs):
+        if tenant_id is None:
+            """PUT /users/{user_id}/roles/OS-KSADM/{role_id}"""
+            return self.admin_request(method='PUT',
+                path='/users/%s/roles/OS-KSADM/%s' %
+                (user_id, role_id), **kwargs)
+        else:
+            """PUT /tenants/{tenant_id}/users/{user_id}/
+            roles/OS-KSADM/{role_id}"""
+            return self.admin_request(method='PUT',
+                path='/tenants/%s/users/%s/roles/OS-KSADM/%s' % (tenant_id,
+                    user_id, role_id,), **kwargs)
 
-    def delete_user_role(self, user_id, role_id, **kwargs):
-        """DELETE /users/{user_id}/roleRefs/{role_ref_id}"""
-        return self.admin_request(method='DELETE',
-            path='/users/%s/roleRefs/%s' % (user_id, role_id), **kwargs)
+    def delete_user_role(self, user_id, role_id,  tenant_id, **kwargs):
+        """DELETE /users/{user_id}/roles/{role_id}"""
+        if tenant_id is None:
+            return self.admin_request(method='DELETE',
+                path='/users/%s/roles/OS-KSADM/%s'
+                % (user_id, role_id), **kwargs)
+        else:
+            return self.admin_request(method='DELETE',
+                path='/tenants/%s/users/%s/roles/OS-KSADM/%s' %
+                    (tenant_id, user_id, role_id), **kwargs)
 
     def post_role(self, **kwargs):
         """POST /roles"""
@@ -308,54 +388,74 @@ class ApiTestCase(RestfulTestCase):
         return self.admin_request(method='GET',
             path='/OS-KSADM/roles/%s' % (role_id,), **kwargs)
 
+    def get_role_by_name(self, role_name, **kwargs):
+        """GET /roles?name={role_name}"""
+        return self.admin_request(method='GET',
+            path='/OS-KSADM/roles?name=%s' % (role_name,), **kwargs)
+
     def delete_role(self, role_id, **kwargs):
         """DELETE /roles/{role_id}"""
         return self.admin_request(method='DELETE',
             path='/OS-KSADM/roles/%s' % (role_id,), **kwargs)
 
     def get_endpoint_templates(self, **kwargs):
-        """GET /endpointTemplates"""
-        return self.admin_request(method='GET', path='/endpointTemplates',
+        """GET /OS-KSCATALOG/endpointTemplates"""
+        return self.admin_request(method='GET',
+            path='/OS-KSCATALOG/endpointTemplates',
             **kwargs)
 
     def post_endpoint_template(self, **kwargs):
-        """POST /endpointTemplates"""
-        return self.admin_request(method='POST', path='/endpointTemplates',
+        """POST /OS-KSCATALOG/endpointTemplates"""
+        return self.admin_request(method='POST',
+            path='/OS-KSCATALOG/endpointTemplates',
             **kwargs)
 
     def put_endpoint_template(self, endpoint_template_id, **kwargs):
-        """PUT /endpointTemplates/{endpoint_template_id}"""
+        """PUT /OS-KSCATALOG/endpointTemplates/{endpoint_template_id}"""
         return self.admin_request(method='PUT',
-            path='/endpointTemplates/%s' % (endpoint_template_id,),
+            path='/OS-KSCATALOG/endpointTemplates/%s'
+            % (endpoint_template_id,),
             **kwargs)
 
     def get_endpoint_template(self, endpoint_template_id, **kwargs):
-        """GET /endpointTemplates/{endpoint_template_id}"""
+        """GET /OS-KSCATALOG/endpointTemplates/{endpoint_template_id}"""
         return self.admin_request(method='GET',
-            path='/endpointTemplates/%s' % (endpoint_template_id,),
+            path='/OS-KSCATALOG/endpointTemplates/%s'
+            % (endpoint_template_id,),
             **kwargs)
 
     def delete_endpoint_template(self, endpoint_template_id, **kwargs):
-        """DELETE /endpointTemplates/{endpoint_template_id}"""
+        """DELETE /OS-KSCATALOG/endpointTemplates/{endpoint_template_id}"""
         return self.admin_request(method='DELETE',
-            path='/endpointTemplates/%s' % (endpoint_template_id,),
+            path='/OS-KSCATALOG/endpointTemplates/%s' %
+            (endpoint_template_id,),
             **kwargs)
 
     def get_tenant_endpoints(self, tenant_id, **kwargs):
-        """GET /tenants/{tenant_id}/endpoints"""
+        """GET /tenants/{tenant_id}/OS-KSCATALOG/endpoints"""
         return self.admin_request(method='GET',
-            path='/tenants/%s/endpoints' % (tenant_id,),
+            path='/tenants/%s/OS-KSCATALOG/endpoints' %
+            (tenant_id,),
             **kwargs)
 
     def post_tenant_endpoint(self, tenant_id, **kwargs):
-        """POST /tenants/{tenant_id}/endpoints"""
+        """POST /tenants/{tenant_id}/OS-KSCATALOG/endpoints"""
         return self.admin_request(method='POST',
-            path='/tenants/%s/endpoints' % (tenant_id,), **kwargs)
+            path='/tenants/%s/OS-KSCATALOG/endpoints' %
+            (tenant_id,), **kwargs)
 
     def delete_tenant_endpoint(self, tenant_id, endpoint_id, **kwargs):
-        """DELETE /tenants/{tenant_id}/endpoints/{endpoint_id}"""
+        """DELETE /tenants/{tenant_id}/OS-KSCATALOG/endpoints/{endpoint_id}"""
         return self.admin_request(method='DELETE',
-            path='/tenants/%s/endpoints/%s' % (tenant_id, endpoint_id,),
+            path='/tenants/%s/OS-KSCATALOG/endpoints/%s' %
+            (tenant_id, endpoint_id,),
+            **kwargs)
+
+    def get_token_endpoints(self, token_id, **kwargs):
+        """GET /tokens/{token_id}/endpoints"""
+        return self.admin_request(method='GET',
+            path='/tokens/%s/endpoints' %
+            (token_id,),
             **kwargs)
 
     def post_service(self, **kwargs):
@@ -372,6 +472,11 @@ class ApiTestCase(RestfulTestCase):
         """GET /services/{service_id}"""
         return self.admin_request(method='GET',
             path='/OS-KSADM/services/%s' % (service_id,), **kwargs)
+
+    def get_service_by_name(self, service_name, **kwargs):
+        """GET /services?name={service_name}"""
+        return self.admin_request(method='GET',
+            path='/OS-KSADM/services?name=%s' % (service_name,), **kwargs)
 
     def delete_service(self, service_id, **kwargs):
         """DELETE /services/{service_id}"""
@@ -431,6 +536,35 @@ class ApiTestCase(RestfulTestCase):
         return self.service_request(method='GET',
             path='/samples/%s' % (filename,), **kwargs)
 
+    def get_user_credentials(self, user_id, **kwargs):
+        """GET /users/{user_id}/OS-KSADM/credentials"""
+        return self.admin_request(method='GET',
+            path='/users/%s/OS-KSADM/credentials' % (user_id,), **kwargs)
+
+    def get_user_credentials_by_type(self,
+        user_id, credentials_type, **kwargs):
+        """GET /users/{user_id}/OS-KSADM/credentials/{credentials_type}"""
+        return self.admin_request(method='GET',
+            path='/users/%s/OS-KSADM/credentials/%s'\
+            % (user_id, credentials_type,), **kwargs)
+
+    def post_credentials(self, user_id, **kwargs):
+        """POST /users/{user_id}/OS-KSADM/credentials"""
+        return self.admin_request(method='POST',
+            path='/users/%s/OS-KSADM/credentials' % (user_id,), **kwargs)
+
+    def post_credentials_by_type(self, user_id, credentials_type, **kwargs):
+        """POST /users/{user_id}/OS-KSADM/credentials/{credentials_type}"""
+        return self.admin_request(method='POST',
+            path='/users/%s/OS-KSADM/credentials/%s' %\
+            (user_id, credentials_type), **kwargs)
+
+    def delete_user_credentials_by_type(self, user_id,\
+        credentials_type, **kwargs):
+        """DELETE /users/{user_id}/OS-KSADM/credentials/{credentials_type}"""
+        return self.admin_request(method='DELETE',
+            path='/users/%s/OS-KSADM/credentials/%s' %\
+            (user_id, credentials_type,), **kwargs)
 
 # Generates and return a unique string
 unique_str = lambda: str(uuid.uuid4())
@@ -466,6 +600,8 @@ class FunctionalTestCase(ApiTestCase):
 
     xmlns = 'http://docs.openstack.org/identity/api/v2.0'
     xmlns_ksadm = 'http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0'
+    xmlns_kscatalog = "http://docs.openstack.org/identity/api/ext"\
+        + "/OSKSCATALOG/v1.0"
 
     def setUp(self):
         """Prepare keystone for system tests"""
@@ -525,6 +661,11 @@ class FunctionalTestCase(ApiTestCase):
         tenant_id = optional_str(tenant_id)
         return self.get_tenant(tenant_id, **kwargs)
 
+    def fetch_tenant_by_name(self, tenant_name=None, **kwargs):
+        tenant_name = optional_str(tenant_name)
+        if tenant_name:
+            return self.get_tenant_by_name(tenant_name, **kwargs)
+
     def update_tenant(self, tenant_id=None, tenant_name=None,
             tenant_description=None, tenant_enabled=True, **kwargs):
         tenant_id = optional_str(tenant_id)
@@ -540,11 +681,14 @@ class FunctionalTestCase(ApiTestCase):
         if tenant_enabled is not None:
             data['tenant']['enabled'] = tenant_enabled
 
-        return self.put_tenant(tenant_id, as_json=data, **kwargs)
+        return self.post_tenant_for_update(tenant_id, as_json=data, **kwargs)
 
-    def list_tenant_users(self, tenant_id, **kwargs):
+    def list_tenant_users(self, tenant_id, role_id=None, **kwargs):
         tenant_id = optional_str(tenant_id)
-        return self.get_tenant_users(tenant_id, **kwargs)
+        if role_id:
+            return self.get_tenant_users_by_role(tenant_id, role_id, **kwargs)
+        else:
+            return self.get_tenant_users(tenant_id, **kwargs)
 
     def remove_tenant(self, tenant_id=None, **kwargs):
         tenant_id = optional_str(tenant_id)
@@ -586,7 +730,7 @@ class FunctionalTestCase(ApiTestCase):
         return self.query_user(user_name, **kwargs)
 
     def update_user(self, user_id=None, user_email=None, user_enabled=None,
-            **kwargs):
+            user_name=None, **kwargs):
         user_id = optional_str(user_id)
 
         data = {"user": {}}
@@ -596,8 +740,9 @@ class FunctionalTestCase(ApiTestCase):
 
         if user_enabled is not None:
             data['user']['enabled'] = user_enabled
-
-        return self.put_user(user_id, as_json=data, **kwargs)
+        if user_name is not None:
+            data['user']['name'] = user_name
+        return self.post_user_for_update(user_id, as_json=data, **kwargs)
 
     def update_user_password(self, user_id=None, user_password=None, **kwargs):
         user_id = optional_str(user_id)
@@ -638,19 +783,26 @@ class FunctionalTestCase(ApiTestCase):
         user_id = optional_str(user_id)
         role_id = optional_str(role_id)
         tenant_id = optional_str(tenant_id)
+        return self.put_user_role(user_id, role_id, tenant_id, **kwargs)
 
-        data = {
-            "role": {
-                "tenantId": tenant_id,
-                "roleId": role_id}}
-
-        return self.post_user_role(user_id, as_json=data, **kwargs)
-
-    def revoke_role_from_user(self, user_id=None, role_id=None, **kwargs):
+    def grant_global_role_to_user(self, user_id=None, role_id=None,
+            **kwargs):
         user_id = optional_str(user_id)
         role_id = optional_str(role_id)
+        return self.put_user_role(user_id, role_id, None, **kwargs)
 
+    def revoke_global_role_from_user(self,
+        user_id=None, role_id=None, **kwargs):
+        user_id = optional_str(user_id)
+        role_id = optional_str(role_id)
         return self.delete_user_role(user_id, role_id, **kwargs)
+
+    def revoke_role_from_user(self,
+        user_id=None, role_id=None, tenant_id=None, **kwargs):
+        user_id = optional_str(user_id)
+        role_id = optional_str(role_id)
+        tenant_id = optional_str(tenant_id)
+        return self.delete_user_role(user_id, tenant_id, **kwargs)
 
     def create_role(self, role_name=None, role_description=None,
             service_id=None, **kwargs):
@@ -673,6 +825,10 @@ class FunctionalTestCase(ApiTestCase):
     def fetch_role(self, role_id=None, **kwargs):
         role_id = optional_str(role_id)
         return self.get_role(role_id, **kwargs)
+
+    def fetch_role_by_name(self, role_name=None, **kwargs):
+        role_name = optional_str(role_name)
+        return self.get_role_by_name(role_name, **kwargs)
 
     def remove_role(self, role_id=None, **kwargs):
         role_id = optional_str(role_id)
@@ -697,6 +853,10 @@ class FunctionalTestCase(ApiTestCase):
         service_id = optional_str(service_id)
         return self.get_service(service_id, **kwargs)
 
+    def fetch_service_by_name(self, service_name=None, **kwargs):
+        service_name = optional_str(service_name)
+        return self.get_service_by_name(service_name, **kwargs)
+
     def remove_service(self, service_id=None, **kwargs):
         service_id = optional_str(service_id)
         self.delete_service(service_id, **kwargs)
@@ -706,7 +866,7 @@ class FunctionalTestCase(ApiTestCase):
         tenant_id = optional_str(tenant_id)
         endpoint_template_id = optional_str(endpoint_template_id)
 
-        data = {"endpointTemplate": {"id": endpoint_template_id}}
+        data = {"OS-KSCATALOG:endpointTemplate": {"id": endpoint_template_id}}
 
         return self.post_tenant_endpoint(tenant_id, as_json=data, **kwargs)
 
@@ -733,26 +893,34 @@ class FunctionalTestCase(ApiTestCase):
     def list_endpoint_templates(self, **kwargs):
         return self.get_endpoint_templates(**kwargs)
 
-    def create_endpoint_template(self, region=None, service_id=None,
+    def create_endpoint_template(self, region=None, name=None, type=None,
             public_url=None, admin_url=None, internal_url=None, enabled=True,
-            is_global=True, **kwargs):
+            is_global=True, version_id=None,
+            version_list=None, version_info=None, **kwargs):
 
         region = optional_str(region)
-        service_id = optional_str(service_id)
+        name = optional_str(name)
+        type = optional_str(type)
         public_url = optional_url(public_url)
         admin_url = optional_url(admin_url)
         internal_url = optional_url(internal_url)
+        version_id = optional_url(version_id)
+        version_list = optional_url(version_list)
+        version_info = optional_url(version_info)
 
         data = {
-            "endpointTemplate": {
+            "OS-KSCATALOG:endpointTemplate": {
                 "region": region,
-                "serviceId": service_id,
+                "name": name,
+                "type": type,
                 "publicURL": public_url,
                 "adminURL": admin_url,
                 "internalURL": internal_url,
                 "enabled": enabled,
-                "global": is_global}}
-
+                "global": is_global,
+                "versionId": version_id,
+                "versionInfo": version_info,
+                "versionList": version_list}}
         return self.post_endpoint_template(as_json=data, **kwargs)
 
     def remove_endpoint_template(self, endpoint_template_id=None, **kwargs):
@@ -764,31 +932,78 @@ class FunctionalTestCase(ApiTestCase):
         return self.get_endpoint_template(endpoint_template_id, **kwargs)
 
     def update_endpoint_template(self, endpoint_template_id=None, region=None,
-            service_id=None, public_url=None, admin_url=None,
-            internal_url=None, enabled=None, is_global=None, **kwargs):
+            name=None, type=None, public_url=None, admin_url=None,
+            internal_url=None, enabled=None, is_global=None,
+            version_id=None, version_list=None, version_info=None, **kwargs):
 
-        data = {"endpointTemplate": {}}
+        data = {"OS-KSCATALOG:endpointTemplate": {}}
 
         if region is not None:
-            data['endpointTemplate']['region'] = region
+            data['OS-KSCATALOG:endpointTemplate']['region'] = region
 
-        if service_id is not None:
-            data['endpointTemplate']['serviceId'] = service_id
+        if name is not None:
+            data['OS-KSCATALOG:endpointTemplate']['name'] = name
+
+        if type is not None:
+            data['OS-KSCATALOG:endpointTemplate']['type'] = type
 
         if public_url is not None:
-            data['endpointTemplate']['publicURL'] = public_url
+            data['OS-KSCATALOG:endpointTemplate']['publicURL'] = public_url
 
         if admin_url is not None:
-            data['endpointTemplate']['adminURL'] = admin_url
+            data['OS-KSCATALOG:endpointTemplate']['adminURL'] = admin_url
 
         if internal_url is not None:
-            data['endpointTemplate']['internalURL'] = internal_url
+            data['OS-KSCATALOG:endpointTemplate']['internalURL'] = internal_url
 
         if enabled is not None:
-            data['endpointTemplate']['enabled'] = enabled
+            data['OS-KSCATALOG:endpointTemplate']['enabled'] = enabled
 
         if is_global is not None:
-            data['endpointTemplate']['global'] = is_global
+            data['OS-KSCATALOG:endpointTemplate']['global'] = is_global
+
+        if version_id is not None:
+            data['OS-KSCATALOG:endpointTemplate']['versionId'] = version_id
+
+        if version_list is not None:
+            data['OS-KSCATALOG:endpointTemplate']['versionList'] = version_list
+
+        if version_info is not None:
+            data['OS-KSCATALOG:endpointTemplate']['versionInfo'] = version_info
 
         return self.put_endpoint_template(endpoint_template_id, as_json=data,
             **kwargs)
+
+    def fetch_user_credentials(self, user_id=None, **kwargs):
+        user_id = optional_str(user_id)
+        return self.get_user_credentials(user_id, **kwargs)
+
+    def fetch_password_credentials(self, user_id=None, **kwargs):
+        user_id = optional_str(user_id)
+        return self.get_user_credentials_by_type(
+            user_id, 'passwordCredentials', **kwargs)
+
+    def create_password_credentials(self, user_id, user_name, **kwargs):
+        user_id = optional_str(user_id)
+        password = unique_str()
+        data = {
+            "passwordCredentials": {
+                "username": user_name,
+                "password": password}}
+        return self.post_credentials(user_id, as_json=data, **kwargs)
+
+    def update_password_credentials(self, user_id, user_name,
+                password=None, **kwargs):
+        user_id = optional_str(user_id)
+        password = optional_str(password)
+        data = {
+            "passwordCredentials": {
+                "username": user_name,
+                "password": password}}
+        return self.post_credentials_by_type(
+            user_id, 'passwordCredentials', as_json=data, **kwargs)
+
+    def delete_password_credentials(self, user_id, **kwargs):
+        user_id = optional_str(user_id)
+        return self.delete_user_credentials_by_type(
+                user_id, 'passwordCredentials', **kwargs)

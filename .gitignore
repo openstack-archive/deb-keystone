@@ -13,11 +13,11 @@ keystone.token.db
 *.pid
 pidfile
 *.komodoproject
-doc/build/
 build/
-doc/guide/target
+doc/source/sourcecode
 .keystone-venv/
 keystone.egg-info/
 run_tests.err.log
 .coverage
 .DS_Store
+test_migrations.db

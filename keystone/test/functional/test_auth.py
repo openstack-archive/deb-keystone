@@ -130,7 +130,7 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         # Request our tenant list as a service user
         self.service_token = unscoped['token']['id']
         tenants = self.service_request(method='GET', path='/tenants').\
-            json['tenants']['values']
+            json['tenants']
         self.service_token = None  # Should become a service_request() param...
 
         # Our tenant should be the only tenant in the list
@@ -149,6 +149,9 @@ class TestServiceAuthentication(common.FunctionalTestCase):
 
         self.assertEqual(scoped['token']['tenant']['id'], tenant['id'])
         self.assertEqual(scoped['token']['tenant']['name'], tenant['name'])
+        self.assertEqual(scoped['user']['roles'][0]['id'], role['id'])
+        self.assertEqual(scoped['user']['roles'][0]['name'], role['name'])
+        self.assertEqual(scoped['user']['roles'][0]['tenantId'], tenant['id'])
 
         # And an admin should be able to validate that our new token is scoped
         r = self.validate_token(scoped['token']['id'], tenant['id'])

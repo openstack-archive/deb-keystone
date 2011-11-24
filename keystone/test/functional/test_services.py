@@ -71,7 +71,7 @@ class GetServicesTest(ServicesTest):
 
     def test_get_services_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.list_services(assert_status=404)
+        self.list_services(assert_status=401)
 
 
 class GetServiceTest(ServicesTest):
@@ -109,7 +109,50 @@ class GetServiceTest(ServicesTest):
 
     def test_get_service_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.fetch_service(service_id=self.service['id'], assert_status=404)
+        self.fetch_service(service_id=self.service['id'], assert_status=401)
+
+
+class GetServiceByNameTest(ServicesTest):
+    def setUp(self, *args, **kwargs):
+        super(GetServiceByNameTest, self).setUp(*args, **kwargs)
+        self.service = self.create_service().json['OS-KSADM:service']
+
+    def test_service_get_json(self):
+        service = self.fetch_service_by_name(service_name=self.service['name'],
+            assert_status=200).json['OS-KSADM:service']
+
+        self.assertIsNotNone(service['id'])
+        self.assertIsNotNone(service['name'])
+        self.assertIsNotNone(service['description'])
+
+    def test_service_get_xml(self):
+        service = self.fetch_service_by_name(service_name=self.service['name'],
+            assert_status=200, headers={'Accept': 'application/xml'}).xml
+
+        self.assertEqual(service.tag, '{%s}service' % self.xmlns_ksadm)
+        self.assertIsNotNone(service.get('id'))
+        self.assertIsNotNone(service.get('name'))
+        self.assertIsNotNone(service.get('description'))
+
+    def test_get_service_using_disabled_token(self):
+        self.admin_token = self.disabled_admin_token
+        self.fetch_service_by_name(
+            service_name=self.service['name'], assert_status=403)
+
+    def test_get_service_using_missing_token(self):
+        self.admin_token = ''
+        self.fetch_service_by_name(
+            service_name=self.service['name'], assert_status=401)
+
+    def test_get_service_using_expired_token(self):
+        self.admin_token = self.expired_admin_token
+        self.fetch_service_by_name(
+            service_name=self.service['name'], assert_status=403)
+
+    def test_get_service_using_invalid_token(self):
+        self.admin_token = common.unique_str()
+        self.fetch_service_by_name(
+            service_name=self.service['name'], assert_status=401)
 
 
 class CreateServiceTest(ServicesTest):
@@ -160,7 +203,7 @@ class CreateServiceTest(ServicesTest):
 
     def test_service_create_json_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.create_service(assert_status=404)
+        self.create_service(assert_status=401)
 
 
 class DeleteServiceTest(ServicesTest):
@@ -182,8 +225,8 @@ class DeleteServiceTest(ServicesTest):
         user = self.create_user(tenant_id=tenant['id']).json['user']
 
         self.grant_role_to_user(user['id'], role['id'], tenant['id'])
-        self.create_endpoint_template(service_id=self.service['id'])
-
+        self.create_endpoint_template(name=self.service['name'],
+            type=self.service['type'])
         self.remove_service(self.service['id'], assert_status=204)
 
     def test_service_delete_json_using_expired_token(self):
@@ -200,7 +243,7 @@ class DeleteServiceTest(ServicesTest):
 
     def test_service_delete_json_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.remove_service(self.service['id'], assert_status=404)
+        self.remove_service(self.service['id'], assert_status=401)
 
 
 if __name__ == '__main__':

@@ -14,6 +14,15 @@
       License for the specific language governing permissions and limitations
       under the License.
 
-Tenants
-=======
+==============
+Using Keystone
+==============
 
+Curl examples
+-------------
+
+.. toctree::
+   :maxdepth: 1
+
+   adminAPI_curl_examples
+   serviceAPI_curl_examples

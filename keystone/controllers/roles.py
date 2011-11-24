@@ -1,6 +1,6 @@
 from keystone import utils
 from keystone.common import wsgi
-from keystone.logic.types.role import Role, RoleRef
+from keystone.logic.types.role import Role
 import keystone.config as config
 from . import get_marker_limit_and_url
 
@@ -25,10 +25,16 @@ class RolesController(wsgi.Controller):
 
     @utils.wrap_error
     def get_roles(self, req):
-        marker, limit, url = get_marker_limit_and_url(req)
-        roles = config.SERVICE.get_roles(
-            utils.get_auth_token(req), marker, limit, url)
-        return utils.send_result(200, req, roles)
+        role_name = req.GET["name"] if "name" in req.GET else None
+        if role_name:
+            tenant = config.SERVICE.get_role_by_name(
+                utils.get_auth_token(req), role_name)
+            return utils.send_result(200, req, tenant)
+        else:
+            marker, limit, url = get_marker_limit_and_url(req)
+            roles = config.SERVICE.get_roles(
+                utils.get_auth_token(req), marker, limit, url)
+            return utils.send_result(200, req, roles)
 
     @utils.wrap_error
     def get_role(self, req, role_id):
@@ -36,27 +42,20 @@ class RolesController(wsgi.Controller):
         return utils.send_result(200, req, role)
 
     @utils.wrap_error
-    def create_role_ref(self, req, user_id):
-        roleRef = utils.get_normalized_request_content(RoleRef, req)
-        return utils.send_result(201, req, config.SERVICE.create_role_ref(
-            utils.get_auth_token(req), user_id, roleRef))
+    def add_role_to_user(self, req, user_id, role_id, tenant_id=None):
+        config.SERVICE.add_role_to_user(utils.get_auth_token(req),
+            user_id, role_id, tenant_id)
+        return utils.send_result(201, None)
 
     @utils.wrap_error
-    def get_role_refs(self, req, user_id):
+    def delete_role_from_user(self, req, user_id, role_id, tenant_id=None):
+        config.SERVICE.remove_role_from_user(utils.get_auth_token(req),
+            user_id, role_id, tenant_id)
+        return utils.send_result(204, req, None)
+
+    @utils.wrap_error
+    def get_user_roles(self, req, user_id, tenant_id=None):
         marker, limit, url = get_marker_limit_and_url(req)
-        roleRefs = config.SERVICE.get_user_roles(
-            utils.get_auth_token(req), marker, limit, url, user_id)
-
-        return utils.send_result(200, req, roleRefs)
-
-    @utils.wrap_error
-    def delete_role_ref(self, req, user_id, role_ref_id):
-        rval = config.SERVICE.delete_role_ref(utils.get_auth_token(req),
-            role_ref_id)
-        return utils.send_result(204, req, rval)
-
-    @utils.wrap_error
-    def add_global_role_to_user(self, req, user_id, role_id):
-        config.SERVICE.add_global_role_to_user(utils.get_auth_token(req),
-            user_id, role_id)
-        return utils.send_result(201)
+        roles = config.SERVICE.get_user_roles(
+            utils.get_auth_token(req), marker, limit, url, user_id, tenant_id)
+        return utils.send_result(200, req, roles)

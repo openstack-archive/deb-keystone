@@ -73,10 +73,11 @@ class BaseUserAPI(object):
     def users_get_page_markers(self, marker, limit):
         raise NotImplementedError
 
-    def users_get_by_tenant_get_page(self, tenant_id, marker, limit):
+    def users_get_by_tenant_get_page(self, tenant_id, role_id, marker, limit):
         raise NotImplementedError
 
-    def users_get_by_tenant_get_page_markers(self, tenant_id, marker, limit):
+    def users_get_by_tenant_get_page_markers(self, tenant_id,
+        role_id, marker, limit):
         raise NotImplementedError
 
     def check_password(self, user, password):
@@ -166,7 +167,7 @@ class BaseRoleAPI(object):
     def get_page(self, marker, limit):
         raise NotImplementedError
 
-    def ref_get_page(self, marker, limit, user_id):
+    def ref_get_page(self, marker, limit, user_id, tenant_id):
         raise NotImplementedError
 
     def ref_get_all_global_roles(self, user_id):
@@ -187,7 +188,10 @@ class BaseRoleAPI(object):
     def get_page_markers(self, marker, limit):
         raise NotImplementedError
 
-    def ref_get_page_markers(self, user_id, marker, limit):
+    def ref_get_page_markers(self, user_id, tenant_id, marker, limit):
+        raise NotImplementedError
+
+    def ref_get_by_user(self, user_id, role_id, tenant_id):
         raise NotImplementedError
 
 
@@ -249,6 +253,9 @@ class BaseServiceAPI:
     def get_by_name(self, name):
         raise NotImplementedError
 
+    def get_by_name_and_type(self, name, type):
+        raise NotImplementedError
+
     def get_all(self):
         raise NotImplementedError
 
@@ -270,9 +277,6 @@ class BaseCredentialsAPI(object):
         raise NotImplementedError
 
     def get(self, id):
-        raise NotImplementedError
-
-    def get_all(self):
         raise NotImplementedError
 
     def get_by_access(self, access):
