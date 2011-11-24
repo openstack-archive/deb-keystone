@@ -1,3 +1,9 @@
+keystone (2012.1~e1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Julien Danjou <acid@debian.org>  Thu, 24 Nov 2011 12:35:45 +0100
+
 keystone (2011.3-1) unstable; urgency=low
 
   * Initial release (Closes: #647611)
