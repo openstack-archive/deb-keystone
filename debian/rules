@@ -22,8 +22,6 @@ endif
 
 override_dh_install:
 	dh_install
-	# Needed until this is fixed in later versions (upstream git is fixed)
-	chmod -x $(CURDIR)/debian/keystone/etc/keystone/keystone.conf
 	chmod -x $(CURDIR)/debian/python-keystone/usr/lib/python*/dist-packages/keystone/test/etc/ldap.conf.template
 	sed -i 's|^log_file = keystone.log$$|log_file = /var/log/keystone/keystone.log|' \
 		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
@@ -31,7 +29,7 @@ override_dh_install:
 		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
 
 override_dh_clean:
-	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
+	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info
 	rm -rf $(CURDIR)/keystone/test/*.log
 	rm -rf $(CURDIR)/doc/source/sourcecode
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
