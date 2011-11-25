@@ -47,7 +47,7 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-nova
 Recommends: python-memcache, python-ldap
 Provides: ${python:Provides}
-Description: cloud identity service - Python library
+Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
  authN and user-service authorization. It is scalable to include OAuth, SAML
@@ -62,7 +62,7 @@ Section: python
 Depends: ${python:Depends}, ${misc:Depends},
  python-keystone (= ${source:Version}),
  adduser
-Description: cloud identity service
+Description: OpenStack identity service
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
  authN and user-service authorization. It is scalable to include OAuth, SAML
@@ -75,7 +75,7 @@ Package: keystone-doc
 Architecture: all
 Section: doc
 Depends: ${misc:Depends}
-Description: Proposed OpenStack identity service - Documentation
+Description: OpenStack identity service - documentation
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
  authN and user-service authorization. It is scalable to include OAuth, SAML
