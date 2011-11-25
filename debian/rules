@@ -12,13 +12,7 @@ endif
 
 override_dh_auto_build:
 	dh_auto_build
-ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
 	python setup.py build_sphinx
-else
-	mkdir -p $(CURDIR)/build/sphinx/html
-	mkdir -p $(CURDIR)/build/sphinx/man
-	touch $(CURDIR)/build/sphinx/man/keystone-manage.1
-endif
 
 override_dh_install:
 	dh_install
