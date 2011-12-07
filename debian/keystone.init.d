@@ -12,7 +12,7 @@
 #              authentication (authN) and high-level authorization (authZ).
 ### END INIT INFO
 
-# Author: #USERNAME# <#EMAIL#>
+# Author: Julien Danjou <acid@debian.org>
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
