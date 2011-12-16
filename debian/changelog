@@ -1,8 +1,9 @@
 keystone (2012.1~e2-1) unstable; urgency=low
 
   * New upstream release.
+  * Disable doc building because it's currently failing.
 
- -- Julien Danjou <acid@debian.org>  Fri, 16 Dec 2011 10:06:08 +0100
+ -- Julien Danjou <acid@debian.org>  Fri, 16 Dec 2011 11:12:44 +0100
 
 keystone (2012.1~e1-2) unstable; urgency=low
 
