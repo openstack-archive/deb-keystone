@@ -30,6 +30,8 @@ from keystone.common.wsgi import add_console_handler
 
 DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)8s [%(name)s] %(message)s"
 DEFAULT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+DEFAULT_LOG_DIR = "/var/log/keystone"
+DEFAULT_LOG_FILE = "keystone.log"
 
 
 def parse_options(parser, cli_args=None):
@@ -78,9 +80,9 @@ def add_common_options(parser):
 specified (the default), we generally look at the first argument specified to \
 be a config file, and if that is also missing, we search standard directories \
 for a config file.""")
-    group.add_option('-p', '--port', '--bind-port', default=5000,
+    group.add_option('-p', '--port', '--bind-port',
                      dest="bind_port",
-                     help="specifies port to listen on (default is 5000)")
+                     help="specifies port to listen on")
     group.add_option('--host', '--bind-host',
                      default="0.0.0.0", dest="bind_host",
                      help="specifies host address to listen on "\
@@ -162,22 +164,18 @@ def setup_logging(options, conf):
     log_date_format = options.get('log_date_format', DEFAULT_LOG_DATE_FORMAT)
     formatter = logging.Formatter(log_format, log_date_format)
 
-    logfile = options.get('log_file') or conf.get('log_file')
+    # grab log_file and log_dir from config; set to defaults of not already
+    # defined
+    logfile = options.get('log_file') or conf.get('log_file', DEFAULT_LOG_FILE)
+    logdir = options.get('log_dir') or conf.get('log_dir', DEFAULT_LOG_DIR)
 
-    if logfile:
-        logdir = options.get('log_dir') or conf.get('log_dir')
-        if logdir:
-            logfile = os.path.join(logdir, logfile)
-        logfile = logging.FileHandler(logfile)
-        logfile.setFormatter(formatter)
-        root_logger.addHandler(logfile)
-        # Mirror to console if verbose or debug
-        if debug or verbose:
-            add_console_handler(root_logger, logging.INFO)
-    else:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(formatter)
-        root_logger.addHandler(handler)
+    logfile = os.path.join(logdir, logfile)
+    logfile = logging.FileHandler(logfile)
+    logfile.setFormatter(formatter)
+    root_logger.addHandler(logfile)
+    # Mirror to console if verbose or debug
+    if debug or verbose:
+        add_console_handler(root_logger, logging.INFO)
 
 
 def find_config_file(options, args):
@@ -321,7 +319,8 @@ def load_paste_app(app_name, options, args):
     try:
         # Setup logging early, supplying both the CLI options and the
         # configuration mapping from the config file
-        options['log_file'] = "%s.log" % app_name
+        if not conf.get('log_file'):
+            options['log_file'] = "%s.log" % app_name
         setup_logging(options, conf)
 
         # We only update the conf dict for the verbose and debug

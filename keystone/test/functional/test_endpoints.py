@@ -29,6 +29,11 @@ class EndpointTemplatesTest(common.FunctionalTestCase):
             type=self.service['type']).\
             json['OS-KSCATALOG:endpointTemplate']
 
+        admin_token = self.admin_token
+        self.admin_token = self.service_admin_token
+        self.my_service = self.create_service().json['OS-KSADM:service']
+        self.admin_token = admin_token
+
 
 class CreateEndpointTemplatesTest(EndpointTemplatesTest):
     def test_create_endpoint_template(self):
@@ -41,6 +46,18 @@ class CreateEndpointTemplatesTest(EndpointTemplatesTest):
         self.assertIsNotNone(endpoint_template['id'], endpoint_template)
         self.assertIsNotNone(endpoint_template['name'], endpoint_template)
         self.assertIsNotNone(endpoint_template['type'], endpoint_template)
+
+    def test_create_endpoint_template_with_empty_name(self):
+        self.create_endpoint_template(
+            name=self.service['name'],
+            type='',
+            assert_status=400)
+
+    def test_create_endpoint_template_with_empty_type(self):
+        self.create_endpoint_template(
+            name='',
+            type=self.service['type'],
+            assert_status=400)
 
     def test_create_endpoint_template_xml(self):
         region = common.unique_str()
@@ -72,6 +89,40 @@ class CreateEndpointTemplatesTest(EndpointTemplatesTest):
         self.assertEqual(r.xml.get("enabled"), str(enabled).lower())
         self.assertEqual(r.xml.get("global"), str(is_global).lower())
 
+    def test_create_endpoint_template_xml_using_empty_type(self):
+        region = common.unique_str()
+        public_url = common.unique_url()
+        admin_url = common.unique_url()
+        internal_url = common.unique_url()
+        enabled = True
+        is_global = True
+
+        data = ('<?xml version="1.0" encoding="UTF-8"?> '
+            '<endpointTemplate xmlns="%s" region="%s" name="%s" '
+            'type="%s" publicURL="%s" adminURL="%s" '
+            'internalURL="%s" enabled="%s" global="%s"/>'
+            ) % (self.xmlns_kscatalog, region, self.service['name'],
+                '', public_url, admin_url, internal_url,
+                enabled, is_global)
+        self.post_endpoint_template(as_xml=data, assert_status=400)
+
+    def test_create_endpoint_template_xml_using_empty_name(self):
+        region = common.unique_str()
+        public_url = common.unique_url()
+        admin_url = common.unique_url()
+        internal_url = common.unique_url()
+        enabled = True
+        is_global = True
+
+        data = ('<?xml version="1.0" encoding="UTF-8"?> '
+            '<endpointTemplate xmlns="%s" region="%s" name="%s" '
+            'type="%s" publicURL="%s" adminURL="%s" '
+            'internalURL="%s" enabled="%s" global="%s"/>'
+            ) % (self.xmlns_kscatalog, region, '',
+                self.service['type'], public_url, admin_url, internal_url,
+                enabled, is_global)
+        self.post_endpoint_template(as_xml=data, assert_status=400)
+
     def test_delete_endpoint_template_that_has_dependencies(self):
         tenant = self.create_tenant().json['tenant']
 
@@ -84,14 +135,14 @@ class CreateEndpointTemplatesTest(EndpointTemplatesTest):
     def test_create_endpoint_template_using_service_admin_token(self):
         self.admin_token = self.service_admin_token
         endpoint_template = self.create_endpoint_template(
-            name=self.service['name'],
-            type=self.service['type'],
+            name=self.my_service['name'],
+            type=self.my_service['type'],
             assert_status=201).\
             json['OS-KSCATALOG:endpointTemplate']
 
         self.assertIsNotNone(endpoint_template['id'])
-        self.assertEqual(endpoint_template['name'], self.service['name'])
-        self.assertEqual(endpoint_template['type'], self.service['type'])
+        self.assertEqual(endpoint_template['name'], self.my_service['name'])
+        self.assertEqual(endpoint_template['type'], self.my_service['type'])
 
 
 class GetEndpointTemplatesTest(EndpointTemplatesTest):
@@ -147,6 +198,86 @@ class GetEndpointTemplatesTest(EndpointTemplatesTest):
             'Accept': 'application/xml'})
 
 
+class GetEndpointTemplatesByServiceTest(EndpointTemplatesTest):
+    def test_get_endpoint_templates(self):
+        r = self.list_endpoint_templates(
+            service_id=self.service['id'], assert_status=200)
+        self.assertIsNotNone(r.json['OS-KSCATALOG:endpointTemplates'])
+        self.assertEquals(len(r.json['OS-KSCATALOG:endpointTemplates']), 1)
+        self.assertEquals(r.json['OS-KSCATALOG:endpointTemplates'][0]['name'],
+            self.service['name'])
+        self.assertEquals(r.json['OS-KSCATALOG:endpointTemplates'][0]['type'],
+            self.service['type'])
+
+    def test_get_endpoint_templates_using_service_admin_token(self):
+        self.admin_token = self.service_admin_token
+        r = self.list_endpoint_templates(service_id=self.service['id'],
+            assert_status=200)
+        self.assertIsNotNone(r.json['OS-KSCATALOG:endpointTemplates'])
+        self.assertEquals(len(r.json['OS-KSCATALOG:endpointTemplates']), 1)
+        self.assertEquals(r.json['OS-KSCATALOG:endpointTemplates'][0]['name'],
+            self.service['name'])
+        self.assertEquals(
+            r.json['OS-KSCATALOG:endpointTemplates'][0]['type'],
+            self.service['type'])
+
+    def test_get_endpoint_templates_using_expired_auth_token(self):
+        self.admin_token = self.expired_admin_token
+        self.list_endpoint_templates(
+            service_id=self.service['id'], assert_status=403)
+
+    def test_get_endpoint_templates_using_disabled_auth_token(self):
+        self.admin_token = self.disabled_admin_token
+        self.list_endpoint_templates(
+            service_id=self.service['id'], assert_status=403)
+
+    def test_get_endpoint_templates_using_missing_auth_token(self):
+        self.admin_token = ''
+        self.list_endpoint_templates(service_id=self.service['id'],
+            assert_status=401)
+
+    def test_get_endpoint_templates_using_invalid_auth_token(self):
+        self.admin_token = common.unique_str()
+        self.list_endpoint_templates(service_id=self.service['id'],
+            assert_status=401)
+
+    def test_get_endpoint_templates_xml(self):
+        r = self.get_endpoint_templates_by_service(
+            service_id=self.service['id'],
+            assert_status=200, headers={'Accept': 'application/xml'})
+        self.assertEqual(r.xml.tag,
+            "{%s}endpointTemplates" % self.xmlns_kscatalog)
+        endpoint_template = r.xml.find(
+            '{%s}endpointTemplate' % self.xmlns_kscatalog)
+        self.assertIsNotNone(endpoint_template)
+        self.assertEqual(endpoint_template.get('name'), self.service['name'])
+        self.assertEqual(endpoint_template.get('type'), self.service['type'])
+
+    def test_get_endpoint_templates_xml_expired_auth_token(self):
+        self.admin_token = self.expired_admin_token
+        self.get_endpoint_templates_by_service(
+            service_id=self.service['id'], assert_status=403, headers={
+            'Accept': 'application/xml'})
+
+    def test_get_endpoint_templates_xml_disabled_auth_token(self):
+        self.admin_token = self.disabled_admin_token
+        self.get_endpoint_templates_by_service(
+            service_id=self.service['id'], assert_status=403, headers={
+            'Accept': 'application/xml'})
+
+    def test_get_endpoint_templates_xml_missing_auth_token(self):
+        self.admin_token = ''
+        self.get_endpoint_templates_by_service(
+            service_id=self.service['id'], assert_status=401, headers={
+            'Accept': 'application/xml'})
+
+    def test_get_endpoint_templates_xml_invalid_auth_token(self):
+        self.admin_token = common.unique_str()
+        self.get_endpoint_templates_by_service(
+            service_id=self.service['id'], assert_status=401, headers={
+            'Accept': 'application/xml'})
+
+
 class GetEndpointTemplateTest(EndpointTemplatesTest):
     def test_get_endpoint(self):
         r = self.fetch_endpoint_template(self.endpoint_template['id'])
@@ -184,6 +315,10 @@ class GetEndpointTemplateTest(EndpointTemplatesTest):
         self.assertEqual(r.xml.tag,
             "{%s}endpointTemplate" % self.xmlns_kscatalog)
 
+    def test_non_existent_get_endpoint(self):
+        self.fetch_endpoint_template('99999999',
+            assert_status=404)
+
 
 class UpdateEndpointTemplateTest(EndpointTemplatesTest):
     def test_update_endpoint(self):
@@ -191,6 +326,16 @@ class UpdateEndpointTemplateTest(EndpointTemplatesTest):
             name=self.service['name'], type=self.service['type'],
             assert_status=201)
 #       self.assertIsNotNone(r.json['endpointTemplate'].get('enabled'), r.json)
+
+    def test_update_endpoint_with_empty_name(self):
+        self.update_endpoint_template(self.endpoint_template['id'],
+            name='', type=self.service['type'],
+            assert_status=400)
+
+    def test_update_endpoint_with_empty_type(self):
+        self.update_endpoint_template(self.endpoint_template['id'],
+            name=self.service['name'], type='',
+            assert_status=400)
 
     def test_update_endpoint_xml(self):
         region = common.unique_str()
@@ -202,11 +347,11 @@ class UpdateEndpointTemplateTest(EndpointTemplatesTest):
 
         data = ('<?xml version="1.0" encoding="UTF-8"?> '
             '<endpointTemplate '
-            'xmlns="http://docs.openstack.org'
-            '/identity/api/ext/OSKSCATALOG/v1.0" '
+            'xmlns="%s" '
             'region="%s" name="%s" type="%s"'
             ' publicURL="%s" adminURL="%s"'
-            ' internalURL="%s" enabled="%s" global="%s"/>') % (region,
+            ' internalURL="%s" enabled="%s" global="%s"/>') % (
+                self.xmlns_kscatalog, region,
                 self.service['name'], self.service['type'],
                 public_url, admin_url, internal_url,
                 enabled, is_global)
@@ -354,11 +499,11 @@ class CreateEndpointRefsTest(EndpointTemplatesTest):
         self.admin_token = self.expired_admin_token
         data = ('<?xml version="1.0" encoding="UTF-8"?> '
             '<endpointTemplate '
-            'xmlns="http://docs.openstack.org/identity'
-            '/api/ext/OSKSCATALOG/v1.0" '
+            'xmlns="%s" '
             'region="%s" name="%s"'
             ' type="%s" publicURL="%s" adminURL="%s" '
             'internalURL="%s" enabled="%s" global="%s"/>') % (
+                self.xmlns_kscatalog,
                 common.unique_str(),
                 self.service['name'],
                 self.service['type'], common.unique_url(),
@@ -370,11 +515,11 @@ class CreateEndpointRefsTest(EndpointTemplatesTest):
         self.admin_token = self.disabled_admin_token
         data = ('<?xml version="1.0" encoding="UTF-8"?> '
             '<endpointTemplate '
-            'xmlns="http://docs.openstack.org/identity'
-            '/api/ext/OSKSCATALOG/v1.0" '
+            'xmlns="%s" '
             'region="%s" name="%s" type="%s" publicURL="%s" adminURL="%s" '
             'internalURL="%s" enabled="%s" global="%s"/>') % (
-                common.unique_str(), self.service['name'],
+                self.xmlns_kscatalog, common.unique_str(),
+                self.service['name'],
                 self.service['type'], common.unique_url(),
                 common.unique_url(), common.unique_url(), True, True)
         self.post_endpoint_template(as_xml=data, assert_status=403, headers={
@@ -384,10 +529,10 @@ class CreateEndpointRefsTest(EndpointTemplatesTest):
         self.admin_token = ''
         data = ('<?xml version="1.0" encoding="UTF-8"?> '
             '<endpointTemplate '
-            'xmlns="http://docs.openstack.org'
-            '/identity/api/ext/OSKSCATALOG/v1.0" '
+            'xmlns="%s" '
             'region="%s" name="%s" type="%s"  publicURL="%s" adminURL="%s" '
             'internalURL="%s" enabled="%s" global="%s"/>') % (
+                self.xmlns_kscatalog,
                 common.unique_str(),
                 self.service['name'], self.service['type'],
                 common.unique_url(),
@@ -399,11 +544,11 @@ class CreateEndpointRefsTest(EndpointTemplatesTest):
         self.admin_token = common.unique_str()
         data = ('<?xml version="1.0" encoding="UTF-8"?> '
             '<endpointTemplate '
-            'xmlns="http://docs.openstack.org/'
-            'identity/api/ext/OSKSCATALOG/v1.0" '
+            'xmlns="%s" '
             'region="%s" name="%s" type="%s" publicURL="%s" adminURL="%s" '
             'internalURL="%s" enabled="%s" global="%s"/>') % (
-                common.unique_str(), self.service['name'],
+                self.xmlns_kscatalog, common.unique_str(),
+                self.service['name'],
                 self.service['type'], common.unique_url(),
                 common.unique_url(), common.unique_url(), True, True)
         self.post_endpoint_template(as_xml=data, assert_status=401, headers={

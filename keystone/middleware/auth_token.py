@@ -19,18 +19,17 @@
 """
 TOKEN-BASED AUTH MIDDLEWARE
 
-This WSGI component performs multiple jobs:
+This WSGI component:
 
-* it verifies that incoming client requests have valid tokens by verifying
+* Verifies that incoming client requests have valid tokens by validating
   tokens with the auth service.
-* it will reject unauthenticated requests UNLESS it is in 'delay_auth_decision'
+* Rejects unauthenticated requests UNLESS it is in 'delay_auth_decision'
   mode, which means the final decision is delegated to the downstream WSGI
   component (usually the OpenStack service)
-* it will collect and forward identity information from a valid token
-  such as user name etc...
+* Collects and forwards identity information based on a valid token
+  such as user name, tenant, etc
 
-Refer to: http://wiki.openstack.org/openstack-authn
-
+Refer to: http://keystone.openstack.org/middleware_architecture.html
 
 HEADERS
 -------
@@ -42,11 +41,11 @@ Coming in from initial call from client or customer
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 HTTP_X_AUTH_TOKEN
-    the client token being passed in
+    The client token being passed in.
 
 HTTP_X_STORAGE_TOKEN
-    the client token being passed in (legacy Rackspace use) to support
-    cloud files
+    The client token being passed in (legacy Rackspace use) to support
+    swift/cloud files
 
 Used for communication between components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -61,35 +60,96 @@ What we add to the request for use by the OpenStack service
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 HTTP_X_AUTHORIZATION
-    the client identity being passed in
+    The client identity being passed in
+
+HTTP_X_IDENTITY_STATUS
+    'Confirmed' or 'Invalid'
+    The underlying service will only see a value of 'Invalid' if the Middleware
+    is configured to run in 'delay_auth_decision' mode
+
+HTTP_X_TENANT
+    *Deprecated* in favor of HTTP_X_TENANT_ID and HTTP_X_TENANT_NAME
+    Keystone-assigned unique identifier, deprecated
+
+HTTP_X_TENANT_ID
+    Identity service managed unique identifier, string
+
+HTTP_X_TENANT_NAME
+    Unique tenant identifier, string
+
+HTTP_X_USER
+    *Deprecated* in favor of HTTP_X_USER_ID and HTTP_X_USER_NAME
+    Unique user name, string
+
+HTTP_X_USER_ID
+    Identity-service managed unique identifier, string
+
+HTTP_X_USER_NAME
+    Unique user identifier, string
+
+HTTP_X_ROLE
+    *Deprecated* in favor of HTTP_X_ROLES
+    This is being renamed, and the new header contains the same data.
+
+HTTP_X_ROLES
+    Comma delimited list of case-sensitive Roles
 
 """
 
+from datetime import datetime
 import eventlet
 from eventlet import wsgi
-import httplib
 import json
+# memcache is imported in __init__ if memcache caching is configured
 import os
 from paste.deploy import loadapp
+import time
 from urlparse import urlparse
 from webob.exc import HTTPUnauthorized
 from webob.exc import Request, Response
 import keystone.tools.tracer  # @UnusedImport # module runs on import
-
 from keystone.common.bufferedhttp import http_connect_raw as http_connect
 
+
 PROTOCOL_NAME = "Token Authentication"
+# The time format of the 'expires' property of a token
+EXPIRE_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
+MAX_CACHE_TIME = 86400
+
+
+def get_datetime(time_string):
+    """ Gets datetime object with microsecond accuracy from input string.
+    Handle strings which don't include microseconds
+
+    :param: time_string: datetime in %Y-%m-%dT%H:%M:%S.%f format (.%f optional)
+    """
+    result = time_string.split(".", 1)
+    datetime_string = result[0]
+    microseconds = result[1] if len(result) > 1 else "0"
+    d1 = datetime.strptime(datetime_string, "%Y-%m-%dT%H:%M:%S")
+    ms = int(microseconds.ljust(6, '0')[:6])
+    return d1.replace(microsecond=ms)
+
+
+class ValidationFailed(Exception):
+    pass
+
+
+class TokenExpired(Exception):
+    pass
 
 
 class AuthProtocol(object):
     """Auth Middleware that handles authenticating client calls"""
 
     def _init_protocol_common(self, app, conf):
-        """ Common initialization code"""
+        """ Common initialization code
+
+        When we eventually superclass this, this will be the superclass
+        initialization code that applies to all protocols
+        """
         print "Starting the %s component" % PROTOCOL_NAME
 
-        self.conf = conf
-        self.app = app
         #if app is set, then we are in a WSGI pipeline and requests get passed
         # on to app. If it is not set, this component should forward requests
 
@@ -98,10 +158,13 @@ class AuthProtocol(object):
         # and the OpenSTack service is running remotely
         self.service_protocol = conf.get('service_protocol', 'https')
         self.service_host = conf.get('service_host')
-        self.service_port = int(conf.get('service_port'))
+        service_port = conf.get('service_port')
+        if service_port:
+            self.service_port = int(service_port)
         self.service_url = '%s://%s:%s' % (self.service_protocol,
                                            self.service_host,
                                            self.service_port)
+        self.service_timeout = conf.get('service_timeout', 30)
         # used to verify this component with the OpenStack service or PAPIAuth
         self.service_pass = conf.get('service_pass')
 
@@ -116,6 +179,7 @@ class AuthProtocol(object):
         self.auth_host = conf.get('auth_host')
         self.auth_port = int(conf.get('auth_port'))
         self.auth_protocol = conf.get('auth_protocol', 'https')
+        self.auth_timeout = conf.get('auth_timeout', 30)
 
         # where to tell clients to find the auth service (default to url
         # constructed based on endpoint we have for the service to use)
@@ -131,6 +195,12 @@ class AuthProtocol(object):
         # server
         self.cert_file = conf.get('certfile', None)
         self.key_file = conf.get('keyfile', None)
+        # Caching
+        self.cache = conf.get('cache', None)
+        self.memcache_hosts = conf.get('memcache_hosts', None)
+        if self.memcache_hosts:
+            if self.cache is None:
+                self.cache = "keystone.cache"
 
     def __init__(self, app, conf):
         """ Common initialization code """
@@ -139,6 +209,8 @@ class AuthProtocol(object):
         # NOTE(salvatore-orlando): the following vars are assigned values
         # either in init_protocol or init_protocol_common. We should not
         # worry about them being initialized to None
+        self.conf = conf
+        self.app = app
         self.admin_password = None
         self.admin_token = None
         self.admin_user = None
@@ -147,15 +219,31 @@ class AuthProtocol(object):
         self.auth_location = None
         self.auth_port = None
         self.auth_protocol = None
+        self.auth_timeout = None
+        self.cert_file = None
+        self.key_file = None
+        self.delay_auth_decision = None
+        self.service_pass = None
         self.service_host = None
         self.service_port = None
         self.service_protocol = None
+        self.service_timeout = None
         self.service_url = None
+        self.cache = None
+        self.memcache_hosts = None
         self._init_protocol_common(app, conf)  # Applies to all protocols
         self._init_protocol(conf)  # Specific to this protocol
 
     def __call__(self, env, start_response):
         """ Handle incoming request. Authenticate. And send downstream. """
+        # Initialize caching client
+        if self.memcache_hosts:
+            # This will only be used if the configuration calls for memcache
+            import memcache
+
+            if env.get(self.cache, None) is None:
+                memcache_client = memcache.Client([self.memcache_hosts])
+                env[self.cache] = memcache_client
 
         #Prep headers to forward request to local or remote downstream service
         proxy_headers = env.copy()
@@ -165,8 +253,8 @@ class AuthProtocol(object):
                 del proxy_headers[header]
 
         #Look for authentication claims
-        claims = self._get_claims(env)
-        if not claims:
+        token = self._get_claims(env)
+        if not token:
             #No claim(s) provided
             if self.delay_auth_decision:
                 #Configured to allow downstream service to make final decision.
@@ -178,8 +266,9 @@ class AuthProtocol(object):
                 return self._reject_request(env, start_response)
         else:
             # this request is presenting claims. Let's validate them
-            valid = self._validate_claims(claims)
-            if not valid:
+            try:
+                claims = self._verify_claims(env, token)
+            except (ValidationFailed, TokenExpired):
                 # Keystone rejected claim
                 if self.delay_auth_decision:
                     # Downstream service will receive call still and decide
@@ -192,45 +281,101 @@ class AuthProtocol(object):
                 self._decorate_request("X_IDENTITY_STATUS",
                     "Confirmed", env, proxy_headers)
 
-            #Collect information about valid claims
-            if valid:
-                claims = self._expound_claims(claims)
-
                 # Store authentication data
                 if claims:
                     self._decorate_request('X_AUTHORIZATION', "Proxy %s" %
-                        claims['user'], env, proxy_headers)
+                        claims['user']['name'], env, proxy_headers)
 
-                    # For legacy compatibility before we had ID and Name
-                    self._decorate_request('X_TENANT',
-                        claims['tenant'], env, proxy_headers)
-
-                    # Services should use these
-                    self._decorate_request('X_TENANT_NAME',
-                        claims.get('tenant_name', claims['tenant']),
-                        env, proxy_headers)
                     self._decorate_request('X_TENANT_ID',
-                        claims['tenant'], env, proxy_headers)
+                        claims['tenant']['id'], env, proxy_headers)
+                    self._decorate_request('X_TENANT_NAME',
+                        claims['tenant']['name'], env, proxy_headers)
 
+                    self._decorate_request('X_USER_ID',
+                        claims['user']['id'], env, proxy_headers)
+                    self._decorate_request('X_USER_NAME',
+                        claims['user']['name'], env, proxy_headers)
+
+                    roles = ','.join(claims['roles'])
+                    self._decorate_request('X_ROLES',
+                        roles, env, proxy_headers)
+
+                    # Deprecated in favor of X_TENANT_ID and _NAME
+                    self._decorate_request('X_TENANT',
+                        claims['tenant']['id'], env, proxy_headers)
+
+                    # Deprecated in favor of X_USER_ID and _NAME
                     self._decorate_request('X_USER',
-                        claims['user'], env, proxy_headers)
-                    if 'roles' in claims and len(claims['roles']) > 0:
-                        if claims['roles'] != None:
-                            roles = ''
-                            for role in claims['roles']:
-                                if len(roles) > 0:
-                                    roles += ','
-                                roles += role
-                            self._decorate_request('X_ROLE',
-                                roles, env, proxy_headers)
+                        claims['user']['id'], env, proxy_headers)
 
-                    # NOTE(todd): unused
-                    self.expanded = True
+                    # Deprecated in favor of X_ROLES
+                    self._decorate_request('X_ROLE',
+                        roles, env, proxy_headers)
 
         #Send request downstream
         return self._forward_request(env, start_response, proxy_headers)
 
-    def _get_claims(self, env):
+    @staticmethod
+    def _convert_date(date):
+        """ Convert datetime to unix timestamp for caching """
+        return time.mktime(datetime.strptime(
+                date[:date.rfind(':')].replace('-', ''), "%Y%m%dT%H:%M",
+                ).timetuple())
+
+    @staticmethod
+    def _protect_claims(token, claims):
+        """ encrypt or mac claims if necessary """
+        return claims
+
+    @staticmethod
+    def _unprotect_claims(token, pclaims):
+        """ decrypt or demac claims if necessary """
+        return pclaims
+
+    def _cache_put(self, env, token, claims, valid):
+        """ Put a claim into the cache """
+        cache = self._cache(env)
+        if (cache and claims):
+            key = 'tokens/%s' % (token)
+            claims = self._protect_claims(token, claims)
+            if "timeout" in cache.set.func_code.co_varnames:
+                # swift cache
+                expires = self._convert_date(claims['expires'])
+                cache.set(key, (claims, expires, valid),
+                             timeout=expires - time.time())
+            else:
+                # normal memcache client
+                expires = get_datetime(claims['expires'])
+                delta = expires - datetime.now()
+                timeout = delta.seconds
+                if timeout > MAX_CACHE_TIME or not valid:
+                    # Limit cache to one day (and cache bad tokens for a day)
+                    timeout = MAX_CACHE_TIME
+                cache.set(key, (claims, expires, valid), time=timeout)
+
+    def _cache_get(self, env, token):
+        """ Return claim and relevant information (expiration and validity)
+        from cache """
+        cache = self._cache(env)
+        if cache:
+            key = 'tokens/%s' % (token)
+            cached_claims = cache.get(key)
+            if cached_claims:
+                claims, expires, valid = cached_claims
+                if valid:
+                    if expires > datetime.now():
+                        claims = self._unprotect_claims(token, claims)
+                return (claims, expires, valid)
+        return None
+
+    def _cache(self, env):
+        """ Return a cache to use for token caching, or none """
+        if (self.cache is not None):
+            return env.get(self.cache, None)
+        return None
+
+    @staticmethod
+    def _get_claims(env):
         """Get claims from request"""
         claims = env.get('HTTP_X_AUTH_TOKEN', env.get('HTTP_X_STORAGE_TOKEN'))
         return claims
@@ -242,13 +387,23 @@ class AuthProtocol(object):
                       "Keystone uri='%s'" % self.auth_location)])(env,
                                                         start_response)
 
-    def _reject_claims(self, env, start_response):
+    @staticmethod
+    def _reject_claims(env, start_response):
         """Client sent bad claims"""
         return HTTPUnauthorized()(env,
             start_response)
 
-    def _validate_claims(self, claims):
-        """Validate claims, and provide identity information isf applicable """
+    def _verify_claims(self, env, claims):
+        """Verify claims and extract identity information, if applicable."""
+
+        cached_claims = self._cache_get(env, claims)
+        if cached_claims:
+            claims, expires, valid = cached_claims
+            if not valid:
+                raise ValidationFailed()
+            if expires <= datetime.now():
+                raise TokenExpired()
+            return claims
 
         # Step 1: We need to auth with the keystone service, so get an
         # admin token
@@ -268,71 +423,68 @@ class AuthProtocol(object):
                     #Khaled's version uses creds to get a token
                     # "X-Auth-Token": admin_token}
                     # we're using a test token from the ini file for now
-        conn = http_connect(self.auth_host, self.auth_port, 'HEAD',
-                            '/v2.0/tokens/%s' % claims, headers=headers,
-                            ssl=(self.auth_protocol == 'https'),
-                            key_file=self.key_file, cert_file=self.cert_file)
-        resp = conn.getresponse()
-        # data = resp.read()
-        conn.close()
-
-        if not str(resp.status).startswith('20'):
-            # Keystone rejected claim
-            return False
-        else:
-            #TODO(Ziad): there is an optimization we can do here. We have just
-            #received data from Keystone that we can use instead of making
-            #another call in _expound_claims
-            return True
-
-    def _expound_claims(self, claims):
-        # Valid token. Get user data and put it in to the call
-        # so the downstream service can use it
-        headers = {"Content-type": "application/json",
-                    "Accept": "application/json",
-                    "X-Auth-Token": self.admin_token}
-                    ##TODO(ziad):we need to figure out how to auth to keystone
-                    #since validate_token is a priviledged call
-                    #Khaled's version uses creds to get a token
-                    # "X-Auth-Token": admin_token}
-                    # we're using a test token from the ini file for now
         conn = http_connect(self.auth_host, self.auth_port, 'GET',
                             '/v2.0/tokens/%s' % claims, headers=headers,
                             ssl=(self.auth_protocol == 'https'),
-                            key_file=self.key_file, cert_file=self.cert_file)
+                            key_file=self.key_file, cert_file=self.cert_file,
+                            timeout=self.auth_timeout)
         resp = conn.getresponse()
         data = resp.read()
-        conn.close()
 
         if not str(resp.status).startswith('20'):
-            raise LookupError('Unable to locate claims: %s' % resp.status)
+            # Cache it if there is a cache available
+            if self.cache:
+                self._cache_put(env, claims,
+                                claims={'expires':
+                                datetime.strftime(datetime.now(),
+                                                  EXPIRE_TIME_FORMAT)},
+                                valid=False)
+            # Keystone rejected claim
+            raise ValidationFailed()
 
         token_info = json.loads(data)
-        roles = []
-        role_refs = token_info["access"]["user"]["roles"]
-        if role_refs != None:
-            for role_ref in role_refs:
-                # Nova looks for the non case-sensitive role 'Admin'
-                # to determine admin-ness
-                roles.append(role_ref["name"])
 
-        try:
-            tenant = token_info['access']['token']['tenant']['id']
-            tenant_name = token_info['access']['token']['tenant']['name']
-        except:
-            tenant = None
-            tenant_name = None
-        if not tenant:
-            tenant = token_info['access']['user'].get('tenantId')
+        roles = [role['name'] for role in token_info[
+            "access"]["user"]["roles"]]
+
+        # in diablo, there were two ways to get tenant data
+        tenant = token_info['access']['token'].get('tenant')
+        if tenant:
+            # post diablo
+            tenant_id = tenant['id']
+            tenant_name = tenant['name']
+        else:
+            # diablo only
+            tenant_id = token_info['access']['user'].get('tenantId')
             tenant_name = token_info['access']['user'].get('tenantName')
-        verified_claims = {'user': token_info['access']['user']['username'],
-                    'tenant': tenant,
-                    'roles': roles}
-        if tenant_name:
-            verified_claims['tenantName'] = tenant_name
+
+        verified_claims = {
+            'user': {
+                'id': token_info['access']['user']['id'],
+                'name': token_info['access']['user']['name'],
+            },
+            'tenant': {
+                'id': tenant_id,
+                'name': tenant_name
+            },
+            'roles': roles,
+            'expires': token_info['access']['token']['expires']}
+
+        expires = get_datetime(verified_claims['expires'])
+        if expires <= datetime.now():
+            # Cache it if there is a cache available (we also cached bad
+            # claims)
+            if self.cache:
+                self._cache_put(env, claims, verified_claims, valid=False)
+            raise TokenExpired()
+
+        # Cache it if there is a cache available
+        if self.cache:
+            self._cache_put(env, claims, verified_claims, valid=True)
         return verified_claims
 
-    def _decorate_request(self, index, value, env, proxy_headers):
+    @staticmethod
+    def _decorate_request(index, value, env, proxy_headers):
         """Add headers to request"""
         proxy_headers[index] = value
         env["HTTP_%s" % index] = value
@@ -356,14 +508,15 @@ class AuthProtocol(object):
                                 req.method,
                                 parsed.path,
                                 proxy_headers,
-                                ssl=(self.service_protocol == 'https'))
+                                ssl=(self.service_protocol == 'https'),
+                                timeout=self.service_timeout)
             resp = conn.getresponse()
             data = resp.read()
 
             #TODO(ziad): use a more sophisticated proxy
             # we are rewriting the headers now
 
-            if resp.status == 401 or resp.status == 305:
+            if resp.status in (401, 305):
                 # Add our own headers to the list
                 headers = [("WWW_AUTHENTICATE",
                    "Keystone uri='%s'" % self.auth_location)]
@@ -380,8 +533,8 @@ def filter_factory(global_conf, **local_conf):
     conf = global_conf.copy()
     conf.update(local_conf)
 
-    def auth_filter(app):
-        return AuthProtocol(app, conf)
+    def auth_filter(filteredapp):
+        return AuthProtocol(filteredapp, conf)
     return auth_filter
 
 
@@ -391,10 +544,10 @@ def app_factory(global_conf, **local_conf):
     return AuthProtocol(None, conf)
 
 if __name__ == "__main__":
-    app = loadapp("config:" + \
+    wsgiapp = loadapp("config:" + \
         os.path.join(os.path.abspath(os.path.dirname(__file__)),
                      os.pardir,
                      os.pardir,
                     "examples/paste/auth_token.ini"),
                     global_conf={"log_name": "auth_token.log"})
-    wsgi.server(eventlet.listen(('', 8090)), app)
+    wsgi.server(eventlet.listen(('', 8090)), wsgiapp)

@@ -15,8 +15,8 @@
 
 import json
 from lxml import etree
-
 from keystone.logic.types import fault
+from keystone import utils
 
 
 class Service(object):
@@ -34,16 +34,14 @@ class Service(object):
             root = dom.find(
                 "{http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0}"\
                 "service")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting Service")
             id = root.get("id")
             name = root.get("name")
             type = root.get("type")
             description = root.get("description")
-            if name is None:
-                raise fault.BadRequestFault("Expecting Service")
-            if type == None:
-                raise fault.BadRequestFault("Expecting Service Type")
+            utils.check_empty_string(name, "Expecting Service Name")
+            utils.check_empty_string(type, "Expecting Service Type")
             return Service(id, name, type, description)
         except etree.LxmlError as e:
             raise fault.BadRequestFault("Cannot parse service", str(e))
@@ -54,19 +52,21 @@ class Service(object):
             obj = json.loads(json_str)
             if not "OS-KSADM:service" in obj:
                 raise fault.BadRequestFault("Expecting service")
-
             service = obj["OS-KSADM:service"]
+
+            # Check that fields are valid
+            invalid = [key for key in service if key not in\
+                       ['id', 'name', 'type', 'description']]
+            if invalid != []:
+                raise fault.BadRequestFault("Invalid attribute(s): %s"
+                                            % invalid)
+
             id = service.get('id')
             name = service.get('name')
             type = service.get('type')
             description = service.get('description')
-
-            if name is None:
-                raise fault.BadRequestFault("Expecting service")
-
-            if type is None:
-                raise fault.BadRequestFault("Expecting Service Type")
-
+            utils.check_empty_string(name, "Expecting Service Name")
+            utils.check_empty_string(type, "Expecting Service Type")
             return Service(id, name, type, description)
         except (ValueError, TypeError) as e:
             raise fault.BadRequestFault("Cannot parse service", str(e))

@@ -81,7 +81,17 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         # Create a user
         password = common.unique_str()
         self.user = self.create_user(user_password=password).json['user']
+        self.tenant = self.create_tenant().json['tenant']
         self.user['password'] = password
+        self.services = {}
+        self.endpoint_templates = {}
+        self.services = self.create_service().json['OS-KSADM:service']
+        self.endpoint_templates = self.create_endpoint_template(
+            name=self.services['name'], \
+            type=self.services['type']).\
+            json['OS-KSCATALOG:endpointTemplate']
+        self.create_endpoint_for_tenant(self.tenant['id'],
+            self.endpoint_templates['id'])
 
     def test_unscoped_user_auth(self):
         """Admin should be able to validate a user's token"""
@@ -102,15 +112,14 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         self.assertEqual(r.json['access']['token']['id'], self.service_token)
         self.assertTrue(r.json['access']['token']['expires'])
         self.assertEqual(r.json['access']['user']['id'], self.user['id'])
-        self.assertEqual(r.json['access']['user']['username'],
+        self.assertEqual(r.json['access']['user']['name'],
             self.user['name'])
         self.assertEqual(r.json['access']['user']['roles'], [])
 
     def test_user_auth_with_role_on_tenant(self):
         # Additonal setUp
-        tenant = self.create_tenant().json['tenant']
         role = self.create_role().json['role']
-        self.grant_role_to_user(self.user['id'], role['id'], tenant['id'])
+        self.grant_role_to_user(self.user['id'], role['id'], self.tenant['id'])
 
         # Create an unscoped token
         unscoped = self.post_token(as_json={
@@ -121,9 +130,9 @@ class TestServiceAuthentication(common.FunctionalTestCase):
 
         # The token shouldn't be scoped to a tenant nor have roles just yet
         self.assertIsNone(unscoped['token'].get('tenant'))
+        self.assertIsNotNone(unscoped.get('user'))
         self.assertIsNotNone(unscoped['user'].get('roles'))
         self.assertEqual(len(unscoped['user']['roles']), 0)
-        self.assertIsNotNone(unscoped.get('user'))
         self.assertEqual(unscoped['user'].get('id'), self.user['id'])
         self.assertEqual(unscoped['user'].get('name'), self.user['name'])
 
@@ -135,32 +144,36 @@ class TestServiceAuthentication(common.FunctionalTestCase):
 
         # Our tenant should be the only tenant in the list
         self.assertEqual(len(tenants), 1, tenants)
-        self.assertEqual(tenant['id'], tenants[0]['id'])
-        self.assertEqual(tenant['name'], tenants[0]['name'])
-        self.assertEqual(tenant['description'], tenants[0]['description'])
-        self.assertEqual(tenant['enabled'], tenants[0]['enabled'])
+        self.assertEqual(self.tenant['id'], tenants[0]['id'])
+        self.assertEqual(self.tenant['name'], tenants[0]['name'])
+        self.assertEqual(self.tenant['description'], tenants[0]['description'])
+        self.assertEqual(self.tenant['enabled'], tenants[0]['enabled'])
 
         # We can now get a token scoped to our tenant
         scoped = self.post_token(as_json={
             'auth': {
                 'token': {
                    'id': unscoped['token']['id']},
-                'tenantId': tenant['id']}}).json['access']
+                'tenantId': self.tenant['id']}}).json['access']
 
-        self.assertEqual(scoped['token']['tenant']['id'], tenant['id'])
-        self.assertEqual(scoped['token']['tenant']['name'], tenant['name'])
-        self.assertEqual(scoped['user']['roles'][0]['id'], role['id'])
+        self.assertEqual(scoped['token']['tenant']['id'], self.tenant['id'])
+        self.assertEqual(scoped['token']['tenant']['name'],\
+                         self.tenant['name'])
+        self.assertEqual(
+            scoped['user']['roles'][0]['id'], role['id'])
         self.assertEqual(scoped['user']['roles'][0]['name'], role['name'])
-        self.assertEqual(scoped['user']['roles'][0]['tenantId'], tenant['id'])
+        self.assertEqual(scoped['user']['roles'][0]['tenantId'],
+            self.tenant['id'])
 
         # And an admin should be able to validate that our new token is scoped
-        r = self.validate_token(scoped['token']['id'], tenant['id'])
+        r = self.validate_token(scoped['token']['id'], self.tenant['id'])
         access = r.json['access']
 
         self.assertEqual(access['user']['id'], self.user['id'])
-        self.assertEqual(access['user']['username'], self.user['name'])
-        self.assertEqual(access['token']['tenant']['id'], tenant['id'])
-        self.assertEqual(access['token']['tenant']['name'], tenant['name'])
+        self.assertEqual(access['user']['name'], self.user['name'])
+        self.assertEqual(access['token']['tenant']['id'], self.tenant['id'])
+        self.assertEqual(access['token']['tenant']['name'],\
+            self.tenant['name'])
 
     def test_user_auth_with_role_on_tenant_xml(self):
         # Additonal setUp
@@ -243,7 +256,7 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         user = r.xml.find('{%s}user' % self.xmlns)
         self.assertIsNotNone(user)
         self.assertEqual(user.get('id'), self.user['id'])
-        self.assertEqual(user.get('username'), self.user['name'])
+        self.assertEqual(user.get('name'), self.user['name'])
         self.assertIsNone(user.get('tenantId'))
 
     def test_scope_to_tenant_by_name(self):
@@ -274,7 +287,7 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         access = r.json['access']
 
         self.assertEqual(access['user']['id'], self.user['id'])
-        self.assertEqual(access['user']['username'], self.user['name'])
+        self.assertEqual(access['user']['name'], self.user['name'])
         self.assertEqual(access['token']['tenant']['id'], tenant['id'])
         self.assertEqual(access['token']['tenant']['name'], tenant['name'])
 
@@ -299,7 +312,7 @@ class TestServiceAuthentication(common.FunctionalTestCase):
         access = r.json['access']
 
         self.assertEqual(access['user']['id'], self.user['id'])
-        self.assertEqual(access['user']['username'], self.user['name'])
+        self.assertEqual(access['user']['name'], self.user['name'])
         self.assertEqual(access['token']['tenant']['id'], tenant['id'])
         self.assertEqual(access['token']['tenant']['name'], tenant['name'])
 

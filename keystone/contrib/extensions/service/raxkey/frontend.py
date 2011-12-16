@@ -19,17 +19,16 @@
 """
 RACKSPACE API KEY EXTENSION
 
-This WSGI component
-- detects calls with extensions in them.
-- processes the necessary components
-"""
+Deprecated middleware. We still have it here to not break compatiblity with
+configuration files that add it to the pipeline.
 
-import os
-import json
-from lxml import etree
-from webob.exc import Request, Response
+TODO(ZNS): Remove this in Essex+1
+"""
+import logging
 
 EXTENSION_ALIAS = "RAX-KEY"
+
+LOG = logging.getLogger('keystone.contrib.extensions')
 
 
 class FrontEndFilter(object):
@@ -42,49 +41,11 @@ class FrontEndFilter(object):
         self.app = app
 
     def __call__(self, env, start_response):
-        """ Handle incoming request. Transform. And send downstream. """
-        request = Request(env)
-        if request.path == "/extensions":
-            if env['KEYSTONE_API_VERSION'] == '2.0':
-                request = Request(env)
-                response = request.get_response(self.app)
-                if response.status_int == 200:
-                    if response.content_type == 'application/json':
-                        #load json for this extension from file
-                        thisextension = open(os.path.join(
-                                                    os.path.dirname(__file__),
-                                                   "extension.json")).read()
-                        thisextensionjson = json.loads(thisextension)
-
-                        #load json in response
-                        body = json.loads(response.body)
-                        extensionsarray = body["extensions"]["values"]
-
-                        #add this extension and return the response
-                        extensionsarray.append(thisextensionjson)
-                        newresp = Response(
-                            content_type='application/json',
-                            body=json.dumps(body))
-                        return newresp(env, start_response)
-                    elif response.content_type == 'application/xml':
-                        #load xml for this extension from file
-                        thisextensionxml = etree.parse(os.path.join(
-                                                    os.path.dirname(__file__),
-                                                   "extension.xml")).getroot()
-                        #load xml being returned in response
-                        body = etree.fromstring(response.body)
-
-                        #add this extension and return the response
-                        body.append(thisextensionxml)
-                        newresp = Response(
-                            content_type='application/xml',
-                            body=etree.tostring(body))
-                        return newresp(env, start_response)
-
-                # return the response
-                return response(env, start_response)
-
-        #default action, bypass
+        LOG.warn("%s middleware is deprecated and will be removed in "
+                 "Essex+1 (Fall fo 2012). Remove it from your "
+                 "configuration files." % EXTENSION_ALIAS)
+        #Kept for backward compatibility with existing configuration files.
+        #Does nothing now.
         return self.app(env, start_response)
 
 

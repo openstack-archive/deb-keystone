@@ -45,6 +45,10 @@ keystone.conf example
         'swift' : 'X-Storage-Url',
         'cdn' : 'X-CDN-Management-Url'}
 
+	#List of extensions currently loaded.
+	#Refer docs for list of supported extensions. 
+	extensions= osksadm,oskscatalog
+  
     # Address to bind the API server
     # TODO Properties defined within app not available via pipeline.
     service_host = 0.0.0.0
@@ -81,13 +85,14 @@ keystone.conf example
     [pipeline:admin]
     pipeline =
         urlrewritefilter
+        d5_compat
         admin_api
 
     [pipeline:keystone-legacy-auth]
     pipeline =
         urlrewritefilter
         legacy_auth
-        RAX-KEY-extension
+        d5_compat
         service_api
 
     [app:service_api]
@@ -101,6 +106,9 @@ keystone.conf example
 
     [filter:legacy_auth]
     paste.filter_factory = keystone.frontends.legacy_token_auth:filter_factory
+
+    [filter:d5_compat]
+    paste.filter_factory = keystone.frontends.d5_compat:filter_factory
 
     [filter:RAX-KEY-extension]
     paste.filter_factory = keystone.contrib.extensions.service.raxkey.frontend:filter_factory

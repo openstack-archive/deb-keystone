@@ -1,35 +1,42 @@
-================
-Using Migrations
-================
+===================
+Database Migrations
+===================
 
-Keystone uses sqlalchemy-migrate to manage migrations.
+Keystone uses SQLAlchemy Migrate (``sqlalchemy-migrate``) to manage migrations.
 
+.. WARNING::
 
-Running Migrations
-======================
+    Backup your database before applying migrations. Migrations may attempt to modify both your schema and data, and could result in data loss.
 
-Keep backups of your db.Add your existing database to version control.
+    Always review the behavior of migrations in a staging environment before applying them in production.
 
-Example::
+Getting Started
+===============
 
-$python keystone/backends/sqlalchemy/migrate_repo/manage.py version_control  --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
+Migrations are tracked using a metadata table. Place an existing database under version control to enable migration support (SQLite in this case)::
 
+    $ python keystone/backends/sqlalchemy/migrate_repo/manage.py version_control --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
 
-Set your current db version to appropriate version_number.
+If you are starting with an existing schema, you can set your database to the current schema version number using a
+SQL command. For example, if you're starting from a
+diablo-compatible database, set your current database version to ``1``::
 
-Version number 1 maps to diablo release.
+    UPDATE migrate_version SET version=1;
 
-Example::
- 
-UPDATE migrate_version SET version=1; 
+Upgrading & Downgrading
+=======================
 
-Perform Upgrades/Downgrades
+Fresh installs of Keystone will need to run database upgrades, which will build a schema and bootstrap it with any necessary data.
 
-Example Upgrade ::
+Upgrade::
 
-$python keystone/backends/sqlalchemy/migrate_repo/manage.py upgrade  --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
+    $ python keystone/backends/sqlalchemy/migrate_repo/manage.py upgrade --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
 
-Example Downgrade::
+Downgrade (will likely result in data loss!)::
 
-$python keystone/backends/sqlalchemy/migrate_repo/manage.py downgrade 1   --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
+    $ python keystone/backends/sqlalchemy/migrate_repo/manage.py downgrade 1 --url=sqlite:///bin/keystone.db --repository=keystone/backends/sqlalchemy/migrate_repo/
 
+Useful Links
+============
+
+Principles to follow when developing migrations `OpenStack Deployability <http://wiki.openstack.org/OpenstackDeployability>`_

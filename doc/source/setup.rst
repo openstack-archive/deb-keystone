@@ -14,9 +14,9 @@
       License for the specific language governing permissions and limitations
       under the License.
 
-===============================================
-Setting up a Keystone a development environment
-===============================================
+=============================================
+Setting up a Keystone development environment
+=============================================
 
 This document describes setting up keystone directly from GitHub_
 for development purposes.
@@ -103,8 +103,14 @@ the easiest of which is::
 You should then be able to `import keystone` from your Python shell
 without issue::
 
-    >>> import keystone
+    >>> import keystone.version
     >>>
+
+If you want to check the version of Keystone you are running:
+
+    >>> print keystone.version.version()
+    2012.1-dev
+
 
 If you can import keystone successfully, you should be ready to move on to :doc:`testing`.
 

@@ -15,9 +15,9 @@
 
 import json
 from lxml import etree
-
 from keystone.logic.types import fault
 import keystone.backends.api as db_api
+from keystone import utils
 
 
 class AuthBase(object):
@@ -72,7 +72,7 @@ class AuthWithUnscopedToken(AuthBase):
             dom.append(etree.fromstring(xml_str))
             root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
                 "auth")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting auth")
             token = root.find("{http://docs.openstack.org/identity/api/v2.0}"
                 "token")
@@ -82,10 +82,7 @@ class AuthWithUnscopedToken(AuthBase):
             token_id = token.get("id")
             tenant_id = root.get("tenantId")
             tenant_name = root.get("tenantName")
-
-            if token_id is None:
-                raise fault.BadRequestFault("Expecting a token id")
-
+            utils.check_empty_string(token_id, "Expecting a token id.")
             if tenant_id and tenant_name:
                 raise fault.BadRequestFault(
                     "Expecting either Tenant ID or Tenant Name, but not both")
@@ -124,21 +121,19 @@ class AuthWithPasswordCredentials(AuthBase):
             dom.append(etree.fromstring(xml_str))
             root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
                             "auth")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting auth")
             tenant_id = root.get("tenantId")
             tenant_name = root.get("tenantName")
             password_credentials = \
                 root.find("{http://docs.openstack.org/identity/api/v2.0}"
                 "passwordCredentials")
-            if password_credentials == None:
+            if password_credentials is None:
                 raise fault.BadRequestFault("Expecting passwordCredentials")
             username = password_credentials.get("username")
-            if username == None:
-                raise fault.BadRequestFault("Expecting a username")
+            utils.check_empty_string(username, "Expecting a username")
             password = password_credentials.get("password")
-            if password == None:
-                raise fault.BadRequestFault("Expecting a password")
+            utils.check_empty_string(password, "Expecting a password")
 
             if tenant_id and tenant_name:
                 raise fault.BadRequestFault(
@@ -206,23 +201,18 @@ class Ec2Credentials(object):
             dom.append(etree.fromstring(xml_str))
             root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
                             "ec2Credentials")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting ec2Credentials")
             access = root.get("access")
-            if access == None:
-                raise fault.BadRequestFault("Expecting an access key")
+            utils.check_empty_string(access, "Expecting an access key.")
             signature = root.get("signature")
-            if signature == None:
-                raise fault.BadRequestFault("Expecting a signature")
+            utils.check_empty_string(signature, "Expecting a signature.")
             verb = root.get("verb")
-            if verb == None:
-                raise fault.BadRequestFault("Expecting a verb")
+            utils.check_empty_string(verb, "Expecting a verb.")
             host = root.get("host")
-            if host == None:
-                raise fault.BadRequestFault("Expecting a host")
+            utils.check_empty_string(signature, "Expecting a host.")
             path = root.get("path")
-            if path == None:
-                raise fault.BadRequestFault("Expecting a path")
+            utils.check_empty_string(signature, "Expecting a path.")
             # TODO(vish): parse xml params
             params = {}
             return Ec2Credentials(access, signature, verb, host, path, params)
@@ -305,14 +295,26 @@ class User(object):
 
 
 class AuthData(object):
-    """Authentation Information returned upon successful login."""
+    """Authentation Information returned upon successful login.
 
-    url_kinds = ["internal", "public", "admin"]
+        This class handles rendering to JSON and XML. It renders
+        the token, the user data, the roles, and the service catalog.
 
-    def __init__(self, token, user, base_urls=None):
+        The list of endpoint URLs in the service catalog can be filtered by
+        URL type. For example, when we respond to a public call from a user
+        without elevated privileges, the "adminURL" is not returned. The
+        url_types paramater in the initializer lists the types to return.
+        The actual authorization is done in logic/service.py
+    """
+
+    def __init__(self, token, user, base_urls=None, url_types=None):
         self.token = token
         self.user = user
         self.base_urls = base_urls
+        if url_types is None:
+            self.url_types = ["internal", "public", "admin"]
+        else:
+            self.url_types = url_types
         self.d = {}
         if self.base_urls != None:
             self.__convert_baseurls_to_dict()
@@ -351,7 +353,7 @@ class AuthData(object):
                     endpoint = etree.Element("endpoint")
                     if base_url.region:
                         endpoint.set("region", base_url.region)
-                    for url_kind in AuthData.url_kinds:
+                    for url_kind in self.url_types:
                         base_url_item = getattr(base_url, url_kind + "_url")
                         if base_url_item:
                             endpoint.set(url_kind + "URL", base_url_item.\
@@ -394,7 +396,7 @@ class AuthData(object):
                     endpoint = {}
                     if base_url.region:
                         endpoint["region"] = base_url.region
-                    for url_kind in AuthData.url_kinds:
+                    for url_kind in self.url_types:
                         base_url_item = getattr(base_url, url_kind + "_url")
                         if base_url_item:
                             endpoint[url_kind + "URL"] = base_url_item.\
@@ -442,7 +444,7 @@ class ValidateData(object):
 
         user = etree.Element("user",
             id=unicode(self.user.id),
-            username=unicode(self.user.username))
+            name=unicode(self.user.username))
 
         if self.user.tenant_id is not None:
             user.set('tenantId', unicode(self.user.tenant_id))
@@ -468,6 +470,8 @@ class ValidateData(object):
 
         user = {
             "id": unicode(self.user.id),
+            "name": unicode(self.user.username),
+            # TODO(ziad) temporary until we are comfortable clients are updated
             "username": unicode(self.user.username)}
 
         if self.user.tenant_id is not None:

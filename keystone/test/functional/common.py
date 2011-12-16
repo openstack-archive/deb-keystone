@@ -3,6 +3,7 @@ import httplib
 import uuid
 import json
 import os
+from webob import Request, Response
 from xml.etree import ElementTree
 
 
@@ -30,9 +31,8 @@ class HttpTestCase(unittest.TestCase):
         # Initialize headers dictionary
         headers = {} if not headers else headers
 
-        # Initialize a connection
         cert_file = isSsl()
-        if (cert_file != None):
+        if (cert_file is not None):
             connection = httplib.HTTPSConnection(host, port,
                                             cert_file=cert_file,
                                             timeout=20)
@@ -62,7 +62,7 @@ class HttpTestCase(unittest.TestCase):
         """Asserts that a status code lies inside the 2xx range
 
         :param response: :py:class:`httplib.HTTPResponse` to be
-        verified to have a status code between 200 and 299.
+          verified to have a status code between 200 and 299.
 
         example::
 
@@ -97,10 +97,11 @@ class RestfulTestCase(HttpTestCase):
         Dynamically encodes json or xml as request body if one is provided.
 
         .. WARNING::
-           * Existing Content-Type header will be overwritten.
-           * If both as_json and as_xml are provided, as_xml is ignored.
-           * If either as_json or as_xml AND a body is provided, the body
-             is ignored.
+
+            * Existing Content-Type header will be overwritten.
+            * If both as_json and as_xml are provided, as_xml is ignored.
+            * If either as_json or as_xml AND a body is provided, the body
+              is ignored.
 
         Dynamically returns 'as_json' or 'as_xml' attribute based on the
         detected response type, and fails the current test case if
@@ -230,7 +231,14 @@ class ApiTestCase(RestfulTestCase):
 
     def post_token(self, **kwargs):
         """POST /tokens"""
-        return self.service_request(method='POST', path='/tokens', **kwargs)
+        #Setting service call as the default behavior."""
+        if 'request_type' in kwargs and \
+            kwargs.pop('request_type') == 'admin':
+            return self.admin_request(method='POST',
+                path='/tokens', **kwargs)
+        else:
+            return self.service_request(method='POST',
+                path='/tokens', **kwargs)
 
     def get_token(self, token_id, **kwargs):
         """GET /tokens/{token_id}"""
@@ -325,19 +333,19 @@ class ApiTestCase(RestfulTestCase):
             path='/users/%s' % (user_id,), **kwargs)
 
     def put_user_password(self, user_id, **kwargs):
-        """PUT /users/{user_id}/password"""
+        """PUT /users/{user_id}/OS-KSADM/password"""
         return self.admin_request(method='PUT',
-            path='/users/%s/password' % (user_id,), **kwargs)
+            path='/users/%s/OS-KSADM/password' % (user_id,), **kwargs)
 
     def put_user_tenant(self, user_id, **kwargs):
-        """PUT /users/{user_id}/tenant"""
+        """PUT /users/{user_id}/OS-KSADM/tenant"""
         return self.admin_request(method='PUT',
-            path='/users/%s/tenant' % (user_id,), **kwargs)
+            path='/users/%s/OS-KSADM/tenant' % (user_id,), **kwargs)
 
     def put_user_enabled(self, user_id, **kwargs):
-        """PUT /users/{user_id}/enabled"""
+        """PUT /users/{user_id}/OS-KSADM/enabled"""
         return self.admin_request(method='PUT',
-            path='/users/%s/enabled' % (user_id,), **kwargs)
+            path='/users/%s/OS-KSADM/enabled' % (user_id,), **kwargs)
 
     def delete_user(self, user_id, **kwargs):
         """DELETE /users/{user_id}"""
@@ -362,7 +370,7 @@ class ApiTestCase(RestfulTestCase):
                 path='/tenants/%s/users/%s/roles/OS-KSADM/%s' % (tenant_id,
                     user_id, role_id,), **kwargs)
 
-    def delete_user_role(self, user_id, role_id,  tenant_id, **kwargs):
+    def delete_user_role(self, user_id, role_id, tenant_id, **kwargs):
         """DELETE /users/{user_id}/roles/{role_id}"""
         if tenant_id is None:
             return self.admin_request(method='DELETE',
@@ -402,6 +410,13 @@ class ApiTestCase(RestfulTestCase):
         """GET /OS-KSCATALOG/endpointTemplates"""
         return self.admin_request(method='GET',
             path='/OS-KSCATALOG/endpointTemplates',
+            **kwargs)
+
+    def get_endpoint_templates_by_service(self, service_id, **kwargs):
+        """GET /OS-KSCATALOG/endpointTemplates"""
+        return self.admin_request(method='GET', path=(
+            '/OS-KSCATALOG/endpointTemplates?serviceId=%s')
+            % (service_id),
             **kwargs)
 
     def post_endpoint_template(self, **kwargs):
@@ -601,7 +616,7 @@ class FunctionalTestCase(ApiTestCase):
     xmlns = 'http://docs.openstack.org/identity/api/v2.0'
     xmlns_ksadm = 'http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0'
     xmlns_kscatalog = "http://docs.openstack.org/identity/api/ext"\
-        + "/OSKSCATALOG/v1.0"
+        + "/OS-KSCATALOG/v1.0"
 
     def setUp(self):
         """Prepare keystone for system tests"""
@@ -625,6 +640,31 @@ class FunctionalTestCase(ApiTestCase):
         if tenant_id:
             data["auth"]["tenantId"] = tenant_id
 
+        return self.post_token(as_json=data, **kwargs)
+
+    def authenticate_D5(self, user_name=None, user_password=None,
+                        tenant_id=None, **kwargs):
+        user_name = optional_str(user_name)
+        user_password = optional_str(user_password)
+
+        data = {"passwordCredentials": {
+                "username": user_name,
+                "password": user_password}}
+        if tenant_id:
+            data["passwordCredentials"]["tenantId"] = tenant_id
+
+        return self.post_token(as_json=data, **kwargs)
+
+    def authenticate_using_token(self, token, tenant_id=None,
+            **kwargs):
+
+        data = {
+            "auth": {
+                "token": {
+                "id": token,
+                }}}
+        if tenant_id:
+            data["auth"]["tenantId"] = tenant_id
         return self.post_token(as_json=data, **kwargs)
 
     def validate_token(self, token_id=None, tenant_id=None, **kwargs):
@@ -890,8 +930,11 @@ class FunctionalTestCase(ApiTestCase):
         """TODO: Should this be an 'endpoint_id' or 'endpoint_template_id'??"""
         return self.delete_tenant_endpoint(tenant_id, endpoint_id, **kwargs)
 
-    def list_endpoint_templates(self, **kwargs):
-        return self.get_endpoint_templates(**kwargs)
+    def list_endpoint_templates(self, service_id=None, **kwargs):
+        if service_id is None:
+            return self.get_endpoint_templates(**kwargs)
+        else:
+            return self.get_endpoint_templates_by_service(service_id, **kwargs)
 
     def create_endpoint_template(self, region=None, name=None, type=None,
             public_url=None, admin_url=None, internal_url=None, enabled=True,
@@ -983,9 +1026,10 @@ class FunctionalTestCase(ApiTestCase):
         return self.get_user_credentials_by_type(
             user_id, 'passwordCredentials', **kwargs)
 
-    def create_password_credentials(self, user_id, user_name, **kwargs):
+    def create_password_credentials(self, user_id, user_name,
+                                    password=None, **kwargs):
         user_id = optional_str(user_id)
-        password = unique_str()
+        password = optional_str(password)
         data = {
             "passwordCredentials": {
                 "username": user_name,
@@ -1007,3 +1051,186 @@ class FunctionalTestCase(ApiTestCase):
         user_id = optional_str(user_id)
         return self.delete_user_credentials_by_type(
                 user_id, 'passwordCredentials', **kwargs)
+
+    def check_urls_for_regular_user(self, service_catalog):
+        self.assertIsNotNone(service_catalog)
+        for x in range(0, len(service_catalog)):
+            endpoints = service_catalog[x]['endpoints']
+            for y in range(0, len(endpoints)):
+                endpoint = endpoints[y]
+                for key in endpoint:
+                    #Checks whether adminURL is not present.
+                    self.assertNotEquals(key, 'adminURL')
+
+    def check_urls_for_regular_user_xml(self, service_catalog):
+        self.assertIsNotNone(service_catalog)
+        services = service_catalog.findall('{%s}service' % self.xmlns)
+        self.assertIsNotNone(services)
+        for service in services:
+            endpoints = service.findall('{%s}endpoint' % self.xmlns)
+            self.assertIsNotNone(endpoints)
+            for endpoint in endpoints:
+                #Checks whether adminURL is not present.
+                self.assertIsNone(endpoint.get('adminURL'))
+        self.assertIsNotNone(service_catalog)
+
+    def check_urls_for_admin_user(self, service_catalog):
+        self.assertIsNotNone(service_catalog)
+        for x in range(0, len(service_catalog)):
+            endpoints = service_catalog[x]['endpoints']
+            is_admin__url_present = None
+            for y in range(0, len(endpoints)):
+                endpoint = endpoints[y]
+                for key in endpoint:
+                    if key == 'adminURL':
+                        is_admin__url_present = True
+            self.assertTrue(is_admin__url_present,
+                            "Admin API does not return admin URL")
+
+    def check_urls_for_admin_user_xml(self, service_catalog):
+        self.assertIsNotNone(service_catalog)
+        services = service_catalog.findall('{%s}service' % self.xmlns)
+        self.assertIsNotNone(services)
+        is_admin_url_present = None
+        for service in services:
+            endpoints = service.findall('{%s}endpoint' % self.xmlns)
+            self.assertIsNotNone(endpoints)
+            for endpoint in endpoints:
+                if endpoint.get('adminURL'):
+                    is_admin_url_present = True
+        self.assertTrue(is_admin_url_present,
+            "Admin API does not return admin URL")
+
+
+class HeaderApp(object):
+    """
+    Dummy WSGI app the returns HTTP headers in the body
+
+    This is useful for making sure the headers we want
+    aer being passwed down to the downstream WSGI app.
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, env, start_response):
+        self.request = Request.blank('', environ=env)
+        body = ''
+        for key in env:
+            if key.startswith('HTTP_'):
+                body += '%s: %s\n' % (key, env[key])
+        return Response(status="200 OK",
+                        body=body)(env, start_response)
+
+
+class BlankApp(object):
+    """
+    Dummy WSGI app - does not do anything
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, env, start_response):
+        self.request = Request.blank('', environ=env)
+        return Response(status="200 OK",
+                        body={})(env, start_response)
+
+
+class MiddlewareTestCase(FunctionalTestCase):
+    """
+    Base class to run tests for Keystone WSGI middleware.
+    """
+
+    def setUp(self, middleware, settings=None):
+        super(MiddlewareTestCase, self).setUp()
+        if settings is None:
+            settings = {'delay_auth_decision': '0',
+                'auth_host': '127.0.0.1',
+                'auth_port': '35357',
+                'auth_protocol': 'http',
+                'auth_uri': 'http://localhost:35357/',
+                'admin_token': '999888777666',
+                'auth_admin_user': self.admin_username,
+                'auth_admin_password': self.admin_password}
+        cert_file = isSsl()
+        if cert_file:
+            settings['auth_protocol'] = 'https'
+            settings['certfile'] = cert_file
+            settings['auth_uri'] = 'https://localhost:35357/'
+        if isinstance(middleware, tuple):
+            self.test_middleware = HeaderApp()
+            for filter in middleware:
+                self.test_middleware = \
+                filter.filter_factory(settings)(self.test_middleware)
+        else:
+            self.test_middleware = \
+                middleware.filter_factory(settings)(HeaderApp())
+
+        password = unique_str()
+        self.tenant = self.create_tenant().json['tenant']
+        self.user = self.create_user(user_password=password,
+            tenant_id=self.tenant['id']).json['user']
+        self.user['password'] = password
+
+        self.services = {}
+        self.endpoint_templates = {}
+        for x in range(0, 5):
+            self.services[x] = self.create_service().json['OS-KSADM:service']
+            self.endpoint_templates[x] = self.create_endpoint_template(
+                name=self.services[x]['name'], \
+                type=self.services[x]['type']).\
+                json['OS-KSCATALOG:endpointTemplate']
+            self.create_endpoint_for_tenant(self.tenant['id'],
+                self.endpoint_templates[x]['id'])
+
+        r = self.authenticate(self.user['name'], self.user['password'],
+            self.tenant['id'], assert_status=200)
+        self.user_token = r.json['access']['token']['id']
+
+    def test_401_without_token(self):
+        resp = Request.blank('/').get_response(self.test_middleware)
+        self.assertEquals(resp.status_int, 401)
+        headers = resp.headers
+        self.assertTrue("WWW-Authenticate" in headers)
+        if isSsl():
+            self.assertEquals(headers['WWW-Authenticate'],
+                                    "Keystone uri='https://localhost:35357/'")
+        else:
+            self.assertEquals(headers['WWW-Authenticate'],
+                                    "Keystone uri='http://localhost:35357/'")
+
+    def test_401_bad_token(self):
+        resp = Request.blank('/',
+            headers={'X-Auth-Token': 'MADE_THIS_UP'}) \
+            .get_response(self.test_middleware)
+        self.assertEquals(resp.status_int, 401)
+
+    def test_200_good_token(self):
+        resp = Request.blank('/',
+            headers={'X-Auth-Token': self.user_token}) \
+            .get_response(self.test_middleware)
+
+        self.assertEquals(resp.status_int, 200)
+
+        headers = resp.body.split('\n')
+
+        header = "HTTP_X_IDENTITY_STATUS: Confirmed"
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        header = "HTTP_X_USER_ID: %s" % self.user['id']
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        header = "HTTP_X_USER_NAME: %s" % self.user['name']
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        header = "HTTP_X_TENANT_ID: %s" % self.tenant['id']
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        header = "HTTP_X_TENANT_NAME: %s" % self.tenant['name']
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        # These are here for legacy support and should be removed by F
+        header = "HTTP_X_TENANT: %s" % self.tenant['id']
+        self.assertTrue(header in headers, "Missing %s" % header)
+
+        header = "HTTP_X_USER: %s" % self.user['id']
+        self.assertTrue(header in headers, "Missing %s" % header)

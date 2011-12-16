@@ -16,6 +16,7 @@ import json
 from lxml import etree
 
 from keystone.logic.types import fault
+from keystone import utils
 
 
 class PasswordCredentials(object):
@@ -30,12 +31,11 @@ class PasswordCredentials(object):
             dom.append(etree.fromstring(xml_str))
             root = dom.find("{http://docs.openstack.org/identity/api/v2.0}" \
                 "passwordCredentials")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting passwordCredentials")
             user_name = root.get("username")
             password = root.get("password")
-            if password is None:
-                raise fault.BadRequestFault("Expecting password")
+            utils.check_empty_string(password, "Expecting a password.")
             return PasswordCredentials(user_name, password)
         except etree.LxmlError as e:
             raise fault.BadRequestFault(
@@ -49,10 +49,16 @@ class PasswordCredentials(object):
                 raise fault.BadRequestFault("Expecting passwordCredentials")
             password_credentials = obj["passwordCredentials"]
 
+            # Check that fields are valid
+            invalid = [key for key in password_credentials if key not in\
+                       ['username', 'password']]
+            if invalid != []:
+                raise fault.BadRequestFault("Invalid attribute(s): %s"
+                                            % invalid)
+
             user_name = password_credentials.get('username')
             password = password_credentials.get('password')
-            if password is None:
-                raise fault.BadRequestFault("Expecting password.")
+            utils.check_empty_string(password, "Expecting a password.")
             return PasswordCredentials(user_name, password)
         except (ValueError, TypeError) as e:
             raise fault.BadRequestFault(

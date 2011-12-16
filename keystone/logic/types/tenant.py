@@ -15,7 +15,6 @@
 
 import json
 from lxml import etree
-
 from keystone.logic.types import fault
 
 
@@ -42,12 +41,12 @@ class Tenant(object):
             dom.append(etree.fromstring(xml_str))
             root = dom.find(
                 "{http://docs.openstack.org/identity/api/v2.0}tenant")
-            if root == None:
+            if root is None:
                 raise fault.BadRequestFault("Expecting Tenant")
             id = root.get("id")
             name = root.get("name")
             enabled = root.get("enabled")
-            if enabled == None or enabled == "true" or enabled == "yes":
+            if enabled is None or enabled == "true" or enabled == "yes":
                 set_enabled = True
             elif enabled == "false" or enabled == "no":
                 set_enabled = False
@@ -55,7 +54,7 @@ class Tenant(object):
                 raise fault.BadRequestFault("Bad enabled attribute!")
             desc = root.find("{http://docs.openstack.org/identity/api/v2.0}"
                              "description")
-            if desc == None:
+            if desc is None:
                 raise fault.BadRequestFault("Expecting Tenant Description")
             return Tenant(id=id, name=name, description=desc.text,
                 enabled=set_enabled)
@@ -69,6 +68,14 @@ class Tenant(object):
             if not "tenant" in obj:
                 raise fault.BadRequestFault("Expecting tenant")
             tenant = obj["tenant"]
+
+            # Check that fields are valid
+            invalid = [key for key in tenant if key not in\
+                       ['id', 'name', 'enabled', 'description']]
+            if invalid != []:
+                raise fault.BadRequestFault("Invalid attribute(s): %s"
+                                            % invalid)
+
             id = tenant.get("id", None)
             name = tenant.get("name", None)
             set_enabled = True

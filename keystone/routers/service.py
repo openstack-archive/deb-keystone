@@ -19,7 +19,7 @@ import routes
 
 from keystone.common import wsgi
 import keystone.backends as db
-from keystone.controllers.auth import AuthController
+from keystone.controllers.token import TokenController
 from keystone.controllers.tenant import TenantController
 from keystone.controllers.version import VersionController
 from keystone.controllers.staticfiles import StaticFilesController
@@ -36,7 +36,7 @@ class ServiceApi(wsgi.Router):
         db.configure_backends(options)
 
         # Token Operations
-        auth_controller = AuthController(options)
+        auth_controller = TokenController(options)
         mapper.connect("/tokens", controller=auth_controller,
                        action="authenticate",
                        conditions=dict(method=["POST"]))
@@ -56,11 +56,10 @@ class ServiceApi(wsgi.Router):
                         action="get_version_info", file="service/version",
                         conditions=dict(method=["GET"]))
 
-        extensions_controller = ExtensionsController(options)
+        extensions_controller = ExtensionsController(options, True)
         mapper.connect("/extensions",
                         controller=extensions_controller,
                         action="get_extensions_info",
-                        path="content/service/extensions",
                         conditions=dict(method=["GET"]))
 
         # Static Files Controller

@@ -87,6 +87,7 @@ class UserRoleAssociation(Base, KeystoneBase):
     __table_args__ = (UniqueConstraint("user_id", "role_id", "tenant_id"), {})
 
     user = relationship('User')
+    role = relationship('Role')
 
 
 class Endpoints(Base, KeystoneBase):
@@ -117,6 +118,7 @@ class Service(Base, KeystoneBase):
     name = Column(String(255), unique=True)
     type = Column(String(255))
     desc = Column(String(255))
+    owner_id = Column(Integer, ForeignKey('users.id'))
 
 
 class Tenant(Base, KeystoneBase):

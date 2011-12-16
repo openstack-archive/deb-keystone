@@ -3,12 +3,13 @@ verbose = False
 debug = False
 default_store = sqlite
 log_file = %(test_dir)s/keystone.sql.log
+log_dir = %(test_dir)s
 backends = keystone.backends.sqlalchemy
 extensions= osksadm,oskscatalog
 service-header-mappings = {
-	'nova' : 'X-Server-Management-Url',
-	'swift' : 'X-Storage-Url',
-	'cdn' : 'X-CDN-Manageent-Url'}
+    'nova' : 'X-Server-Management-Url',
+    'swift' : 'X-Storage-Url',
+    'cdn' : 'X-CDN-Management-Url'}
 service_host = 0.0.0.0
 service_port = 5000
 service_ssl = False
@@ -20,21 +21,22 @@ keystone-service-admin-role = KeystoneServiceAdmin
 hash-password = True
 
 [keystone.backends.sqlalchemy]
-sql_connection = for_testing_only
+sql_connection = sqlite://
 sql_idle_timeout = 30
 backend_entities = ['Endpoints', 'Credentials',  'EndpointTemplates', 'Tenant', 'User', 'UserRoleAssociation', 'Role', 'Token', 'Service']
 
 [pipeline:admin]
 pipeline =
-	urlrewritefilter
-	admin_api
+        urlrewritefilter
+        d5_compat
+        admin_api
 
 [pipeline:keystone-legacy-auth]
 pipeline =
-	urlrewritefilter
-	legacy_auth
-	RAX-KEY-extension
-	service_api
+        urlrewritefilter
+        legacy_auth
+        d5_compat
+        service_api
 
 [app:service_api]
 paste.app_factory = keystone.server:service_app_factory
@@ -45,8 +47,8 @@ paste.app_factory = keystone.server:admin_app_factory
 [filter:urlrewritefilter]
 paste.filter_factory = keystone.middleware.url:filter_factory
 
+[filter:d5_compat]
+paste.filter_factory = keystone.frontends.d5_compat:filter_factory
+
 [filter:legacy_auth]
 paste.filter_factory = keystone.frontends.legacy_token_auth:filter_factory
-
-[filter:RAX-KEY-extension]
-paste.filter_factory = keystone.contrib.extensions.service.raxkey.frontend:filter_factory
