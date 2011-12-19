@@ -10,7 +10,7 @@ then
             --quiet \
             --disabled-password \
             --group keystone
-    chown keystone:keystone -R /var/lib/keystone /var/log/keystone
+    chown keystone:keystone /var/lib/keystone /var/log/keystone
     chown 0700 /var/log/keystone
     chmod 0700 /var/log/keystone
 
