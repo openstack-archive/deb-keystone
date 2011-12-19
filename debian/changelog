@@ -1,3 +1,9 @@
+keystone (2012.1~e2-2) unstable; urgency=low
+
+  * Fix init script
+
+ -- Julien Danjou <acid@debian.org>  Mon, 19 Dec 2011 17:16:48 +0100
+
 keystone (2012.1~e2-1) unstable; urgency=low
 
   * New upstream release.
