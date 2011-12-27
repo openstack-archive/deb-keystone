@@ -23,7 +23,6 @@ Build-Depends: debhelper (>= 7.0.50),
  python-memcache,
  python-swift,
  python-nose
-X-Python-Version: >= 2.6
 Standards-Version: 3.9.2
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
@@ -47,7 +46,6 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-sqlite,
  python-nova
 Recommends: python-memcache, python-ldap
-Provides: ${python:Provides}
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based

@@ -1,8 +1,9 @@
 keystone (2012.1~e2-3) unstable; urgency=low
 
   * Add missing build depends on python-nose (Closes: #652805)
+  * Remove useless python fields in control
 
- -- Julien Danjou <acid@debian.org>  Tue, 27 Dec 2011 11:38:53 +0100
+ -- Julien Danjou <acid@debian.org>  Tue, 27 Dec 2011 11:40:18 +0100
 
 keystone (2012.1~e2-2) unstable; urgency=low
 
