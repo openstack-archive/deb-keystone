@@ -1,3 +1,9 @@
+keystone (2012.1~e2-4) unstable; urgency=low
+
+  * Fix default location of keystone db file
+
+ -- Ghe Rivero <ghe@debian.org>  Tue, 24 Jan 2012 09:43:15 +0100
+
 keystone (2012.1~e2-3) unstable; urgency=low
 
   * Add missing build depends on python-nose (Closes: #652805)
