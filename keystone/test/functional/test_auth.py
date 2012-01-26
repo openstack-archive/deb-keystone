@@ -5,10 +5,6 @@ from keystone.test.functional import common
 class TestAdminAuthentication(common.FunctionalTestCase):
     """Test admin-side user authentication"""
 
-    def setUp(self):
-        """Empty method to prevent KeystoneTestCase from authenticating"""
-        pass
-
     def test_bootstrapped_admin_user(self):
         """Bootstrap script should create an 'admin' user with 'Admin' role"""
         # Authenticate as admin
@@ -27,10 +23,14 @@ class TestAdminAuthentication(common.FunctionalTestCase):
 class TestAdminAuthenticationNegative(common.FunctionalTestCase):
     """Negative test admin-side user authentication"""
 
-    def test_admin_user_trying_to_scope_to_tenant_with_established_role(self):
+    def test_admin_user_scoping_to_tenant_with_role(self):
         """A Keystone Admin SHOULD be able to retrieve a scoped token...
 
-        But only if the Admin has some Role on the Tenant other than Admin."""
+        But only if the Admin has some Role on the Tenant other than Admin.
+
+        Formerly:
+            test_admin_user_trying_to_scope_to_tenant_with_established_role
+        """
         tenant = self.create_tenant().json['tenant']
         role = self.create_role().json['role']
 
@@ -157,7 +157,12 @@ class TestServiceAuthentication(common.FunctionalTestCase):
                 'tenantId': self.tenant['id']}}).json['access']
 
         self.assertEqual(scoped['token']['tenant']['id'], self.tenant['id'])
-        self.assertEqual(scoped['token']['tenant']['name'],\
+        self.assertEqual(scoped['token']['tenant']['name'],
+                         self.tenant['name'])
+        self.assertIn('tenants', scoped['token'])
+        self.assertEqual(scoped['token']['tenants'][0]['id'],
+                         self.tenant['id'])
+        self.assertEqual(scoped['token']['tenants'][0]['name'],
                          self.tenant['name'])
         self.assertEqual(
             scoped['user']['roles'][0]['id'], role['id'])

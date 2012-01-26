@@ -22,21 +22,35 @@
 Keystone Identity Server - CLI Management Interface
 """
 
-import sys
 import logging
 import optparse  # deprecated in 2.7, in favor of argparse
+import os
+import sys
+import tempfile
 
 from keystone import version
-from keystone.common import config
-from keystone.manage import api
 import keystone.backends as db
+from keystone.backends.sqlalchemy import migration
+# Need to give it a different alias
+from keystone import config as new_config
+from keystone.common import config
+from keystone.logic.types import fault
+from keystone.manage import api
+from keystone import utils
+
+logger = logging.getLogger(__name__)  # pylint: disable=C0103
+
+# We're using two config systems here, so we need to be clear
+# which one we're working with.
+CONF = new_config.CONF
 
 
 # CLI feature set
 OBJECTS = ['user', 'tenant', 'role', 'service',
-    'endpointTemplates', 'token', 'endpoint', 'credentials']
-ACTIONS = ['add', 'list', 'disable', 'delete', 'grant',
-    'revoke']
+    'endpointTemplates', 'token', 'endpoint', 'credentials', 'database']
+ACTIONS = ['add', 'list', 'disable', 'delete', 'grant', 'revoke',
+    'sync', 'downgrade', 'upgrade', 'version_control', 'version',
+    'goto']
 
 
 # Messages
@@ -65,6 +79,7 @@ def parse_args(args=None):
         tokens   : user, tenant, expiration
 
       role list [tenant] will list roles granted on that tenant
+      database [sync | downgrade | upgrade | version_control | version]
 
     options
       -c | --config-file : config file to use
@@ -76,20 +91,38 @@ def parse_args(args=None):
     # Initialize a parser for our configuration paramaters
     parser = RaisingOptionParser(usage, version='%%prog %s'
         % version.version())
-    _common_group = config.add_common_options(parser)
+    config.add_common_options(parser)
     config.add_log_options(parser)
 
     # Parse command-line and load config
     (options, args) = config.parse_options(parser, args)
-    _config_file, conf = config.load_paste_config('admin', options, args)
 
-    config.setup_logging(options, conf)
+    if not args or args[0] != 'database':
+        # Use the legacy code to find the config file
+        config_file = config.find_config_file(options, sys.argv[1:])
+        # Now init the CONF for the backends
+        CONF(config_files=[config_file])
 
-    db.configure_backends(conf.global_conf)
-
+        db.configure_backends()
     return args
 
 
+def get_options(args=None):
+    # Initialize a parser for our configuration paramaters
+    parser = RaisingOptionParser()
+    config.add_common_options(parser)
+    config.add_log_options(parser)
+
+    # Parse command-line and load config
+    (options, args) = config.parse_options(parser, list(args))
+
+    _config_file, conf = config.load_paste_config('admin', options, args)
+    conf.global_conf.update(conf.local_conf)
+
+    return conf.global_conf
+
+
+# pylint: disable=R0912,R0915
 def process(*args):
     # Check arguments
     if len(args) == 0:
@@ -106,7 +139,7 @@ def process(*args):
         if action not in ACTIONS:
             raise optparse.OptParseError(SUPPORTED_ACTIONS)
 
-    if action not in ['list']:
+    if action not in ['list', 'sync', 'version_control', 'version']:
         if len(args) == 2:
             raise optparse.OptParseError(ID_NOT_SPECIFIED)
         else:
@@ -118,69 +151,66 @@ def process(*args):
         if len(args) < min:
             raise optparse.OptParseError(msg)
 
-    optional_arg = (lambda args, x:
-        len(args) > x and str(args[x]).strip() or None)
+    def optional_arg(args, index):
+        return ((len(args) > index) and str(args[index]).strip()) or None
 
-    def print_table(header_row, rows):
-        """Prints a lists of lists as table in a human readable format"""
-        print "\t".join(header_row)
-        print '-' * 79
-        rows = [[str(col) for col in row] for row in rows]
-        print "\n".join(["\t".join(row) for row in rows])
+    if object_type == 'database':
+        options = get_options(args)
 
     # Execute command
     if (object_type, action) == ('user', 'add'):
         require_args(args, 4, 'No password specified for fourth argument')
         if api.add_user(name=object_id, password=args[3],
                 tenant=optional_arg(args, 4)):
-            print "SUCCESS: User %s created." % object_id
+            print ("SUCCESS: User %s created." % object_id)
 
     elif (object_type, action) == ('user', 'list'):
-        print_table(('id', 'name', 'enabled', 'tenant'), api.list_users())
+        print (Table('Users', ['id', 'name', 'enabled', 'tenant'],
+                     api.list_users()))
 
     elif (object_type, action) == ('user', 'disable'):
         if api.disable_user(name=object_id):
-            print "SUCCESS: User %s disabled." % object_id
+            print ("SUCCESS: User %s disabled." % object_id)
 
     elif object_type == 'user':
         raise optparse.OptParseError(ACTION_NOT_SUPPORTED % ('users'))
 
     elif (object_type, action) == ('tenant', 'add'):
         if api.add_tenant(name=object_id):
-            print "SUCCESS: Tenant %s created." % object_id
+            print ("SUCCESS: Tenant %s created." % object_id)
 
     elif (object_type, action) == ('tenant', 'list'):
-        print_table(('id', 'name', 'enabled'), api.list_tenants())
+        print Table('Tenants', ['id', 'name', 'enabled'], api.list_tenants())
 
     elif (object_type, action) == ('tenant', 'disable'):
         if api.disable_tenant(name=object_id):
-            print "SUCCESS: Tenant %s disabled." % object_id
+            print ("SUCCESS: Tenant %s disabled." % object_id)
 
     elif object_type == 'tenant':
         raise optparse.OptParseError(ACTION_NOT_SUPPORTED % ('tenants'))
 
     elif (object_type, action) == ('role', 'add'):
-        if api.add_role(name=object_id):
-            print "SUCCESS: Role %s created successfully." % object_id
+        if api.add_role(name=object_id, service_name=optional_arg(args, 3)):
+            print ("SUCCESS: Role %s created successfully." % object_id)
 
     elif (object_type, action) == ('role', 'list'):
         tenant = optional_arg(args, 2)
         if tenant:
             # print with users
-            print 'Role assignments for tenant %s' % tenant
-            print_table(('User', 'Role'),
-                api.list_roles(tenant=tenant))
+            print (Table('Role assignments for tenant %s' %
+                         tenant, ['User', 'Role'],
+                         api.list_roles(tenant=tenant)))
         else:
             # print without tenants
-            print_table(('id', 'name', 'service_id', 'description'),
-                api.list_roles())
+            print (Table('Roles', ['id', 'name', 'service_id', 'description'],
+                         api.list_roles()))
 
     elif (object_type, action) == ('role', 'grant'):
         require_args(args, 4, "Missing arguments: role grant 'role' 'user' "
             "'tenant (optional)'")
         tenant = optional_arg(args, 4)
         if api.grant_role(object_id, args[3], tenant):
-            print("SUCCESS: Granted %s the %s role on %s." %
+            print ("SUCCESS: Granted %s the %s role on %s." %
                 (args[3], object_id, tenant))
 
     elif object_type == 'role':
@@ -198,26 +228,26 @@ def process(*args):
                 enabled=args[7], is_global=args[8],
                 version_id=version_id, version_list=version_list,
                 version_info=version_info):
-            print("SUCCESS: Created EndpointTemplates for %s pointing to %s." %
-                (args[3], args[4]))
+            print ("SUCCESS: Created EndpointTemplates for %s "
+                                   "pointing to %s." % (args[3], args[4]))
 
     elif (object_type, action) == ('endpointTemplates', 'list'):
         tenant = optional_arg(args, 2)
         if tenant:
-            print 'Endpoints for tenant %s' % tenant
-            print_table(('service', 'region', 'Public URL'),
-                api.list_tenant_endpoints(tenant))
+            print Table('Endpoints for tenant %s' % tenant,
+                        ['id', 'service', 'region', 'Public URL'],
+                        api.list_tenant_endpoints(tenant))
         else:
-            print 'All EndpointTemplates'
-            print_table(('id', 'service', 'type', 'region', 'enabled',
-                         'is_global', 'Public URL', 'Admin URL'),
+            print Table('All EndpointTemplates', ['id', 'service', 'type',
+                        'region', 'enabled', 'is_global', 'Public URL',
+                        'Admin URL'],
                 api.list_endpoint_templates())
 
     elif (object_type, action) == ('endpoint', 'add'):
         require_args(args, 4, "Missing arguments: endPoint add tenant "
             "endPointTemplate")
         if api.add_endpoint(tenant=args[2], endpoint_template=args[3]):
-            print("SUCCESS: Endpoint %s added to tenant %s." %
+            print ("SUCCESS: Endpoint %s added to tenant %s." %
                 (args[3], args[2]))
 
     elif object_type == 'endpoint':
@@ -228,15 +258,15 @@ def process(*args):
             'tenant, and expiration')
         if api.add_token(token=object_id, user=args[3], tenant=args[4],
                 expires=args[5]):
-            print "SUCCESS: Token %s created." % (object_id,)
+            print ("SUCCESS: Token %s created." % object_id)
 
     elif (object_type, action) == ('token', 'list'):
-        print_table(('token', 'user', 'expiration', 'tenant'),
+        print Table('Tokens', ('token', 'user', 'expiration', 'tenant'),
             api.list_tokens())
 
     elif (object_type, action) == ('token', 'delete'):
         if api.delete_token(token=object_id):
-            print 'SUCCESS: Token %s deleted.' % (object_id,)
+            print ('SUCCESS: Token %s deleted.' % (object_id,))
 
     elif object_type == 'token':
         raise optparse.OptParseError(ACTION_NOT_SUPPORTED % ('tokens'))
@@ -251,11 +281,12 @@ def process(*args):
 
         if api.add_service(name=object_id, type=type, desc=desc,
                            owner_id=owner_id):
-            print "SUCCESS: Service %s created successfully." % (object_id,)
+            print ("SUCCESS: Service %s created successfully."
+                                   % (object_id,))
 
     elif (object_type, action) == ('service', 'list'):
-        print_table(('id', 'name', 'type', 'owner_id', 'description'),
-            api.list_services())
+        print (Table('Services', ('id', 'name', 'type', 'owner_id',
+                                  'description'), api.list_services()))
 
     elif object_type == 'service':
         raise optparse.OptParseError(ACTION_NOT_SUPPORTED % ('services'))
@@ -265,36 +296,212 @@ def process(*args):
             'secret, and tenant_id (id is user_id)')
         if api.add_credentials(user=object_id, type=args[3], key=args[4],
                 secrete=args[5], tenant=optional_arg(args, 6)):
-            print "SUCCESS: Credentials %s created." % object_id
+            print ("SUCCESS: Credentials %s created." %
+                                   (object_id,))
 
     elif object_type == 'credentials':
         raise optparse.OptParseError(ACTION_NOT_SUPPORTED % ('credentials'))
+
+    elif (object_type, action) == ('database', 'sync'):
+        require_args(args, 1, 'Syncing database requires a version #')
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_sync(options['keystone.backends.sqlalchemy'],
+                                 args)
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
+
+    elif (object_type, action) == ('database', 'upgrade'):
+        require_args(args, 1, 'Upgrading database requires a version #')
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_upgrade(options['keystone.backends.sqlalchemy'],
+                                 args)
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
+
+    elif (object_type, action) == ('database', 'downgrade'):
+        require_args(args, 1, 'Downgrading database requires a version #')
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_downgrade(options['keystone.backends.sqlalchemy'],
+                                 args)
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
+
+    elif (object_type, action) == ('database', 'version_control'):
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_version_control(options['keystone.backends.sqlalchemy'])
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
+
+    elif (object_type, action) == ('database', 'version'):
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_version(options['keystone.backends.sqlalchemy'])
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
+
+    elif (object_type, action) == ('database', 'goto'):
+        require_args(args, 1, 'Jumping database versions requires a '
+            'version #')
+        backend_names = options.get('backends', None)
+        if backend_names:
+            if 'keystone.backends.sqlalchemy' in backend_names.split(','):
+                do_db_goto_version(options['keystone.backends.sqlalchemy'],
+                    target_version=args[2])
+            else:
+                raise optparse.OptParseError(
+                    'SQL alchemy backend not specified in config')
 
     else:
         # Command recognized but not handled: should never reach this
         raise NotImplementedError()
 
 
+#
+#   Database Migration commands (from Glance-manage)
+#
+def do_db_version(options):
+    """Print database's current migration level"""
+    print (migration.db_version(options['sql_connection']))
+
+
+def do_db_goto_version(options, target_version):
+    """Override the database's current migration level"""
+    if migration.db_goto_version(options['sql_connection'], target_version):
+        msg = ('Jumped to version=%s (without performing intermediate '
+            'migrations)') % target_version
+        print (msg)
+
+
+def do_db_upgrade(options, args):
+    """Upgrade the database's migration level"""
+    try:
+        db_version = args[2]
+    except IndexError:
+        db_version = None
+
+    print ("Upgrading database to version %s" % db_version)
+    migration.upgrade(options['sql_connection'], version=db_version)
+
+
+def do_db_downgrade(options, args):
+    """Downgrade the database's migration level"""
+    try:
+        db_version = args[2]
+    except IndexError:
+        raise Exception("downgrade requires a version argument")
+
+    migration.downgrade(options['sql_connection'], version=db_version)
+
+
+def do_db_version_control(options):
+    """Place a database under migration control"""
+    migration.version_control(options['sql_connection'])
+    print ("Database now under version control")
+
+
+def do_db_sync(options, args):
+    """Place a database under migration control and upgrade"""
+    try:
+        db_version = args[2]
+    except IndexError:
+        db_version = None
+    migration.db_sync(options['sql_connection'], version=db_version)
+
+
+class Table:
+    """Prints data in table for console output
+
+    Syntax print Table("This is the title",
+            ["Header1","Header2","H3"],
+            [[1,2,3],["Hi","everybody","How are you??"],[None,True,[1,2]]])
+
+    """
+    def __init__(self, title=None, headers=None, rows=None):
+        self.title = title
+        self.headers = headers if headers is not None else []
+        self.rows = rows if rows is not None else []
+        self.nrows = len(self.rows)
+        self.fieldlen = []
+
+        ncols = len(headers)
+
+        for h in range(ncols):
+            max = 0
+            for row in rows:
+                if len(str(row[h])) > max:
+                    max = len(str(row[h]))
+            self.fieldlen.append(max)
+
+        for i in range(len(headers)):
+            if len(str(headers[i])) > self.fieldlen[i]:
+                self.fieldlen[i] = len(str(headers[i]))
+
+        self.width = sum(self.fieldlen) + (ncols - 1) * 3 + 4
+
+    def __str__(self):
+        hbar = "-" * self.width
+        if self.title:
+            title = "| " + self.title + " " * \
+                    (self.width - 3 - (len(self.title))) + "|"
+            out = [hbar, title, hbar]
+        else:
+            out = []
+        header = ""
+        for i in range(len(self.headers)):
+            header += "| %s" % (str(self.headers[i])) + " " * \
+                (self.fieldlen[i] - len(str(self.headers[i]))) + " "
+        header += "|"
+        out.append(header)
+        out.append(hbar)
+        for i in self.rows:
+            line = ""
+            for j in range(len(i)):
+                line += "| %s" % (str(i[j])) + " " * \
+                (self.fieldlen[j] - len(str(i[j]))) + " "
+            out.append(line + "|")
+
+        out.append(hbar)
+        return "\r\n".join(out)
+
+
 def main(args=None):
     try:
         process(*parse_args(args))
-    except optparse.OptParseError as exc:
+    except (optparse.OptParseError, fault.DatabaseMigrationError) as exc:
         print >> sys.stderr, exc
         sys.exit(2)
     except Exception as exc:
-        try:
-            info = exc.args[1]
-        except IndexError:
-            print "ERROR: %s" % (exc,)
-            logging.error(str(exc))
-        else:
-            print "ERROR: %s: %s" % (exc.args[0], info)
-            logging.error(exc.args[0], exc_info=info)
-        raise exc
+        logstr = str(exc)
+        loginfo = None
+        if len(exc.args) > 1:
+            logstr = exc.args[0]
+            loginfo = exc.args[1]
+
+        errmsg = "ERROR: %s" % logstr
+        if loginfo:
+            errmsg += ": %s" % loginfo
+
+        print errmsg
+        logger.error(logstr, exc_info=loginfo)
+        raise
 
 
 if __name__ == '__main__':
     try:
         main()
-    except Exception as exc:
+    except StandardError:
         sys.exit(1)

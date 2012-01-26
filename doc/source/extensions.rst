@@ -71,10 +71,31 @@ RAX-KEY
 
     This is an Admin and Service API extension.
 
+HP-IDM
+
+    This extension adds capability to filter roles with optional service IDs
+    for token validation to mitigate security risks with role name conflicts.
+    See https://bugs.launchpad.net/keystone/+bug/890411 for more details.
+
+    This is an Admin API extension. Applicable to validate token (GET)
+    and check token (HEAD) APIs only.
+
+OS-KSVALIDATE
+
+    This extensions supports admin calls to /tokens without having to specify
+    the token ID in the URL. Instead, the ID is supplied in a header called
+    X-Subject-Token. This is provided as an alternative to address any security
+    concerns that arise when token IDs are passed as part of the URL which is
+    often (and by default) logged to insecure media.
+
+    This is an Admin API extension only.
+
 .. note::
 
     The included extensions are in the process of being rewritten. Currently
-    only osksadm and oskscatalog work with this new extensions design.
+    osksadm, oskscatalog, hpidm, and osksvalidate work with this new
+    extensions design.
+
 
 Enabling & Disabling Extensions
 -------------------------------

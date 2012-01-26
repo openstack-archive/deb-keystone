@@ -21,6 +21,7 @@ Routines for configuring OpenStack Service
 """
 
 import logging.config
+from logging import FileHandler
 import optparse
 import os
 from paste import deploy
@@ -84,7 +85,7 @@ for a config file.""")
                      dest="bind_port",
                      help="specifies port to listen on")
     group.add_option('--host', '--bind-host',
-                     default="0.0.0.0", dest="bind_host",
+                     default=None, dest="bind_host",
                      help="specifies host address to listen on "\
                             "(default is all or 0.0.0.0)")
     # This one is handled by keystone/tools/tracer.py (if loaded)
@@ -169,12 +170,21 @@ def setup_logging(options, conf):
     logfile = options.get('log_file') or conf.get('log_file', DEFAULT_LOG_FILE)
     logdir = options.get('log_dir') or conf.get('log_dir', DEFAULT_LOG_DIR)
 
-    logfile = os.path.join(logdir, logfile)
-    logfile = logging.FileHandler(logfile)
-    logfile.setFormatter(formatter)
-    root_logger.addHandler(logfile)
+    # Add FileHandler if it doesn't exist
+    logfile = os.path.abspath(os.path.join(logdir, logfile))
+    handlers = [handler for handler in root_logger.handlers
+                if isinstance(handler, FileHandler)
+                and handler.baseFilename == logfile]
+
+    if not handlers:
+        logfile = logging.FileHandler(logfile)
+        logfile.setFormatter(formatter)
+        root_logger.addHandler(logfile)
+
     # Mirror to console if verbose or debug
     if debug or verbose:
+        add_console_handler(root_logger, logging.DEBUG)
+    else:
         add_console_handler(root_logger, logging.INFO)
 
 
@@ -202,9 +212,12 @@ def find_config_file(options, args):
                     os.pardir,
                     os.pardir))
     fix_path = lambda p: os.path.abspath(os.path.expanduser(p))
-    if options.get('config_file'):
-        if os.path.exists(options['config_file']):
-            return fix_path(options['config_file'])
+    cfg_file = options.get('config_file')
+    if cfg_file:
+        if isinstance(cfg_file, list):
+            cfg_file = cfg_file[0]
+        if os.path.exists(cfg_file):
+            return fix_path(cfg_file)
     elif args:
         if os.path.exists(args[0]):
             return fix_path(args[0])
@@ -272,7 +285,7 @@ def get_non_paste_configs(conf_file):
     complete_conf = load_config_files(conf_file)
     #Add Non Paste global sections.Need to find a better way.
     global_conf = {}
-    if complete_conf != None:
+    if complete_conf is not None:
         for section in complete_conf.sections():
             if not (section.startswith('filter:') or \
                     section.startswith('app:') or \

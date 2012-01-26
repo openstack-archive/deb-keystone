@@ -16,8 +16,11 @@
 
 import httplib
 import json
+import logging
 
 import keystone.common.exception
+
+LOG = logging.getLogger(__name__)
 
 
 class ServiceClient(object):
@@ -52,13 +55,13 @@ class ServiceClient(object):
         :returns: httplib.HTTPResponse object
 
         """
+        LOG.debug("Connecting to %s" % self.auth_address)
         if (self.is_ssl):
             connection = httplib.HTTPSConnection(self.auth_address,
                                                  cert_file=self.cert_file)
         else:
             connection = httplib.HTTPConnection(self.auth_address)
         connection.request(verb, path, body=body, headers=headers)
-
         response = connection.getresponse()
         response.body = response.read()
         status_int = int(response.status)
@@ -115,6 +118,7 @@ class AdminClient(ServiceClient):
     _default_admin_name = "admin"
     _default_admin_pass = "password"
 
+    # pylint: disable=R0913
     def __init__(self, host, port=None, is_ssl=False, cert_file=None,
                  admin_name=None, admin_pass=None):
         """Initialize client.

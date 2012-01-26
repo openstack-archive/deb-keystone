@@ -14,13 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pylint: disable=W1201
 
+import functools
+import json
+import logging
+from lxml import etree
 import os
 import sys
-import logging
-import functools
+import tempfile
 from webob import Response
+
+from keystone import config
 import keystone.logic.types.fault as fault
+
+logger = logging.getLogger(__name__)  # pylint: disable=C0103
+
+CONF = config.CONF
 
 
 def is_xml_response(req):
@@ -31,6 +41,11 @@ def is_xml_response(req):
 def is_json_response(req):
     """Returns True when the request wants a JSON response, False otherwise"""
     return "Accept" in req.headers and "application/json" in req.accept
+
+
+def is_atom_response(req):
+    """Returns True when the request wants an ATOM response, False otherwise"""
+    return "Accept" in req.headers and "application/atom+xml" in req.accept
 
 
 def get_app_root():
@@ -54,6 +69,7 @@ def get_auth_key(req):
 
 def wrap_error(func):
 
+    # pylint: disable=W0703
     @functools.wraps(func)
     def check_error(*args, **kwargs):
         try:
@@ -79,6 +95,55 @@ def get_normalized_request_content(model, req):
     elif req.content_type == "application/json":
         return model.from_json(req.body)
     else:
+        logging.debug("Unsupported content-type passed: %s" % req.content_type)
+        raise fault.IdentityFault("I don't understand the content type",
+                                  code=415)
+
+
+# pylint: disable=R0912
+def detect_credential_type(req):
+    """Return the credential type name by detecting them in json/xml body"""
+
+    if req.content_type == "application/xml":
+        dom = etree.Element("root")
+        dom.append(etree.fromstring(req.body))
+        root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
+                        "auth")
+        if root is None:
+            # Try legacy without wrapper
+            creds = dom.find("*")
+            if creds:
+                logger.warning("Received old syntax credentials not wrapped in"
+                               "'auth'")
+        else:
+            creds = root.find("*")
+
+        if creds is None:
+            raise fault.BadRequestFault("Request is missing credentials")
+
+        name = creds.tag
+        if "}" in name:
+            #trim away namespace if it is there
+            name = name[name.rfind("}") + 1:]
+
+        return name
+    elif req.content_type == "application/json":
+        obj = json.loads(req.body)
+        if len(obj) == 0:
+            raise fault.BadRequestFault("Expecting 'auth'")
+        tag = obj.keys()[0]
+        if tag == "auth":
+            if len(obj[tag]) == 0:
+                raise fault.BadRequestFault("Expecting Credentials")
+            for key, value in obj[tag].iteritems():  # pylint: disable=W0612
+                if key not in ['tenantId', 'tenantName']:
+                    return key
+            raise fault.BadRequestFault("Credentials missing from request")
+        else:
+            credentials_type = tag
+        return credentials_type
+    else:
+        logging.debug("Unsupported content-type passed: %s" % req.content_type)
         raise fault.IdentityFault("I don't understand the content type",
                                   code=415)
 
@@ -88,6 +153,7 @@ def send_error(code, req, result):
 
     resp = Response()
     resp.headers['content-type'] = None
+    resp.headers['Vary'] = 'X-Auth-Token'
     resp.status = code
 
     if result:
@@ -109,6 +175,7 @@ def send_result(code, req, result=None):
 
     resp = Response()
     resp.headers['content-type'] = None
+    resp.headers['Vary'] = 'X-Auth-Token'
     resp.status = code
     if code > 399:
         return resp
@@ -130,6 +197,9 @@ def send_legacy_result(code, headers):
     resp = Response()
     if 'content-type' not in headers:
         headers['content-type'] = "text/plain"
+    resp.headers['Vary'] = 'X-Auth-Token'
+
+    headers['Vary'] = 'X-Auth-Token'
 
     resp.headers = headers
     resp.status = code
@@ -147,16 +217,20 @@ def import_module(module_name, class_name=None):
     be the last part of the module_name string.'''
     if class_name is None:
         try:
-            __import__(module_name)
+            if module_name not in sys.modules:
+                __import__(module_name)
             return sys.modules[module_name]
         except ImportError as exc:
+            logging.exception(exc)
             module_name, _separator, class_name = module_name.rpartition('.')
             if not exc.args[0].startswith('No module named %s' % class_name):
                 raise
     try:
-        __import__(module_name)
+        if module_name not in sys.modules:
+            __import__(module_name)
         return getattr(sys.modules[module_name], class_name)
     except (ImportError, ValueError, AttributeError), exception:
+        logging.exception(exception)
         raise ImportError(_('Class %s.%s cannot be found (%s)') %
             (module_name, class_name, exception))
 
@@ -181,3 +255,58 @@ def is_empty_string(value):
     if len(value.strip()) == 0:
         return True
     return False
+
+
+def write_temp_file(txt):
+    """
+    Writes the supplied text to a temporary file and returns the file path.
+
+    When the file is no longer needed, it is up to the calling program to
+    delete it.
+    """
+    fd, tmpname = tempfile.mkstemp()
+    os.close(fd)
+    with file(tmpname, "w") as fconf:
+        fconf.write(txt)
+    return tmpname
+
+
+def opt_to_conf(options, create_temp=False):
+    """
+    Takes a dict of options and either returns a string that represents the
+    equivalent CONF configuration file (when create_temp is False), or writes
+    the temp file and returns the name of that temp file. NOTE: it is up to
+    the calling program to delete the temp file when it is no longer needed.
+    """
+    def parse_opt(options, section=None):
+        out = []
+        subsections = []
+        if section is None:
+            section = "DEFAULT"
+        # Create the section header
+        out.append("[%s]" % section)
+        for key, val in options.iteritems():
+            if isinstance(val, dict):
+                # This is a subsection; parse recursively.
+                subsections.append(parse_opt(val, section=key))
+            else:
+                out.append("%s = %s" % (key.replace("-", "_"), val))
+
+        # Add the subsections
+        for subsection in subsections:
+            out.append("")
+            out.append(subsection)
+        return "\n".join(out)
+
+    txt = parse_opt(options)
+    if create_temp:
+        return write_temp_file(txt)
+    else:
+        return txt
+
+
+def set_configuration(options):
+    """ Given a dict of options, populates the config.CONF module to match."""
+    _config_file = opt_to_conf(options, create_temp=True)
+    CONF(config_files=[_config_file])
+    os.remove(_config_file)

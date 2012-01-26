@@ -20,9 +20,9 @@ Starting point for routing EC2 requests.
 
 """
 
-from urlparse import urlparse
-
+import logging
 from eventlet.green import httplib
+from urlparse import urlparse
 import webob.dec
 import webob.exc
 
@@ -30,10 +30,11 @@ from nova import flags
 from nova import utils
 from nova import wsgi
 
+logger = logging.getLogger(__name__)  # pylint: disable=C0103
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('keystone_ec2_url',
-                    'http://localhost:5000/v2.0/ec2tokens',
+                    'http://localhost:5000/v2.0/tokens',
                     'URL to get token from ec2 request.')
 
 
@@ -46,7 +47,8 @@ class EC2Token(wsgi.Middleware):
         try:
             signature = req.params['Signature']
             access = req.params['AWSAccessKeyId']
-        except KeyError:
+        except KeyError, e:
+            logger.exception(e)
             raise webob.exc.HTTPBadRequest()
 
         # Make a copy of args for authentication and signature verification.
@@ -55,13 +57,14 @@ class EC2Token(wsgi.Middleware):
         auth_params.pop('Signature')
 
         # Authenticate the request.
-        creds = {'ec2Credentials': {'access': access,
+        creds = {'auth':
+                    {'OS-KSEC2:ec2Credentials': {'access': access,
                                     'signature': signature,
                                     'host': req.host,
                                     'verb': req.method,
                                     'path': req.path,
                                     'params': auth_params,
-                                   }}
+                                   }}}
         creds_json = utils.dumps(creds)
         headers = {'Content-Type': 'application/json'}
 
@@ -84,7 +87,8 @@ class EC2Token(wsgi.Middleware):
         result = utils.loads(response)
         try:
             token_id = result['access']['token']['id']
-        except (AttributeError, KeyError):
+        except (AttributeError, KeyError), e:
+            logger.exception(e)
             raise webob.exc.HTTPBadRequest()
 
         # Authenticated!

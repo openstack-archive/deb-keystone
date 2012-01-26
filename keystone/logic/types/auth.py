@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pylint: disable=C0103,R0912,R0913,R0914
+
 import json
 from lxml import etree
 from keystone.logic.types import fault
@@ -150,7 +152,7 @@ class AuthWithPasswordCredentials(AuthBase):
             obj = json.loads(json_str)
 
             auth = AuthBase._validate_auth(obj, 'tenantId', 'tenantName',
-                                           'passwordCredentials')
+                                           'passwordCredentials', 'token')
             cred = AuthBase._validate_key(auth, 'passwordCredentials',
                                           'username', 'password')
 
@@ -200,10 +202,15 @@ class Ec2Credentials(object):
             dom = etree.Element("root")
             dom.append(etree.fromstring(xml_str))
             root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
-                            "ec2Credentials")
+                            "auth")
+            xmlns = "http://docs.openstack.org/identity/api/ext/OS-KSEC2/v1.0"
+            if root is None:
+                root = dom.find("{%s}ec2Credentials" % xmlns)
+            else:
+                root = root.find("{%s}ec2Credentials" % xmlns)
             if root is None:
                 raise fault.BadRequestFault("Expecting ec2Credentials")
-            access = root.get("access")
+            access = root.get("key")
             utils.check_empty_string(access, "Expecting an access key.")
             signature = root.get("signature")
             utils.check_empty_string(signature, "Expecting a signature.")
@@ -223,10 +230,18 @@ class Ec2Credentials(object):
     @staticmethod
     def from_json(json_str):
         try:
-            obj = json.loads(json_str)
-            if not "ec2Credentials" in obj:
+            root = json.loads(json_str)
+            if "auth" in root:
+                obj = root['auth']
+            else:
+                obj = root
+
+            if "OS-KSEC2:ec2Credentials" in obj:
+                cred = obj["OS-KSEC2:ec2Credentials"]
+            elif "ec2Credentials" in obj:
+                cred = obj["ec2Credentials"]
+            else:
                 raise fault.BadRequestFault("Expecting ec2Credentials")
-            cred = obj["ec2Credentials"]
             # Check that fields are valid
             invalid = [key for key in cred if key not in\
                        ['username', 'access', 'signature', 'params',
@@ -258,6 +273,137 @@ class Ec2Credentials(object):
                                         str(e))
 
 
+# pylint: disable=R0902
+class S3Credentials(object):
+    """Credentials based on username, access_key, signature and data.
+
+        @type access: str
+        @param access: Access key for user in the form of access:project.
+
+        @type signature: str
+        @param signature: Signature of the request.
+
+        @type verb: str
+        @param verb: Web request verb ('GET' or 'POST').
+
+        @type host: expire
+        @param host: Web request expire time.
+
+        @type path: str
+        @param path: Web request path.
+
+        @type expire: str
+        @param expire: Web request expire.
+
+        @type content_type: str
+        @param content_type: Web request content contenttype.
+
+        @type content_md5: str
+        @param content_md5: Web request content contentmd5.
+
+        @type xheaders: str
+        @param xheaders: Web request content extended headers.
+
+     """
+
+    def __init__(self, access, signature, verb, path, expire, content_type,
+                 content_md5, xheaders):
+        self.access = access
+        self.signature = signature
+        self.verb = verb
+        self.path = path
+        self.expire = expire
+        self.content_type = content_type
+        self.content_md5 = content_md5
+        self.xheaders = xheaders
+
+    @staticmethod
+    def from_xml(xml_str):
+        try:
+            dom = etree.Element("root")
+            dom.append(etree.fromstring(xml_str))
+            root = dom.find("{http://docs.openstack.org/identity/api/v2.0}"
+                            "auth")
+            xmlns = "http://docs.openstack.org/identity/api/ext/OS-KSS3/v1.0"
+            if root is None:
+                root = dom.find("{%s}s3Credentials" % xmlns)
+            else:
+                root = root.find("{%s}s3Credentials" % xmlns)
+
+            if root is None:
+                raise fault.BadRequestFault("Expecting s3Credentials")
+            access = root.get("access")
+            if access == None:
+                raise fault.BadRequestFault("Expecting an access key")
+            signature = root.get("signature")
+            if signature == None:
+                raise fault.BadRequestFault("Expecting a signature")
+            verb = root.get("verb")
+            if verb == None:
+                raise fault.BadRequestFault("Expecting a verb")
+            path = root.get("path")
+            if path == None:
+                raise fault.BadRequestFault("Expecting a path")
+            expire = root.get("expire")
+            if expire == None:
+                raise fault.BadRequestFault("Expecting a expire")
+            content_type = root.get("content_type", '')
+            content_md5 = root.get("content_md5", '')
+            xheaders = root.get("xheaders", None)
+            return S3Credentials(access, signature, verb, path, expire,
+                                 content_type, content_md5, xheaders)
+        except etree.LxmlError as e:
+            raise fault.BadRequestFault("Cannot parse password credentials",
+                                        str(e))
+
+    @staticmethod
+    def from_json(json_str):
+        try:
+            root = json.loads(json_str)
+            if "auth" in root:
+                obj = root['auth']
+            else:
+                obj = root
+
+            if "OS-KSS3:s3Credentials" in obj:
+                cred = obj["OS-KSS3:s3Credentials"]
+            elif "s3Credentials" in obj:
+                cred = obj["s3Credentials"]
+            else:
+                raise fault.BadRequestFault("Expecting s3Credentials")
+
+            # Check that fields are valid
+            invalid = [key for key in cred if key not in\
+                       ['username', 'access', 'signature', 'verb', 'expire',
+                        'path', 'content_type', 'content_md5', 'xheaders']]
+            if invalid != []:
+                raise fault.BadRequestFault("Invalid attribute(s): %s"
+                                            % invalid)
+            if not "access" in cred:
+                raise fault.BadRequestFault("Expecting an access key")
+            access = cred["access"]
+            if not "signature" in cred:
+                raise fault.BadRequestFault("Expecting a signature")
+            signature = cred["signature"]
+            if not "verb" in cred:
+                raise fault.BadRequestFault("Expecting a verb")
+            verb = cred["verb"]
+            if not "path" in cred:
+                raise fault.BadRequestFault("Expecting a path")
+            path = cred["path"]
+            if not "expire" in cred:
+                raise fault.BadRequestFault("Expecting a expire")
+            expire = cred["expire"]
+            content_type = cred.get("content_type", '')
+            content_md5 = cred.get("content_md5", '')
+            xheaders = cred.get("xheaders", None)
+            return S3Credentials(access, signature, verb, path, expire,
+                                 content_type, content_md5, xheaders)
+        except (ValueError, TypeError) as e:
+            raise fault.BadRequestFault("Cannot parse password credentials",
+                                        str(e))
+
+
 class Tenant(object):
     """Provides the scope of a token"""
 
@@ -284,14 +430,14 @@ class User(object):
     username = None
     tenant_id = None
     tenant_name = None
-    role_refs = None
+    rolegrants = None
 
-    def __init__(self, id, username, tenant_id, tenant_name, role_refs=None):
+    def __init__(self, id, username, tenant_id, tenant_name, rolegrants=None):
         self.id = id
         self.username = username
         self.tenant_id = tenant_id
         self.tenant_name = tenant_name
-        self.role_refs = role_refs
+        self.rolegrants = rolegrants
 
 
 class AuthData(object):
@@ -316,7 +462,7 @@ class AuthData(object):
         else:
             self.url_types = url_types
         self.d = {}
-        if self.base_urls != None:
+        if self.base_urls is not None:
             self.__convert_baseurls_to_dict()
 
     def to_xml(self):
@@ -333,14 +479,14 @@ class AuthData(object):
         dom.append(token)
 
         user = etree.Element("user",
-            id=unicode(self.user.id),
-            name=unicode(self.user.username))
+                id=unicode(self.user.id),
+                name=unicode(self.user.username))
         dom.append(user)
 
-        if self.user.role_refs != None:
-            user.append(self.user.role_refs.to_dom())
+        if self.user.rolegrants is not None:
+            user.append(self.user.rolegrants.to_dom())
 
-        if self.base_urls != None:
+        if self.base_urls is not None and len(self.base_urls) > 0:
             service_catalog = etree.Element("serviceCatalog")
             for key, key_base_urls in self.d.items():
                 dservice = db_api.SERVICE.get(key)
@@ -350,17 +496,35 @@ class AuthData(object):
                 service = etree.Element("service",
                                  name=dservice.name, type=dservice.type)
                 for base_url in key_base_urls:
+                    include_this_endpoint = False
                     endpoint = etree.Element("endpoint")
                     if base_url.region:
                         endpoint.set("region", base_url.region)
                     for url_kind in self.url_types:
                         base_url_item = getattr(base_url, url_kind + "_url")
                         if base_url_item:
-                            endpoint.set(url_kind + "URL", base_url_item.\
-                            replace('%tenant_id%', str(self.token.tenant.id))
-                            if self.token.tenant else base_url_item)
-                    service.append(endpoint)
-                service_catalog.append(service)
+                            if '%tenant_id%' in base_url_item:
+                                if self.token.tenant:
+                                    # Don't return tenant endpoints if token
+                                    # not scoped to a tenant
+                                    endpoint.set(url_kind + "URL",
+                                        base_url_item.replace('%tenant_id%',
+                                        str(self.token.tenant.id)))
+                                    endpoint.set('tenantId',
+                                                 str(self.token.tenant.id))
+                                    include_this_endpoint = True
+                            else:
+                                endpoint.set(url_kind + "URL", base_url_item)
+                                include_this_endpoint = True
+                    if include_this_endpoint:
+                        endpoint.set("id", str(base_url.id))
+                        if hasattr(base_url, "version_id"):
+                            if base_url.version_id:
+                                endpoint.set("versionId",
+                                             str(base_url.version_id))
+                        service.append(endpoint)
+                if service.find("endpoint") is not None:
+                    service_catalog.append(service)
             dom.append(service_catalog)
         return etree.tostring(dom)
 
@@ -375,43 +539,62 @@ class AuthData(object):
         token["id"] = self.token.id
         token["expires"] = self.token.expires.isoformat()
         if self.token.tenant:
-            token['tenant'] = {
+            tenant = {
                 'id': unicode(self.token.tenant.id),
                 'name': unicode(self.token.tenant.name)}
+            token['tenant'] = tenant     # v2.0/Diablo contract
+            token['tenants'] = [tenant]  # missed use case in v2.0
         auth = {}
         auth["token"] = token
         auth['user'] = {
             'id': unicode(self.user.id),
             'name': unicode(self.user.username)}
 
-        if self.user.role_refs is not None:
-            auth['user']["roles"] = self.user.role_refs.to_json_values()
+        if self.user.rolegrants is not None:
+            auth['user']["roles"] = self.user.rolegrants.to_json_values()
 
-        if self.base_urls != None:
+        if self.base_urls is not None and len(self.base_urls) > 0:
             service_catalog = []
             for key, key_base_urls in self.d.items():
                 service = {}
                 endpoints = []
                 for base_url in key_base_urls:
+                    include_this_endpoint = False
                     endpoint = {}
                     if base_url.region:
                         endpoint["region"] = base_url.region
                     for url_kind in self.url_types:
                         base_url_item = getattr(base_url, url_kind + "_url")
                         if base_url_item:
-                            endpoint[url_kind + "URL"] = base_url_item.\
-                                replace('%tenant_id%',
-                                    str(self.token.tenant.id)) \
-                                if self.token.tenant else base_url_item
-                    endpoints.append(endpoint)
-                    dservice = db_api.SERVICE.get(key)
-                    if not dservice:
-                        raise fault.ItemNotFoundFault(
-                        "The service could not be found for" + str(key))
-                service["name"] = dservice.name
-                service["type"] = dservice.type
-                service["endpoints"] = endpoints
-                service_catalog.append(service)
+                            if '%tenant_id%' in base_url_item:
+                                if self.token.tenant:
+                                    # Don't return tenant endpoints if token
+                                    # not scoped to a tenant
+                                    endpoint[url_kind + "URL"] = \
+                                    base_url_item.replace('%tenant_id%',
+                                            str(self.token.tenant.id))
+                                    endpoint['tenantId'] = \
+                                            str(self.token.tenant.id)
+                                    include_this_endpoint = True
+                            else:
+                                endpoint[url_kind + "URL"] = base_url_item
+                                include_this_endpoint = True
+                    if include_this_endpoint:
+                        endpoint['id'] = str(base_url.id)
+                        if hasattr(base_url, 'version_id'):
+                            if base_url.version_id:
+                                endpoint['versionId'] = \
+                                        str(base_url.version_id)
+                        endpoints.append(endpoint)
+                        dservice = db_api.SERVICE.get(key)
+                        if not dservice:
+                            raise fault.ItemNotFoundFault(
+                            "The service could not be found for" + str(key))
+                if len(endpoints):
+                    service["name"] = dservice.name
+                    service["type"] = dservice.type
+                    service["endpoints"] = endpoints
+                    service_catalog.append(service)
             auth["serviceCatalog"] = service_catalog
         ret = {}
         ret["access"] = auth
@@ -451,8 +634,8 @@ class ValidateData(object):
             if self.user.tenant_name is not None:
                 user.set('tenantName', unicode(self.user.tenant_name))
 
-        if self.user.role_refs is not None:
-            user.append(self.user.role_refs.to_dom())
+        if self.user.rolegrants is not None:
+            user.append(self.user.rolegrants.to_dom())
 
         dom.append(token)
         dom.append(user)
@@ -464,9 +647,11 @@ class ValidateData(object):
             "expires": self.token.expires.isoformat()}
 
         if self.token.tenant:
-            token['tenant'] = {
+            tenant = {
                 'id': unicode(self.token.tenant.id),
                 'name': unicode(self.token.tenant.name)}
+            token['tenant'] = tenant     # v2.0/Diablo contract
+            token['tenants'] = [tenant]  # missed use case in v2.0
 
         user = {
             "id": unicode(self.user.id),
@@ -479,8 +664,8 @@ class ValidateData(object):
             if self.user.tenant_name is not None:
                 user['tenantName'] = unicode(self.user.tenant_name)
 
-        if self.user.role_refs is not None:
-            user["roles"] = self.user.role_refs.to_json_values()
+        if self.user.rolegrants is not None:
+            user["roles"] = self.user.rolegrants.to_json_values()
 
         return json.dumps({
             "access": {
