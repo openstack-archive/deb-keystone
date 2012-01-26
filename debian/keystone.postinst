@@ -1,25 +1,67 @@
 #!/bin/sh
-
 set -e
 
 if [ "$1" = "configure" ]
 then
+    . /usr/share/debconf/confmodule
+    . /usr/share/dbconfig-common/dpkg/postinst
+
     adduser --system \
             --home /var/lib/keystone \
             --no-create-home \
             --quiet \
             --disabled-password \
             --group keystone
+
+    dbc_go keystone $@
+
+    case "$dbc_dbtype" in
+        sqlite3)
+            SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
+            ;;
+        mysql)
+            [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+            SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+            ;;
+        pgsql)
+            [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+            SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+            ;;
+        *)
+            SQL_CONNECTION="sqlite:////var/lib/keystone/keystone.db"
+            ;;
+    esac
+
+    [ -z "$2" -o "$dbc_install" = "true" ] \
+        && sed -e "s,_DBC_URL_,$SQL_CONNECTION," -i /etc/keystone/keystone.conf
+
+    if [ "$dbc_install" = "true" ]
+    then
+        # On first install, create basics configuration and add roles
+        if [ -z "$2" ]
+        then
+            sed -e "s,_DBC_URL_,$SQL_CONNECTION," -i /etc/keystone/keystone.conf
+
+            keystone-manage database sync
+            keystone-manage role add Admin
+            keystone-manage role add Member
+            keystone-manage role add KeystoneAdmin
+            keystone-manage role add KeystoneServiceAdmin
+            keystone-manage role add sysadmin
+            keystone-manage role add netadmin
+        fi
+
+        if [ "$dbc_upgrade" = "true" ]
+        then
+	    keystone-manage database sync
+        fi
+    fi
+
     chown keystone:keystone /var/lib/keystone /var/log/keystone
     chown 0700 /var/log/keystone
     chmod 0700 /var/log/keystone
-
-    if grep -q -e "^sql_connection\s*=\s*sqlite://" /etc/keystone/keystone.conf
-    then
-        # Do not fail to install even if the db sync fails
-	su -c 'keystone-manage db sync' keystone || true
-    fi
 fi
+
 
 #DEBHELPER#
 
