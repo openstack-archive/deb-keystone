@@ -42,6 +42,7 @@ class CreateRolesTest(RolesTest):
         self.create_role(assert_status=401)
 
     def test_create_roles_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.create_role(assert_status=403)
 
@@ -50,6 +51,7 @@ class CreateRolesTest(RolesTest):
         self.create_role(assert_status=401)
 
     def test_create_roles_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.create_role(assert_status=403)
 
@@ -81,7 +83,8 @@ class CreateRolesTest(RolesTest):
         self.assertEqual(role['description'], description)
         self.assertEqual(role['serviceId'], service['id'])
 
-    def test_create_role_mapped_to_a_service_using_incorrect_role_name(self):
+    def test_create__service_role_using_incorrect_role_name(self):
+        """ test_create_role_mapped_to_a_service_using_incorrect_role_name """
         self.create_role(common.unique_str(), service_id=common.unique_str(),
             assert_status=400)
 
@@ -101,6 +104,7 @@ class DeleteRoleTest(RolesTest):
         self.role = self.create_role().json['role']
 
     def test_delete_roles_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.delete_role(self.role['id'], assert_status=403)
 
@@ -109,6 +113,7 @@ class DeleteRoleTest(RolesTest):
         self.delete_role(self.role['id'], assert_status=401)
 
     def test_delete_roles_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.delete_role(self.role['id'], assert_status=403)
 
@@ -143,9 +148,50 @@ class DeleteRoleTest(RolesTest):
         self.assertEqual(role['id'], role_id)
         self.assertEqual(role['serviceId'], service['id'])
 
-    def test_create_role_mapped_to_a_service_using_incorrect_role_name(self):
+    def test_create_service_role_using_incorrect_role_name(self):
+        """ Formerly:
+            test_create_role_mapped_to_a_service_using_incorrect_role_name"""
         self.create_role(common.unique_str(), service_id=common.unique_str(),
             assert_status=400)
+
+
+class GetRolesByServiceTest(common.FunctionalTestCase):
+    def setUp(self, *args, **kwargs):
+        super(GetRolesByServiceTest, self).setUp(*args, **kwargs)
+        service = self.create_service().json['OS-KSADM:service']
+        role_name = service['name'] + ':' + common.unique_str()
+        role = self.create_role(role_name=role_name,
+            service_id=service['id']).json['role']
+        self.service_id = service['id']
+
+    def tearDown(self, *args, **kwargs):
+        super(GetRolesByServiceTest, self).tearDown(*args, **kwargs)
+
+    def test_get_roles(self):
+        r = self.list_roles(assert_status=200, service_id=self.service_id)
+        self.assertTrue(len(r.json['roles']))
+
+    def test_get_roles_xml(self):
+        r = self.get_roles_by_service(assert_status=200, headers={
+            'Accept': 'application/xml'}, service_id=self.service_id,)
+        self.assertEquals(r.xml.tag, '{%s}roles' % self.xmlns)
+        roles = r.xml.findall('{%s}role' % self.xmlns)
+
+        for role in roles:
+            self.assertIsNotNone(role.get('id'))
+
+    def test_get_roles_exp_token(self):
+        self.fixture_create_expired_token()
+        self.admin_token = self.expired_admin_token
+        self.get_roles_by_service(
+            service_id=self.service_id, assert_status=403)
+
+    def test_get_roles_exp_token_xml(self):
+        self.fixture_create_expired_token()
+        self.admin_token = self.expired_admin_token
+        self.get_roles_by_service(
+            service_id=self.service_id, assert_status=403, headers={
+            'Accept': 'application/xml'})
 
 
 class GetRolesTest(RolesTest):
@@ -163,10 +209,12 @@ class GetRolesTest(RolesTest):
             self.assertIsNotNone(role.get('id'))
 
     def test_get_roles_exp_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.get_roles(assert_status=403)
 
     def test_get_roles_exp_token_xml(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.get_roles(assert_status=403, headers={
             'Accept': 'application/xml'})
@@ -175,7 +223,6 @@ class GetRolesTest(RolesTest):
 class GetRoleTest(RolesTest):
     def setUp(self, *args, **kwargs):
         super(GetRoleTest, self).setUp(*args, **kwargs)
-
         self.role = self.create_role().json['role']
 
     def test_get_role(self):
@@ -202,19 +249,23 @@ class GetRoleTest(RolesTest):
             'Accept': 'application/xml'})
 
     def test_get_role_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.fetch_role(self.role['id'], assert_status=403)
 
     def test_get_role_xml_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.get_role(self.role['id'], assert_status=403, headers={
             'Accept': 'application/xml'})
 
     def test_get_role_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.fetch_role(self.role['id'], assert_status=403)
 
     def test_get_role_xml_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.get_role(self.role['id'], assert_status=403, headers={
             'Accept': 'application/xml'})
@@ -270,19 +321,23 @@ class GetRoleByNameTest(RolesTest):
             'Accept': 'application/xml'})
 
     def test_get_role_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.fetch_role_by_name(self.role['name'], assert_status=403)
 
     def test_get_role_xml_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
         self.get_role_by_name(self.role['name'], assert_status=403, headers={
             'Accept': 'application/xml'})
 
     def test_get_role_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.fetch_role_by_name(self.role['name'], assert_status=403)
 
     def test_get_role_xml_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
         self.get_role_by_name(self.role['name'], assert_status=403, headers={
             'Accept': 'application/xml'})
@@ -310,13 +365,13 @@ class CreateRoleAssignmentTest(RolesTest):
     def setUp(self, *args, **kwargs):
         super(CreateRoleAssignmentTest, self).setUp(*args, **kwargs)
 
-        self.tenant = self.create_tenant().json['tenant']
-        self.user = self.create_user_with_known_password(
-            tenant_id=self.tenant['id']).json['user']
+        self.fixture_create_normal_tenant()
+        self.fixture_create_tenant_user()
+
         self.role = self.create_role().json['role']
 
     def test_grant_role(self):
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=201)
 
 #    def test_grant_role_json_using_service_admin_token(self):
@@ -336,122 +391,129 @@ class CreateRoleAssignmentTest(RolesTest):
 #            assert_status=201)
 
     def test_grant_role_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=403)
 
     def test_grant_role_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=403)
 
     def test_grant_role_using_missing_token(self):
         self.admin_token = ''
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=401)
 
     def test_grant_role_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=401)
 
     def test_grant_global_role_json(self):
         self.grant_global_role_to_user(
-            self.user['id'], self.role['id'], assert_status=201)
+            self.tenant_user['id'], self.role['id'], assert_status=201)
 
 
 class GetRoleAssignmentsTest(RolesTest):
     def setUp(self, *args, **kwargs):
         super(GetRoleAssignmentsTest, self).setUp(*args, **kwargs)
+        self.fixture_create_normal_tenant()
+        self.fixture_create_tenant_user()
 
-        self.tenant = self.create_tenant().json['tenant']
-        self.user = self.create_user_with_known_password(
-            tenant_id=self.tenant['id']).json['user']
         self.role = self.create_role().json['role']
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'])
 
     def test_get_role_assignments(self):
-        r = self.get_user_roles(self.user['id'], assert_status=200)
+        r = self.get_user_roles(self.tenant_user['id'], assert_status=200)
         self.assertIsNotNone(r.json['roles'])
 
     def test_get_roler_assignments_xml(self):
-        r = self.get_user_roles(self.user['id'], assert_status=200,
+        r = self.get_user_roles(self.tenant_user['id'], assert_status=200,
             headers={'Accept': 'application/xml'})
         self.assertEqual(r.xml.tag, "{%s}roles" % self.xmlns)
 
     def test_get_role_assignments_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
-        self.get_user_roles(self.user['id'], assert_status=403)
+        self.get_user_roles(self.tenant_user['id'], assert_status=403)
 
     def test_get_role_assignments_xml_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
-        self.get_user_roles(self.user['id'], assert_status=403, headers={
-            'Accept': 'application/xml'})
+        self.get_user_roles(self.tenant_user['id'], assert_status=403,
+                            headers={'Accept': 'application/xml'})
 
     def test_get_role_assignments_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
-        self.get_user_roles(self.user['id'], assert_status=403)
+        self.get_user_roles(self.tenant_user['id'], assert_status=403)
 
     def test_get_role_assignments_xml_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
-        self.get_user_roles(self.user['id'], assert_status=403, headers={
-            'Accept': 'application/xml'})
+        self.get_user_roles(self.tenant_user['id'], assert_status=403,
+                            headers={'Accept': 'application/xml'})
 
     def test_get_role_assignments_using_missing_token(self):
         self.admin_token = ''
-        self.get_user_roles(self.user['id'], assert_status=401)
+        self.get_user_roles(self.tenant_user['id'], assert_status=401)
 
     def test_get_role_assignments_xml_using_missing_token(self):
         self.admin_token = ''
-        self.get_user_roles(self.user['id'], assert_status=401, headers={
-            'Accept': 'application/xml'})
+        self.get_user_roles(self.tenant_user['id'], assert_status=401,
+                            headers={'Accept': 'application/xml'})
 
     def test_get_role_assignments_json_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.get_user_roles(self.user['id'], assert_status=401)
+        self.get_user_roles(self.tenant_user['id'], assert_status=401)
 
     def test_get_role_assignments_xml_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.get_user_roles(self.user['id'], assert_status=401, headers={
-            'Accept': 'application/xml'})
+        self.get_user_roles(self.tenant_user['id'], assert_status=401,
+                            headers={'Accept': 'application/xml'})
 
 
 class DeleteRoleAssignmentsTest(RolesTest):
     def setUp(self, *args, **kwargs):
         super(DeleteRoleAssignmentsTest, self).setUp(*args, **kwargs)
 
-        self.tenant = self.create_tenant().json['tenant']
-        self.user = self.create_user_with_known_password(
-            tenant_id=self.tenant['id']).json['user']
+        self.fixture_create_normal_tenant()
+        self.fixture_create_tenant_user()
+
         self.role = self.create_role().json['role']
-        self.grant_role_to_user(self.user['id'], self.role['id'],
+        self.grant_role_to_user(self.tenant_user['id'], self.role['id'],
             self.tenant['id'])
-        self.roles = self.get_user_roles(self.user['id']).\
+        self.roles = self.get_user_roles(self.tenant_user['id']).\
             json['roles']
 
     def test_delete_role_assignment(self):
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=204)
 
     def test_delete_role_assignment_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=403)
 
     def test_delete_role_assignment_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=403)
 
     def test_delete_role_assignment_using_missing_token(self):
         self.admin_token = ''
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=401)
 
     def test_delete_role_assignment_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             self.tenant['id'], assert_status=401)
 
 
@@ -459,36 +521,38 @@ class DeleteGlobalRoleAssignmentsTest(RolesTest):
     def setUp(self, *args, **kwargs):
         super(DeleteGlobalRoleAssignmentsTest, self).setUp(*args, **kwargs)
 
-        self.tenant = self.create_tenant().json['tenant']
-        self.user = self.create_user_with_known_password(
-            tenant_id=self.tenant['id']).json['user']
+        self.fixture_create_normal_tenant()
+        self.fixture_create_tenant_user()
+
         self.role = self.create_role().json['role']
-        self.grant_global_role_to_user(self.user['id'], self.role['id'])
-        self.roles = self.get_user_roles(self.user['id']).\
+        self.grant_global_role_to_user(self.tenant_user['id'], self.role['id'])
+        self.roles = self.get_user_roles(self.tenant_user['id']).\
             json['roles']
 
     def test_delete_role_assignment(self):
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             None, assert_status=204)
 
     def test_delete_role_assignment_using_expired_token(self):
+        self.fixture_create_expired_token()
         self.admin_token = self.expired_admin_token
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             None, assert_status=403)
 
     def test_delete_role_assignment_using_disabled_token(self):
+        self.fixture_create_disabled_user_and_token()
         self.admin_token = self.disabled_admin_token
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             None, assert_status=403)
 
     def test_delete_role_assignment_using_missing_token(self):
         self.admin_token = ''
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             None, assert_status=401)
 
     def test_delete_role_assignment_using_invalid_token(self):
         self.admin_token = common.unique_str()
-        self.delete_user_role(self.user['id'], self.role['id'],
+        self.delete_user_role(self.tenant_user['id'], self.role['id'],
             None, assert_status=401)
 
 if __name__ == '__main__':

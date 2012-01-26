@@ -14,20 +14,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pylint: disable=W0613
 
 import unittest2 as unittest
+
+from keystone.backends import api
+from keystone.logic.types import fault
+from keystone.logic import service
 from keystone.test.functional import common
 
 
 class ValidateToken(common.FunctionalTestCase):
     def setUp(self, *args, **kwargs):
         super(ValidateToken, self).setUp(*args, **kwargs)
+        self.fixture_create_normal_tenant()
 
-        self.tenant = self.create_tenant().json['tenant']
         self.user = self.create_user_with_known_password(
             tenant_id=self.tenant['id']).json['user']
         self.role = self.create_role().json['role']
-        self.role_ref = self.grant_role_to_user(self.user['id'],
+        self.rolegrant = self.grant_role_to_user(self.user['id'],
             self.role['id'], self.tenant['id'])
         self.token = self.authenticate(self.user['name'],
             self.user['password'], self.tenant['id']).json['access']['token']
@@ -35,7 +40,6 @@ class ValidateToken(common.FunctionalTestCase):
     def test_validate_token_true(self):
         r = self.get_token_belongsto(self.token['id'], self.tenant['id'],
             assert_status=200)
-
         self.assertIsNotNone(r.json['access']['user']["roles"])
         self.assertEqual(r.json['access']['user']["roles"][0]['id'],
             self.role['id'])
@@ -44,8 +48,10 @@ class ValidateToken(common.FunctionalTestCase):
         self.assertIsNotNone(r.json['access']['user']['id'], self.user['id'])
         self.assertIsNotNone(r.json['access']['user']['name'],
             self.user['name'])
+        self.assertIn('tenants', r.json['access']['token'])
 
     def test_validate_token_true_using_service_token(self):
+        self.fixture_create_service_admin()
         self.admin_token = self.service_admin_token
         r = self.get_token_belongsto(self.token['id'], self.tenant['id'],
             assert_status=200)
@@ -93,25 +99,29 @@ class ValidateToken(common.FunctionalTestCase):
 class CheckToken(common.FunctionalTestCase):
     def setUp(self, *args, **kwargs):
         super(CheckToken, self).setUp(*args, **kwargs)
-        self.tenant = self.create_tenant().json['tenant']
-        self.user = self.create_user_with_known_password(
-            tenant_id=self.tenant['id']).json['user']
-        self.token = self.authenticate(self.user['name'],
-        self.user['password'], self.tenant['id']).json['access']['token']
+        self.fixture_create_normal_tenant()
+        self.fixture_create_tenant_user()
+
+        self.token = self.authenticate(self.tenant_user['name'],
+            self.tenant_user['password'],
+            self.tenant['id']).json['access']['token']
 
     def test_validate_token_true(self):
         self.check_token_belongs_to(self.token['id'], self.tenant['id'],
             assert_status=200)
 
     def test_validate_token_true_using_service_token(self):
+        self.fixture_create_service_admin()
         self.admin_token = self.service_admin_token
         self.check_token_belongs_to(self.token['id'], self.tenant['id'],
             assert_status=200)
 
     def test_validate_token_expired(self):
+        self.fixture_create_expired_token()
         self.check_token(self.expired_admin_token, assert_status=404)
 
     def test_validate_token_expired_xml(self):
+        self.fixture_create_expired_token()
         self.check_token(self.expired_admin_token, assert_status=404, headers={
             'Accept': 'application/xml'})
 
@@ -119,6 +129,7 @@ class CheckToken(common.FunctionalTestCase):
         self.check_token(common.unique_str(), assert_status=404)
 
 
+# pylint: disable=E1101,E1120
 class TokenEndpointTest(unittest.TestCase):
     def _noop_validate_admin_token(self, admin_token):
         pass
@@ -159,10 +170,10 @@ class TokenEndpointTest(unittest.TestCase):
 
         def test_endpoints_from_good_token(self):
             """Happy Day scenario."""
-            self.stubout.SmartSet(keystone.backends.api.TOKEN,
+            self.stubout.SmartSet(api.TOKEN,
                                   'get', self._fake_token_get)
 
-            self.stubout.SmartSet(keystone.backends.api.BaseTenantAPI,
+            self.stubout.SmartSet(api.BaseTenantAPI,
                                   'get_all_endpoints',
                                   self._fake_tenant_get_all_endpoints)
 
@@ -172,7 +183,7 @@ class TokenEndpointTest(unittest.TestCase):
             self.assertEquals(len(auth_data.base_urls), 1)
 
         def test_endpoints_from_bad_token(self):
-            self.stubout.SmartSet(keystone.backends.api.TOKEN,
+            self.stubout.SmartSet(api.TOKEN,
                                   'get', self._fake_missing_token_get)
 
             self.assertRaises(fault.ItemNotFoundFault,
@@ -180,10 +191,10 @@ class TokenEndpointTest(unittest.TestCase):
                               "admin token", "token id")
 
         def test_bad_endpoints(self):
-            self.stubout.SmartSet(keystone.backends.api.TOKEN,
+            self.stubout.SmartSet(api.TOKEN,
                                   'get', self._fake_token_get)
 
-            self.stubout.SmartSet(keystone.backends.api.TENANT,
+            self.stubout.SmartSet(api.TENANT,
                 'get_all_endpoints',
                 self._fake_exploding_tenant_get_all_endpoints)
 

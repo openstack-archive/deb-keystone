@@ -17,6 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# pylint: disable=W0613
 """
 Utility methods for working with WSGI servers
 """
@@ -32,6 +33,8 @@ eventlet.patcher.monkey_patch(all=False, socket=True)
 import routes.middleware
 from webob import Response
 import webob.dec
+
+LOG = logging.getLogger(__name__)
 
 
 def find_console_handler(logger):
@@ -57,8 +60,11 @@ def add_console_handler(logger, level=logging.INFO):
         # tell the handler to use this format
         console.setFormatter(formatter)
         # add the handler to the root logger
+        LOG.debug("Adding console handler at level %s" % level)
         logger.addHandler(console)
     elif console.level != level:
+        LOG.debug("Setting console handler level to %s from %s" % (level,
+                                                                console.level))
         console.setLevel(level)
     return console
 
@@ -69,8 +75,6 @@ class WritableLogger(object):
     def __init__(self, logger, level=logging.INFO):
         self.logger = logger
         self.level = level
-        # TODO(Ziad): figure out why root logger is not set to same level as
-        # caller. Maybe something to do with paste?
         if level == logging.DEBUG:
             add_console_handler(logger, level)
 
@@ -80,6 +84,7 @@ class WritableLogger(object):
 
 def run_server(application, port):
     """Run a WSGI server with the given application."""
+    LOG.debug("Running WSGI server on 0.0.0.0:%s" % port)
     sock = eventlet.listen(('0.0.0.0', port))
     eventlet.wsgi.server(sock, application)
 
@@ -88,15 +93,23 @@ class Server(object):
     """Server class to manage multiple WSGI sockets and applications."""
     started = False
 
-    def __init__(self, threads=1000):
+    def __init__(self, application=None, port=None, threads=1000):
+        self.application = application
+        self.port = port
         self.pool = eventlet.GreenPool(threads)
         self.socket_info = {}
         self.threads = {}
 
-    def start(self, application, port, host='0.0.0.0', key=None, backlog=128):
+    def start(self, application=None, port=None, host='0.0.0.0', key=None,
+            backlog=128):
         """Run a WSGI server with the given application."""
-        socket = eventlet.listen((host, port), backlog=backlog)
-        thread = self.pool.spawn(self._run, application, socket)
+        if application is not None:
+            self.application = application
+        if port is not None:
+            self.port = port
+        LOG.debug("start server '%s' on %s:%s" % (key, host, self.port))
+        socket = eventlet.listen((host, self.port), backlog=backlog)
+        thread = self.pool.spawn(self._run, self.application, socket)
         if key:
             self.socket_info[key] = socket
             self.threads[key] = thread
@@ -110,19 +123,20 @@ class Server(object):
 
     def _run(self, application, socket):
         """Start a WSGI server in a new green thread."""
-        logger = logging.getLogger('eventlet.wsgi.server')
-        # TODO(Ziad): figure out why root logger is not set to same level as
-        # caller. Maybe something to do with paste?
+        LOG.debug("_run called")
+        eventlet_logger = logging.getLogger('eventlet.wsgi.server')
         eventlet.wsgi.server(socket, application, custom_pool=self.pool,
-                             log=WritableLogger(logger, logging.root.level))
+                log=WritableLogger(eventlet_logger, logging.root.level))
 
 
 class SslServer(Server):
     """SSL Server class to manage multiple WSGI sockets and applications."""
+    # pylint: disable=W0221,R0913
     def start(self, application, port, host='0.0.0.0', backlog=128,
               certfile=None, keyfile=None, ca_certs=None,
               cert_required='True', key=None):
         """Run a 2-way SSL WSGI server with the given application."""
+        LOG.debug("start SSL server '%s' on %s:%s" % (key, host, port))
         socket = eventlet.listen((host, port), backlog=backlog)
         if cert_required == 'True':
             cert_reqs = ssl.CERT_REQUIRED
@@ -149,7 +163,8 @@ class Middleware(object):
     def __init__(self, application):
         self.application = application
 
-    def process_request(self, req):
+    @staticmethod
+    def process_request(req):
         """
         Called on each request.
 
@@ -160,10 +175,12 @@ class Middleware(object):
         """
         return None
 
-    def process_response(self, response):
+    @staticmethod
+    def process_response(response):
         """Do whatever you'd like to the response."""
         return response
 
+    # pylint: disable=W1111
     @webob.dec.wsgify
     def __call__(self, req):
         response = self.process_request(req)
@@ -292,7 +309,7 @@ class Controller(object):
         del arg_dict['action']
         arg_dict['req'] = req
         result = method(**arg_dict)
-        if type(result) is dict:
+        if isinstance(result, dict):
             return self._serialize(result, req)
         else:
             return result
@@ -313,12 +330,14 @@ class Serializer(object):
     Serializes a dictionary to a Content Type specified by a WSGI environment.
     """
 
-    def __init__(self, environ, metadata={}):
+    def __init__(self, environ, metadata=None):
         """
         Create a serializer based on the given WSGI environment.
         'metadata' is an optional dict mapping MIME types to information
         needed to serialize a dictionary to that type.
         """
+        if metadata is None:
+            metadata = {}
         self.environ = environ
         self.metadata = metadata
         self._methods = {
@@ -334,10 +353,12 @@ class Serializer(object):
         # FIXME(sirp): for now, supporting json only
         #mimetype = 'application/xml'
         mimetype = 'application/json'
+        LOG.debug("serializing: mimetype=%s" % mimetype)
         # TODO(gundlach): determine mimetype from request
         return self._methods.get(mimetype, repr)(data)
 
-    def _to_json(self, data):
+    @staticmethod
+    def _to_json(data):
         def sanitizer(obj):
             if isinstance(obj, datetime.datetime):
                 return obj.isoformat()
@@ -357,7 +378,7 @@ class Serializer(object):
     def _to_xml_node(self, doc, metadata, nodename, data):
         """Recursive method to convert data members to XML nodes."""
         result = doc.createElement(nodename)
-        if type(data) is list:
+        if isinstance(data, list):
             singular = metadata.get('plurals', {}).get(nodename, None)
             if singular is None:
                 if nodename.endswith('s'):
@@ -367,7 +388,7 @@ class Serializer(object):
             for item in data:
                 node = self._to_xml_node(doc, metadata, singular, item)
                 result.appendChild(node)
-        elif type(data) is dict:
+        elif isinstance(data, dict):
             attrs = metadata.get('attributes', {}).get(nodename, {})
             for k, v in data.items():
                 if k in attrs:

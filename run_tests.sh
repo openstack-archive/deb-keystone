@@ -6,17 +6,25 @@ function usage {
   echo "Usage: $0 [OPTION]..."
   echo "Run Keystone's test suite(s)"
   echo ""
-  echo "  -O test_name             Only run the specified test"
-  echo "                             Note: valid options now are SQLTest, LDAPTest, SSLTest, and MemcacheTest"
+  echo "  -O, --only test_suite    Only run the specified test suite. Valid values are:"
+  echo "                               UnitTests:    runs unit tests"
+  echo "                               ClientTests:  runs tests that start and hit an HTTP[S] server"
+  echo "                               SQLTest:      runs functional tests with SQLAlchemy backend"
+  echo "                               SSLTest:      runs client tests with SSL configured"
+  echo "                               LDAPTest:     runs functional tests with LDAP backend"
+  echo "                               MemcacheTest: runs functional tests with memcached storing tokens"
+  echo "                               ClientWithoutHPIDMTest: runs client tests with HP-IDM extension disabled"
+  echo "                               Note: by default, run_tests will run all suites"
   echo "  -V, --virtual-env        Always use virtualenv.  Install automatically if not present"
   echo "  -N, --no-virtual-env     Don't use virtualenv.  Run tests in local environment"
   echo "  -x, --stop               Stop running tests after the first error or failure."
   echo "  -f, --force              Force a clean re-build of the virtual environment. Useful when dependencies have been added."
   echo "                             Note: you might need to 'sudo' this since it pip installs into the vitual environment"  
+  echo "  -P, --skip-pep8          Just run tests; skip pep8 check"
   echo "  -p, --pep8               Just run pep8"
   echo "  -l, --pylint             Just run pylint"
   echo "  -j, --json               Just validate JSON"
-  echo "  -c, --coverage           Generate coverage report"
+  echo "  -c, --with-coverage      Generate coverage report"
   echo "  -h, --help               Print this usage message"
   echo "  --hide-elapsed           Don't print the elapsed time for each test along with slow test list"
   echo "  --verbose                Print additional logging"
@@ -25,6 +33,9 @@ function usage {
   echo "Note: with no options specified, the script will try to run the tests in a virtual environment,"
   echo "      If no virtualenv is found, the script will ask if you would like to create one.  If you "
   echo "      prefer to run tests NOT in a virtual environment, simply pass the -N option."
+  echo ""
+  echo "Note: with no options specified, the script will run the pep8 check after completing the tests."
+  echo "      If you prefer not to run pep8, simply pass the -P option."
   exit
 }
 
@@ -40,12 +51,13 @@ function process_option {
       -h|--help) usage;;
       -V|--virtual-env) always_venv=1; never_venv=0;;
       -N|--no-virtual-env) always_venv=0; never_venv=1;;
-      -O) only_run_flag=1;;
+      -O|--only) only_run_flag=1;;
       -f|--force) force=1;;
+      -P|--skip-pep8) skip_pep8=1;;
       -p|--pep8) just_pep8=1;;
       -l|--pylint) just_pylint=1;;
       -j|--json) just_json=1;;
-      -c|--coverage) coverage=1;;
+      -c|--with-coverage) coverage=1;;
       -*) addlopts="$addlopts $1";;
       *) addlargs="$addlargs $1"
     esac
@@ -61,7 +73,7 @@ addlargs=
 addlopts=
 wrapper=""
 just_pep8=0
-no_pep8=0
+skip_pep8=0
 just_pylint=0
 just_json=0
 coverage=0
@@ -134,7 +146,6 @@ function run_pep8 {
   srcfiles+=" keystone examples tools setup.py run_tests.py"
   # Just run PEP8 in current environment
   ${wrapper} pep8 --repeat --show-pep8 --show-source \
-    --ignore=E202,E111 \
     --exclude=vcsversion.py,$GLOBIGNORE ${srcfiles}
 }
 
@@ -175,9 +186,16 @@ fi
 
 
 run_tests
+if [ $skip_pep8 -eq 0 ]; then
+    # Run the pep8 check
+    run_pep8
+fi
 
+# Since we run multiple test suites, we need to execute 'coverage combine'
 if [ $coverage -eq 1 ]; then
     echo "Generating coverage report in covhtml/"
+    ${wrapper} coverage combine
     ${wrapper} coverage html -d covhtml -i
+    ${wrapper} coverage report --omit='/usr*,keystone/test*,.,setup.py,*egg*,/Library*,*.xml,*.tpl'
 fi
 

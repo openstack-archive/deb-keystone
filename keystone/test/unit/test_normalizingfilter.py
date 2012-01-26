@@ -16,7 +16,7 @@
 
 
 import unittest2 as unittest
-from keystone.middleware.url import NormalizingFilter
+from keystone.frontends.normalizer import NormalizingFilter
 
 
 class MockWsgiApp(object):
@@ -60,11 +60,26 @@ class NormalizingFilterTest(unittest.TestCase):
         self.assertEqual('/someresource', env['PATH_INFO'])
         self.assertEqual('application/xml', env['HTTP_ACCEPT'])
 
+    def test_atom_extension(self):
+        env = {'PATH_INFO': '/v2.0/someresource.atom'}
+        self.filter(env, _start_response)
+        self.assertEqual('/someresource', env['PATH_INFO'])
+        self.assertEqual('application/atom+xml', env['HTTP_ACCEPT'])
+
     def test_json_extension(self):
         env = {'PATH_INFO': '/v2.0/someresource.json'}
         self.filter(env, _start_response)
         self.assertEqual('/someresource', env['PATH_INFO'])
         self.assertEqual('application/json', env['HTTP_ACCEPT'])
+
+    def test_version_header(self):
+        env = {'PATH_INFO': '/someresource',
+               'HTTP_ACCEPT':
+                    'application/vnd.openstack.identity+xml;version=2.0'}
+        self.filter(env, _start_response)
+        self.assertEqual('/someresource', env['PATH_INFO'])
+        self.assertEqual('application/xml', env['HTTP_ACCEPT'])
+        self.assertEqual('2.0', env['KEYSTONE_API_VERSION'])
 
     def test_extension_overrides_header(self):
         env = {

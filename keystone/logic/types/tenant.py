@@ -15,7 +15,9 @@
 
 import json
 from lxml import etree
+
 from keystone.logic.types import fault
+from keystone import models
 
 
 class Tenant(object):
@@ -26,7 +28,7 @@ class Tenant(object):
     enabled = None
 
     def __init__(self, id=None, name=None, description=None, enabled=None):
-        self.id = id
+        self.id = id  # pylint: disable=C0103
         self.name = name
         self.description = description
         if enabled is not None:
@@ -55,8 +57,10 @@ class Tenant(object):
             desc = root.find("{http://docs.openstack.org/identity/api/v2.0}"
                              "description")
             if desc is None:
-                raise fault.BadRequestFault("Expecting Tenant Description")
-            return Tenant(id=id, name=name, description=desc.text,
+                description = None
+            else:
+                description = desc.text
+            return models.Tenant(id=id, name=name, description=description,
                 enabled=set_enabled)
         except etree.LxmlError as e:
             raise fault.BadRequestFault("Cannot parse Tenant", str(e))
@@ -83,9 +87,7 @@ class Tenant(object):
                 set_enabled = tenant["enabled"]
                 if not isinstance(set_enabled, bool):
                     raise fault.BadRequestFault("Bad enabled attribute!")
-            if not "description" in tenant:
-                raise fault.BadRequestFault("Expecting Tenant Description")
-            description = tenant["description"]
+            description = tenant.get("description")
             return Tenant(id=id, name=name, description=description,
                 enabled=set_enabled)
         except (ValueError, TypeError) as e:
@@ -93,14 +95,15 @@ class Tenant(object):
 
     def to_dom(self):
         dom = etree.Element("tenant",
-                        xmlns="http://docs.openstack.org/identity/api/v2.0",
-                        enabled=str(self.enabled).lower())
+            xmlns="http://docs.openstack.org/identity/api/v2.0",
+            enabled=str(self.enabled).lower())
         if self.id:
             dom.set("id", unicode(self.id))
         if self.name:
             dom.set("name", unicode(self.name))
         desc = etree.Element("description")
-        desc.text = unicode(self.description)
+        if self.description:
+            desc.text = unicode(self.description)
         dom.append(desc)
         return dom
 
@@ -109,8 +112,9 @@ class Tenant(object):
 
     def to_dict(self):
         tenant = {
-            "description": unicode(self.description),
             "enabled": self.enabled}
+        if self.description:
+            tenant['description'] = unicode(self.description)
         if self.id:
             tenant["id"] = unicode(self.id)
         if self.name:
@@ -144,45 +148,3 @@ class Tenants(object):
         values = [t.to_dict()["tenant"] for t in self.values]
         links = [t.to_dict()["links"] for t in self.links]
         return json.dumps({"tenants": values, "tenants_links": links})
-
-
-class User(object):
-    """Describes a user in the auth system
-
-    TODO: This is basically a duplicate of keystone.logic.types.user.User and
-    should be considered deprecated.
-    """
-
-    def __init__(self, user_id, email, enabled, tenant_id=None):
-        self.user_id = user_id
-        self.tenant_id = tenant_id
-        self.email = email
-        self.enabled = bool(enabled)
-
-    def to_dom(self):
-        dom = etree.Element("user",
-            xmlns="http://docs.openstack.org/identity/api/v2.0")
-        if self.user_id:
-            dom.set("id", self.user_id)
-        if self.tenant_id:
-            dom.set("tenantId", self.tenant_id)
-        if self.email:
-            dom.set("email", self.email)
-        if self.enabled:
-            dom.set("enabled", str(self.enabled).lower())
-        return dom
-
-    def to_xml(self):
-        return etree.tostring(self.to_dom())
-
-    def to_dict(self):
-        user = {}
-        user["id"] = self.user_id
-        user["email"] = self.email
-        user["enabled"] = str(self.enabled).lower()
-        if self.tenant_id:
-            user["tenantId"] = self.tenant_id
-        return {'user': user}
-
-    def to_json(self):
-        return json.dumps(self.to_dict())

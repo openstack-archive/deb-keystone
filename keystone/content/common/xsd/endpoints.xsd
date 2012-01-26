@@ -14,7 +14,8 @@
         xmlns:atom="http://www.w3.org/2005/Atom"
         targetNamespace="http://docs.openstack.org/identity/api/v2.0"
     >
-    <include schemaLocation="api.xsd"/>
+    <include schemaLocation="services.xsd"/>
+    <include schemaLocation="token.xsd"/>
     <!-- Import ATOM specific schema definitions -->
     <import vc:minVersion="1.1" namespace="http://www.w3.org/2005/Atom"
             schemaLocation="atom/atom.xsd" />
@@ -59,7 +60,7 @@
             <element vc:minVersion="1.1" ref="atom:link" minOccurs="0" maxOccurs="unbounded" />
             <any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded" />
         </sequence>        
-        <attribute name="id" type="xsd:int" use="required">
+        <attribute name="id" type="xsd:string" use="required">
             <annotation>
                 <xsd:documentation
                         xml:lang="EN"

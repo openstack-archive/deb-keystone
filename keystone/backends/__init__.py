@@ -14,38 +14,40 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import ast
-import logging
-from keystone import utils
-from keystone.backends import models
-from keystone.backends import api
 
-DEFAULT_BACKENDS = 'keystone.backends.sqlalchemy'
+import logging
+
+from keystone.cfg import NoSuchOptError
+from keystone import config
+from keystone import utils
+
+LOG = logging.getLogger(__name__)
+
+CONF = config.CONF
+DEFAULT_BACKENDS = "keystone.backends.sqlalchemy"
 
 #Configs applicable to all backends.
-#Reference to Admin Role.
-ADMIN_ROLE_ID = None
-ADMIN_ROLE_NAME = None
-SERVICE_ADMIN_ROLE_ID = None
-SERVICE_ADMIN_ROLE_NAME = None
-SHOULD_HASH_PASSWORD = None
+SHOULD_HASH_PASSWORD = CONF.hash_password
 
 
-def configure_backends(options):
-    '''Load backends given in the 'backends' option.'''
-    backend_names = options.get('backends', DEFAULT_BACKENDS)
-    for backend in backend_names.split(','):
-        backend_module = utils.import_module(backend)
-        backend_module.configure_backend(options[backend])
+class GroupConf(CONF.__class__):
+    """ Allows direct access to the values in the backend groups."""
+    def __init__(self, group, *args, **kwargs):
+        self.group = group
+        super(GroupConf, self).__init__(*args, **kwargs)
 
-    #Initialize common configs general to all backends.
-    global ADMIN_ROLE_NAME
-    ADMIN_ROLE_NAME = options["keystone-admin-role"]
+    def __getattr__(self, att):
+        try:
+            # pylint: disable=W0212
+            return CONF._get(att, self.group)
+        except NoSuchOptError:
+            return None
 
-    global SERVICE_ADMIN_ROLE_NAME
-    SERVICE_ADMIN_ROLE_NAME = options["keystone-service-admin-role"]
 
-    global SHOULD_HASH_PASSWORD
-    if "hash-password" in options\
-        and ast.literal_eval(options["hash-password"]) == True:
-        SHOULD_HASH_PASSWORD = options["hash-password"]
+def configure_backends():
+    """Load backends given in the 'backends' option."""
+    backend_names = CONF.backends or DEFAULT_BACKENDS
+    for module_name in backend_names.split(","):
+        backend_module = utils.import_module(module_name)
+        backend_conf = GroupConf(module_name)
+        backend_module.configure_backend(backend_conf)

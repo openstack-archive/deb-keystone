@@ -50,29 +50,33 @@ HTTP_X_AUTHORIZATION
     the client identity being passed in
 
 """
-import sys
-import optparse
 
-from keystone import version
+# pylint: disable=W0613
+
+import logging
+
+from keystone import config
+from keystone.common import config as common_config
+from keystone.common import wsgi
 from keystone.routers.service import ServiceApi
 from keystone.routers.admin import AdminApi
-from keystone.common import config, wsgi
+
+CONF = config.CONF
+
+logger = logging.getLogger(__name__)  # pylint: disable=C0103
 
 
 def service_app_factory(global_conf, **local_conf):
     """paste.deploy app factory for creating OpenStack API server apps"""
-    conf = global_conf.copy()
-    conf.update(local_conf)
-    return ServiceApi(conf)
+    return ServiceApi()
 
 
 def admin_app_factory(global_conf, **local_conf):
     """paste.deploy app factory for creating OpenStack API server apps"""
-    conf = global_conf.copy()
-    conf.update(local_conf)
-    return AdminApi(conf)
+    return AdminApi()
 
 
+# pylint: disable=R0902
 class Server():
     """Used to start and stop Keystone servers
 
@@ -84,45 +88,25 @@ class Server():
     the server.
     """
 
-    def __init__(self, name='admin', config_name=None,
-                 options=None, args=None):
+    def __init__(self, name='admin', config_name=None, args=None):
         """Initizalizer which takes the following paramaters:
 
         :param name: A cosmetic name for the server (ex. Admin API)
         :param config: the paste config name to look for when starting the
             server
-        :param options: a mapping of option key/str(value) pairs passed to
-            config.load_paste_app
         :param args: override for sys.argv (otherwise sys.argv is used)
         """
-        self.options = options
-        if args:
-            self.args = args
-        else:
-            self.args = sys.argv
-
-        if options is None or args is None:
-            # Initialize a parser for our configuration paramaters
-            parser = optparse.OptionParser(version='%%prog %s' %
-                                           version.version())
-            common_group = config.add_common_options(parser)
-            config.add_log_options(parser)
-
-            # Parse arguments and load config
-            (poptions, pargs) = config.parse_options(parser)
-
-        if options is None:
-            self.options = poptions
-        else:
-            self.options = options
-
-        if args is None:
-            self.args = pargs
-        else:
-            self.args = args
+        logger.debug("Init server '%s' with config=%s" % (name, config_name))
 
         self.name = name
         self.config = config_name or self.name
+        self.args = args
+        self.key = None
+        self.server = None
+        self.port = None
+        self.host = None
+        self.protocol = None
+        self.options = CONF.to_dict()
 
     def start(self, host=None, port=None, wait=True):
         """Starts the Keystone server
@@ -132,36 +116,32 @@ class Server():
         :param wait: whether to wait (block) for the server to terminate or
             return to the caller without waiting
         """
-        # Load Service API server
-        conf, app = config.load_paste_app(
-            self.config, self.options, self.args)
+        logger.debug("Starting API server")
+        conf, app = common_config.load_paste_app(self.config, self.options,
+                self.args)
 
-        debug = self.options.get('debug') or conf.get('debug', False)
-        debug = debug in [True, "True", "1"]
-        verbose = self.options.get('verbose') or conf.get('verbose', False)
-        verbose = verbose in [True, "True", "1"]
+        debug = CONF.debug in [True, "True", "1"]
+        verbose = CONF.verbose in [True, "True", "1"]
 
         if debug or verbose:
-            config_file = config.find_config_file(self.options, self.args)
-            print "Starting '%s' with config: %s" % (self.config, config_file)
+            config_file = common_config.find_config_file(self.options,
+                    self.args)
+            logger.info("Starting '%s' with config: %s" %
+                                   (self.config, config_file))
 
         if port is None:
             if self.config == 'admin':
                 # Legacy
-                port = int(self.options.get('bind_port') or
-                           conf.get('admin_port', 35357))
+                port = int(CONF.admin_port or 35357)
             else:
-                port = int(self.options.get('bind_port') or
-                           conf.get('service_port', 5000))
+                port = int(CONF.service_port or CONF.bind_port or 5000)
         if host is None:
-            host = self.options.get('bind_host',
-                                    conf.get('service_host', '0.0.0.0'))
+            host = CONF.bind_host or CONF.service_host or "0.0.0.0"
 
         self.key = "%s-%s:%s" % (self.name, host, port)
 
         # Safely get SSL options
-        service_ssl = conf.get('service_ssl', False)
-        service_ssl = service_ssl in [True, "True", "1"]
+        service_ssl = CONF.service_ssl in [True, "True", "1"]
 
         # Load the server
         if service_ssl:
@@ -177,13 +157,18 @@ class Server():
                          ca_certs=ca_certs,
                          cert_required=cert_required,
                          key=self.key)
+            self.protocol = 'https'
         else:
             self.server = wsgi.Server()
             self.server.start(app, port, host,
                               key="%s-%s:%s" % (self.config, host, port))
+            self.protocol = 'http'
 
-        print "%s listening on %s://%s:%s" % (
-            self.name, ['http', 'https'][service_ssl], host, port)
+        self.port = port
+        self.host = host
+
+        logger.info("%s listening on %s://%s:%s" % (
+            self.name, ['http', 'https'][service_ssl], host, port))
 
         # Wait until done
         if wait:
@@ -196,5 +181,6 @@ class Server():
         """
         if self.server is not None:
             if self.key in self.server.threads:
+                logger.debug("Killing %s" % self.key)
                 self.server.threads[self.key].kill()
             self.server = None

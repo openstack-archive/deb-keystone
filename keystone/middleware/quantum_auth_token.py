@@ -71,21 +71,23 @@ HTTP_X_AUTHORIZATION
 import httplib
 import json
 import logging
+import urllib
 from urlparse import urlparse
 from webob.exc import HTTPUnauthorized, Request, Response
 
 from keystone.common.bufferedhttp import http_connect_raw as http_connect
 
-PROTOCOL_NAME = "Token Authentication"
-LOG = logging.getLogger('quantum.common.authentication')
+PROTOCOL_NAME = "Quantum Token Authentication"
+logger = logging.getLogger(__name__)  # pylint: disable=C0103
 
 
+# pylint: disable=R0902
 class AuthProtocol(object):
     """Auth Middleware that handles authenticating client calls"""
 
     def _init_protocol_common(self, app, conf):
         """ Common initialization code"""
-        LOG.info("Starting the %s component", PROTOCOL_NAME)
+        logger.info("Starting the %s component", PROTOCOL_NAME)
 
         self.conf = conf
         self.app = app
@@ -122,17 +124,23 @@ class AuthProtocol(object):
                                              self.auth_host,
                                              self.auth_port)
         self.auth_uri = conf.get('auth_uri', self.auth_location)
-        LOG.debug("Authentication Service:%s", self.auth_location)
+        logger.debug("Authentication Service:%s", self.auth_location)
         # Credentials used to verify this component with the Auth service
         # since validating tokens is a privileged call
         self.admin_user = conf.get('auth_admin_user')
         self.admin_password = conf.get('auth_admin_password')
         self.admin_token = conf.get('auth_admin_token')
+        # bind to one or more service instances
+        service_ids = conf.get('service_ids')
+        self.serviceId_qs = ''
+        if service_ids:
+            self.serviceId_qs = '?HP-IDM-serviceId=%s' % \
+                                (urllib.quote(service_ids))
 
     def _build_token_uri(self, claims=None):
-        uri = "/v" + self.auth_api_version + "/tokens" + \
-              (claims and '/' + claims or '')
-        return uri
+        claim_str = "/%s" % claims if claims else ""
+        return "/v%s/tokens%s%s" % (self.auth_api_version, claim_str,
+                                    self.serviceId_qs or '')
 
     def __init__(self, app, conf):
         """ Common initialization code """
@@ -149,19 +157,30 @@ class AuthProtocol(object):
         self.auth_uri = None
         self.auth_port = None
         self.auth_protocol = None
+        self.auth_timeout = None
         self.cert_file = None
         self.key_file = None
         self.service_host = None
         self.service_port = None
         self.service_protocol = None
         self.service_url = None
+        self.proxy_headers = None
+        self.start_response = None
+        self.app = None
+        self.conf = None
+        self.env = None
+        self.delay_auth_decision = None
+        self.expanded = None
+        self.claims = None
+
         self._init_protocol_common(app, conf)  # Applies to all protocols
         self._init_protocol(app, conf)  # Specific to this protocol
 
+    # pylint: disable=R0912
     def __call__(self, env, start_response):
         """ Handle incoming request. Authenticate. And send downstream. """
-        LOG.debug("entering AuthProtocol.__call__")
-        LOG.debug("start response:%s", start_response)
+        logger.debug("entering AuthProtocol.__call__")
+        logger.debug("start response:%s", start_response)
         self.start_response = start_response
         self.env = env
 
@@ -173,11 +192,11 @@ class AuthProtocol(object):
                 del self.proxy_headers[header]
 
         #Look for authentication claims
-        LOG.debug("Looking for authentication claims")
+        logger.debug("Looking for authentication claims")
         self.claims = self._get_claims(env)
         if not self.claims:
             #No claim(s) provided
-            LOG.debug("No claims provided")
+            logger.debug("No claims provided")
             if self.delay_auth_decision:
                 #Configured to allow downstream service to make final decision.
                 #So mark status as Invalid and forward the request downstream
@@ -187,7 +206,7 @@ class AuthProtocol(object):
                 return self._reject_request()
         else:
             # this request is presenting claims. Let's validate them
-            LOG.debug("Claims found. Validating.")
+            logger.debug("Claims found. Validating.")
             valid = self._validate_claims(self.claims)
             if not valid:
                 # Keystone rejected claim
@@ -202,7 +221,7 @@ class AuthProtocol(object):
 
             #Collect information about valid claims
             if valid:
-                LOG.debug("Validation successful")
+                logger.debug("Validation successful")
                 claims = self._expound_claims()
 
                 # Store authentication data
@@ -228,7 +247,7 @@ class AuthProtocol(object):
                     if 'group' in claims:
                         self._decorate_request('X_GROUP', claims['group'])
                     if 'roles' in claims and len(claims['roles']) > 0:
-                        if claims['roles'] != None:
+                        if claims['roles'] is not None:
                             roles = ''
                             for role in claims['roles']:
                                 if len(roles) > 0:
@@ -238,7 +257,7 @@ class AuthProtocol(object):
 
                     # NOTE(todd): unused
                     self.expanded = True
-            LOG.debug("About to forward request")
+            logger.debug("About to forward request")
             #Send request downstream
             return self._forward_request()
 
@@ -273,7 +292,8 @@ class AuthProtocol(object):
         data = response.read()
         return data
 
-    def _get_claims(self, env):
+    @staticmethod
+    def _get_claims(env):
         """Get claims from request"""
         claims = env.get('HTTP_X_AUTH_TOKEN', env.get('HTTP_X_STORAGE_TOKEN'))
         return claims
@@ -315,6 +335,7 @@ class AuthProtocol(object):
                             key_file=self.key_file, cert_file=self.cert_file,
                             timeout=self.auth_timeout)
         resp = conn.getresponse()
+        # pylint: disable=E1103
         conn.close()
 
         if not str(resp.status).startswith('20'):
@@ -326,7 +347,7 @@ class AuthProtocol(object):
             # what should be returned
             if self.admin_user and self.admin_password and \
                not retry and str(resp.status) == '404':
-                LOG.warn("Unable to validate token." +
+                logger.warn("Unable to validate token." +
                          "Admin token possibly expired.")
                 self.admin_token = None
                 return self._validate_claims(claims, True)
@@ -335,7 +356,7 @@ class AuthProtocol(object):
             #TODO(Ziad): there is an optimization we can do here. We have just
             #received data from Keystone that we can use instead of making
             #another call in _expound_claims
-            LOG.info("Claims successfully validated")
+            logger.info("Claims successfully validated")
             return True
 
     def _expound_claims(self):
@@ -352,6 +373,7 @@ class AuthProtocol(object):
                             timeout=self.auth_timeout)
         resp = conn.getresponse()
         data = resp.read()
+        # pylint: disable=E1103
         conn.close()
 
         if not str(resp.status).startswith('20'):
@@ -361,10 +383,9 @@ class AuthProtocol(object):
         #TODO(Ziad): make this more robust
         #first_group = token_info['auth']['user']['groups']['group'][0]
         roles = []
-        role_refs = token_info["access"]["user"]["roles"]
-        if role_refs != None:
-            for role_ref in role_refs:
-                roles.append(role_ref["id"])
+        rolegrants = token_info["access"]["user"]["roles"]
+        if rolegrants is not None:
+            roles = [rolegrant["id"] for rolegrant in rolegrants]
 
         token_info = json.loads(data)
 
@@ -410,6 +431,7 @@ class AuthProtocol(object):
         else:
             # We are forwarding to a remote service (no downstream WSGI app)
             req = Request(self.proxy_headers)
+            # pylint: disable=E1101
             parsed = urlparse(req.url)
             conn = http_connect(self.service_host,
                                 self.service_port,

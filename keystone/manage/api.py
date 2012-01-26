@@ -2,13 +2,14 @@ import datetime
 
 import keystone.backends.api as db_api
 import keystone.backends.models as db_models
+import keystone.models as models
 
 
 def add_user(name, password, tenant=None):
     if tenant:
         tenant = db_api.TENANT.get_by_name(tenant).id
 
-    obj = db_models.User()
+    obj = models.User()
     obj.name = name
     obj.password = password
     obj.enabled = True
@@ -32,10 +33,10 @@ def list_users():
 
 
 def add_tenant(name):
-    obj = db_models.Tenant()
+    obj = models.Tenant()
     obj.name = name
     obj.enabled = True
-    return db_api.TENANT.create(obj)
+    db_api.TENANT.create(obj)
 
 
 def list_tenants():
@@ -53,11 +54,18 @@ def disable_tenant(name):
     return db_api.TENANT.update(obj.id, obj)
 
 
-def add_role(name):
-    obj = db_models.Role()
+def add_role(name, service_name=None):
+    obj = models.Role()
     obj.name = name
-    role = db_api.ROLE.create(obj)
-    return role
+
+    names = name.split(":")
+    if len(names) == 2:
+        service_name = names[0] or service_name
+    if service_name:
+        # we have a role with service prefix, fill in the service ID
+        service = db_api.SERVICE.get_by_name(name=service_name)
+        obj.service_id = service.id
+    return db_api.ROLE.create(obj)
 
 
 def list_role_assignments(tenant):
@@ -75,7 +83,7 @@ def list_roles(tenant=None):
         objects = db_api.ROLE.get_all()
         if objects is None:
             raise IndexError("Roles not found")
-        return [[o.id, o.name, o.service_id, o.desc] for o in objects]
+        return [[o.id, o.name, o.service_id, o.description] for o in objects]
 
 
 def grant_role(role, user, tenant=None):
@@ -145,9 +153,10 @@ def add_endpoint(tenant, endpoint_template):
 
 def add_token(token, user, tenant, expires):
     user = db_api.USER.get_by_name(name=user).id
-    tenant = db_api.TENANT.get_by_name(name=tenant).id
+    if tenant:
+        tenant = db_api.TENANT.get_by_name(name=tenant).id
 
-    obj = db_models.Token()
+    obj = models.Token()
     obj.id = token
     obj.user_id = user
     obj.tenant_id = tenant
@@ -171,10 +180,10 @@ def delete_token(token):
 
 
 def add_service(name, type, desc, owner_id):
-    obj = db_models.Service()
+    obj = models.Service()
     obj.name = name
     obj.type = type
-    obj.desc = desc
+    obj.description = desc
     obj.owner_id = owner_id
     return db_api.SERVICE.create(obj)
 
@@ -183,7 +192,7 @@ def list_services():
     objects = db_api.SERVICE.get_all()
     if objects is None:
         raise IndexError("Services not found")
-    return [[o.id, o.name, o.type, o.owner_id, o.desc] for o in objects]
+    return [[o.id, o.name, o.type, o.owner_id, o.description] for o in objects]
 
 
 def add_credentials(user, type, key, secrete, tenant=None):
@@ -192,7 +201,7 @@ def add_credentials(user, type, key, secrete, tenant=None):
     if tenant:
         tenant = db_api.TENANT.get_by_name(tenant).id
 
-    obj = db_models.Credentials()
+    obj = models.Credentials()
     obj.user_id = user
     obj.type = type
     obj.key = key
