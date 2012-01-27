@@ -40,8 +40,6 @@ then
         # On first install, create basics configuration and add roles
         if [ -z "$2" ]
         then
-            sed -e "s,_DBC_URL_,$SQL_CONNECTION," -i /etc/keystone/keystone.conf
-
             keystone-manage database sync
             keystone-manage role add Admin
             keystone-manage role add Member
