@@ -1,3 +1,9 @@
+keystone (2012.1~e3-2) unstable; urgency=low
+
+  * Add dbconfig prerm
+
+ -- Julien Danjou <acid@debian.org>  Fri, 27 Jan 2012 16:13:48 +0100
+
 keystone (2012.1~e3-1) unstable; urgency=low
 
   * New upstream release.
