@@ -24,10 +24,9 @@ override_dh_install:
 	chmod -x $(CURDIR)/debian/python-keystone/usr/lib/python*/dist-packages/keystone/test/etc/ldap.conf.template
 	sed -i 's|^log_file = keystone.log$$|log_file = /var/log/keystone/keystone.log|' \
 		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
-	sed -i 's|^sqlite = sqlite:///keystone.db$$|sqlite = sqlite:///var/lib/keystone/keystone.db|' \
-		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
 
 override_dh_clean:
+	rm -f run_tests.log
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info
 	rm -rf $(CURDIR)/keystone/test/*.log
 	rm -rf $(CURDIR)/doc/source/sourcecode

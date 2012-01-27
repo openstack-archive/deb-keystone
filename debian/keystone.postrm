@@ -1,0 +1,21 @@
+#!/bin/sh
+
+set -e
+
+if [ -f /usr/share/debconf/confmodule ]
+then
+    . /usr/share/debconf/confmodule
+fi
+
+if [ -f /usr/share/dbconfig-common/dpkg/postrm ]
+then
+    . /usr/share/dbconfig-common/dpkg/postrm
+    dbc_go keystone $@
+fi
+
+case "$1" in
+    purge)
+        rm -rf /var/log/keystone
+esac
+
+#DEBHELPER#

@@ -1,3 +1,10 @@
+keystone (2012.1~e3-1) unstable; urgency=low
+
+  * New upstream release.
+  * Use dbconfig to configure database
+
+ -- Julien Danjou <acid@debian.org>  Thu, 26 Jan 2012 17:03:10 +0100
+
 keystone (2012.1~e2-4) unstable; urgency=low
 
   * Fix default location of keystone db file
