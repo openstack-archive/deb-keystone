@@ -44,7 +44,8 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-webob,
  python-sqlalchemy,
  python-sqlite,
- python-nova
+ python-nova,
+ python-dateutil
 Recommends: python-memcache, python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)

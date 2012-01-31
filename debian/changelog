@@ -1,3 +1,9 @@
+keystone (2012.1~e3-3) unstable; urgency=low
+
+  * Add missing dependency on python-dateutil
+
+ -- Julien Danjou <acid@debian.org>  Tue, 31 Jan 2012 12:37:35 +0100
+
 keystone (2012.1~e3-2) unstable; urgency=low
 
   * Add dbconfig prerm
