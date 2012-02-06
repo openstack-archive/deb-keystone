@@ -26,7 +26,8 @@ Build-Depends: debhelper (>= 7.0.50),
  python-migrate,
  python-prettytable,
  python-mox,
- python-dateutil
+ python-dateutil,
+ pep8
 Standards-Version: 3.9.2
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
