@@ -2,10 +2,10 @@
 %:
 	dh $@ --with python2
 
-ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
-override_dh_auto_test:
-	bash run_tests.sh -N
-endif
+# ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
+# override_dh_auto_test:
+# 	bash run_tests.sh -N
+# endif
 
 ### This is temporary because upstream documentation does not build
 # override_dh_auto_build:
