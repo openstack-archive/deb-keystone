@@ -23,7 +23,9 @@ Build-Depends: debhelper (>= 7.0.50),
  python-memcache,
  python-swift,
  python-nose,
- python-migrate
+ python-migrate,
+ python-prettytable,
+ python-mox
 Standards-Version: 3.9.2
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
