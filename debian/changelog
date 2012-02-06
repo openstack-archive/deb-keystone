@@ -2,8 +2,9 @@ keystone (2012.1~e3-4) unstable; urgency=low
 
   * Add missing python-migrate, python-prettytable, python-mox in
     build deps (Closes: #658592)
+  * Deactivate tests because they fails (upstream problem)
 
- -- Julien Danjou <acid@debian.org>  Mon, 06 Feb 2012 10:32:56 +0100
+ -- Julien Danjou <acid@debian.org>  Mon, 06 Feb 2012 10:35:52 +0100
 
 keystone (2012.1~e3-3) unstable; urgency=low
 
