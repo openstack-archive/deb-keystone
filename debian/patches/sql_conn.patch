@@ -1,11 +1,11 @@
 --- a/etc/keystone.conf
 +++ b/etc/keystone.conf
-@@ -78,7 +78,7 @@
- # SQLAlchemy connection string for the reference implementation registry
- # server. Any valid SQLAlchemy connection string is fine.
- # See: http://bit.ly/ideIpI
--sql_connection = sqlite:///keystone.db
+@@ -16,7 +16,7 @@
+ # syslog_log_facility = LOG_LOCAL0
+ 
+ [sql]
+-connection = sqlite:///bla.db
 +sql_connection = _DBC_URL_
- backend_entities = ['UserRoleAssociation', 'Endpoints', 'Role', 'Tenant',
-                     'User', 'Credentials', 'EndpointTemplates', 'Token',
-                     'Service']
+ idle_timeout = 200
+ min_pool_size = 5
+ max_pool_size = 10
