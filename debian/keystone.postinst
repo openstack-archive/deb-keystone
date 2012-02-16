@@ -13,30 +13,29 @@ then
             --disabled-password \
             --group keystone
 
-    dbc_go keystone $@
-
-    case "$dbc_dbtype" in
-        sqlite3)
-            SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
-            ;;
-        mysql)
-            [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-            SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-            ;;
-        pgsql)
-            [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-            SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-            ;;
-        *)
-            SQL_CONNECTION="sqlite:////var/lib/keystone/keystone.db"
-            ;;
-    esac
-
-    [ -z "$2" -o "$dbc_install" = "true" ] \
-        && sed -e "s,_DBC_URL_,$SQL_CONNECTION," -i /etc/keystone/keystone.conf
-
     if [ "$dbc_install" = "true" ]
     then
+        dbc_go keystone $@
+
+        case "$dbc_dbtype" in
+            sqlite3)
+                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
+                ;;
+            mysql)
+                [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+                SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+                ;;
+            pgsql)
+                [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+                SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+                ;;
+            *)
+                SQL_CONNECTION="sqlite:////var/lib/keystone/keystone.db"
+                ;;
+        esac
+
+        sed -e "s,^sql_connection\s*=\s*.\+$,sql_connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
+
         # On first install, create basics configuration and add roles
         if [ -z "$2" ]
         then
