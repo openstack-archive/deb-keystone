@@ -1,3 +1,9 @@
+keystone (2012.1~e3-5) UNRELEASED; urgency=low
+
+  * Fix permissions /etc/keystone
+
+ -- Julien Danjou <acid@debian.org>  Thu, 16 Feb 2012 11:01:02 +0100
+
 keystone (2012.1~e3-4) unstable; urgency=low
 
   * Add missing python-migrate, python-prettytable, python-mox in
