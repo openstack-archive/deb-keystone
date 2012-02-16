@@ -55,7 +55,7 @@ then
         fi
     fi
 
-    chown keystone:keystone /var/lib/keystone /var/log/keystone /etc/keystone
+    chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
     chmod 0750 /etc/keystone
     chmod 0750 /var/log/keystone
 fi
