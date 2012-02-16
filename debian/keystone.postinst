@@ -44,6 +44,7 @@ then
             keystone-manage role add Member
             keystone-manage role add KeystoneAdmin
             keystone-manage role add KeystoneServiceAdmin
+            keystone-manage role add projectmanager
             keystone-manage role add sysadmin
             keystone-manage role add netadmin
         fi
