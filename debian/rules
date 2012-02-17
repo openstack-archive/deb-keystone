@@ -21,7 +21,6 @@ override_dh_installdocs:
 
 override_dh_install:
 	dh_install
-	chmod -x $(CURDIR)/debian/python-keystone/usr/lib/python*/dist-packages/keystone/test/etc/ldap.conf.template
 	sed -i 's|^log_file = keystone.log$$|log_file = /var/log/keystone/keystone.log|' \
 		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
 
