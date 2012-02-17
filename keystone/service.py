@@ -1,8 +1,19 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-import json
-import urllib
-import urlparse
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 import uuid
 
 import routes
@@ -43,12 +54,6 @@ class AdminRouter(wsgi.ComposingRouter):
                        conditions=dict(method=['GET']))
 
         # Miscellaneous Operations
-        version_controller = VersionController()
-        mapper.connect('/',
-                       controller=version_controller,
-                       action='get_version_info', module='admin/version',
-                       conditions=dict(method=['GET']))
-
         extensions_controller = ExtensionsController()
         mapper.connect('/extensions',
                        controller=extensions_controller,
@@ -76,13 +81,6 @@ class PublicRouter(wsgi.ComposingRouter):
                        conditions=dict(method=['POST']))
 
         # Miscellaneous
-        version_controller = VersionController()
-        mapper.connect('/',
-                       controller=version_controller,
-                       action='get_version_info',
-                       module='service/version',
-                       conditions=dict(method=['GET']))
-
         extensions_controller = ExtensionsController()
         mapper.connect('/extensions',
                        controller=extensions_controller,
@@ -93,6 +91,81 @@ class PublicRouter(wsgi.ComposingRouter):
         routers = [identity_router]
 
         super(PublicRouter, self).__init__(mapper, routers)
+
+
+class PublicVersionRouter(wsgi.ComposingRouter):
+    def __init__(self):
+        mapper = routes.Mapper()
+        version_controller = VersionController('public')
+        mapper.connect('/',
+                       controller=version_controller,
+                       action='get_versions')
+        routers = []
+        super(PublicVersionRouter, self).__init__(mapper, routers)
+
+
+class AdminVersionRouter(wsgi.ComposingRouter):
+    def __init__(self):
+        mapper = routes.Mapper()
+        version_controller = VersionController('admin')
+        mapper.connect('/',
+                       controller=version_controller,
+                       action='get_versions')
+        routers = []
+        super(AdminVersionRouter, self).__init__(mapper, routers)
+
+
+class VersionController(wsgi.Application):
+    def __init__(self, version_type):
+        self.catalog_api = catalog.Manager()
+        self.url_key = "%sURL" % version_type
+        super(VersionController, self).__init__()
+
+    def _get_identity_url(self, context):
+        catalog_ref = self.catalog_api.get_catalog(
+                context=context,
+                user_id=None,
+                tenant_id=None)
+        for region, region_ref in catalog_ref.iteritems():
+            for service, service_ref in region_ref.iteritems():
+                if service == 'identity':
+                    return service_ref[self.url_key]
+
+        raise NotImplementedError()
+
+    def get_versions(self, context):
+        identity_url = self._get_identity_url(context)
+        if not identity_url.endswith('/'):
+            identity_url = identity_url + '/'
+        return {
+            "versions": {
+                "values": [{
+                    "id": "v2.0",
+                    "status": "beta",
+                    "updated": "2011-11-19T00:00:00Z",
+                    "links": [{
+                            "rel": "self",
+                            "href": identity_url,
+                        }, {
+                            "rel": "describedby",
+                            "type": "text/html",
+                            "href": "http://docs.openstack.org/api/openstack-"
+                                     "identity-service/2.0/content/"
+                        }, {
+                            "rel": "describedby",
+                            "type": "application/pdf",
+                            "href": "http://docs.openstack.org/api/openstack-"
+                                     "identity-service/2.0/identity-dev-guide-"
+                                     "2.0.pdf"
+                        }],
+                    "media-types": [{
+                            "base": "application/json",
+                            "type": "application/vnd.openstack.identity-v2.0"
+                                     "+json"
+                        }]
+                }]
+            }
+        }
 
 
 class NoopController(wsgi.Application):
@@ -168,8 +241,7 @@ class TokenController(wsgi.Application):
                 raise webob.exc.HTTPForbidden(e.message)
 
             token_ref = self.token_api.create_token(
-                    context, token_id, dict(expires='',
-                                            id=token_id,
+                    context, token_id, dict(id=token_id,
                                             user=user_ref,
                                             tenant=tenant_ref,
                                             metadata=metadata_ref))
@@ -195,10 +267,10 @@ class TokenController(wsgi.Application):
             else:
                 tenant_id = auth.get('tenantId', None)
 
-            old_token_ref = self.token_api.get_token(context=context,
-                                                     token_id=token)
-
-            if old_token_ref is None:
+            try:
+                old_token_ref = self.token_api.get_token(context=context,
+                                                         token_id=token)
+            except exception.NotFound:
                 raise exception.Unauthorized()
 
             user_ref = old_token_ref['user']
@@ -225,8 +297,7 @@ class TokenController(wsgi.Application):
                 catalog_ref = {}
 
             token_ref = self.token_api.create_token(
-                    context, token_id, dict(expires='',
-                                            id=token_id,
+                    context, token_id, dict(id=token_id,
                                             user=user_ref,
                                             tenant=tenant_ref,
                                             metadata=metadata_ref))
@@ -253,9 +324,6 @@ class TokenController(wsgi.Application):
         token_ref = self.token_api.get_token(context=context,
                                              token_id=token_id)
 
-        if token_ref is None:
-            raise exception.NotFound(target='token')
-
         if belongs_to:
             assert token_ref['tenant']['id'] == belongs_to
 
@@ -277,8 +345,12 @@ class TokenController(wsgi.Application):
 
     def endpoints(self, context, token_id):
         """Return service catalog endpoints."""
-        token_ref = self.token_api.get_token(context=context,
-                                             token_id=token_id)
+        try:
+            token_ref = self.token_api.get_token(context=context,
+                                                 token_id=token_id)
+        except exception.NotFound:
+            raise exception.Unauthorized()
+
         catalog_ref = self.catalog_api.get_catalog(context,
                                                    token_ref['user']['id'],
                                                    token_ref['tenant']['id'])
@@ -292,8 +364,11 @@ class TokenController(wsgi.Application):
     def _format_token(self, token_ref, roles_ref):
         user_ref = token_ref['user']
         metadata_ref = token_ref['metadata']
+        expires = token_ref['expires']
+        if expires is not None:
+            expires = utils.isotime(expires)
         o = {'access': {'token': {'id': token_ref['id'],
-                                  'expires': token_ref['expires']
+                                  'expires': expires,
                                   },
                         'user': {'id': user_ref['id'],
                                  'name': user_ref['name'],
@@ -355,20 +430,12 @@ class TokenController(wsgi.Application):
         return services.values()
 
 
-class VersionController(wsgi.Application):
-    def __init__(self):
-        super(VersionController, self).__init__()
-
-    def get_version_info(self, context, module='version'):
-        raise NotImplemented()
-
-
 class ExtensionsController(wsgi.Application):
     def __init__(self):
         super(ExtensionsController, self).__init__()
 
     def get_extensions_info(self, context):
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 def public_app_factory(global_conf, **local_conf):
@@ -381,3 +448,15 @@ def admin_app_factory(global_conf, **local_conf):
     conf = global_conf.copy()
     conf.update(local_conf)
     return AdminRouter()
+
+
+def public_version_app_factory(global_conf, **local_conf):
+    conf = global_conf.copy()
+    conf.update(local_conf)
+    return PublicVersionRouter()
+
+
+def admin_version_app_factory(global_conf, **local_conf):
+    conf = global_conf.copy()
+    conf.update(local_conf)
+    return AdminVersionRouter()

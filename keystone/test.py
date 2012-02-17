@@ -1,5 +1,19 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 import os
 import unittest
 import subprocess
@@ -202,6 +216,21 @@ class TestCase(unittest.TestCase):
         for x in sys.modules.keys():
             if x.startswith(module):
                 del sys.modules[x]
+
+    def assertIsNotNone(self, actual):
+        if hasattr(super(TestCase, self), 'assertIsNotNone'):
+            return super(TestCase, self).assertIsNotNone(actual)
+        self.assert_(actual is not None)
+
+    def assertNotIn(self, needle, haystack):
+        if hasattr(super(TestCase, self), 'assertNotIn'):
+            return super(TestCase, self).assertNotIn(needle, haystack)
+        self.assert_(needle not in haystack)
+
+    def assertIn(self, needle, haystack):
+        if hasattr(super(TestCase, self), 'assertIn'):
+            return super(TestCase, self).assertIn(needle, haystack)
+        self.assert_(needle in haystack)
 
     def assertListEquals(self, actual, expected):
         copy = expected[:]

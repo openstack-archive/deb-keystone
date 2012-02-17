@@ -55,6 +55,7 @@ class Server(object):
         self.port = port
         self.pool = eventlet.GreenPool(threads)
         self.socket_info = {}
+        self.greenthread = None
 
     def start(self, host='0.0.0.0', key=None, backlog=128):
         """Run a WSGI server with the given application."""
@@ -63,9 +64,13 @@ class Server(object):
                        'host': host,
                        'port': self.port})
         socket = eventlet.listen((host, self.port), backlog=backlog)
-        self.pool.spawn_n(self._run, self.application, socket)
+        self.greenthread = self.pool.spawn(self._run, self.application, socket)
         if key:
             self.socket_info[key] = socket.getsockname()
+
+    def kill(self):
+        if self.greenthread:
+            self.greenthread.kill()
 
     def wait(self):
         """Wait until all servers have completed running."""
@@ -160,6 +165,7 @@ class Application(BaseApplication):
 
         # allow middleware up the stack to provide context & params
         context = req.environ.get('openstack.context', {})
+        context['query_string'] = dict(req.params.iteritems())
         params = req.environ.get('openstack.params', {})
         params.update(arg_dict)
 
@@ -197,11 +203,17 @@ class Application(BaseApplication):
 
     def assert_admin(self, context):
         if not context['is_admin']:
-            user_token_ref = self.token_api.get_token(
-                    context=context, token_id=context['token_id'])
+            try:
+                user_token_ref = self.token_api.get_token(
+                        context=context, token_id=context['token_id'])
+            except exception.TokenNotFound:
+                raise exception.Unauthorized()
             creds = user_token_ref['metadata'].copy()
             creds['user_id'] = user_token_ref['user'].get('id')
             creds['tenant_id'] = user_token_ref['tenant'].get('id')
+            # NOTE(vish): this is pretty inefficient
+            creds['roles'] = [self.identity_api.get_role(context, role)['name']
+                              for role in creds.get('roles', [])]
             # Accept either is_admin or the admin role
             assert self.policy_api.can_haz(context,
                                            ('is_admin:1', 'roles:admin'),

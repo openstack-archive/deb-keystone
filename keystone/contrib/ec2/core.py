@@ -1,5 +1,19 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 """Main entry point into the EC2 Credentials service.
 
 This service allows the creation of access/secret credentials used for
@@ -26,6 +40,7 @@ import webob.exc
 
 from keystone import catalog
 from keystone import config
+from keystone import exception
 from keystone import identity
 from keystone import policy
 from keystone import service
@@ -162,8 +177,7 @@ class Ec2Controller(wsgi.Application):
                     metadata=metadata_ref)
 
         token_ref = self.token_api.create_token(
-                context, token_id, dict(expires='',
-                                        id=token_id,
+                context, token_id, dict(id=token_id,
                                         user=user_ref,
                                         tenant=tenant_ref,
                                         metadata=metadata_ref))
@@ -252,8 +266,11 @@ class Ec2Controller(wsgi.Application):
         :raises webob.exc.HTTPForbidden: when token is invalid
 
         """
-        token_ref = self.token_api.get_token(context=context,
-                token_id=context['token_id'])
+        try:
+            token_ref = self.token_api.get_token(context=context,
+                    token_id=context['token_id'])
+        except exception.TokenNotFound:
+            raise exception.Unauthorized()
         token_user_id = token_ref['user'].get('id')
         if not token_user_id == user_id:
             raise webob.exc.HTTPForbidden()

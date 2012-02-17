@@ -1,12 +1,27 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+import uuid
+
 import nose.exc
 
-from keystone import config
 from keystone import test
 
 import default_fixtures
 
-CONF = config.CONF
 OPENSTACK_REPO = 'https://review.openstack.org/p/openstack'
 KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
@@ -18,9 +33,6 @@ class CompatTestCase(test.TestCase):
         revdir = test.checkout_vendor(*self.get_checkout())
         self.add_path(revdir)
         self.clear_module('keystoneclient')
-
-        self.public_app = self.loadapp('keystone', name='main')
-        self.admin_app = self.loadapp('keystone', name='admin')
 
         self.load_backends()
         self.load_fixtures(default_fixtures)
@@ -36,14 +48,19 @@ class CompatTestCase(test.TestCase):
             self.user_foo['id'], self.tenant_bar['id'],
             dict(roles=['keystone_admin'], is_admin='1'))
 
+    def tearDown(self):
+        self.public_server.kill()
+        self.admin_server.kill()
+        self.public_server = None
+        self.admin_server = None
+        super(CompatTestCase, self).tearDown()
+
     def _public_url(self):
         public_port = self.public_server.socket_info['socket'][1]
-        CONF.public_port = public_port
         return "http://localhost:%s/v2.0" % public_port
 
     def _admin_url(self):
         admin_port = self.admin_server.socket_info['socket'][1]
-        CONF.admin_port = admin_port
         return "http://localhost:%s/v2.0" % admin_port
 
     def _client(self, **kwargs):
@@ -180,7 +197,6 @@ class KeystoneClientTests(object):
         tenant = client.tenants.get(tenant_id=tenant.id)
         self.assertEquals(tenant.name, test_tenant)
 
-        # TODO(devcamcar): update gives 404. why?
         tenant = client.tenants.update(tenant_id=tenant.id,
                                        tenant_name='new_tenant2',
                                        enabled=False,
@@ -223,7 +239,9 @@ class KeystoneClientTests(object):
         user = client.users.get(user=user.id)
         self.assertEquals(user.name, test_username)
 
-        user = client.users.update_email(user=user, email='user2@test.com')
+        user = client.users.update(user=user,
+                                   name=test_username,
+                                   email='user2@test.com')
         self.assertEquals(user.email, 'user2@test.com')
 
         # NOTE(termie): update_enabled doesn't return anything, probably a bug
@@ -250,6 +268,13 @@ class KeystoneClientTests(object):
         client.users.delete(user.id)
         self.assertRaises(client_exceptions.NotFound, client.users.get,
                           user.id)
+
+        # Test creating a user with a tenant (auto-add to tenant)
+        user2 = client.users.create(name=test_username,
+                                    password='password',
+                                    email='user1@test.com',
+                                    tenant_id='bar')
+        self.assertEquals(user2.name, test_username)
 
     def test_user_list(self):
         client = self.get_client()
@@ -448,6 +473,58 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         self.assert_(self.tenant_baz['id'] not in
                      [x.id for x in tenant_refs])
 
+    def test_tenant_list_marker(self):
+        client = self.get_client()
+
+        # Add two arbitrary tenants to user for testing purposes
+        for i in range(2):
+            tenant_id = uuid.uuid4().hex
+            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id}
+            self.identity_api.create_tenant(tenant_id, tenant)
+            self.identity_api.add_user_to_tenant(tenant_id, self.user_foo['id'])
+
+        tenants = client.tenants.list()
+        self.assertEqual(len(tenants), 3)
+
+        tenants_marker = client.tenants.list(marker=tenants[0].id)
+        self.assertEqual(len(tenants_marker), 2)
+        self.assertEqual(tenants[1].name, tenants_marker[0].name)
+        self.assertEqual(tenants[2].name, tenants_marker[1].name)
+
+    def test_tenant_list_marker_not_found(self):
+        from keystoneclient import exceptions as client_exceptions
+
+        client = self.get_client()
+        self.assertRaises(client_exceptions.BadRequest,
+                          client.tenants.list, marker=uuid.uuid4().hex)
+
+    def test_tenant_list_limit(self):
+        client = self.get_client()
+
+        # Add two arbitrary tenants to user for testing purposes
+        for i in range(2):
+            tenant_id = uuid.uuid4().hex
+            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id}
+            self.identity_api.create_tenant(tenant_id, tenant)
+            self.identity_api.add_user_to_tenant(tenant_id, self.user_foo['id'])
+
+        tenants = client.tenants.list()
+        self.assertEqual(len(tenants), 3)
+
+        tenants_limited = client.tenants.list(limit=2)
+        self.assertEqual(len(tenants_limited), 2)
+        self.assertEqual(tenants[0].name, tenants_limited[0].name)
+        self.assertEqual(tenants[1].name, tenants_limited[1].name)
+
+    def test_tenant_list_limit_bad_value(self):
+        from keystoneclient import exceptions as client_exceptions
+
+        client = self.get_client()
+        self.assertRaises(client_exceptions.BadRequest,
+                          client.tenants.list, limit='a')
+        self.assertRaises(client_exceptions.BadRequest,
+                          client.tenants.list, limit=-1)
+
     def test_roles_get_by_user(self):
         client = self.get_client()
         roles = client.roles.roles_for_user(user=self.user_foo['id'],
@@ -473,10 +550,10 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         roleref_refs = client.roles.get_user_role_refs(
                 user_id=self.user_foo['id'])
         for roleref_ref in roleref_refs:
-          if (roleref_ref.roleId == self.role_useless['id'] and
-              roleref_ref.tenantId == self.tenant_baz['id']):
-            # use python's scope fall through to leave roleref_ref set
-            break
+            if (roleref_ref.roleId == self.role_useless['id']
+                and roleref_ref.tenantId == self.tenant_baz['id']):
+                # use python's scope fall through to leave roleref_ref set
+                break
 
         client.roles.remove_user_from_tenant(tenant_id=self.tenant_baz['id'],
                                              user_id=self.user_foo['id'],
@@ -493,3 +570,44 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
 
     def test_authenticate_and_delete_token(self):
         raise nose.exc.SkipTest('N/A')
+
+    def test_user_create_update_delete(self):
+        from keystoneclient import exceptions as client_exceptions
+
+        test_username = 'new_user'
+        client = self.get_client()
+        user = client.users.create(name=test_username,
+                                   password='password',
+                                   email='user1@test.com')
+        self.assertEquals(user.name, test_username)
+
+        user = client.users.get(user=user.id)
+        self.assertEquals(user.name, test_username)
+
+        user = client.users.update_email(user=user, email='user2@test.com')
+        self.assertEquals(user.email, 'user2@test.com')
+
+        # NOTE(termie): update_enabled doesn't return anything, probably a bug
+        client.users.update_enabled(user=user, enabled=False)
+        user = client.users.get(user.id)
+        self.assertFalse(user.enabled)
+
+        self.assertRaises(client_exceptions.AuthorizationFailure,
+                  self._client,
+                  username=test_username,
+                  password='password')
+        client.users.update_enabled(user, True)
+
+        user = client.users.update_password(user=user, password='password2')
+
+        self._client(username=test_username,
+                     password='password2')
+
+        user = client.users.update_tenant(user=user, tenant='bar')
+        # TODO(ja): once keystonelight supports default tenant
+        #           when you login without specifying tenant, the
+        #           token should be scoped to tenant 'bar'
+
+        client.users.delete(user.id)
+        self.assertRaises(client_exceptions.NotFound, client.users.get,
+                          user.id)

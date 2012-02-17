@@ -1,7 +1,22 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 import json
-import webob
+
+import webob.exc
 
 from keystone import config
 from keystone.common import wsgi
@@ -80,10 +95,11 @@ class JsonBodyMiddleware(wsgi.Middleware):
     an underscore.
 
     """
-
     def process_request(self, request):
-        #if 'json' not in request.params:
-        #    return
+        # Ignore unrecognized content types. Empty string indicates
+        # the client did not explicitly set the header
+        if not request.content_type in ('application/json', ''):
+            return
 
         params_json = request.body
         if not params_json:
@@ -92,6 +108,9 @@ class JsonBodyMiddleware(wsgi.Middleware):
         params_parsed = {}
         try:
             params_parsed = json.loads(params_json)
+        except ValueError:
+            msg = "Malformed json in request body"
+            raise webob.exc.HTTPBadRequest(explanation=msg)
         finally:
             if not params_parsed:
                 params_parsed = {}
@@ -105,40 +124,3 @@ class JsonBodyMiddleware(wsgi.Middleware):
             params[k] = v
 
         request.environ[PARAMS_ENV] = params
-
-
-class Debug(wsgi.Middleware):
-    """
-    Middleware that produces stream debugging traces to the console (stdout)
-    for HTTP requests and responses flowing through it.
-    """
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        print ('*' * 40) + ' REQUEST ENVIRON'
-        for key, value in req.environ.items():
-            print key, '=', value
-        print
-        resp = req.get_response(self.application)
-
-        print ('*' * 40) + ' RESPONSE HEADERS'
-        for (key, value) in resp.headers.iteritems():
-            print key, '=', value
-        print
-
-        resp.app_iter = self.print_generator(resp.app_iter)
-
-        return resp
-
-    @staticmethod
-    def print_generator(app_iter):
-        """
-        Iterator that prints the contents of a wrapper string iterator
-        when iterated.
-        """
-        print ('*' * 40) + ' BODY'
-        for part in app_iter:
-            sys.stdout.write(part)
-            sys.stdout.flush()
-            yield part
-        print

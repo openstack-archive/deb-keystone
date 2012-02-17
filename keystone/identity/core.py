@@ -1,5 +1,19 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 """Main entry point into the Identity service."""
 
 import uuid
@@ -232,10 +246,10 @@ class TenantController(wsgi.Application):
         Doesn't care about token scopedness.
 
         """
-        token_ref = self.token_api.get_token(context=context,
-                                             token_id=context['token_id'])
-
-        if token_ref is None:
+        try:
+            token_ref = self.token_api.get_token(context=context,
+                                                 token_id=context['token_id'])
+        except exception.NotFound:
             raise exception.Unauthorized()
 
         user_ref = token_ref['user']
@@ -246,21 +260,15 @@ class TenantController(wsgi.Application):
             tenant_refs.append(self.identity_api.get_tenant(
                     context=context,
                     tenant_id=tenant_id))
-        return self._format_tenants_for_token(tenant_refs)
+        params = {
+            'limit': context['query_string'].get('limit'),
+            'marker': context['query_string'].get('marker'),
+        }
+        return self._format_tenant_list(tenant_refs, **params)
 
     def get_tenant(self, context, tenant_id):
         # TODO(termie): this stuff should probably be moved to middleware
-        if not context['is_admin']:
-            user_token_ref = self.token_api.get_token(
-                    context=context, token_id=context['token_id'])
-            creds = user_token_ref['metadata'].copy()
-            creds['user_id'] = user_token_ref['user'].get('id')
-            creds['tenant_id'] = user_token_ref['tenant'].get('id')
-            # Accept either is_admin or the admin role
-            assert self.policy_api.can_haz(context,
-                                           ('is_admin:1', 'roles:admin'),
-                                           creds)
-
+        self.assert_admin(context)
         tenant = self.identity_api.get_tenant(context, tenant_id)
         if not tenant:
             return webob.exc.HTTPNotFound()
@@ -293,7 +301,30 @@ class TenantController(wsgi.Application):
         self.assert_admin(context)
         raise NotImplementedError()
 
-    def _format_tenants_for_token(self, tenant_refs):
+    def _format_tenant_list(self, tenant_refs, **kwargs):
+        marker = kwargs.get('marker')
+        page_idx = 0
+        if marker is not None:
+            for (marker_idx, tenant) in enumerate(tenant_refs):
+                if tenant['id'] == marker:
+                    # we start pagination after the marker
+                    page_idx = marker_idx + 1
+                    break
+            else:
+                msg = 'Marker could not be found'
+                raise webob.exc.HTTPBadRequest(explanation=msg)
+
+        limit = kwargs.get('limit')
+        if limit is not None:
+            try:
+                limit = int(limit)
+                assert limit >= 0
+            except (ValueError, AssertionError):
+                msg = 'Invalid limit value'
+                raise webob.exc.HTTPBadRequest(explanation=msg)
+
+        tenant_refs = tenant_refs[page_idx:limit]
+
         for x in tenant_refs:
             x['enabled'] = True
         o = {'tenants': tenant_refs,
@@ -334,7 +365,7 @@ class UserController(wsgi.Application):
         new_user_ref = self.identity_api.create_user(
                 context, user_id, user_ref)
         if tenant_id:
-            self.identity_api.add_user_to_tenant(tenant_id, user_id)
+            self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
         return {'user': new_user_ref}
 
     def update_user(self, context, user_id, user):
