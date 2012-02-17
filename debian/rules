@@ -7,17 +7,11 @@
 # 	bash run_tests.sh -N
 # endif
 
-### This is temporary because upstream documentation does not build
-# override_dh_auto_build:
-# 	dh_auto_build
-# 	python setup.py build_sphinx
+override_dh_auto_build:
+	dh_auto_build
+	python setup.py build_sphinx
 
 override_dh_installman:
-
-override_dh_installdocs:
-	dh_installdocs -X build/sphinx
-
-###
 
 override_dh_install:
 	dh_install
