@@ -1,0 +1,11 @@
+--- a/etc/keystone.conf
++++ b/etc/keystone.conf
+@@ -27,7 +27,7 @@
+ 
+ [catalog]
+ driver = keystone.catalog.backends.templated.TemplatedCatalog
+-template_file = ./etc/default_catalog.templates
++template_file = /etc/keystone/default_catalog.templates
+ 
+ [token]
+ driver = keystone.token.backends.kvs.Token
