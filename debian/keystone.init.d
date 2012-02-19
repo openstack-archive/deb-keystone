@@ -18,7 +18,7 @@
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="OpenStack Identity service"
 NAME=keystone
-DAEMON=/usr/bin/keystone
+DAEMON=/usr/bin/keystone-all
 DAEMON_ARGS=""             # Arguments to run the daemon with
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
