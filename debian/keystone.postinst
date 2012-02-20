@@ -61,8 +61,12 @@ fi
 
 if [ -z $2 ]
 then
+   if ! timeout 20 sh -c "while ! http_proxy= wget -q -O- http://127.0.0.1:35357/v2.0/; do sleep 1; done"; then
+      echo "keystone did not start"
+      exit 1
+   fi
    keystone role-create --name=admin
-   keystone role-create --naem=Member
+   keystone role-create --name=Member
    keystone role-create --name=KeystoneAdmin
    keystone role-create --name=KeystoneServiceAdmin
    keystone role-create --name=sysadmin
