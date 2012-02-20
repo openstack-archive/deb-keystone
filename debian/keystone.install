@@ -1,2 +1,3 @@
 usr/bin/*
 etc/* etc/keystone
+usr/keystone/common/sql/migrate_repo/migrate.cfg usr/share/pyshared/keystone/common/migrate_repo/
