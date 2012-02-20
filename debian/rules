@@ -15,8 +15,6 @@ override_dh_installman:
 
 override_dh_install:
 	dh_install
-	sed -i 's|^log_file = keystone.log$$|log_file = /var/log/keystone/keystone.log|' \
-		$(CURDIR)/debian/keystone/etc/keystone/keystone.conf
 
 override_dh_clean:
 	rm -f run_tests.log
