@@ -1,3 +1,2 @@
 usr/bin/*
-etc/keystone.conf usr/share/keystone
 etc/* etc/keystone
