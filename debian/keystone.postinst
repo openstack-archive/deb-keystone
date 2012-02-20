@@ -34,7 +34,7 @@ then
                 ;;
         esac
 
-        sed -e "s,^sql_connection\s*=\s*.\+$,sql_connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
+        sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
 
         # On first install, create basics configuration and add roles
         if [ -z "$2" ]
