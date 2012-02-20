@@ -40,18 +40,18 @@ then
         # On first install, create basics configuration and add roles
         if [ -z "$2" ]
         then
-            keystone-manage database sync
-            keystone-manage role add Admin
-            keystone-manage role add Member
-            keystone-manage role add KeystoneAdmin
-            keystone-manage role add KeystoneServiceAdmin
-            keystone-manage role add sysadmin
-            keystone-manage role add netadmin
+            keystone-manage db_sync
+	    keystone role-create --name=admin
+	    keystone role-create --name=Member
+	    keystone role-create --name=KeystoneAdmin
+	    keystone role-create --name=KeystoneServiceAdmin
+	    keystone role-create --name=sysadmin
+	    keystone role-create --name=netadmin
         fi
 
         if [ "$dbc_upgrade" = "true" ]
         then
-	    keystone-manage database sync
+	    keystone-manage db_sync
         fi
     fi
 
