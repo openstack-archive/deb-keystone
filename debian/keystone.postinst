@@ -13,10 +13,10 @@ then
             --disabled-password \
             --group keystone
 
+    dbc_go keystone $@
+
     if [ "$dbc_install" = "true" ]
     then
-        dbc_go keystone $@
-
         case "$dbc_dbtype" in
             sqlite3)
                 SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
