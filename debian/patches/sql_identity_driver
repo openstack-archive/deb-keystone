@@ -1,0 +1,11 @@
+--- a/etc/keystone.conf
++++ b/etc/keystone.conf
+@@ -23,7 +23,7 @@
+ pool_timeout = 200
+ 
+ [identity]
+-driver = keystone.identity.backends.kvs.Identity
++driver = keystone.identity.backends.sql.Identity
+ 
+ [catalog]
+ driver = keystone.catalog.backends.templated.TemplatedCatalog
