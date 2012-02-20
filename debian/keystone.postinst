@@ -39,13 +39,17 @@ then
         # On first install, create basics configuration and add roles
         if [ -z "$2" ]
         then
+	    db_get glance/auth-token
+	    sed -s "s,^admin_token = ADMIN,admin_token = $RET," -i /etc/keystone/keystone.conf
+	    export SERVICE_TOKEN=$RET
+	    export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
             keystone-manage db_sync
-	    keystone-manage role add admin
-	    keystone-manage role add Member
-	    keystone-manage role add KeystoneAdmin
-	    keystone-manage role add KeystoneServiceAdmin
-	    keystone-manage role add sysadmin
-	    keystone-manage role add netadmin
+	    keystone role-create --name=admin
+	    keystone role-create --naem=Member
+	    keystone role-create --name=KeystoneAdmin
+	    keystone role-create --name=KeystoneServiceAdmin
+	    keystone role-create --name=sysadmin
+	    keystone role-create --name=netadmin
         fi
 
         if [ "$dbc_upgrade" = "true" ]

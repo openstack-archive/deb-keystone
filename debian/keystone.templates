@@ -1,0 +1,3 @@
+Template: keystone/auth-token
+Type: string
+_Description: Auth server admin token:
