@@ -1,1 +1,2 @@
 usr/lib/python*/dist-packages/keystone
+usr/keystone/common/sql/migrate_repo/migrate.cfg usr/share/pyshared/keystone/common/sql/migrate_repo/
