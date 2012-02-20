@@ -44,12 +44,6 @@ then
 	    export SERVICE_TOKEN=$RET
 	    export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
             keystone-manage db_sync
-	    keystone role-create --name=admin
-	    keystone role-create --naem=Member
-	    keystone role-create --name=KeystoneAdmin
-	    keystone role-create --name=KeystoneServiceAdmin
-	    keystone role-create --name=sysadmin
-	    keystone role-create --name=netadmin
         fi
 
         if [ "$dbc_upgrade" = "true" ]
@@ -63,7 +57,16 @@ then
     chmod 0750 /var/log/keystone
 fi
 
-
 #DEBHELPER#
+
+if [ -z $2 ]
+then
+   keystone role-create --name=admin
+   keystone role-create --naem=Member
+   keystone role-create --name=KeystoneAdmin
+   keystone role-create --name=KeystoneServiceAdmin
+   keystone role-create --name=sysadmin
+   keystone role-create --name=netadmin
+fi
 
 exit 0
