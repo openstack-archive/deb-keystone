@@ -1,3 +1,2 @@
 sql_identity_driver
 default_catalog.patch
-setup_migrate
