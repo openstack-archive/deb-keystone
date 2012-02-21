@@ -19,31 +19,27 @@ then
     then
         case "$dbc_dbtype" in
             sqlite3)
-                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
+                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
                 ;;
             mysql)
                 [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+                SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
                 ;;
             pgsql)
                 [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+                SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
                 ;;
             *)
-                SQL_CONNECTION="sqlite:////var/lib/keystone/keystone.db"
+                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_name"
                 ;;
         esac
 
         sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
 
-        # On first install, create basics configuration and add roles
         if [ -z "$2" ]
         then
 	    db_get keystone/auth-token
 	    sed -s "s,^admin_token = ADMIN,admin_token = $RET," -i /etc/keystone/keystone.conf
-	    export SERVICE_TOKEN=$RET
-	    export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
-            keystone-manage db_sync
         fi
 
         if [ "$dbc_upgrade" = "true" ]
@@ -59,12 +55,16 @@ fi
 
 #DEBHELPER#
 
-if [ -z $2 ]
+# On first install, create basics configuration and add roles
+if [ -z "$2" ]
 then
    if ! timeout 20 sh -c "while ! http_proxy= wget -q -O- http://127.0.0.1:5000/v2.0/; do sleep 1; done"; then
       echo "keystone did not start"
       exit 1
    fi
+   keystone-manage db_sync
+   export SERVICE_TOKEN=$RET
+   export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
    keystone role-create --name=admin
    keystone role-create --name=Member
    keystone role-create --name=KeystoneAdmin
