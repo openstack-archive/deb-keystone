@@ -5,7 +5,7 @@
  # server. Any valid SQLAlchemy connection string is fine.
  # See: http://bit.ly/ideIpI
 -sql_connection = sqlite:///keystone.db
-+sql_connection = _DBC_URL_
++sql_connection = sqlite:////var/lib/keystone/keystone.db
  backend_entities = ['UserRoleAssociation', 'Endpoints', 'Role', 'Tenant',
                      'User', 'Credentials', 'EndpointTemplates', 'Token',
                      'Service']
