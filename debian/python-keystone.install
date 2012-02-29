@@ -1,4 +1,2 @@
 usr/lib/python*/dist-packages/keystone
-usr/keystone/common/sql/migrate_repo/migrate.cfg usr/lib/python2.6/dist-packages/keystone/common/sql/migrate_repo/
-usr/keystone/common/sql/migrate_repo/migrate.cfg usr/lib/python2.7/dist-packages/keystone/common/sql/migrate_repo/
 
