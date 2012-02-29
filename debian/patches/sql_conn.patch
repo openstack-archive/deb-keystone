@@ -5,7 +5,8 @@
  
  [sql]
 -connection = sqlite:///bla.db
-+connection = _DBC_URL_
++connection = sqlite:////var/lib/keystone/keystone.db
  idle_timeout = 200
  min_pool_size = 5
  max_pool_size = 10
+

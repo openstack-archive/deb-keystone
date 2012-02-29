@@ -1,0 +1,8 @@
+run_tests.log
+build
+keystone.egg-info/*
+keystone/test/*.log
+keystone/test/*.test.db
+doc/source/sourcecode
+admin.log
+keystone-legacy-auth.log

@@ -3,11 +3,12 @@ keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
   [ Julien Danjou ]
   * Fix permissions /etc/keystone
   * Add projectmanager role on initial database creation
+  * Do not run dbconfig by default
 
   [ Ghe Rivero ]
   * Some dbconfig cleanup
 
- -- Ghe Rivero <ghe@debian.org>  Tue, 21 Feb 2012 14:05:51 +0100
+ -- Julien Danjou <acid@debian.org>  Tue, 28 Feb 2012 17:54:52 +0100
 
 keystone (2012.1~e3-4) unstable; urgency=low
 

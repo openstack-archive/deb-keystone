@@ -1,0 +1,8 @@
+A note about database configuration
+----------------------------------
+
+Keystone by default uses sqlite3 as a database. If you want
+to use something other than sqlite3, please run the following command:
+
+sudo dpkg-reconfigure -plow keystone
+
