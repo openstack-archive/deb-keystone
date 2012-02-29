@@ -1,7 +1,7 @@
 --- a/etc/keystone.conf
 +++ b/etc/keystone.conf
-@@ -23,7 +23,7 @@
- pool_timeout = 200
+@@ -33,7 +33,7 @@
+ #suffix = cn=example,cn=com
  
  [identity]
 -driver = keystone.identity.backends.kvs.Identity
