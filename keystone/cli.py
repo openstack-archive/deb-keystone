@@ -16,10 +16,7 @@
 
 from __future__ import absolute_import
 
-import json
-import logging
 import sys
-import StringIO
 import textwrap
 
 from keystone import config
@@ -93,9 +90,27 @@ class ExportLegacyCatalog(BaseApp):
         print '\n'.join(migration.dump_catalog())
 
 
+class ImportNovaAuth(BaseApp):
+    """Import a dump of nova auth data into keystone."""
+
+    name = 'import_nova_auth'
+
+    def __init__(self, *args, **kw):
+        super(ImportNovaAuth, self).__init__(*args, **kw)
+
+    def main(self):
+        from keystone.common.sql import nova
+        if len(self.argv) < 2:
+            return self.missing_param('dump_file')
+        dump_file = self.argv[1]
+        dump_data = json.loads(open(dump_file).read())
+        nova.import_auth(dump_data)
+
+
 CMDS = {'db_sync': DbSync,
         'import_legacy': ImportLegacy,
         'export_legacy_catalog': ExportLegacyCatalog,
+        'import_nova_auth': ImportNovaAuth,
         }
 
 
@@ -130,3 +145,6 @@ def main(argv=None, config_files=None):
     cmd = args[1]
     if cmd in CMDS:
         return run(cmd, (args[:1] + args[2:]))
+    else:
+        print_commands(CMDS)
+        sys.exit("Unknown command: %s" % cmd)

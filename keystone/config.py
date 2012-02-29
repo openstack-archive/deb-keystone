@@ -18,8 +18,8 @@ import gettext
 import sys
 import os
 
-from keystone.common import cfg
 from keystone.common import logging
+from keystone.openstack.common import cfg
 
 
 gettext.install('keystone', unicode=1)
@@ -31,19 +31,6 @@ class ConfigMixin(object):
             self._opts['config_file']['opt'].default = config_files
         kw.setdefault('args', [])
         return super(ConfigMixin, self).__call__(*args, **kw)
-
-    def __getitem__(self, key, default=None):
-        return getattr(self, key, default)
-
-    def __setitem__(self, key, value):
-        return setattr(self, key, value)
-
-    def iteritems(self):
-        for k in self._opts:
-            yield (k, getattr(self, k))
-
-    def print_help(self):
-        self._oparser.print_help()
 
     def set_usage(self, usage):
         self.usage = usage
@@ -161,7 +148,7 @@ register_str('public_port')
 register_str('connection', group='sql')
 register_str('idle_timeout', group='sql')
 register_str('min_pool_size', group='sql')
-register_str('maz_pool_size', group='sql')
+register_str('max_pool_size', group='sql')
 register_str('pool_timeout', group='sql')
 
 
@@ -170,3 +157,26 @@ register_str('driver', group='identity')
 register_str('driver', group='policy')
 register_str('driver', group='token')
 register_str('driver', group='ec2')
+
+
+#ldap
+register_str('url', group='ldap')
+register_str('user', group='ldap')
+register_str('password', group='ldap')
+register_str('suffix', group='ldap')
+register_bool('use_dumb_member', group='ldap')
+
+register_str('user_tree_dn', group='ldap')
+register_str('user_objectclass', group='ldap')
+register_str('user_id_attribute', group='ldap')
+
+register_str('tenant_tree_dn', group='ldap')
+register_str('tenant_objectclass', group='ldap')
+register_str('tenant_id_attribute', group='ldap')
+register_str('tenant_member_attribute', group='ldap')
+
+
+register_str('role_tree_dn', group='ldap')
+register_str('role_objectclass', group='ldap')
+register_str('role_id_attribute', group='ldap')
+register_str('role_member_attribute', group='ldap')

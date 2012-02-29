@@ -159,6 +159,14 @@ class Identity(sql.Base, identity.Driver):
             return
         return tenant_ref.to_dict()
 
+    def get_tenant_users(self, tenant_id):
+        session = self.get_session()
+        user_refs = session.query(User)\
+                .join(UserTenantMembership)\
+                .filter(UserTenantMembership.tenant_id == tenant_id)\
+                .all()
+        return [_filter_user(user_ref.to_dict()) for user_ref in user_refs]
+
     def _get_user(self, user_id):
         session = self.get_session()
         user_ref = session.query(User).filter_by(id=user_id).first()
@@ -227,12 +235,16 @@ class Identity(sql.Base, identity.Driver):
             session.delete(membership_ref)
             session.flush()
 
+    def get_tenants(self):
+        session = self.get_session()
+        tenant_refs = session.query(Tenant).all()
+        return [tenant_ref.to_dict() for tenant_ref in tenant_refs]
+
     def get_tenants_for_user(self, user_id):
         session = self.get_session()
         membership_refs = session.query(UserTenantMembership)\
                           .filter_by(user_id=user_id)\
                           .all()
-
         return [x.tenant_id for x in membership_refs]
 
     def get_roles_for_user_and_tenant(self, user_id, tenant_id):

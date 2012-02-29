@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright (c) 2010-2011 OpenStack, LLC.
+# Copyright (c) 2010-2012 OpenStack, LLC.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ from urllib import quote
 import logging
 import time
 
-from eventlet.green.httplib import CONTINUE, HTTPConnection, HTTPMessage, \
-    HTTPResponse, HTTPSConnection, _UNKNOWN
+from eventlet.green.httplib import (CONTINUE, HTTPConnection, HTTPMessage,
+                                    HTTPResponse, HTTPSConnection, _UNKNOWN)
 
 
 class BufferedHTTPResponse(HTTPResponse):

@@ -1,20 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may
-# not use this file except in compliance with the License. You may obtain
-# a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations
-# under the License.
-
-# Copyright (c) 2010-2011 OpenStack, LLC.
+# Copyright 2010-2012 OpenStack LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +14,6 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 
 """
 NOVA LAZY PROVISIONING AUTH MIDDLEWARE
@@ -82,7 +67,7 @@ class KeystoneAuthShim(wsgi.Middleware):
         # FIXME: keystone-admin-role value from keystone.conf is not
         # used neither here nor in glance_auth_token!
         roles = [r.strip() for r in req.headers.get('X_ROLE', '').split(',')]
-        is_admin = 'Admin' in roles
+        is_admin = 'admin' in roles
         if user_ref.is_admin() != is_admin:
             self.auth.modify_user(user_ref, admin=is_admin)
 
@@ -111,7 +96,7 @@ class KeystoneAuthShim(wsgi.Middleware):
 
         # Build a context, including the auth_token...
         ctx = context.RequestContext(user_id, project_id,
-                                     is_admin=('Admin' in roles),
+                                     is_admin=('admin' in roles),
                                      auth_token=auth_token)
 
         req.environ['nova.context'] = ctx

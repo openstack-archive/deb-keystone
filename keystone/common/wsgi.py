@@ -1,5 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # Copyright 2010 OpenStack LLC.
@@ -59,7 +60,7 @@ class Server(object):
 
     def start(self, host='0.0.0.0', key=None, backlog=128):
         """Run a WSGI server with the given application."""
-        logging.debug('Starting %(arg0)s on %(host)s:%(port)s' % \
+        logging.debug('Starting %(arg0)s on %(host)s:%(port)s' %
                       {'arg0': sys.argv[0],
                        'host': host,
                        'port': self.port})
@@ -181,20 +182,15 @@ class Application(BaseApplication):
             logging.warning(e)
             return render_exception(e)
 
-        if result is None or type(result) is str or type(result) is unicode:
+        if result is None:
+            return render_response(status=(204, 'No Content'))
+        elif isinstance(result, basestring):
             return result
         elif isinstance(result, webob.Response):
             return result
         elif isinstance(result, webob.exc.WSGIHTTPException):
             return result
-
-        response = webob.Response()
-        self._serialize(response, result)
-        return response
-
-    def _serialize(self, response, result):
-        response.content_type = 'application/json'
-        response.body = json.dumps(result, cls=utils.SmarterEncoder)
+        return render_response(body=result)
 
     def _normalize_arg(self, arg):
         return str(arg).replace(':', '_').replace('-', '_')
@@ -264,7 +260,7 @@ class Middleware(Application):
     def __init__(self, application):
         self.application = application
 
-    def process_request(self, req):
+    def process_request(self, request):
         """Called on each request.
 
         If this returns None, the next application down the stack will be
@@ -274,17 +270,17 @@ class Middleware(Application):
         """
         return None
 
-    def process_response(self, response):
-        """Do whatever you'd like to the response."""
+    def process_response(self, request, response):
+        """Do whatever you'd like to the response, based on the request."""
         return response
 
     @webob.dec.wsgify(RequestClass=Request)
-    def __call__(self, req):
-        response = self.process_request(req)
+    def __call__(self, request):
+        response = self.process_request(request)
         if response:
             return response
-        response = req.get_response(self.application)
-        return self.process_response(response)
+        response = request.get_response(self.application)
+        return self.process_response(request, response)
 
 
 class Debug(Middleware):
@@ -457,13 +453,15 @@ class ExtensionRouter(Router):
         return _factory
 
 
-def render_response(body, status=(200, 'OK'), headers=None):
-    """Forms a WSGI response"""
+def render_response(body=None, status=(200, 'OK'), headers=None):
+    """Forms a WSGI response."""
     resp = webob.Response()
     resp.status = '%s %s' % status
-    resp.headerlist = headers or [('Content-Type', 'application/json')]
+    resp.headerlist = headers or [('Content-Type', 'application/json'),
+                                  ('Vary', 'X-Auth-Token')]
 
-    resp.body = json.dumps(body)
+    if body is not None:
+        resp.body = json.dumps(body, cls=utils.SmarterEncoder)
 
     return resp
 

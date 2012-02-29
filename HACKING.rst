@@ -13,6 +13,7 @@ General
 - Do not write "except:", use "except Exception:" at the very least
 - Include your name with TODOs as in "#TODO(termie)"
 - Do not name anything the same name as a built-in or reserved word
+- When defining global constants, define them before functions and classes
 
 TODO vs FIXME
 -------------
@@ -57,12 +58,14 @@ Example::
   import eventlet
   import webob.exc
 
-  import nova.api.ec2
-  from nova.api import openstack
-  from nova.auth import users
-  import nova.flags
-  from nova.endpoint import cloud
   from nova import test
+  from nova import utils
+  from nova.api import openstack
+  from nova.auth import ldap
+  from nova.auth import users
+  from nova.endpoint import cloud
+  import nova.flags
+  import nova.api.ec2
 
 
 Docstrings
@@ -190,3 +193,18 @@ without the patch and passes with the patch.
 
 For more information on creating unit tests and utilizing the testing
 infrastructure in OpenStack Nova, please read nova/testing/README.rst.
+
+
+openstack-common
+----------------
+
+A number of modules from openstack-common are imported into the project.
+
+These modules are "incubating" in openstack-common and are kept in sync
+with the help of openstack-common's update.py script. See:
+
+  http://wiki.openstack.org/CommonLibrary#Incubation
+
+The copy of the code should never be directly modified here. Please
+always update openstack-common first and then run the script to copy
+the changes across.

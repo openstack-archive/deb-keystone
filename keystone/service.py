@@ -34,6 +34,11 @@ class AdminRouter(wsgi.ComposingRouter):
     def __init__(self):
         mapper = routes.Mapper()
 
+        version_controller = VersionController('admin')
+        mapper.connect('/',
+                       controller=version_controller,
+                       action='get_version')
+
         # Token Operations
         auth_controller = TokenController()
         mapper.connect('/tokens',
@@ -46,6 +51,10 @@ class AdminRouter(wsgi.ComposingRouter):
                        conditions=dict(method=['GET']))
         mapper.connect('/tokens/{token_id}',
                        controller=auth_controller,
+                       action='validate_token_head',
+                       conditions=dict(method=['HEAD']))
+        mapper.connect('/tokens/{token_id}',
+                       controller=auth_controller,
                        action='delete_token',
                        conditions=dict(method=['DELETE']))
         mapper.connect('/tokens/{token_id}/endpoints',
@@ -54,10 +63,14 @@ class AdminRouter(wsgi.ComposingRouter):
                        conditions=dict(method=['GET']))
 
         # Miscellaneous Operations
-        extensions_controller = ExtensionsController()
+        extensions_controller = AdminExtensionsController()
         mapper.connect('/extensions',
                        controller=extensions_controller,
                        action='get_extensions_info',
+                       conditions=dict(method=['GET']))
+        mapper.connect('/extensions/{extension_alias}',
+                       controller=extensions_controller,
+                       action='get_extension_info',
                        conditions=dict(method=['GET']))
         identity_router = identity.AdminRouter()
         routers = [identity_router]
@@ -68,10 +81,10 @@ class PublicRouter(wsgi.ComposingRouter):
     def __init__(self):
         mapper = routes.Mapper()
 
-        noop_controller = NoopController()
+        version_controller = VersionController('public')
         mapper.connect('/',
-                       controller=noop_controller,
-                       action='noop')
+                       controller=version_controller,
+                       action='get_version')
 
         # Token Operations
         auth_controller = TokenController()
@@ -81,10 +94,14 @@ class PublicRouter(wsgi.ComposingRouter):
                        conditions=dict(method=['POST']))
 
         # Miscellaneous
-        extensions_controller = ExtensionsController()
+        extensions_controller = PublicExtensionsController()
         mapper.connect('/extensions',
                        controller=extensions_controller,
                        action='get_extensions_info',
+                       conditions=dict(method=['GET']))
+        mapper.connect('/extensions/{extension_alias}',
+                       controller=extensions_controller,
+                       action='get_extension_info',
                        conditions=dict(method=['GET']))
 
         identity_router = identity.PublicRouter()
@@ -119,6 +136,7 @@ class VersionController(wsgi.Application):
     def __init__(self, version_type):
         self.catalog_api = catalog.Manager()
         self.url_key = "%sURL" % version_type
+
         super(VersionController, self).__init__()
 
     def _get_identity_url(self, context):
@@ -133,39 +151,61 @@ class VersionController(wsgi.Application):
 
         raise NotImplementedError()
 
-    def get_versions(self, context):
+    def _get_versions_list(self, context):
+        """The list of versions is dependent on the context."""
         identity_url = self._get_identity_url(context)
         if not identity_url.endswith('/'):
             identity_url = identity_url + '/'
 
+        versions = {}
+        versions['v2.0'] = {
+            "id": "v2.0",
+            "status": "beta",
+            "updated": "2011-11-19T00:00:00Z",
+            "links": [
+                {
+                    "rel": "self",
+                    "href": identity_url,
+                }, {
+                    "rel": "describedby",
+                    "type": "text/html",
+                    "href": "http://docs.openstack.org/api/openstack-"
+                                "identity-service/2.0/content/"
+                }, {
+                    "rel": "describedby",
+                    "type": "application/pdf",
+                    "href": "http://docs.openstack.org/api/openstack-"
+                                "identity-service/2.0/identity-dev-guide-"
+                                "2.0.pdf"
+                }
+            ],
+            "media-types": [
+                {
+                    "base": "application/json",
+                    "type": "application/vnd.openstack.identity-v2.0"
+                                "+json"
+                }, {
+                    "base": "application/xml",
+                    "type": "application/vnd.openstack.identity-v2.0"
+                                "+xml"
+                }
+            ]
+        }
+
+        return versions
+
+    def get_versions(self, context):
+        versions = self._get_versions_list(context)
         return wsgi.render_response(status=(300, 'Multiple Choices'), body={
             "versions": {
-                "values": [{
-                    "id": "v2.0",
-                    "status": "beta",
-                    "updated": "2011-11-19T00:00:00Z",
-                    "links": [{
-                            "rel": "self",
-                            "href": identity_url,
-                        }, {
-                            "rel": "describedby",
-                            "type": "text/html",
-                            "href": "http://docs.openstack.org/api/openstack-"
-                                     "identity-service/2.0/content/"
-                        }, {
-                            "rel": "describedby",
-                            "type": "application/pdf",
-                            "href": "http://docs.openstack.org/api/openstack-"
-                                     "identity-service/2.0/identity-dev-guide-"
-                                     "2.0.pdf"
-                        }],
-                    "media-types": [{
-                            "base": "application/json",
-                            "type": "application/vnd.openstack.identity-v2.0"
-                                     "+json"
-                        }]
-                }]
+                "values": versions.values()
             }
+        })
+
+    def get_version(self, context):
+        versions = self._get_versions_list(context)
+        return wsgi.render_response(body={
+            "version": versions['v2.0']
         })
 
 
@@ -213,33 +253,33 @@ class TokenController(wsgi.Application):
             password = auth['passwordCredentials'].get('password', '')
             tenant_name = auth.get('tenantName', None)
 
+            user_id = auth['passwordCredentials'].get('userId', None)
             if username:
                 user_ref = self.identity_api.get_user_by_name(
                         context=context, user_name=username)
-                user_id = user_ref['id']
-            else:
-                user_id = auth['passwordCredentials'].get('userId', None)
+                if user_ref:
+                    user_id = user_ref['id']
 
             # more compat
+            tenant_id = auth.get('tenantId', None)
             if tenant_name:
                 tenant_ref = self.identity_api.get_tenant_by_name(
                         context=context, tenant_name=tenant_name)
-                tenant_id = tenant_ref['id']
-            else:
-                tenant_id = auth.get('tenantId', None)
+                if tenant_ref:
+                    tenant_id = tenant_ref['id']
 
             try:
-                (user_ref, tenant_ref, metadata_ref) = \
-                        self.identity_api.authenticate(context=context,
-                                                       user_id=user_id,
-                                                       password=password,
-                                                       tenant_id=tenant_id)
+                auth_info = self.identity_api.authenticate(context=context,
+                                                           user_id=user_id,
+                                                           password=password,
+                                                           tenant_id=tenant_id)
+                (user_ref, tenant_ref, metadata_ref) = auth_info
 
                 # If the user is disabled don't allow them to authenticate
                 if not user_ref.get('enabled', True):
                     raise webob.exc.HTTPForbidden('User has been disabled')
             except AssertionError as e:
-                raise webob.exc.HTTPForbidden(e.message)
+                raise exception.Unauthorized(e.message)
 
             token_ref = self.token_api.create_token(
                     context, token_id, dict(id=token_id,
@@ -312,11 +352,10 @@ class TokenController(wsgi.Application):
         logging.debug('TOKEN_REF %s', token_ref)
         return self._format_authenticate(token_ref, roles_ref, catalog_ref)
 
-    # admin only
-    def validate_token(self, context, token_id, belongs_to=None):
-        """Check that a token is valid.
+    def _get_token_ref(self, context, token_id, belongs_to=None):
+        """Returns a token if a valid one exists.
 
-        Optionally, also ensure that it is owned by a specific tenant.
+        Optionally, limited to a token owned by a specific tenant.
 
         """
         # TODO(termie): this stuff should probably be moved to middleware
@@ -327,6 +366,30 @@ class TokenController(wsgi.Application):
 
         if belongs_to:
             assert token_ref['tenant']['id'] == belongs_to
+
+        return token_ref
+
+    # admin only
+    def validate_token_head(self, context, token_id, belongs_to=None):
+        """Check that a token is valid.
+
+        Optionally, also ensure that it is owned by a specific tenant.
+
+        Identical to ``validate_token``, except does not return a response.
+
+        """
+        assert self._get_token_ref(context, token_id, belongs_to)
+
+    # admin only
+    def validate_token(self, context, token_id, belongs_to=None):
+        """Check that a token is valid.
+
+        Optionally, also ensure that it is owned by a specific tenant.
+
+        Returns metadata about the token along any associated roles.
+
+        """
+        token_ref = self._get_token_ref(context, token_id, belongs_to)
 
         # TODO(termie): optimize this call at some point and put it into the
         #               the return for metadata
@@ -345,17 +408,8 @@ class TokenController(wsgi.Application):
         self.token_api.delete_token(context=context, token_id=token_id)
 
     def endpoints(self, context, token_id):
-        """Return service catalog endpoints."""
-        try:
-            token_ref = self.token_api.get_token(context=context,
-                                                 token_id=token_id)
-        except exception.NotFound:
-            raise exception.Unauthorized()
-
-        catalog_ref = self.catalog_api.get_catalog(context,
-                                                   token_ref['user']['id'],
-                                                   token_ref['tenant']['id'])
-        return {'token': {'serviceCatalog': self._format_catalog(catalog_ref)}}
+        """Return a list of endpoints available to the token."""
+        raise NotImplementedError()
 
     def _format_authenticate(self, token_ref, roles_ref, catalog_ref):
         o = self._format_token(token_ref, roles_ref)
@@ -432,11 +486,53 @@ class TokenController(wsgi.Application):
 
 
 class ExtensionsController(wsgi.Application):
-    def __init__(self):
+    """Base extensions controller to be extended by public and admin API's."""
+
+    def __init__(self, extensions=None):
         super(ExtensionsController, self).__init__()
 
+        self.extensions = extensions or {}
+
     def get_extensions_info(self, context):
-        raise NotImplementedError()
+        return {'extensions': {'values': self.extensions.values()}}
+
+    def get_extension_info(self, context, extension_alias):
+        try:
+            return {'extension': self.extensions[extension_alias]}
+        except KeyError:
+            raise exception.NotFound(target=extension_alias)
+
+
+class PublicExtensionsController(ExtensionsController):
+    pass
+
+
+class AdminExtensionsController(ExtensionsController):
+    def __init__(self, *args, **kwargs):
+        super(AdminExtensionsController, self).__init__(*args, **kwargs)
+
+        # TODO(dolph): Extensions should obviously provide this information
+        #               themselves, but hardcoding it here allows us to match
+        #               the API spec in the short term with minimal complexity.
+        self.extensions['OS-KSADM'] = {
+            'name': 'Openstack Keystone Admin',
+            'namespace': 'http://docs.openstack.org/identity/api/ext/'
+                         'OS-KSADM/v1.0',
+            'alias': 'OS-KSADM',
+            'updated': '2011-08-19T13:25:27-06:00',
+            'description': 'Openstack extensions to Keystone v2.0 API '
+                           'enabling Admin Operations.',
+            'links': [
+                {
+                    'rel': 'describedby',
+                    # TODO(dolph): link needs to be revised after
+                    #              bug 928059 merges
+                    'type': 'text/html',
+                    'href': ('https://github.com/openstack/'
+                        'identity-api'),
+                }
+            ]
+        }
 
 
 def public_app_factory(global_conf, **local_conf):
