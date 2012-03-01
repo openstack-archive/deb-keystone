@@ -1,3 +1,10 @@
+keystone (2012.1~e4-2) UNRELEASED; urgency=low
+
+  * Install egg-info
+  This is needed at least for Swift.
+
+ -- Julien Danjou <acid@debian.org>  Fri, 02 Mar 2012 10:34:30 +0100
+
 keystone (2012.1~e4-1) unstable; urgency=low
 
   *  New upstream release
@@ -13,11 +20,6 @@ keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
     That fixes LP#931236 until #607171 is fixed in dbconfig-common.
     Patch based on:
     http://bazaar.launchpad.net/~ubuntu-server-dev/keystone/essex/revision/83
-
-  [ Ghe Rivero ]
-  * Some dbconfig cleanup
-
- -- Julien Danjou <acid@debian.org>  Tue, 28 Feb 2012 17:54:52 +0100
 
 keystone (2012.1~e3-4) unstable; urgency=low
 
