@@ -30,7 +30,7 @@ then
                 SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
                 ;;
             *)
-                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_name.db"
+                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname.db"
                 ;;
         esac
 
