@@ -10,6 +10,9 @@ keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
   * Fix permissions /etc/keystone
   * Add projectmanager role on initial database creation
   * Do not run dbconfig by default
+    That fixes LP#931236 until #607171 is fixed in dbconfig-common.
+    Patch based on:
+    http://bazaar.launchpad.net/~ubuntu-server-dev/keystone/essex/revision/83
 
   [ Ghe Rivero ]
   * Some dbconfig cleanup
