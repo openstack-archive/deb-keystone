@@ -1,3 +1,9 @@
+keystone (2012.1~e4-1) unstable; urgency=low
+
+  *  New upstream release
+
+ -- Ghe Rivero <ghe@debian.org>  Fri, 02 Mar 2012 08:38:43 +0100
+
 keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
 
   [ Julien Danjou ]
