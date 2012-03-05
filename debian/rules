@@ -17,11 +17,13 @@ override_dh_install:
 	dh_install
 
 override_dh_clean:
+	dh_clean
 	rm -f run_tests.log
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info
 	rm -rf $(CURDIR)/keystone/test/*.log
 	rm -rf $(CURDIR)/keystone/test/*.test.db
 	rm -rf $(CURDIR)/doc/source/sourcecode
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
-	dh_clean
+
+override_dh_auto_clean:
 
