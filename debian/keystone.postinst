@@ -39,7 +39,8 @@ then
         if [ -z "$2" ]
         then
 	    db_get keystone/auth-token
-	    sed -s "s,^admin_token = ADMIN,admin_token = $RET," -i /etc/keystone/keystone.conf
+	    AUTH_TOKEN=${RET:-ADMIN}
+	    sed -s "s,^admin_token = ADMIN,admin_token = $AUTH_TOKEN," -i /etc/keystone/keystone.conf
         fi
 
         if [ "$dbc_upgrade" = "true" ]
@@ -63,7 +64,8 @@ then
       exit 1
    fi
    keystone-manage db_sync
-   export SERVICE_TOKEN=$RET
+   db_get keystone/auth-token
+   export SERVICE_TOKEN=${RET:-ADMIN}
    export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
    keystone role-create --name=admin
    keystone role-create --name=Member
