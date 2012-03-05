@@ -15,3 +15,7 @@ Description: Set up a database for keystone?
  .
  Database configuration can be reconfigured later by running
  'dpkg-reconfigure -plow keystone'.
+
+Template: keystone/auth-token
+Type: string
+_Description: Auth server admin token:
