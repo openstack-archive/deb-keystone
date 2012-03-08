@@ -1,6 +1,6 @@
 --- a/etc/keystone.conf
 +++ b/etc/keystone.conf
-@@ -16,7 +16,7 @@
+@@ -17,7 +17,7 @@
  # syslog_log_facility = LOG_LOCAL0
  
  [sql]

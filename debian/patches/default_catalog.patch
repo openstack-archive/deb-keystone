@@ -1,6 +1,6 @@
 --- a/etc/keystone.conf
 +++ b/etc/keystone.conf
-@@ -37,7 +37,7 @@
+@@ -38,7 +38,7 @@
  
  [catalog]
  driver = keystone.catalog.backends.templated.TemplatedCatalog
