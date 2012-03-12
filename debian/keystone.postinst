@@ -13,13 +13,24 @@ then
             --disabled-password \
             --group keystone
 
+
+    db_get keystone/configure_db
+    if [ "$RET" = "true" ]; then
+	db_get keystone/database-type
+	if [ $RET = "sqlite3" ]
+	then
+	    dbc_name="keystone.sqlite"
+	    db_set keystone/db/dbname $dbc_name
+	fi
+    fi
+
     dbc_go keystone $@
 
     if [ "$dbc_install" = "true" ]
     then
         case "$dbc_dbtype" in
             sqlite3)
-                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname.db"
+                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
                 ;;
             mysql)
                 [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
@@ -30,7 +41,7 @@ then
                 SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
                 ;;
             *)
-                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname.db"
+                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
                 ;;
         esac
 

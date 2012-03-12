@@ -1,4 +1,4 @@
-keystone (2012.1~e4-2) UNRELEASED; urgency=low
+keystone (2012.1~e4+git35-g4e4f793-1) UNRELEASED; urgency=low
 
   [ Julien Danjou ]
   * Install egg-info
