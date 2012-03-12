@@ -22,6 +22,7 @@ then
 	    dbc_name="keystone.sqlite"
 	    db_set keystone/db/dbname $dbc_name
 	fi
+	dbc_dbfile_owner="keystone:keystone"
     fi
 
     dbc_go keystone $@

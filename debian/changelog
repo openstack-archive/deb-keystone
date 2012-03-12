@@ -25,6 +25,7 @@ keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
     Patch based on:
     http://bazaar.launchpad.net/~ubuntu-server-dev/keystone/essex/revision/83
 
+  
 keystone (2012.1~e3-4) unstable; urgency=low
 
   * Add missing python-migrate, python-prettytable, python-mox in
