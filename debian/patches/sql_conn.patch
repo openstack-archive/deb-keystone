@@ -7,5 +7,5 @@
 -connection = sqlite:///keystone.db
 +connection = sqlite:////var/lib/keystone/keystone.sqlite
  idle_timeout = 200
- min_pool_size = 5
- max_pool_size = 10
+ 
+ [ldap]
