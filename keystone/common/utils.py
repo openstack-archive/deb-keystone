@@ -22,6 +22,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import subprocess
 import sys
 import time
@@ -36,8 +37,10 @@ from keystone.common import logging
 CONF = config.CONF
 config.register_int('crypt_strength', default=40000)
 
+LOG = logging.getLogger(__name__)
 
 ISO_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
+MAX_PASSWORD_LENGTH = 4096
 
 
 def import_class(import_str):
@@ -47,7 +50,7 @@ def import_class(import_str):
         __import__(mod_str)
         return getattr(sys.modules[mod_str], class_str)
     except (ImportError, ValueError, AttributeError), exc:
-        logging.debug('Inner Exception: %s', exc)
+        LOG.debug('Inner Exception: %s', exc)
         raise
 
 
@@ -59,6 +62,48 @@ def import_object(import_str, *args, **kw):
     except ImportError:
         cls = import_class(import_str)
         return cls(*args, **kw)
+
+
+def find_config(config_path):
+    """Find a configuration file using the given hint.
+
+    :param config_path: Full or relative path to the config.
+    :returns: Full path of the config, if it exists.
+
+    """
+    possible_locations = [
+        config_path,
+        os.path.join('etc', 'keystone', config_path),
+        os.path.join('etc', config_path),
+        os.path.join(config_path),
+        '/etc/keystone/%s' % config_path,
+    ]
+
+    for path in possible_locations:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+
+    raise Exception('Config not found: %s', os.path.abspath(config_path))
+
+
+def read_cached_file(filename, cache_info, reload_func=None):
+    """Read from a file if it has been modified.
+
+    :param cache_info: dictionary to hold opaque cache.
+    :param reload_func: optional function to be called with data when
+                        file is reloaded due to a modification.
+
+    :returns: data from file
+
+    """
+    mtime = os.path.getmtime(filename)
+    if not cache_info or mtime != cache_info.get('mtime'):
+        with open(filename) as fap:
+            cache_info['data'] = fap.read()
+        cache_info['mtime'] = mtime
+        if reload_func:
+            reload_func(cache_info['data'])
+    return cache_info['data']
 
 
 class SmarterEncoder(json.JSONEncoder):
@@ -120,7 +165,7 @@ class Ec2Signer(object):
 
     def _calc_signature_2(self, params, verb, server_string, path):
         """Generate AWS signature version 2 string."""
-        logging.debug('using _calc_signature_2')
+        LOG.debug('using _calc_signature_2')
         string_to_sign = '%s\n%s\n%s\n' % (verb, server_string, path)
         if self.hmac_256:
             current_hmac = self.hmac_256
@@ -136,19 +181,27 @@ class Ec2Signer(object):
             val = urllib.quote(val, safe='-_~')
             pairs.append(urllib.quote(key, safe='') + '=' + val)
         qs = '&'.join(pairs)
-        logging.debug('query string: %s', qs)
+        LOG.debug('query string: %s', qs)
         string_to_sign += qs
-        logging.debug('string_to_sign: %s', string_to_sign)
+        LOG.debug('string_to_sign: %s', string_to_sign)
         current_hmac.update(string_to_sign)
         b64 = base64.b64encode(current_hmac.digest())
-        logging.debug('len(b64)=%d', len(b64))
-        logging.debug('base64 encoded digest: %s', b64)
+        LOG.debug('len(b64)=%d', len(b64))
+        LOG.debug('base64 encoded digest: %s', b64)
         return b64
+
+
+def trunc_password(password):
+    """Truncate passwords to the MAX_PASSWORD_LENGTH."""
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return password[:MAX_PASSWORD_LENGTH]
+    else:
+        return password
 
 
 def hash_password(password):
     """Hash a password. Hard."""
-    password_utf8 = password.encode('utf-8')
+    password_utf8 = trunc_password(password).encode('utf-8')
     if passlib.hash.sha512_crypt.identify(password_utf8):
         return password_utf8
     h = passlib.hash.sha512_crypt.encrypt(password_utf8,
@@ -158,7 +211,7 @@ def hash_password(password):
 
 def ldap_hash_password(password):
     """Hash a password. Hard."""
-    password_utf8 = password.encode('utf-8')
+    password_utf8 = trunc_password(password).encode('utf-8')
     h = passlib.hash.ldap_salted_sha1.encrypt(password_utf8)
     return h
 
@@ -166,7 +219,7 @@ def ldap_hash_password(password):
 def ldap_check_password(password, hashed):
     if password is None:
         return False
-    password_utf8 = password.encode('utf-8')
+    password_utf8 = trunc_password(password).encode('utf-8')
     h = passlib.hash.ldap_salted_sha1.encrypt(password_utf8)
     return passlib.hash.ldap_salted_sha1.verify(password_utf8, hashed)
 
@@ -180,7 +233,7 @@ def check_password(password, hashed):
     """
     if password is None:
         return False
-    password_utf8 = password.encode('utf-8')
+    password_utf8 = trunc_password(password).encode('utf-8')
     return passlib.hash.sha512_crypt.verify(password_utf8, hashed)
 
 
@@ -207,7 +260,7 @@ def check_output(*popenargs, **kwargs):
     """
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
-    logging.debug(' '.join(popenargs[0]))
+    LOG.debug(' '.join(popenargs[0]))
     process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
     output, unused_err = process.communicate()
     retcode = process.poll()

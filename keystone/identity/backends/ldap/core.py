@@ -1,5 +1,19 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 import uuid
 
 import ldap
@@ -112,13 +126,11 @@ class Identity(identity.Driver):
         return _filter_user(user_ref)
 
     def get_metadata(self, user_id, tenant_id):
-        if not self.get_tenant(tenant_id):
-            return None
-        if not self.get_user(user_id):
-            return None
+        if not self.get_tenant(tenant_id) or not self.get_user(user_id):
+            return {}
 
         metadata_ref = self.get_roles_for_user_and_tenant(user_id, tenant_id)
-        return metadata_ref
+        return metadata_ref or {}
 
     def get_role(self, role_id):
         return self.role.get(role_id)

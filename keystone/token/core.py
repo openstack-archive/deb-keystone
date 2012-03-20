@@ -19,6 +19,7 @@
 import datetime
 
 from keystone import config
+from keystone import exception
 from keystone.common import manager
 
 
@@ -50,7 +51,7 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        raise NotImplementedError()
+        raise exception.NotImplemented()
 
     def create_token(self, token_id, data):
         """Create a token by id and data.
@@ -73,7 +74,7 @@ class Driver(object):
         :returns: token_ref or None.
 
         """
-        raise NotImplementedError()
+        raise exception.NotImplemented()
 
     def delete_token(self, token_id):
         """Deletes a token by id.
@@ -84,13 +85,13 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        raise NotImplementedError()
+        raise exception.NotImplemented()
 
     def _get_default_expire_time(self):
         """Determine when a token should expire based on the config.
 
-        :returns: datetime.datetime object
+        :returns: a naive utc datetime.datetime object
 
         """
         expire_delta = datetime.timedelta(seconds=CONF.token.expiration)
-        return datetime.datetime.now() + expire_delta
+        return datetime.datetime.utcnow() + expire_delta

@@ -21,7 +21,6 @@ Configuring Services to work with Keystone
 .. toctree::
    :maxdepth: 1
 
-    nova-api-paste
     middleware_architecture
 
 Once Keystone is installed and running (see :doc:`configuration`), services
@@ -30,6 +29,7 @@ configure middleware for the OpenStack service to handle authentication tasks
 or otherwise interact with Keystone.
 
 In general:
+
 * Clients making calls to the service will pass in an authentication token.
 * The Keystone middleware will look for and validate that token, taking the
   appropriate action.
@@ -111,17 +111,9 @@ the WSGI pipeline to handle authenticating tokens with Keystone.
 Configuring Nova to use Keystone
 --------------------------------
 
-To configure Nova to use Keystone for authentication, the Nova API service
-can be run against the api-paste file provided by Keystone. This is most
-easily accomplished by setting the `--api_paste_config` flag in nova.conf to
-point to `examples/paste/nova-api-paste.ini` from Keystone. This paste file
-included references to the WSGI authentication middleware provided with the
-keystone installation.
-
 When configuring Nova, it is important to create a admin service token for
 the service (from the Configuration step above) and include that as the key
-'admin_token' in the nova-api-paste.ini. See the documented
-:doc:`nova-api-paste` file for references.
+'admin_token' in Nova's api-paste.ini.
 
 Configuring Swift to use Keystone
 ---------------------------------
@@ -179,13 +171,17 @@ rather than it's built in 'tempauth'.
 
 5. Verify that keystone is providing authentication to Swift
 
-    $ swift -V 2 -A http://localhost:5000/v2.0/tokens -U admin:admin -K ADMIN stat
+    $ swift -V 2 -A http://localhost:5000/v2.0 -U admin:admin -K ADMIN stat
 
-Configuring Swift with S3 emuluation to use Keystone
-----------------------------------------------------
+.. NOTE::
+   Instead of connecting to Swift here, as you would with other services, we
+   are connecting directly to Keystone.
+
+Configuring Swift with S3 emulation to use Keystone
+---------------------------------------------------
 
 Keystone support validating S3 tokens using the same tokens as the
-generated EC2 tokens. After you have generated a pair of EC2 access
+generated EC2 tokens. When you have generated a pair of EC2 access
 token and secret you can access your swift cluster directly with the
 S3 api.
 
@@ -228,7 +224,6 @@ S3 api.
     service_host = 127.0.0.1
     auth_port = 35357
     auth_host = 127.0.0.1
-    auth_protocol = http
     auth_token = ADMIN
     admin_token = ADMIN
 
@@ -261,7 +256,7 @@ S3 api.
    not to `keystone`.
 
 Auth-Token Middleware with Username and Password
---------------------------------
+------------------------------------------------
 
 It is also possible to configure Keystone's auth_token middleware using the
 'admin_user' and 'admin_password' options. When using the 'admin_user' and

@@ -17,6 +17,7 @@
 """Main entry point into the Policy service."""
 
 from keystone import config
+from keystone import exception
 from keystone.common import manager
 
 
@@ -33,3 +34,13 @@ class Manager(manager.Manager):
 
     def __init__(self):
         super(Manager, self).__init__(CONF.policy.driver)
+
+
+class Driver(object):
+    def enforce(context, credentials, action, target):
+        """Verify that a user is authorized to perform action.
+
+        For more information on a full implementation of this see:
+        `keystone.common.policy.enforce`.
+        """
+        raise exception.NotImplemented()

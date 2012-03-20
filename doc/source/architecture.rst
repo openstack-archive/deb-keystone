@@ -167,6 +167,12 @@ interpolation)::
   catalog.RegionOne.identity.internalURL = http://localhost:$(public_port)s/v2.0
   catalog.RegionOne.identity.name = 'Identity Service'
 
+
+LDAP Backend
+-----------------
+The LDAP backend stored Users and Tenents in separate Subtrees.  Roles are recorded
+as entries under the Tenants.
+
 ----------
 Data Model
 ----------
@@ -201,7 +207,7 @@ variety of CRUD operations are provided for the sake of development and testing.
 CRUD is treated as an extension or additional feature to the core feature set
 in that it is not required that a backend support it. It is expected that
 backends for services that don't support the CRUD operations will raise a
-:mod:`NotImplementedError`.
+:mod:`keystone.exception.NotImplemented`.
 
 
 ----------------------------------

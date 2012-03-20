@@ -19,9 +19,13 @@ import sqlalchemy.exc
 import webob.exc
 
 from keystone import catalog
+from keystone import config
 from keystone import exception
 from keystone.common import sql
 from keystone.common.sql import migration
+
+
+CONF = config.CONF
 
 
 class Service(sql.ModelBase, sql.DictBase):
@@ -73,7 +77,7 @@ class Endpoint(sql.ModelBase, sql.DictBase):
         return extra_copy
 
 
-class Catalog(sql.Base):
+class Catalog(sql.Base, catalog.Driver):
     def db_sync(self):
         migration.db_sync()
 
@@ -86,16 +90,20 @@ class Catalog(sql.Base):
     def get_service(self, service_id):
         session = self.get_session()
         service_ref = session.query(Service).filter_by(id=service_id).first()
+        if not service_ref:
+            raise exception.ServiceNotFound(service_id=service_id)
         return service_ref.to_dict()
 
     def delete_service(self, service_id):
         session = self.get_session()
         service_ref = session.query(Service).filter_by(id=service_id).first()
+        if not service_ref:
+            raise exception.ServiceNotFound(service_id=service_id)
         with session.begin():
             session.delete(service_ref)
             session.flush()
 
-    def create_service(self, context, service_ref):
+    def create_service(self, service_id, service_ref):
         session = self.get_session()
         with session.begin():
             service = Service.from_dict(service_ref)
@@ -103,14 +111,8 @@ class Catalog(sql.Base):
             session.flush()
         return service.to_dict()
 
-    def service_exists(self, service_id):
-        session = self.get_session()
-        if not session.query(Service).filter_by(id=service_id).first():
-            return False
-        return True
-
     # Endpoints
-    def create_endpoint(self, context, endpoint_ref):
+    def create_endpoint(self, endpoint_id, endpoint_ref):
         session = self.get_session()
         new_endpoint = Endpoint.from_dict(endpoint_ref)
         with session.begin():
@@ -140,7 +142,9 @@ class Catalog(sql.Base):
         return [e['id'] for e in list(endpoints)]
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        d = {'tenant_id': tenant_id, 'user_id': user_id}
+        d = dict(CONF.iteritems())
+        d.update({'tenant_id': tenant_id,
+                  'user_id': user_id})
         catalog = {}
 
         endpoints = [self.get_endpoint(e)

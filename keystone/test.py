@@ -20,7 +20,9 @@ import subprocess
 import sys
 import time
 
+import mox
 from paste import deploy
+import stubout
 
 from keystone import config
 from keystone.common import kvs
@@ -29,6 +31,7 @@ from keystone.common import utils
 from keystone.common import wsgi
 
 
+LOG = logging.getLogger(__name__)
 ROOTDIR = os.path.dirname(os.path.dirname(__file__))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
 TESTSDIR = os.path.join(ROOTDIR, 'tests')
@@ -78,7 +81,7 @@ def checkout_vendor(repo, rev):
         with open(modcheck, 'w') as fd:
             fd.write('1')
     except subprocess.CalledProcessError as e:
-        logging.warning('Failed to checkout %s', repo)
+        LOG.warning('Failed to checkout %s', repo)
     cd(working_dir)
     return revdir
 
@@ -119,22 +122,38 @@ class TestCase(unittest.TestCase):
         self._paths = []
         self._memo = {}
         self._overrides = []
+        self._group_overrides = {}
 
     def setUp(self):
         super(TestCase, self).setUp()
         self.config()
+        self.mox = mox.Mox()
+        self.stubs = stubout.StubOutForTesting()
 
     def config(self):
         CONF(config_files=[etcdir('keystone.conf'),
                            testsdir('test_overrides.conf')])
 
     def tearDown(self):
-        for path in self._paths:
-            if path in sys.path:
-                sys.path.remove(path)
-        kvs.INMEMDB.clear()
-        self.reset_opts()
-        super(TestCase, self).tearDown()
+        try:
+            self.mox.UnsetStubs()
+            self.stubs.UnsetAll()
+            self.stubs.SmartUnsetAll()
+            self.mox.VerifyAll()
+            super(TestCase, self).tearDown()
+        finally:
+            for path in self._paths:
+                if path in sys.path:
+                    sys.path.remove(path)
+            kvs.INMEMDB.clear()
+            self.reset_opts()
+
+    def opt_in_group(self, group, **kw):
+        for k, v in kw.iteritems():
+            CONF.set_override(k, v, group)
+        if group not in self._group_overrides:
+            self._group_overrides[group] = []
+        self._group_overrides[group].append(k)
 
     def opt(self, **kw):
         for k, v in kw.iteritems():
@@ -142,9 +161,13 @@ class TestCase(unittest.TestCase):
         self._overrides.append(k)
 
     def reset_opts(self):
+        for group, opt_list in self._group_overrides.iteritems():
+            for k in opt_list:
+                CONF.set_override(k, None, group)
         for k in self._overrides:
             CONF.set_override(k, None)
         self._overrides = []
+        self._group_overrides = {}
         CONF.reset()
 
     def load_backends(self):
@@ -162,34 +185,41 @@ class TestCase(unittest.TestCase):
         """
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
-        for tenant in fixtures.TENANTS:
-            rv = self.identity_api.create_tenant(tenant['id'], tenant)
-            setattr(self, 'tenant_%s' % tenant['id'], rv)
+        if hasattr(self, 'catalog_api'):
+            for service in fixtures.SERVICES:
+                rv = self.catalog_api.create_service(service['id'], service)
+                setattr(self, 'service_%s' % service['id'], rv)
 
-        for user in fixtures.USERS:
-            user_copy = user.copy()
-            tenants = user_copy.pop('tenants')
-            rv = self.identity_api.create_user(user['id'], user_copy.copy())
-            for tenant_id in tenants:
-                self.identity_api.add_user_to_tenant(tenant_id, user['id'])
-            setattr(self, 'user_%s' % user['id'], user_copy)
+        if hasattr(self, 'identity_api'):
+            for tenant in fixtures.TENANTS:
+                rv = self.identity_api.create_tenant(tenant['id'], tenant)
+                setattr(self, 'tenant_%s' % tenant['id'], rv)
 
-        for role in fixtures.ROLES:
-            rv = self.identity_api.create_role(role['id'], role)
-            setattr(self, 'role_%s' % role['id'], rv)
+            for user in fixtures.USERS:
+                user_copy = user.copy()
+                tenants = user_copy.pop('tenants')
+                rv = self.identity_api.create_user(user['id'],
+                        user_copy.copy())
+                for tenant_id in tenants:
+                    self.identity_api.add_user_to_tenant(tenant_id, user['id'])
+                setattr(self, 'user_%s' % user['id'], user_copy)
 
-        for metadata in fixtures.METADATA:
-            metadata_ref = metadata.copy()
-            # TODO(termie): these will probably end up in the model anyway,
-            #               so this may be futile
-            del metadata_ref['user_id']
-            del metadata_ref['tenant_id']
-            rv = self.identity_api.create_metadata(metadata['user_id'],
-                                                   metadata['tenant_id'],
-                                                   metadata_ref)
-            setattr(self,
-                    'metadata_%s%s' % (metadata['user_id'],
-                                       metadata['tenant_id']), rv)
+            for role in fixtures.ROLES:
+                rv = self.identity_api.create_role(role['id'], role)
+                setattr(self, 'role_%s' % role['id'], rv)
+
+            for metadata in fixtures.METADATA:
+                metadata_ref = metadata.copy()
+                # TODO(termie): these will probably end up in the model anyway,
+                #               so this may be futile
+                del metadata_ref['user_id']
+                del metadata_ref['tenant_id']
+                rv = self.identity_api.create_metadata(metadata['user_id'],
+                                                       metadata['tenant_id'],
+                                                       metadata_ref)
+                setattr(self,
+                        'metadata_%s%s' % (metadata['user_id'],
+                                           metadata['tenant_id']), rv)
 
     def _paste_config(self, config):
         if not config.startswith('config:'):

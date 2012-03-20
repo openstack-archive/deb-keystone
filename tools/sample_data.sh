@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
+
+# Copyright 2012 OpenStack LLC
 #
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 # Sample initial data for Keystone using python-keystoneclient
 #
 # This script is based on the original DevStack keystone_data.sh script.
@@ -17,6 +31,10 @@
 # Enable the Swift and Quantum accounts by setting ENABLE_SWIFT and/or
 # ENABLE_QUANTUM environment variables.
 #
+# Enable creation of endpoints by setting ENABLE_ENDPOINTS environment variable.
+# Works with Catalog SQL backend. Do not use with Catalog Templated backend
+# (default).
+#
 # A set of EC2-compatible credentials is created for both admin and demo
 # users and placed in etc/ec2rc.
 #
@@ -32,6 +50,17 @@
 # invisible_to_admin   demo      Member
 
 TOOLS_DIR=$(cd $(dirname "$0") && pwd)
+KEYSTONE_CONF=${KEYSTONE_CONF:-/etc/keystone/keystone.conf}
+if [[ -r "$KEYSTONE_CONF" ]]; then
+    EC2RC="$(dirname "$KEYSTONE_CONF")/ec2rc"
+elif [[ -r "$TOOLS_DIR/../etc/keystone.conf" ]]; then
+    # assume git checkout
+    KEYSTONE_CONF="$TOOLS_DIR/../etc/keystone.conf"
+    EC2RC="$TOOLS_DIR/../etc/ec2rc"
+else
+    KEYSTONE_CONF=""
+    EC2RC="ec2rc"
+fi
 
 # Please set these, they are ONLY SAMPLE PASSWORDS!
 ADMIN_PASSWORD=${ADMIN_PASSWORD:-secrete}
@@ -46,9 +75,9 @@ if [[ "$SERVICE_PASSWORD" == "$ADMIN_PASSWORD" ]]; then
 fi
 
 # Extract some info from Keystone's configuration file
-if [[ -r $TOOLS_DIR/../etc/keystone.conf ]]; then
-    CONFIG_SERVICE_TOKEN=$(sed 's/[[:space:]]//g' $TOOLS_DIR/../etc/keystone.conf | grep ^admin_token= | cut -d'=' -f2)
-    CONFIG_ADMIN_PORT=$(sed 's/[[:space:]]//g' $TOOLS_DIR/../etc/keystone.conf | grep ^admin_port= | cut -d'=' -f2)
+if [[ -r "$KEYSTONE_CONF" ]]; then
+    CONFIG_SERVICE_TOKEN=$(sed 's/[[:space:]]//g' $KEYSTONE_CONF | grep ^admin_token= | cut -d'=' -f2)
+    CONFIG_ADMIN_PORT=$(sed 's/[[:space:]]//g' $KEYSTONE_CONF | grep ^admin_port= | cut -d'=' -f2)
 fi
 
 export SERVICE_TOKEN=${SERVICE_TOKEN:-$CONFIG_SERVICE_TOKEN}
@@ -61,7 +90,7 @@ fi
 export SERVICE_ENDPOINT=${SERVICE_ENDPOINT:-http://127.0.0.1:${CONFIG_ADMIN_PORT:-35357}/v2.0}
 
 function get_id () {
-    echo `$@ | grep ' id ' | awk '{print $4}'`
+    echo `"$@" | grep ' id ' | awk '{print $4}'`
 }
 
 
@@ -104,9 +133,10 @@ keystone user-role-add --user $ADMIN_USER --role $KEYSTONESERVICE_ROLE --tenant_
 
 
 # Services
+NOVA_SERVICE=$(get_id \
 keystone service-create --name=nova \
                         --type=compute \
-                        --description="Nova Compute Service"
+                        --description="Nova Compute Service")
 NOVA_USER=$(get_id keystone user-create --name=nova \
                                         --pass="$SERVICE_PASSWORD" \
                                         --tenant_id $SERVICE_TENANT \
@@ -114,14 +144,28 @@ NOVA_USER=$(get_id keystone user-create --name=nova \
 keystone user-role-add --tenant_id $SERVICE_TENANT \
                        --user $NOVA_USER \
                        --role $ADMIN_ROLE
+if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+    keystone endpoint-create --region RegionOne --service_id $NOVA_SERVICE \
+        --publicurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s' \
+        --adminurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s' \
+        --internalurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s'
+fi
 
+EC2_SERVICE=$(get_id \
 keystone service-create --name=ec2 \
                         --type=ec2 \
-                        --description="EC2 Compatibility Layer"
+                        --description="EC2 Compatibility Layer")
+if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+    keystone endpoint-create --region RegionOne --service_id $EC2_SERVICE \
+        --publicurl http://localhost:8773/services/Cloud \
+        --adminurl http://localhost:8773/services/Admin \
+        --internalurl http://localhost:8773/services/Cloud
+fi
 
+GLANCE_SERVICE=$(get_id \
 keystone service-create --name=glance \
                         --type=image \
-                        --description="Glance Image Service"
+                        --description="Glance Image Service")
 GLANCE_USER=$(get_id keystone user-create --name=glance \
                                           --pass="$SERVICE_PASSWORD" \
                                           --tenant_id $SERVICE_TENANT \
@@ -129,14 +173,34 @@ GLANCE_USER=$(get_id keystone user-create --name=glance \
 keystone user-role-add --tenant_id $SERVICE_TENANT \
                        --user $GLANCE_USER \
                        --role $ADMIN_ROLE
+if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+    keystone endpoint-create --region RegionOne --service_id $GLANCE_SERVICE \
+        --publicurl http://localhost:9292/v1 \
+        --adminurl http://localhost:9292/v1 \
+        --internalurl http://localhost:9292/v1
+fi
 
+KEYSTONE_SERVICE=$(get_id \
 keystone service-create --name=keystone \
                         --type=identity \
-                        --description="Keystone Identity Service"
+                        --description="Keystone Identity Service")
+if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+    keystone endpoint-create --region RegionOne --service_id $KEYSTONE_SERVICE \
+        --publicurl 'http://localhost:$(public_port)s/v2.0' \
+        --adminurl 'http://localhost:$(admin_port)s/v2.0' \
+        --internalurl 'http://localhost:$(admin_port)s/v2.0'
+fi
 
-keystone service-create --name=volume \
-                        --type="nova-volume" \
-                        --description="Nova Volume Service"
+VOLUME_SERVICE=$(get_id \
+keystone service-create --name="nova-volume" \
+                        --type=volume \
+                        --description="Nova Volume Service")
+if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+    keystone endpoint-create --region RegionOne --service_id $VOLUME_SERVICE \
+        --publicurl 'http://localhost:8776/v1/$(tenant_id)s' \
+        --adminurl 'http://localhost:8776/v1/$(tenant_id)s' \
+        --internalurl 'http://localhost:8776/v1/$(tenant_id)s'
+fi
 
 keystone service-create --name="horizon" \
 						--type=dashboard \
@@ -179,7 +243,7 @@ DEMO_ACCESS=`echo "$RESULT" | grep access | awk '{print $4}'`
 DEMO_SECRET=`echo "$RESULT" | grep secret | awk '{print $4}'`
 
 # write the secret and access to ec2rc
-cat > $TOOLS_DIR/../etc/ec2rc <<EOF
+cat > $EC2RC <<EOF
 ADMIN_ACCESS=$ADMIN_ACCESS
 ADMIN_SECRET=$ADMIN_SECRET
 DEMO_ACCESS=$DEMO_ACCESS

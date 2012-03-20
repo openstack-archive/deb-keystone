@@ -149,7 +149,7 @@ class VersionController(wsgi.Application):
                 if service == 'identity':
                     return service_ref[self.url_key]
 
-        raise NotImplementedError()
+        raise exception.NotImplemented()
 
     def _get_versions_list(self, context):
         """The list of versions is dependent on the context."""
@@ -378,7 +378,7 @@ class TokenController(wsgi.Application):
         Identical to ``validate_token``, except does not return a response.
 
         """
-        belongs_to = context['query_string'].get("belongs_to")
+        belongs_to = context['query_string'].get("belongsTo")
         assert self._get_token_ref(context, token_id, belongs_to)
 
     # admin only
@@ -390,7 +390,7 @@ class TokenController(wsgi.Application):
         Returns metadata about the token along any associated roles.
 
         """
-        belongs_to = context['query_string'].get("belongs_to")
+        belongs_to = context['query_string'].get("belongsTo")
         token_ref = self._get_token_ref(context, token_id, belongs_to)
 
         # TODO(termie): optimize this call at some point and put it into the
@@ -421,7 +421,7 @@ class TokenController(wsgi.Application):
 
     def endpoints(self, context, token_id):
         """Return a list of endpoints available to the token."""
-        raise NotImplementedError()
+        raise exception.NotImplemented()
 
     def _format_authenticate(self, token_ref, roles_ref, catalog_ref):
         o = self._format_token(token_ref, roles_ref)

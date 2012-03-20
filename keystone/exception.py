@@ -69,5 +69,15 @@ class NotFound(Error):
     title = 'Not Found'
 
 
+class NotImplemented(Error):
+    """The action you have requested has not been implemented."""
+    code = 501
+    action = 'Not Implemented'
+
+
 class TokenNotFound(NotFound):
     """Could not find token: %(token_id)s"""
+
+
+class ServiceNotFound(NotFound):
+    """Could not find service: %(service_id)s"""

@@ -53,14 +53,8 @@ WWW-Authenticate
     HTTP header returned to a user indicating which endpoint to use
     to retrieve a new token
 
-HTTP_AUTHORIZATION
-    basic auth password used to validate the connection
-
 What we add to the request for use by the OpenStack service
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-HTTP_X_AUTHORIZATION
-    The client identity being passed in
 
 HTTP_X_IDENTITY_STATUS
     'Confirmed' or 'Invalid'
@@ -99,12 +93,13 @@ HTTP_X_ROLE
 import httplib
 import json
 import logging
+import time
 
 import webob
 import webob.exc
 
 
-logger = logging.getLogger('keystone.middleware.auth_token')
+LOG = logging.getLogger(__name__)
 
 
 class InvalidUserToken(Exception):
@@ -119,7 +114,7 @@ class AuthProtocol(object):
     """Auth Middleware that handles authenticating client calls."""
 
     def __init__(self, app, conf):
-        logger.info('Starting keystone auth_token middleware')
+        LOG.info('Starting keystone auth_token middleware')
         self.conf = conf
         self.app = app
 
@@ -129,8 +124,7 @@ class AuthProtocol(object):
 
         # where to find the auth service (we use this to validate tokens)
         self.auth_host = conf.get('auth_host')
-        self.auth_port = int(conf.get('auth_port'))
-
+        self.auth_port = int(conf.get('auth_port', 35357))
         auth_protocol = conf.get('auth_protocol', 'https')
         if auth_protocol == 'http':
             self.http_client_class = httplib.HTTPConnection
@@ -149,6 +143,22 @@ class AuthProtocol(object):
         self.admin_password = conf.get('admin_password')
         self.admin_tenant_name = conf.get('admin_tenant_name', 'admin')
 
+        # Token caching via memcache
+        self._cache = None
+        self._iso8601 = None
+        memcache_servers = conf.get('memcache_servers')
+        # By default the token will be cached for 5 minutes
+        self.token_cache_time = conf.get('token_cache_time', 300)
+        if memcache_servers:
+            try:
+                import memcache
+                import iso8601
+                LOG.info('Using memcache for caching token')
+                self._cache = memcache.Client(memcache_servers.split(','))
+                self._iso8601 = iso8601
+            except NameError as e:
+                LOG.warn('disabled caching due to missing libraries %s', e)
+
     def __call__(self, env, start_response):
         """Handle incoming request.
 
@@ -156,7 +166,7 @@ class AuthProtocol(object):
         we can't authenticate.
 
         """
-        logger.debug('Authenticating user token')
+        LOG.debug('Authenticating user token')
         try:
             self._remove_auth_headers(env)
             user_token = self._get_user_token_from_header(env)
@@ -167,15 +177,15 @@ class AuthProtocol(object):
 
         except InvalidUserToken:
             if self.delay_auth_decision:
-                logger.info('Invalid user token - deferring reject downstream')
+                LOG.info('Invalid user token - deferring reject downstream')
                 self._add_headers(env, {'X-Identity-Status': 'Invalid'})
                 return self.app(env, start_response)
             else:
-                logger.info('Invalid user token - rejecting request')
+                LOG.info('Invalid user token - rejecting request')
                 return self._reject_request(env, start_response)
 
         except ServiceError, e:
-            logger.critical('Unable to obtain admin token: %s' % e)
+            LOG.critical('Unable to obtain admin token: %s' % e)
             resp = webob.exc.HTTPServiceUnavailable()
             return resp(env, start_response)
 
@@ -197,7 +207,7 @@ class AuthProtocol(object):
             'X-Tenant',
             'X-Role',
         )
-        logger.debug('Removing headers from request environment: %s' %
+        LOG.debug('Removing headers from request environment: %s' %
                      ','.join(auth_headers))
         self._remove_headers(env, auth_headers)
 
@@ -274,12 +284,17 @@ class AuthProtocol(object):
             conn.request(method, path, **kwargs)
             response = conn.getresponse()
             body = response.read()
-            data = json.loads(body)
         except Exception, e:
-            logger.error('HTTP connection exception: %s' % e)
+            LOG.error('HTTP connection exception: %s' % e)
             raise ServiceError('Unable to communicate with keystone')
         finally:
             conn.close()
+
+        try:
+            data = json.loads(body)
+        except ValueError:
+            LOG.debug('Keystone did not return json-encoded body')
+            data = {}
 
         return response, data
 
@@ -323,25 +338,31 @@ class AuthProtocol(object):
         :raise ServiceError if unable to authenticate token
 
         """
+        cached = self._cache_get(user_token)
+        if cached:
+            return cached
+
         headers = {'X-Auth-Token': self.get_admin_token()}
         response, data = self._json_request('GET',
                                             '/v2.0/tokens/%s' % user_token,
                                             additional_headers=headers)
 
         if response.status == 200:
+            self._cache_put(user_token, data)
             return data
         if response.status == 404:
             # FIXME(ja): I'm assuming the 404 status means that user_token is
             #            invalid - not that the admin_token is invalid
+            self._cache_store_invalid(user_token)
             raise InvalidUserToken('Token authorization failed')
         if response.status == 401:
-            logger.info('Keystone rejected admin token, resetting')
+            LOG.info('Keystone rejected admin token, resetting')
             self.admin_token = None
         else:
-            logger.error('Bad response code while validating token: %s' %
+            LOG.error('Bad response code while validating token: %s' %
                          response.status)
         if retry:
-            logger.info('Retrying validation')
+            LOG.info('Retrying validation')
             return self._validate_user_token(user_token, False)
         else:
             raise InvalidUserToken()
@@ -370,18 +391,32 @@ class AuthProtocol(object):
         token = token_info['access']['token']
         roles = ','.join([role['name'] for role in user.get('roles', [])])
 
-        # FIXME(ja): I think we are checking in both places because:
-        # tenant might not be returned, and there was a pre-release
-        # that put tenant objects inside the user object?
-        try:
-            tenant_id = token['tenant']['id']
-            tenant_name = token['tenant']['name']
-        except:
-            tenant_id = user.get('tenantId')
-            tenant_name = user.get('tenantName')
+        def get_tenant_info():
+            """Returns a (tenant_id, tenant_name) tuple from context."""
+            def essex():
+                """Essex puts the tenant ID and name on the token."""
+                return (token['tenant']['id'], token['tenant']['name'])
+
+            def pre_diablo():
+                """Pre-diablo, Keystone only provided tenantId."""
+                return (token['tenantId'], token['tenantId'])
+
+            def default_tenant():
+                """Assume the user's default tenant."""
+                return (user['tenantId'], user['tenantName'])
+
+            for method in [essex, pre_diablo, default_tenant]:
+                try:
+                    return method()
+                except KeyError:
+                    pass
+
+            raise InvalidUserToken('Unable to determine tenancy.')
+
+        tenant_id, tenant_name = get_tenant_info()
 
         user_id = user['id']
-        user_name = user['username']
+        user_name = user['name']
 
         return {
             'X-Identity-Status': 'Confirmed',
@@ -424,6 +459,54 @@ class AuthProtocol(object):
         """Get http header from environment."""
         env_key = self._header_to_env_var(key)
         return env.get(env_key, default)
+
+    def _cache_get(self, token):
+        """Return token information from cache.
+
+        If token is invalid raise InvalidUserToken
+        return token only if fresh (not expired).
+        """
+        if self._cache and token:
+            key = 'tokens/%s' % token
+            cached = self._cache.get(key)
+            if cached == 'invalid':
+                LOG.debug('Cached Token %s is marked unauthorized', token)
+                raise InvalidUserToken('Token authorization failed')
+            if cached:
+                data, expires = cached
+                if time.time() < float(expires):
+                    LOG.debug('Returning cached token %s', token)
+                    return data
+                else:
+                    LOG.debug('Cached Token %s seems expired', token)
+
+    def _cache_put(self, token, data):
+        """Put token data into the cache.
+
+        Stores the parsed expire date in cache allowing
+        quick check of token freshness on retrieval.
+        """
+        if self._cache and data:
+            key = 'tokens/%s' % token
+            if 'token' in data.get('access', {}):
+                timestamp = data['access']['token']['expires']
+                expires = self._iso8601.parse_date(timestamp).strftime('%s')
+            else:
+                LOG.error('invalid token format')
+                return
+            LOG.debug('Storing %s token in memcache', token)
+            self._cache.set(key,
+                            (data, expires),
+                            time=self.token_cache_time)
+
+    def _cache_store_invalid(self, token):
+        """Store invalid token in cache."""
+        if self._cache:
+            key = 'tokens/%s' % token
+            LOG.debug('Marking token %s as unauthorized in memcache', token)
+            self._cache.set(key,
+                            'invalid',
+                            time=self.token_cache_time)
 
 
 def filter_factory(global_conf, **local_conf):

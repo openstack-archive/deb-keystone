@@ -1,7 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack, LLC
-# All Rights Reserved.
+# Copyright 2012 OpenStack LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -18,6 +17,7 @@
 from setuptools import find_packages
 from setuptools.command.sdist import sdist
 from setuptools import setup
+import subprocess
 
 from keystone.openstack.common.setup import parse_requirements
 from keystone.openstack.common.setup import parse_dependency_links
@@ -38,6 +38,8 @@ try:
 
     class local_BuildDoc(BuildDoc):
         def run(self):
+            subprocess.call('sphinx-apidoc -f -o doc/source keystone',
+                            shell=True)
             for builder in ['html', 'man']:
                 self.builder = builder
                 self.finalize_options()

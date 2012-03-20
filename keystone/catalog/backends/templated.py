@@ -19,7 +19,7 @@ from keystone.common import logging
 from keystone.catalog.backends import kvs
 
 
-LOG = logging.getLogger('keystone.catalog.backends.templated')
+LOG = logging.getLogger(__name__)
 
 CONF = config.CONF
 config.register_str('template_file', group='catalog')
@@ -52,6 +52,9 @@ def parse_templates(template_lines):
     return o
 
 
+# TODO(jaypipes): should be templated.Catalog,
+# not templated.TemplatedCatalog to be consistent with
+# other catalog backends
 class TemplatedCatalog(kvs.Catalog):
     """A backend that generates endpoints for the Catalog based on templates.
 

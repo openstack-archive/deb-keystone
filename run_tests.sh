@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Copyright 2012 OpenStack LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 set -eu
 
 function usage {
@@ -16,6 +30,7 @@ function usage {
   echo "  -P, --no-pep8            Don't run pep8"
   echo "  -c, --coverage           Generate coverage report"
   echo "  -h, --help               Print this usage message"
+  echo "  -xintegration            Ignore all keystoneclient test cases (integration tests)"
   echo "  --hide-elapsed           Don't print the elapsed time for each test along with slow test list"
   echo ""
   echo "Note: with no options specified, the script will try to run the tests in a virtual environment,"
@@ -35,6 +50,7 @@ function process_option {
     -p|--pep8) just_pep8=1;;
     -P|--no-pep8) no_pep8=1;;
     -c|--coverage) coverage=1;;
+	-xintegration) nokeystoneclient=1;;
     -*) noseopts="$noseopts $1";;
     *) noseargs="$noseargs $1"
   esac
@@ -51,6 +67,7 @@ wrapper=""
 just_pep8=0
 no_pep8=0
 coverage=0
+nokeystoneclient=0
 recreate_db=1
 
 for arg in "$@"; do
@@ -60,6 +77,11 @@ done
 # If enabled, tell nose to collect coverage data
 if [ $coverage -eq 1 ]; then
     noseopts="$noseopts --with-coverage --cover-package=keystone"
+fi
+
+if [ $nokeystoneclient -eq 1 ]; then
+	# disable the integration tests
+    noseopts="$noseopts -I test_keystoneclient*"
 fi
 
 function run_tests {
