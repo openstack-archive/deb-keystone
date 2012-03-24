@@ -1,3 +1,9 @@
+keystone (2012.1~rc1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Sat, 24 Mar 2012 09:14:50 +0100
+
 keystone (2012.1~e4+git35-g4e4f793-1) UNRELEASED; urgency=low
 
   [ Julien Danjou ]
@@ -25,6 +31,7 @@ keystone (2012.1~e3+git772-g6919b05-1) UNRELEASED; urgency=low
     Patch based on:
     http://bazaar.launchpad.net/~ubuntu-server-dev/keystone/essex/revision/83
 
+ -- Julien Danjou <acid@debian.org>  Mon, 06 Feb 2012 10:35:52 +0100
   
 keystone (2012.1~e3-4) unstable; urgency=low
 

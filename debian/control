@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
 Uploaders: Julien Danjou <acid@debian.org>,
            Thomas Goirand <zigo@debian.org>,
-           Ghe Rivero <ghe@debian.org>
+           Ghe Rivero <ghe.rivero@stackops.com>
 Build-Depends: debhelper (>= 7.0.50),
  python-all (>= 2.6.6-3~),
  python-all-dev (>= 2.6.6-3~) | python-support,
@@ -29,7 +29,7 @@ Build-Depends: debhelper (>= 7.0.50),
  python-dateutil,
  pep8,
  git-core
-Standards-Version: 3.9.2
+Standards-Version: 3.9.3
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
 Vcs-Git: git://anonscm.debian.org/openstack/keystone.git
