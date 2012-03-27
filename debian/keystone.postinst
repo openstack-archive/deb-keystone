@@ -23,42 +23,42 @@ then
 	    db_set keystone/db/dbname $dbc_name
 	fi
 	dbc_dbfile_owner="keystone:keystone"
+
+	dbc_go keystone $@
+
+	if [ "$dbc_install" = "true" ]
+	then
+            case "$dbc_dbtype" in
+		sqlite3)
+                    SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
+                    ;;
+		mysql)
+                    [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+                    SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
+                    ;;
+		pgsql)
+                    [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+                    SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
+                    ;;
+		*)
+                    SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
+                    ;;
+            esac
+
+            sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
+
+            if [ "$dbc_upgrade" = "true" ]
+            then
+		keystone-manage db_sync
+            fi
+	fi
     fi
 
-    dbc_go keystone $@
-
-    if [ "$dbc_install" = "true" ]
+    if [ -z "$2" ]
     then
-        case "$dbc_dbtype" in
-            sqlite3)
-                SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
-                ;;
-            mysql)
-                [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
-                ;;
-            pgsql)
-                [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
-                ;;
-            *)
-                SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
-                ;;
-        esac
-
-        sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
-
-        if [ -z "$2" ]
-        then
-	    db_get keystone/auth-token
-	    AUTH_TOKEN=${RET:-ADMIN}
-	    sed -s "s,^admin_token = ADMIN,admin_token = $AUTH_TOKEN," -i /etc/keystone/keystone.conf
-        fi
-
-        if [ "$dbc_upgrade" = "true" ]
-        then
-	    keystone-manage db_sync
-        fi
+	db_get keystone/auth-token
+	AUTH_TOKEN=${RET:-ADMIN}
+	sed -s "s,^admin_token = ADMIN,admin_token = $AUTH_TOKEN," -i /etc/keystone/keystone.conf
     fi
 
     chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone

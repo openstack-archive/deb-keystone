@@ -7,10 +7,13 @@ then
     . /usr/share/debconf/confmodule
 fi
 
-if [ -f /usr/share/dbconfig-common/dpkg/postrm ]
-then
-    . /usr/share/dbconfig-common/dpkg/postrm
-    dbc_go keystone $@
+db_get keystone/configure_db
+if [ "$RET" = "true" ]; then
+    if [ -f /usr/share/dbconfig-common/dpkg/postrm ]
+    then
+	. /usr/share/dbconfig-common/dpkg/postrm
+	dbc_go keystone $@
+    fi
 fi
 
 case "$1" in
