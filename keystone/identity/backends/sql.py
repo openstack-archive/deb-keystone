@@ -210,8 +210,7 @@ class Identity(sql.Base, identity.Driver):
 
     def get_role(self, role_id):
         session = self.get_session()
-        role_ref = session.query(Role).filter_by(id=role_id).first()
-        return role_ref
+        return session.query(Role).filter_by(id=role_id).first()
 
     def list_users(self):
         session = self.get_session()
@@ -287,6 +286,10 @@ class Identity(sql.Base, identity.Driver):
             is_new = True
             metadata_ref = {}
         roles = set(metadata_ref.get('roles', []))
+        if role_id not in roles:
+            msg = 'Cannot remove role that has not been granted, %s' % role_id
+            raise exception.RoleNotFound(message=msg)
+
         roles.remove(role_id)
         metadata_ref['roles'] = list(roles)
         if not is_new:

@@ -284,8 +284,9 @@ class TenantController(wsgi.Application):
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
         tenant = self.identity_api.get_tenant(context, tenant_id)
-        if not tenant:
+        if tenant is None:
             raise exception.TenantNotFound(tenant_id=tenant_id)
+
         return {'tenant': tenant}
 
     # CRUD Extension
@@ -303,16 +304,25 @@ class TenantController(wsgi.Application):
 
     def update_tenant(self, context, tenant_id, tenant):
         self.assert_admin(context)
+        if self.identity_api.get_tenant(context, tenant_id) is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+
         tenant_ref = self.identity_api.update_tenant(
                 context, tenant_id, tenant)
         return {'tenant': tenant_ref}
 
     def delete_tenant(self, context, tenant_id, **kw):
         self.assert_admin(context)
+        if self.identity_api.get_tenant(context, tenant_id) is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+
         self.identity_api.delete_tenant(context, tenant_id)
 
     def get_tenant_users(self, context, tenant_id, **kw):
         self.assert_admin(context)
+        if self.identity_api.get_tenant(context, tenant_id) is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+
         user_refs = self.identity_api.get_tenant_users(context, tenant_id)
         return {'users': user_refs}
 
@@ -361,6 +371,7 @@ class UserController(wsgi.Application):
         user_ref = self.identity_api.get_user(context, user_id)
         if not user_ref:
             raise exception.UserNotFound(user_id=user_id)
+
         return {'user': user_ref}
 
     def get_users(self, context):
@@ -375,6 +386,9 @@ class UserController(wsgi.Application):
         user = self._normalize_dict(user)
         self.assert_admin(context)
         tenant_id = user.get('tenantId', None)
+        if (tenant_id is not None
+                and self.identity_api.get_tenant(context, tenant_id) is None):
+            raise exception.TenantNotFound(tenant_id=tenant_id)
         user_id = uuid.uuid4().hex
         user_ref = user.copy()
         user_ref['id'] = user_id
@@ -387,11 +401,17 @@ class UserController(wsgi.Application):
     def update_user(self, context, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
         self.assert_admin(context)
+        if self.identity_api.get_user(context, user_id) is None:
+            raise exception.UserNotFound(user_id=user_id)
+
         user_ref = self.identity_api.update_user(context, user_id, user)
         return {'user': user_ref}
 
     def delete_user(self, context, user_id):
         self.assert_admin(context)
+        if self.identity_api.get_user(context, user_id) is None:
+            raise exception.UserNotFound(user_id=user_id)
+
         self.identity_api.delete_user(context, user_id)
 
     def set_user_enabled(self, context, user_id, user):
@@ -425,7 +445,15 @@ class RoleController(wsgi.Application):
         """
         if tenant_id is None:
             raise exception.NotImplemented(message='User roles not supported: '
-                                                   'tenant_id required')
+                                                   'tenant ID required')
+
+        user = self.identity_api.get_user(context, user_id)
+        if user is None:
+            raise exception.UserNotFound(user_id=user_id)
+        tenant = self.identity_api.get_tenant(context, tenant_id)
+        if tenant is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+
         roles = self.identity_api.get_roles_for_user_and_tenant(
                 context, user_id, tenant_id)
         return {'roles': [self.identity_api.get_role(context, x)
@@ -449,7 +477,8 @@ class RoleController(wsgi.Application):
 
     def delete_role(self, context, role_id):
         self.assert_admin(context)
-        role_ref = self.identity_api.delete_role(context, role_id)
+        self.get_role(context, role_id)
+        self.identity_api.delete_role(context, role_id)
 
     def get_roles(self, context):
         self.assert_admin(context)
@@ -468,6 +497,12 @@ class RoleController(wsgi.Application):
         if tenant_id is None:
             raise exception.NotImplemented(message='User roles not supported: '
                                                    'tenant_id required')
+        if self.identity_api.get_user(context, user_id) is None:
+            raise exception.UserNotFound(user_id=user_id)
+        if self.identity_api.get_tenant(context, tenant_id) is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+        if self.identity_api.get_role(context, role_id) is None:
+            raise exception.RoleNotFound(role_id=role_id)
 
         # This still has the weird legacy semantics that adding a role to
         # a user also adds them to a tenant
@@ -488,9 +523,15 @@ class RoleController(wsgi.Application):
         if tenant_id is None:
             raise exception.NotImplemented(message='User roles not supported: '
                                                    'tenant_id required')
+        if self.identity_api.get_user(context, user_id) is None:
+            raise exception.UserNotFound(user_id=user_id)
+        if self.identity_api.get_tenant(context, tenant_id) is None:
+            raise exception.TenantNotFound(tenant_id=tenant_id)
+        if self.identity_api.get_role(context, role_id) is None:
+            raise exception.RoleNotFound(role_id=role_id)
 
         # This still has the weird legacy semantics that adding a role to
-        # a user also adds them to a tenant
+        # a user also adds them to a tenant, so we must follow up on that
         self.identity_api.remove_role_from_user_and_tenant(
                 context, user_id, tenant_id, role_id)
         roles = self.identity_api.get_roles_for_user_and_tenant(
