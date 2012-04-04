@@ -235,6 +235,27 @@ class KeystoneClientTests(object):
         self.assertFalse([t for t in client.tenants.list()
                            if t.id == tenant.id])
 
+    def test_tenant_delete_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.tenants.delete,
+                          tenant=uuid.uuid4().hex)
+
+    def test_tenant_get_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.tenants.get,
+                          tenant_id=uuid.uuid4().hex)
+
+    def test_tenant_update_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.tenants.update,
+                          tenant_id=uuid.uuid4().hex)
+
     def test_tenant_list(self):
         client = self.get_client()
         tenants = client.tenants.list()
@@ -315,6 +336,61 @@ class KeystoneClientTests(object):
                                     tenant_id='bar')
         self.assertEquals(user2.name, test_username)
 
+    def test_user_create_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.create,
+                          name=uuid.uuid4().hex,
+                          password=uuid.uuid4().hex,
+                          email=uuid.uuid4().hex,
+                          tenant_id=uuid.uuid4().hex)
+
+    def test_user_get_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.get,
+                          user=uuid.uuid4().hex)
+
+    def test_user_list_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.list,
+                          tenant_id=uuid.uuid4().hex)
+
+    def test_user_update_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.update,
+                          user=uuid.uuid4().hex)
+
+    def test_user_update_tenant_404(self):
+        raise nose.exc.SkipTest('N/A')
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.update,
+                          user=self.user_foo['id'],
+                          tenant_id=uuid.uuid4().hex)
+
+    def test_user_update_password_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.update_password,
+                          user=uuid.uuid4().hex,
+                          password=uuid.uuid4().hex)
+
+    def test_user_delete_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.users.delete,
+                          user=uuid.uuid4().hex)
+
     def test_user_list(self):
         client = self.get_client(admin=True)
         users = client.users.list()
@@ -332,7 +408,7 @@ class KeystoneClientTests(object):
         role = client.roles.get(role='keystone_admin')
         self.assertEquals(role.id, 'keystone_admin')
 
-    def test_role_create_and_delete(self):
+    def test_role_crud(self):
         from keystoneclient import exceptions as client_exceptions
 
         test_role = 'new_role'
@@ -345,8 +421,42 @@ class KeystoneClientTests(object):
 
         client.roles.delete(role=role.id)
 
-        self.assertRaises(client_exceptions.NotFound, client.roles.get,
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.delete,
                           role=role.id)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.get,
+                          role=role.id)
+
+    def test_role_get_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.get,
+                          role=uuid.uuid4().hex)
+
+    def test_role_delete_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.delete,
+                          role=uuid.uuid4().hex)
+
+    def test_role_list_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.roles_for_user,
+                          user=uuid.uuid4().hex,
+                          tenant=uuid.uuid4().hex)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.roles_for_user,
+                          user=self.user_foo['id'],
+                          tenant=uuid.uuid4().hex)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.roles_for_user,
+                          user=uuid.uuid4().hex,
+                          tenant=self.tenant_bar['id'])
 
     def test_role_list(self):
         client = self.get_client(admin=True)
@@ -370,6 +480,41 @@ class KeystoneClientTests(object):
         client.ec2.delete(user_id=self.user_foo['id'], access=cred.access)
         creds = client.ec2.list(user_id=self.user_foo['id'])
         self.assertEquals(creds, [])
+
+    def test_ec2_credentials_create_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client()
+        self.assertRaises(client_exceptions.NotFound,
+                          client.ec2.create,
+                          user_id=uuid.uuid4().hex,
+                          tenant_id=self.tenant_bar['id'])
+        self.assertRaises(client_exceptions.NotFound,
+                          client.ec2.create,
+                          user_id=self.user_foo['id'],
+                          tenant_id=uuid.uuid4().hex)
+
+    def test_ec2_credentials_delete_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client()
+        self.assertRaises(client_exceptions.NotFound,
+                          client.ec2.delete,
+                          user_id=uuid.uuid4().hex,
+                          access=uuid.uuid4().hex)
+
+    def test_ec2_credentials_get_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client()
+        self.assertRaises(client_exceptions.NotFound,
+                          client.ec2.get,
+                          user_id=uuid.uuid4().hex,
+                          access=uuid.uuid4().hex)
+
+    def test_ec2_credentials_list_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client()
+        self.assertRaises(client_exceptions.NotFound,
+                          client.ec2.list,
+                          user_id=uuid.uuid4().hex)
 
     def test_ec2_credentials_list_user_forbidden(self):
         from keystoneclient import exceptions as client_exceptions
@@ -430,6 +575,39 @@ class KeystoneClientTests(object):
         services = client.services.list()
         # TODO(devcamcar): This assert should be more specific.
         self.assertTrue(len(services) > 0)
+
+    def test_service_delete_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.services.delete,
+                          id=uuid.uuid4().hex)
+
+    def test_service_get_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.services.get,
+                          id=uuid.uuid4().hex)
+
+    def test_endpoint_create_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.endpoints.create,
+                          region=uuid.uuid4().hex,
+                          service_id=uuid.uuid4().hex,
+                          publicurl=uuid.uuid4().hex,
+                          adminurl=uuid.uuid4().hex,
+                          internalurl=uuid.uuid4().hex)
+
+    def test_endpoint_delete_404(self):
+        # the catalog backend is expected to return Not Implemented
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.HTTPNotImplemented,
+                          client.endpoints.delete,
+                          id=uuid.uuid4().hex)
 
     def test_admin_requires_adminness(self):
         from keystoneclient import exceptions as client_exceptions
@@ -501,6 +679,49 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                                       role=self.role_useless['id'])
         user_refs = client.tenants.list_users(tenant=self.tenant_baz['id'])
         self.assert_(self.user_foo['id'] not in [x.id for x in user_refs])
+
+    def test_user_role_add_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.add_user_role,
+                          tenant=uuid.uuid4().hex,
+                          user=self.user_foo['id'],
+                          role=self.role_useless['id'])
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.add_user_role,
+                          tenant=self.tenant_baz['id'],
+                          user=uuid.uuid4().hex,
+                          role=self.role_useless['id'])
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.add_user_role,
+                          tenant=self.tenant_baz['id'],
+                          user=self.user_foo['id'],
+                          role=uuid.uuid4().hex)
+
+    def test_user_role_remove_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.remove_user_role,
+                          tenant=uuid.uuid4().hex,
+                          user=self.user_foo['id'],
+                          role=self.role_useless['id'])
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.remove_user_role,
+                          tenant=self.tenant_baz['id'],
+                          user=uuid.uuid4().hex,
+                          role=self.role_useless['id'])
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.remove_user_role,
+                          tenant=self.tenant_baz['id'],
+                          user=self.user_foo['id'],
+                          role=uuid.uuid4().hex)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.roles.remove_user_role,
+                          tenant=self.tenant_baz['id'],
+                          user=self.user_foo['id'],
+                          role=self.role_useless['id'])
 
     def test_tenant_list_marker(self):
         client = self.get_client()
@@ -600,6 +821,9 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         roles = client.roles.get_user_role_refs(user_id='foo')
         self.assertTrue(len(roles) > 0)
 
+    def test_role_list_404(self):
+        raise nose.exc.SkipTest('N/A')
+
     def test_authenticate_and_delete_token(self):
         raise nose.exc.SkipTest('N/A')
 
@@ -643,3 +867,12 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         client.users.delete(user.id)
         self.assertRaises(client_exceptions.NotFound, client.users.get,
                           user.id)
+
+    def test_user_update_404(self):
+        raise nose.exc.SkipTest('N/A')
+
+    def test_endpoint_create_404(self):
+        raise nose.exc.SkipTest('N/A')
+
+    def test_endpoint_delete_404(self):
+        raise nose.exc.SkipTest('N/A')

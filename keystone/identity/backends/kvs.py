@@ -97,8 +97,7 @@ class Identity(kvs.Base, identity.Driver):
         return self.db.get('metadata-%s-%s' % (tenant_id, user_id)) or {}
 
     def get_role(self, role_id):
-        role_ref = self.db.get('role-%s' % role_id)
-        return role_ref
+        return self.db.get('role-%s' % role_id)
 
     def list_users(self):
         user_ids = self.db.get('user_list', [])
@@ -145,6 +144,10 @@ class Identity(kvs.Base, identity.Driver):
         if not metadata_ref:
             metadata_ref = {}
         roles = set(metadata_ref.get('roles', []))
+        if role_id not in roles:
+            msg = 'Cannot remove role that has not been granted, %s' % role_id
+            raise exception.RoleNotFound(message=msg)
+
         roles.remove(role_id)
         metadata_ref['roles'] = list(roles)
         self.update_metadata(user_id, tenant_id, metadata_ref)

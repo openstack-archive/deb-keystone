@@ -44,9 +44,12 @@ class SwiftAuth(object):
         pipeline = catch_errors cache authtoken swiftauth proxy-server
 
     Make sure you have the authtoken middleware before the swiftauth
-    middleware. The authtoken will take care of validating the user
-    and swiftauth middleware will authorize it. See the documentation
-    about how to configure the authtoken middleware.
+    middleware.  authtoken will take care of validating the user and
+    swiftauth will authorize access.  If support is required for
+    unvalidated users (as with anonymous access), authtoken will need
+    to be configured with delay_auth_decision set to true.  See the
+    documentation for more detail on how to configure the authtoken
+    middleware.
 
     Set account auto creation to true::
 
@@ -74,6 +77,15 @@ class SwiftAuth(object):
     hellocorp that user will be admin on that account and can give ACL
     to all other users for hellocorp.
 
+    If you need to have a different reseller_prefix to be able to
+    mix different auth servers you can configure the option
+    reseller_prefix in your swiftauth entry like this :
+
+        reseller_prefix = NEWAUTH_
+
+    Make sure you have a underscore at the end of your new
+    reseller_prefix option.
+
     :param app: The next WSGI app in the pipeline
     :param conf: The dict of configuration values
     """
@@ -81,7 +93,7 @@ class SwiftAuth(object):
         self.app = app
         self.conf = conf
         self.logger = swift_utils.get_logger(conf, log_route='keystoneauth')
-        self.reseller_prefix = conf.get('reseller_prefix', 'AUTH').strip()
+        self.reseller_prefix = conf.get('reseller_prefix', 'AUTH_').strip()
         self.operator_roles = conf.get('operator_roles',
                                        'admin, swiftoperator')
         self.reseller_admin_role = conf.get('reseller_admin_role',
@@ -95,15 +107,17 @@ class SwiftAuth(object):
     def __call__(self, environ, start_response):
         identity = self._keystone_identity(environ)
 
-        if not identity:
-            environ['swift.authorize'] = self.denied_response
-            return self.app(environ, start_response)
+        if identity:
+            self.logger.debug('Using identity: %r' % (identity))
+            environ['keystone.identity'] = identity
+            environ['REMOTE_USER'] = identity.get('tenant')
+            environ['swift.authorize'] = self.authorize
+        else:
+            self.logger.debug('Authorizing as anonymous')
+            environ['swift.authorize'] = self.authorize_anonymous
 
-        self.logger.debug("Using identity: %r" % (identity))
-        environ['keystone.identity'] = identity
-        environ['REMOTE_USER'] = identity.get('tenant')
-        environ['swift.authorize'] = self.authorize
         environ['swift.clean_acl'] = swift_acl.clean_acl
+
         return self.app(environ, start_response)
 
     def _keystone_identity(self, environ):
@@ -119,14 +133,17 @@ class SwiftAuth(object):
                     'roles': roles}
         return identity
 
+    def _get_account_for_tenant(self, tenant_id):
+        return '%s%s' % (self.reseller_prefix, tenant_id)
+
     def _reseller_check(self, account, tenant_id):
         """Check reseller prefix."""
-        return account == '%s_%s' % (self.reseller_prefix, tenant_id)
+        return account == self._get_account_for_tenant(tenant_id)
 
     def authorize(self, req):
         env = req.environ
         env_identity = env.get('keystone.identity', {})
-        tenant = env_identity.get('tenant')
+        tenant_id, tenant_name = env_identity.get('tenant')
 
         try:
             part = swift_utils.split_path(req.path, 1, 4, True)
@@ -140,14 +157,14 @@ class SwiftAuth(object):
         # role.
         if self.reseller_admin_role in user_roles:
             msg = 'User %s has reseller admin authorizing'
-            self.logger.debug(msg % tenant[0])
+            self.logger.debug(msg % tenant_id)
             req.environ['swift_owner'] = True
             return
 
         # Check if a user tries to access an account that does not match their
         # token
-        if not self._reseller_check(account, tenant[0]):
-            log_msg = 'tenant mismatch: %s != %s' % (account, tenant[0])
+        if not self._reseller_check(account, tenant_id):
+            log_msg = 'tenant mismatch: %s != %s' % (account, tenant_id)
             self.logger.debug(log_msg)
             return self.denied_response(req)
 
@@ -165,10 +182,65 @@ class SwiftAuth(object):
 
         # If user is of the same name of the tenant then make owner of it.
         user = env_identity.get('user', '')
-        if self.is_admin and user == tenant[1]:
+        if self.is_admin and user == tenant_name:
             req.environ['swift_owner'] = True
             return
 
+        referrers, roles = swift_acl.parse_acl(getattr(req, 'acl', None))
+
+        authorized = self._authorize_unconfirmed_identity(req, obj, referrers,
+                                                          roles)
+        if authorized:
+            return
+        elif authorized is not None:
+            return self.denied_response(req)
+
+        # Allow ACL at individual user level (tenant:user format)
+        if '%s:%s' % (tenant_name, user) in roles:
+            log_msg = 'user %s:%s allowed in ACL authorizing'
+            self.logger.debug(log_msg % (tenant_name, user))
+            return
+
+        # Check if we have the role in the userroles and allow it
+        for user_role in user_roles:
+            if user_role in roles:
+                log_msg = 'user %s:%s allowed in ACL: %s authorizing'
+                self.logger.debug(log_msg % (tenant_name, user, user_role))
+                return
+
+        return self.denied_response(req)
+
+    def authorize_anonymous(self, req):
+        """
+        Authorize an anonymous request.
+
+        :returns: None if authorization is granted, an error page otherwise.
+        """
+        try:
+            part = swift_utils.split_path(req.path, 1, 4, True)
+            version, account, container, obj = part
+        except ValueError:
+            return webob.exc.HTTPNotFound(request=req)
+
+        is_authoritative_authz = (account and
+                                  account.startswith(self.reseller_prefix))
+        if not is_authoritative_authz:
+            return self.denied_response(req)
+
+        referrers, roles = swift_acl.parse_acl(getattr(req, 'acl', None))
+        authorized = self._authorize_unconfirmed_identity(req, obj, referrers,
+                                                          roles)
+        if not authorized:
+            return self.denied_response(req)
+
+    def _authorize_unconfirmed_identity(self, req, obj, referrers, roles):
+        """"
+        Perform authorization for access that does not require a
+        confirmed identity.
+
+        :returns: A boolean if authorization is granted or denied.  None if
+                  a determination could not be made.
+        """
         # Allow container sync.
         if (req.environ.get('swift_sync_key')
             and req.environ['swift_sync_key'] ==
@@ -179,32 +251,15 @@ class SwiftAuth(object):
                  in self.allowed_sync_hosts)):
             log_msg = 'allowing proxy %s for container-sync' % req.remote_addr
             self.logger.debug(log_msg)
-            return
+            return True
 
         # Check if referrer is allowed.
-        referrers, roles = swift_acl.parse_acl(getattr(req, 'acl', None))
         if swift_acl.referrer_allowed(req.referer, referrers):
-            #TODO(chmou): convert .rlistings to Keystone type role.
             if obj or '.rlistings' in roles:
                 log_msg = 'authorizing %s via referer ACL' % req.referrer
                 self.logger.debug(log_msg)
-                return
-            return self.denied_response(req)
-
-        # Allow ACL at individual user level (tenant:user format)
-        if '%s:%s' % (tenant[0], user) in roles:
-            log_msg = 'user %s:%s allowed in ACL authorizing'
-            self.logger.debug(log_msg % (tenant[0], user))
-            return
-
-        # Check if we have the role in the userroles and allow it
-        for user_role in user_roles:
-            if user_role in roles:
-                log_msg = 'user %s:%s allowed in ACL: %s authorizing'
-                self.logger.debug(log_msg % (tenant[0], user, user_role))
-                return
-
-        return self.denied_response(req)
+                return True
+            return False
 
     def denied_response(self, req):
         """Deny WSGI Response.
