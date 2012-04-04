@@ -1,3 +1,9 @@
+keystone (2012.1~rc2-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Wed, 04 Apr 2012 10:09:36 +0200
+
 keystone (2012.1~rc1-2) unstable; urgency=low
 
   * Removed check timeout from keystone.postinst. Closes: #665739
