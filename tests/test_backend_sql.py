@@ -30,18 +30,29 @@ CONF = config.CONF
 class SqlIdentity(test.TestCase, test_backend.IdentityTests):
     def setUp(self):
         super(SqlIdentity, self).setUp()
-        CONF(config_files=[test.etcdir('keystone.conf'),
+        CONF(config_files=[test.etcdir('keystone.conf.sample'),
                            test.testsdir('test_overrides.conf'),
                            test.testsdir('backend_sql.conf')])
         sql_util.setup_test_database()
         self.identity_api = identity_sql.Identity()
         self.load_fixtures(default_fixtures)
 
+    def test_delete_user_with_tenant_association(self):
+        user = {'id': 'fake',
+                'name': 'fakeuser',
+                'password': 'passwd'}
+        self.identity_api.create_user('fake', user)
+        self.identity_api.add_user_to_tenant(self.tenant_bar['id'],
+                                             user['id'])
+        self.identity_api.delete_user(user['id'])
+        tenants = self.identity_api.get_tenants_for_user(user['id'])
+        self.assertEquals(tenants, [])
+
 
 class SqlToken(test.TestCase, test_backend.TokenTests):
     def setUp(self):
         super(SqlToken, self).setUp()
-        CONF(config_files=[test.etcdir('keystone.conf'),
+        CONF(config_files=[test.etcdir('keystone.conf.sample'),
                            test.testsdir('test_overrides.conf'),
                            test.testsdir('backend_sql.conf')])
         sql_util.setup_test_database()
@@ -69,4 +80,4 @@ class SqlToken(test.TestCase, test_backend.TokenTests):
 
 #  def test_get_catalog(self):
 #    catalog_ref = self.catalog_api.get_catalog('foo', 'bar')
-#    self.assertDictEquals(catalog_ref, self.catalog_foobar)
+#    self.assertDictEqual(catalog_ref, self.catalog_foobar)
