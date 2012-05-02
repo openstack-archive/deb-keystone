@@ -1,3 +1,9 @@
+keystone (2012.1-2) unstable; urgency=low
+
+  * Fixed python version requisites on webob and pam. Closes: #665804
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Wed, 02 May 2012 10:17:35 +0200
+
 keystone (2012.1-1) unstable; urgency=low
 
   * New upstream release

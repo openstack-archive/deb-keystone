@@ -1,0 +1,11 @@
+--- a/tools/pip-requires
++++ b/tools/pip-requires
+@@ -1,6 +1,6 @@
+ # keystonelight dependencies
+-pam==0.1.4
+-WebOb==1.0.8
++pam>=0.1.4
++WebOb>=1.0.8
+ eventlet
+ greenlet
+ PasteDeploy
