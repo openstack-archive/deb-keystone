@@ -1,3 +1,9 @@
+keystone (2012.1-3) unstable; urgency=low
+  
+  * Add logrotate for keystone.log. Closes: #663717
+
+ -- Mehdi Abaakouk <sileht@sileht.net>  Tue, 22 May 2012 14:48:56 +0200
+
 keystone (2012.1-2) unstable; urgency=low
 
   * Fixed python version requisites on webob and pam. Closes: #665804
