@@ -1,11 +1,11 @@
 --- a/etc/keystone.conf.sample
 +++ b/etc/keystone.conf.sample
-@@ -17,7 +17,7 @@
- # syslog_log_facility = LOG_LOCAL0
+@@ -52,7 +52,7 @@
  
  [sql]
--connection = sqlite:///keystone.db
+ # The SQLAlchemy connection string used to connect to the database
+-# connection = sqlite:///keystone.db
 +connection = sqlite:////var/lib/keystone/keystone.sqlite
- idle_timeout = 200
  
- [ldap]
+ # the timeout before idle sql connections are reaped
+ # idle_timeout = 200
