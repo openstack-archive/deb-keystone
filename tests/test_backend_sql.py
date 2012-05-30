@@ -14,7 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import uuid
+
 from keystone import config
+from keystone import exception
 from keystone import test
 from keystone.common.sql import util as sql_util
 from keystone.identity.backends import sql as identity_sql
@@ -47,6 +50,86 @@ class SqlIdentity(test.TestCase, test_backend.IdentityTests):
         self.identity_api.delete_user(user['id'])
         tenants = self.identity_api.get_tenants_for_user(user['id'])
         self.assertEquals(tenants, [])
+
+    def test_create_null_user_name(self):
+        user = {'id': uuid.uuid4().hex,
+                'name': None,
+                'password': uuid.uuid4().hex}
+        self.assertRaises(exception.Conflict,
+                          self.identity_api.create_user,
+                          user['id'],
+                          user)
+        # TODO(dolph): can be uncommented pending bug 968519
+        #self.assertRaises(exception.UserNotFound,
+        #                  self.identity_api.get_user,
+        #                  user['id'])
+        #self.assertRaises(exception.UserNotFound,
+        #                  self.identity_api.get_user_by_name,
+        #                  user['name'])
+
+    def test_create_null_tenant_name(self):
+        tenant = {'id': uuid.uuid4().hex,
+                  'name': None}
+        self.assertRaises(exception.ValidationError,
+                          self.identity_api.create_tenant,
+                          tenant['id'],
+                          tenant)
+        # TODO(dolph): can be uncommented pending bug 968519
+        #self.assertRaises(exception.TenantNotFound,
+        #                  self.identity_api.get_tenant,
+        #                  tenant['id'])
+        #self.assertRaises(exception.TenantNotFound,
+        #                  self.identity_api.get_tenant_by_name,
+        #                  tenant['name'])
+
+    def test_create_null_role_name(self):
+        role = {'id': uuid.uuid4().hex,
+                'name': None}
+        self.assertRaises(exception.Conflict,
+                          self.identity_api.create_role,
+                          role['id'],
+                          role)
+        # TODO(dolph): can be uncommented pending bug 968519
+        #self.assertRaises(exception.RoleNotFound,
+        #                  self.identity_api.get_role,
+        #                  role['id'])
+
+    def test_delete_tenant_with_user_association(self):
+        user = {'id': 'fake',
+                'name': 'fakeuser',
+                'password': 'passwd'}
+        self.identity_api.create_user('fake', user)
+        self.identity_api.add_user_to_tenant(self.tenant_bar['id'],
+                                             user['id'])
+        self.identity_api.delete_tenant(self.tenant_bar['id'])
+        tenants = self.identity_api.get_tenants_for_user(user['id'])
+        self.assertEquals(tenants, [])
+
+    def test_delete_user_with_metadata(self):
+        user = {'id': 'fake',
+                'name': 'fakeuser',
+                'password': 'passwd'}
+        self.identity_api.create_user('fake', user)
+        self.identity_api.create_metadata(user['id'],
+                                          self.tenant_bar['id'],
+                                          {'extra': 'extra'})
+        self.identity_api.delete_user(user['id'])
+        metadata = self.identity_api.get_metadata(user['id'],
+                                                  self.tenant_bar['id'])
+        self.assertEquals(metadata, {})
+
+    def test_delete_tenant_with_metadata(self):
+        user = {'id': 'fake',
+                'name': 'fakeuser',
+                'password': 'passwd'}
+        self.identity_api.create_user('fake', user)
+        self.identity_api.create_metadata(user['id'],
+                                          self.tenant_bar['id'],
+                                          {'extra': 'extra'})
+        self.identity_api.delete_tenant(self.tenant_bar['id'])
+        metadata = self.identity_api.get_metadata(user['id'],
+                                                  self.tenant_bar['id'])
+        self.assertEquals(metadata, {})
 
 
 class SqlToken(test.TestCase, test_backend.TokenTests):

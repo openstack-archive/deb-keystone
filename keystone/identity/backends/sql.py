@@ -17,8 +17,9 @@
 import copy
 import functools
 
-from keystone import identity
+from keystone import clean
 from keystone import exception
+from keystone import identity
 from keystone.common import sql
 from keystone.common import utils
 from keystone.common.sql import migration
@@ -53,7 +54,7 @@ def handle_conflicts(type='object'):
 class User(sql.ModelBase, sql.DictBase):
     __tablename__ = 'user'
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True)
+    name = sql.Column(sql.String(64), unique=True, nullable=False)
     #password = sql.Column(sql.String(64))
     extra = sql.Column(sql.JsonBlob())
 
@@ -79,7 +80,7 @@ class User(sql.ModelBase, sql.DictBase):
 class Tenant(sql.ModelBase, sql.DictBase):
     __tablename__ = 'tenant'
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True)
+    name = sql.Column(sql.String(64), unique=True, nullable=False)
     extra = sql.Column(sql.JsonBlob())
 
     @classmethod
@@ -104,7 +105,7 @@ class Tenant(sql.ModelBase, sql.DictBase):
 class Role(sql.ModelBase, sql.DictBase):
     __tablename__ = 'role'
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True)
+    name = sql.Column(sql.String(64), unique=True, nullable=False)
 
 
 class Metadata(sql.ModelBase, sql.DictBase):
@@ -175,9 +176,10 @@ class Identity(sql.Base, identity.Driver):
     def get_tenant_users(self, tenant_id):
         session = self.get_session()
         user_refs = session.query(User)\
-                .join(UserTenantMembership)\
-                .filter(UserTenantMembership.tenant_id == tenant_id)\
-                .all()
+                           .join(UserTenantMembership)\
+                           .filter(UserTenantMembership.tenant_id ==
+                                   tenant_id)\
+                           .all()
         return [_filter_user(user_ref.to_dict()) for user_ref in user_refs]
 
     def _get_user(self, user_id):
@@ -255,8 +257,8 @@ class Identity(sql.Base, identity.Driver):
     def get_tenants_for_user(self, user_id):
         session = self.get_session()
         membership_refs = session.query(UserTenantMembership)\
-                          .filter_by(user_id=user_id)\
-                          .all()
+                                 .filter_by(user_id=user_id)\
+                                 .all()
         return [x.tenant_id for x in membership_refs]
 
     def get_roles_for_user_and_tenant(self, user_id, tenant_id):
@@ -328,19 +330,27 @@ class Identity(sql.Base, identity.Driver):
         session = self.get_session()
         user_ref = session.query(User).filter_by(id=user_id).first()
         membership_refs = session.query(UserTenantMembership)\
-                          .filter_by(user_id=user_id)\
-                          .all()
+                                 .filter_by(user_id=user_id)\
+                                 .all()
+        metadata_refs = session.query(Metadata)\
+                               .filter_by(user_id=user_id)\
+                               .all()
 
         with session.begin():
             if membership_refs:
                 for membership_ref in membership_refs:
                     session.delete(membership_ref)
+                    session.flush()
+            if metadata_refs:
+                for metadata_ref in metadata_refs:
+                    session.delete(metadata_ref)
 
             session.delete(user_ref)
             session.flush()
 
     @handle_conflicts(type='tenant')
     def create_tenant(self, tenant_id, tenant):
+        tenant['name'] = clean.tenant_name(tenant['name'])
         session = self.get_session()
         with session.begin():
             tenant_ref = Tenant.from_dict(tenant)
@@ -350,6 +360,8 @@ class Identity(sql.Base, identity.Driver):
 
     @handle_conflicts(type='tenant')
     def update_tenant(self, tenant_id, tenant):
+        if 'name' in tenant:
+            tenant['name'] = clean.tenant_name(tenant['name'])
         session = self.get_session()
         with session.begin():
             tenant_ref = session.query(Tenant).filter_by(id=tenant_id).first()
@@ -366,7 +378,21 @@ class Identity(sql.Base, identity.Driver):
     def delete_tenant(self, tenant_id):
         session = self.get_session()
         tenant_ref = session.query(Tenant).filter_by(id=tenant_id).first()
+        membership_refs = session.query(UserTenantMembership)\
+                                 .filter_by(tenant_id=tenant_id)\
+                                 .all()
+        metadata_refs = session.query(Metadata)\
+                               .filter_by(tenant_id=tenant_id)\
+                               .all()
+
         with session.begin():
+            if membership_refs:
+                for membership_ref in membership_refs:
+                    session.delete(membership_ref)
+            if metadata_refs:
+                for metadata_ref in metadata_refs:
+                    session.delete(metadata_ref)
+
             session.delete(tenant_ref)
             session.flush()
 

@@ -24,11 +24,14 @@ from keystone import config
 from keystone import exception
 from keystone import policy
 from keystone import token
+from keystone.common import logging
 from keystone.common import manager
 from keystone.common import wsgi
 
 
 CONF = config.CONF
+
+LOG = logging.getLogger(__name__)
 
 
 class Manager(manager.Manager):
@@ -229,7 +232,7 @@ class AdminRouter(wsgi.ComposableRouter):
                        action='get_user_roles',
                        conditions=dict(method=['GET']))
         mapper.connect('/users/{user_id}/roles',
-                       controller=user_controller,
+                       controller=roles_controller,
                        action='get_user_roles',
                        conditions=dict(method=['GET']))
 
@@ -292,6 +295,11 @@ class TenantController(wsgi.Application):
     # CRUD Extension
     def create_tenant(self, context, tenant):
         tenant_ref = self._normalize_dict(tenant)
+
+        if not 'name' in tenant_ref or not tenant_ref['name']:
+            msg = 'Name field is required and cannot be empty'
+            raise exception.ValidationError(message=msg)
+
         self.assert_admin(context)
         tenant_id = (tenant_ref.get('id')
                      and tenant_ref.get('id')
@@ -385,6 +393,11 @@ class UserController(wsgi.Application):
     def create_user(self, context, user):
         user = self._normalize_dict(user)
         self.assert_admin(context)
+
+        if not 'name' in user or not user['name']:
+            msg = 'Name field is required and cannot be empty'
+            raise exception.ValidationError(message=msg)
+
         tenant_id = user.get('tenantId', None)
         if (tenant_id is not None
                 and self.identity_api.get_tenant(context, tenant_id) is None):
@@ -405,6 +418,17 @@ class UserController(wsgi.Application):
             raise exception.UserNotFound(user_id=user_id)
 
         user_ref = self.identity_api.update_user(context, user_id, user)
+
+        # If the password was changed or the user was disabled we clear tokens
+        if user.get('password') or user.get('enabled', True) == False:
+            try:
+                for token_id in self.token_api.list_tokens(context, user_id):
+                    self.token_api.delete_token(context, token_id)
+            except exception.NotImplemented:
+                # The users status has been changed but tokens remain valid for
+                # backends that can't list tokens for users
+                LOG.warning('User %s status has changed, but existing tokens '
+                            'remain valid' % user_id)
         return {'user': user_ref}
 
     def delete_user(self, context, user_id):
@@ -470,6 +494,11 @@ class RoleController(wsgi.Application):
     def create_role(self, context, role):
         role = self._normalize_dict(role)
         self.assert_admin(context)
+
+        if not 'name' in role or not role['name']:
+            msg = 'Name field is required and cannot be empty'
+            raise exception.ValidationError(message=msg)
+
         role_id = uuid.uuid4().hex
         role['id'] = role_id
         role_ref = self.identity_api.create_role(context, role_id, role)
@@ -552,7 +581,8 @@ class RoleController(wsgi.Application):
 
         """
         self.assert_admin(context)
-        user_ref = self.identity_api.get_user(context, user_id)
+        # Ensure user exists by getting it first.
+        self.identity_api.get_user(context, user_id)
         tenant_ids = self.identity_api.get_tenants_for_user(context, user_id)
         o = []
         for tenant_id in tenant_ids:

@@ -175,7 +175,7 @@ Configuring Swift to use Keystone
 ---------------------------------
 
 Similar to Nova, swift can be configured to use Keystone for authentication
-rather than it's built in 'tempauth'.
+rather than its built in 'tempauth'.
 
 1. Add a service endpoint for Swift to Keystone
 
@@ -202,10 +202,9 @@ rather than it's built in 'tempauth'.
     [filter:authtoken]
     paste.filter_factory = keystone.middleware.auth_token:filter_factory
     # Delaying the auth decision is required to support token-less
-    # usage for anonymous referrers ('.r:*').
-    delay_auth_decision = true
-    service_port = 5000
-    service_host = 127.0.0.1
+    # usage for anonymous referrers ('.r:*') or for tempurl/formpost
+    # middleware.
+    delay_auth_decision = 1
     auth_port = 35357
     auth_host = 127.0.0.1
     auth_token = ADMIN
@@ -239,7 +238,7 @@ rather than it's built in 'tempauth'.
 Configuring Swift with S3 emulation to use Keystone
 ---------------------------------------------------
 
-Keystone support validating S3 tokens using the same tokens as the
+Keystone supports validating S3 tokens using the same tokens as the
 generated EC2 tokens. When you have generated a pair of EC2 access
 token and secret you can access your swift cluster directly with the
 S3 api.
@@ -248,7 +247,7 @@ S3 api.
    (`/etc/swift/swift-proxy.conf` to use S3token and Swift3
    middleware.
 
-   Here's an example::
+   Here's an example that by default communicates with keystone via https ::
 
     [DEFAULT]
     bind_port = 8080
@@ -279,17 +278,17 @@ S3 api.
 
     [filter:s3token]
     paste.filter_factory = keystone.middleware.s3_token:filter_factory
+    # uncomment the following line if you don't want to use SSL
+    # auth_protocol = http
     auth_port = 35357
     auth_host = 127.0.0.1
-    auth_protocol = http
 
     [filter:authtoken]
     paste.filter_factory = keystone.middleware.auth_token:filter_factory
-    service_port = 5000
-    service_host = 127.0.0.1
+    # uncomment the following line if you don't want to use SSL
+    # auth_protocol = http
     auth_port = 35357
     auth_host = 127.0.0.1
-    auth_protocol = http
     auth_token = ADMIN
     admin_token = ADMIN
 
@@ -326,8 +325,6 @@ Here is an example paste config filter that makes use of the 'admin_user' and
 
     [filter:authtoken]
     paste.filter_factory = keystone.middleware.auth_token:filter_factory
-    service_port = 5000
-    service_host = 127.0.0.1
     auth_port = 35357
     auth_host = 127.0.0.1
     auth_token = 012345SECRET99TOKEN012345

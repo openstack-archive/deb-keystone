@@ -4,6 +4,7 @@
 import greenlet
 import logging
 import os
+import signal
 import sys
 
 # If ../keystone/__init__.py exists, add ../ to Python search path, so that
@@ -20,6 +21,7 @@ from paste import deploy
 
 from keystone import config
 from keystone.common import wsgi
+from keystone.common import utils
 
 
 CONF = config.CONF
@@ -27,15 +29,34 @@ CONF = config.CONF
 
 def create_server(conf, name, host, port):
     app = deploy.loadapp('config:%s' % conf, name=name)
-    return wsgi.Server(app, host=host, port=port)
+    server = wsgi.Server(app, host=host, port=port)
+    if CONF.ssl.enable:
+        server.set_ssl(CONF.ssl.certfile, CONF.ssl.keyfile,
+                       CONF.ssl.ca_certs, CONF.ssl.cert_required)
+    return server
+
+
+def sigint_handler(signal, frame):
+    """Exits at SIGINT signal."""
+    logging.debug('SIGINT received, stopping servers.')
+    sys.exit(0)
 
 
 def serve(*servers):
+    signal.signal(signal.SIGINT, sigint_handler)
+
     for server in servers:
         logging.debug("starting server %s on port %s",
                       server.application,
                       server.port)
         server.start()
+
+    # notify calling process we are ready to serve
+    if CONF.onready:
+        try:
+            utils.check_output(CONF.onready.split())
+        except Exception:
+            logging.exception('Failed to execute onready command')
 
     for server in servers:
         try:

@@ -19,6 +19,7 @@ import uuid
 import ldap
 from ldap import filter as ldap_filter
 
+from keystone import clean
 from keystone import config
 from keystone import exception
 from keystone import identity
@@ -93,13 +94,13 @@ class Identity(identity.Driver):
             raise AssertionError('Invalid tenant')
 
         tenant_ref = self.get_tenant(tenant_id)
-        metadata_ref = {}
         # TODO(termie): this should probably be made into a get roles call
-        #if tenant_ref:
-        #    metadata_ref =  self.get_metadata(user_id, tenant_id)
-        #else:
-        #    metadata_ref = {}
-        return  (_filter_user(user_ref), tenant_ref, metadata_ref)
+        if tenant_ref:
+            metadata_ref = self.get_metadata(user_id, tenant_id)
+        else:
+            metadata_ref = {}
+
+        return (_filter_user(user_ref), tenant_ref, metadata_ref)
 
     def get_tenant(self, tenant_id):
         return self.tenant.get(tenant_id)
@@ -130,7 +131,9 @@ class Identity(identity.Driver):
             return {}
 
         metadata_ref = self.get_roles_for_user_and_tenant(user_id, tenant_id)
-        return metadata_ref or {}
+        if not metadata_ref:
+            return {}
+        return {'roles': metadata_ref}
 
     def get_role(self, role_id):
         return self.role.get(role_id)
@@ -164,12 +167,15 @@ class Identity(identity.Driver):
         return self.user.update(user_id, user)
 
     def create_tenant(self, tenant_id, tenant):
+        tenant['name'] = clean.tenant_name(tenant['name'])
         data = tenant.copy()
         if 'id' not in data or data['id'] is None:
             data['id'] = str(uuid.uuid4().hex)
         return self.tenant.create(tenant)
 
     def update_tenant(self, tenant_id, tenant):
+        if 'name' in tenant:
+            tenant['name'] = clean.tenant_name(tenant['name'])
         return self.tenant.update(tenant_id, tenant)
 
     def create_metadata(self, user_id, tenant_id, metadata):
@@ -315,8 +321,8 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
             self.role_api.rolegrant_delete(ref.id)
 
     def get_by_email(self, email):
-        users = self.get_all('(mail=%s)' % \
-                            (ldap_filter.escape_filter_chars(email),))
+        users = self.get_all('(mail=%s)' %
+                             (ldap_filter.escape_filter_chars(email),))
         try:
             return users[0]
         except IndexError:

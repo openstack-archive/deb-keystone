@@ -13,10 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
+import stubout
 import unittest2 as unittest
 import webob
 
+from swift.common import utils as swift_utils
+
 from keystone.middleware import swift_auth
+
+
+def setUpModule(self):
+    self.stubs = stubout.StubOutForTesting()
+
+    # Stub out swift_utils.get_logger.  get_logger tries to configure
+    # syslogging to '/dev/log', which will fail on OS X.
+    def fake_get_logger(config, log_route=None):
+        return logging.getLogger(log_route)
+    self.stubs.Set(swift_utils, 'get_logger', fake_get_logger)
+
+
+def tearDownModule(self):
+    self.stubs.UnsetAll()
 
 
 class FakeApp(object):
@@ -90,6 +109,28 @@ class SwiftAuth(unittest.TestCase):
         account = tenant_id = 'foo'
         self.assertTrue(test_auth._reseller_check(account, tenant_id))
 
+    def test_override_asked_for_but_not_allowed(self):
+        conf = {'allow_overrides': 'false'}
+        self.test_auth = swift_auth.filter_factory(conf)(FakeApp())
+        req = self._make_request('/v1/AUTH_account',
+                                 environ={'swift.authorize_override': True})
+        resp = req.get_response(self.test_auth)
+        self.assertEquals(resp.status_int, 401)
+
+    def test_override_asked_for_and_allowed(self):
+        conf = {'allow_overrides': 'true'}
+        self.test_auth = swift_auth.filter_factory(conf)(FakeApp())
+        req = self._make_request('/v1/AUTH_account',
+                                 environ={'swift.authorize_override': True})
+        resp = req.get_response(self.test_auth)
+        self.assertEquals(resp.status_int, 404)
+
+    def test_override_default_allowed(self):
+        req = self._make_request('/v1/AUTH_account',
+                                 environ={'swift.authorize_override': True})
+        resp = req.get_response(self.test_auth)
+        self.assertEquals(resp.status_int, 404)
+
 
 class TestAuthorize(unittest.TestCase):
     def setUp(self):
@@ -138,7 +179,7 @@ class TestAuthorize(unittest.TestCase):
                                  exception=webob.exc.HTTPForbidden)
 
     def test_authorize_succeeds_for_reseller_admin(self):
-        roles =[self.test_auth.reseller_admin_role]
+        roles = [self.test_auth.reseller_admin_role]
         identity = self._get_identity(roles=roles)
         req = self._check_authenticate(identity=identity)
         self.assertTrue(req.environ.get('swift_owner'))
@@ -194,11 +235,15 @@ class TestAuthorize(unittest.TestCase):
         identity = self._get_identity(roles=[acl])
         self._check_authenticate(identity=identity, acl=acl)
 
-    def test_authorize_succeeds_for_tenant_user_in_roles(self):
+    def test_authorize_succeeds_for_tenant_name_user_in_roles(self):
         identity = self._get_identity()
         acl = '%s:%s' % (identity['tenant'][1], identity['user'])
         self._check_authenticate(identity=identity, acl=acl)
 
+    def test_authorize_succeeds_for_tenant_id_user_in_roles(self):
+        identity = self._get_identity()
+        acl = '%s:%s' % (identity['tenant'][0], identity['user'])
+        self._check_authenticate(identity=identity, acl=acl)
 
 if __name__ == '__main__':
     unittest.main()
