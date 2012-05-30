@@ -1,3 +1,27 @@
+keystone (2012.1-3) unstable; urgency=low
+  
+  * Add logrotate for keystone.log. Closes: #663717
+
+ -- Mehdi Abaakouk <sileht@sileht.net>  Tue, 22 May 2012 14:48:56 +0200
+
+keystone (2012.1-2) unstable; urgency=low
+
+  * Fixed python version requisites on webob and pam. Closes: #665804
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Wed, 02 May 2012 10:17:35 +0200
+
+keystone (2012.1-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Mon, 09 Apr 2012 09:06:22 +0200
+
+keystone (2012.1~rc2-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Wed, 04 Apr 2012 10:09:36 +0200
+
 keystone (2012.1~rc1-2) unstable; urgency=low
 
   * Removed check timeout from keystone.postinst. Closes: #665739
