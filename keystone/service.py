@@ -28,6 +28,9 @@ from keystone.common import utils
 from keystone.common import wsgi
 
 
+LOG = logging.getLogger(__name__)
+
+
 class AdminRouter(wsgi.ComposingRouter):
     def __init__(self):
         mapper = routes.Mapper()
@@ -275,7 +278,8 @@ class TokenController(wsgi.Application):
 
                 # If the user is disabled don't allow them to authenticate
                 if not user_ref.get('enabled', True):
-                    raise exception.Forbidden(message='User has been disabled')
+                    LOG.warning('User %s is disabled' % user_id)
+                    raise exception.Unauthorized()
             except AssertionError as e:
                 raise exception.Unauthorized(e.message)
 
@@ -314,6 +318,14 @@ class TokenController(wsgi.Application):
 
             user_ref = old_token_ref['user']
 
+            # If the user is disabled don't allow them to authenticate
+            current_user_ref = self.identity_api.get_user(
+                                                    context=context,
+                                                    user_id=user_ref['id'])
+            if not current_user_ref.get('enabled', True):
+                LOG.warning('User %s is disabled' % user_ref['id'])
+                raise exception.Unauthorized()
+
             tenants = self.identity_api.get_tenants_for_user(context,
                                                              user_ref['id'])
             if tenant_id:
@@ -339,7 +351,8 @@ class TokenController(wsgi.Application):
                     context, token_id, dict(id=token_id,
                                             user=user_ref,
                                             tenant=tenant_ref,
-                                            metadata=metadata_ref))
+                                            metadata=metadata_ref,
+                                            expires=old_token_ref['expires']))
 
         # TODO(termie): optimize this call at some point and put it into the
         #               the return for metadata
