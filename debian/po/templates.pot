@@ -1,0 +1,64 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: keystone\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-06-22 11:34+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "Set up a database for keystone?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"No database has been set up for keystone to use. Before continuing, you "
+"should make sure you have:"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+" - the server host name (that server must allow TCP connections\n"
+"   from this machine);\n"
+" - a username and password to access the database.\n"
+" - A database type that you want to use."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"If some of these requirements are missing, reject this option and run with "
+"regular sqlite support."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"Database configuration can be reconfigured later by running 'dpkg-"
+"reconfigure -plow keystone'."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:2001
+msgid "Auth server admin token:"
+msgstr ""

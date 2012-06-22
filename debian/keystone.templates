@@ -1,7 +1,7 @@
 Template: keystone/configure_db
 Type: boolean
 Default: false
-Description: Set up a database for keystone?
+_Description: Set up a database for keystone?
  No database has been set up for keystone to use. Before continuing,
  you should make sure you have:
  .

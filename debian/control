@@ -29,7 +29,8 @@ Build-Depends: debhelper (>= 7.0.50),
  python-mox,
  python-dateutil,
  pep8,
- git-core
+ git-core,
+ po-debconf
 Standards-Version: 3.9.3
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
