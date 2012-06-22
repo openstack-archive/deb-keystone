@@ -19,6 +19,7 @@ fi
 case "$1" in
     purge)
         rm -rf /var/log/keystone
+	rm -rf /var/lib/keystone
 esac
 
 #DEBHELPER#
