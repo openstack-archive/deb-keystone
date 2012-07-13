@@ -5,10 +5,9 @@ set -e
 
 # ToDo: Check service is running and token properly set
 
-
-SERVICE_TOKEN={`gawk 'match ($0, /^admin_token\s?=\s?(.*)/, ary){ print ary[1]}' /etc/keystone/keystone.conf`:-"ADMIN"}
-SERVICE_ENDPOINT="http://localhost:35357/v2.0/"
-
+TOKEN=`gawk 'match ($0, /^admin_token\s?=\s?(.*)/, ary){ print ary[1]}' /etc/keystone/keystone.conf`
+export SERVICE_TOKEN=${TOKEN:-"ADMIN"}
+export SERVICE_ENDPOINT="http://localhost:35357/v2.0/"
 
 if ! timeout 20 sh -c "while ! http_proxy= wget -q -O- ${SERVICE_ENDPOINT}; do sleep 1; done"
 then
