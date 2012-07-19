@@ -59,5 +59,20 @@ get-orig-source:
 	uscan --verbose --force-download --rename --destdir=../build-area
 
 get-vcs-source:
-        git remote add upstream git://github.com/openstack/keystone.git || true
+	git remote add upstream git://github.com/openstack/keystone.git || true
 	git fetch upstream
+	git archive --prefix=keystone-2012.1.1/ 2012.1.1 | xz >../keystone_2012.1.1.orig.tar.xz
+	if ! git checkout master ; then \
+		echo "No upstream branch: checking out" ; \
+		git checkout -b master upstream/master ; \
+	fi
+	git checkout debian/unstable
+
+display-po-stats:
+	cd $(CURDIR)/debian/po ; for i in *.po ; do \
+		echo -n $$i": " ; \
+		msgfmt -o /dev/null --statistic $$i ; \
+	done
+
+call-for-po-trans:
+	podebconf-report-po --call --withtranslators --languageteam
