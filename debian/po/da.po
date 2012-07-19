@@ -1,27 +1,26 @@
-# SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
-# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+# Danish translation keystone.
+# Copyright (C) 2012 keystone & nedenstående oversættere.
+# This file is distributed under the same license as the keystone package.
+# Joe Hansen <joedalton2@yahoo.dk>, 2012.
 #
-#, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2012-06-27 19:39+0200\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: LANGUAGE <LL@li.org>\n"
+"PO-Revision-Date: 2012-07-03 17:30+01:00\n"
+"Last-Translator: Joe Hansen <joedalton2@yahoo.dk>\n"
+"Language-Team: Danish <debian-l10n-danish@lists.debian.org>\n"
 "Language: \n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
 msgid "Set up a database for Keystone?"
-msgstr ""
+msgstr "Opsæt en database for keystone?"
 
 #. Type: boolean
 #. Description
@@ -30,6 +29,8 @@ msgid ""
 "No database has been set up for Keystone to use. If you want to set one up "
 "now, please make sure you have all needed information:"
 msgstr ""
+"Ingen database er blevet opsat for Keystone. Hvis du ønsker at opsætte en "
+"database nu så sikr dig, at du har den krævede information:"
 
 #. Type: boolean
 #. Description
@@ -40,6 +41,10 @@ msgid ""
 " * a username and password to access the database;\n"
 " * the type of database management software you want to use."
 msgstr ""
+" * værtsnavnet for databaseserveren (som skal tillade TCP-\n"
+"   forbindelser fra denne maskine)\n"
+" * et brugernavn og adgangskode for at tilgå databasen\n"
+" * typen af håndteringsprogram for databasen du ønsker at bruge"
 
 #. Type: boolean
 #. Description
@@ -48,6 +53,8 @@ msgid ""
 "If you don't choose this option, no database will be set up and Keystone "
 "will use regular SQLite support."
 msgstr ""
+"Hvis du ikke vælger denne indstilling, så vil ingen database blive opsat og "
+"Keystone vil bruge den normale SQLite-understøttelse."
 
 #. Type: boolean
 #. Description
@@ -56,3 +63,5 @@ msgid ""
 "You can change this setting later on by running \"dpkg-reconfigure -plow "
 "keystone\"."
 msgstr ""
+"Du kan ændre denne indstilling senere ved at køre »dpkg-reconfigure -plow "
+"keystone«."

@@ -1,0 +1,69 @@
+# Italian translation of keystone debconf messages.
+# Copyright (C) 2012, Beatrice Torracca <beatricet@libero.it>
+# This file is distributed under the same license as the keystone package.
+# Beatrice Torracca <beatricet@libero.it>, 2012.
+msgid ""
+msgstr ""
+"Project-Id-Version: keystone\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"PO-Revision-Date: 2012-07-11 19:15+0200\n"
+"Last-Translator: Beatrice Torracca <beatricet@libero.it>\n"
+"Language-Team: Italian <debian-l10n-italian@lists.debian.org>\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Virtaal 0.7.1\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "Set up a database for Keystone?"
+msgstr "Impostare un database per Keystone?"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"Non è stato impostato alcun database per l'uso da parte di Keystone. Se si "
+"desidera impostarne uno ora assicurarsi di avere tutte le informazioni "
+"necessarie:"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
+msgstr ""
+" * il nome host del server di database (che deve permettere le connessioni\n"
+"   TCP da questa macchina);\n"
+" * un nome utente e una password per accedere al database;\n"
+" * il tipo di software di gestione del database che si desidera usare."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
+"Se non si sceglie questa opzione, non verrà impostato alcun database e "
+"Keystone userà il regolare supporto SQLite."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"È possibile cambiare questa impostazione successivamente eseguendo \"dpkg-"
+"reconfigure -plow keystone\"."

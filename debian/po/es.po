@@ -1,0 +1,91 @@
+# keystone po-debconf translation to Spanish
+# Copyright (C) 2012 Software in the Public Interest
+# This file is distributed under the same license as the keystone package.
+#
+# Changes:
+# - Initial translation
+# SM Baby Siabef <siabef.debian@gmail.com>, 2012
+#
+# - Updates
+#
+#
+# Traductores, si no conocen el formato PO, merece la pena leer la
+# documentación de gettext, especialmente las secciones dedicadas a este
+# formato, por ejemplo ejecutando:
+# info -n '(gettext)PO Files'
+# info -n '(gettext)Header Entry'
+#
+# Equipo de traducción al español, por favor lean antes de traducir
+# los siguientes documentos:
+#
+# - El proyecto de traducción de Debian al español
+# http://www.debian.org/intl/spanish/
+# especialmente las notas y normas de traducción en
+# http://www.debian.org/intl/spanish/notas
+#
+# - La guía de traducción de po's de debconf:
+# /usr/share/doc/po-debconf/README-trans
+# o http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: keystone\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"PO-Revision-Date: 2012-07-08 20:24+0200\n"
+"Last-Translator: SM Baby Siabef <siabef.debian@gmail.com>\n"
+"Language-Team: l10n-Spanish <debian-l10n-spanish@lists.debian.org>\n"
+"Language: Spanish\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "Set up a database for Keystone?"
+msgstr "¿Desea configurar una base de datos para Keystone?"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"No se ha configurado ninguna base de datos para usar con Keystone. Si desea "
+"agregar una ahora, necesitará proporcionar la siguiente información:"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
+msgstr ""
+" * El nombre del servidor de la base de datos (debe permitir\n"
+" conexiones TCP desde este equipo);\n"
+" * Nombre de usuario y contraseña de acceso a la base de datos;\n"
+" * Tipo de software de manejo de base de datos que desee usar."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
+" Si no selecciona esta opción, no se configurará ninguna base de datos y "
+"Keystone usará SQLite."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"Podrá volver a configurarlo más adelante ejecutando «dpkg-reconfigure -plow "
+"keystone»."

@@ -1,3 +1,17 @@
+keystone (2012.1.1-2) unstable; urgency=low
+
+  * Debconf templates and debian/control reviewed by the debian-l10n-
+    english team as part of the Smith review project. Closes: #679295
+  * [Debconf translation updates]
+  * Recycle translations from nova for several languages. Additionnally:
+  * Danish (Joe Hansen).  Closes: #680082
+  * Swedish (Martin Bagge / brother).  Closes: #680847
+  * Spanish; (SM Baby Siabef).  Closes: #681003
+  * Italian (Beatrice Torracca).  Closes: #681249
+  * Fixed the get-vcs-source target in debian/rules.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 19 Jul 2012 06:21:30 +0000
+
 keystone (2012.1.1-1) unstable; urgency=low
 
   * New upstream release.
