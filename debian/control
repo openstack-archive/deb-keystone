@@ -50,7 +50,6 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-pastedeploy,
  python-pastescript,
  python-webob,
- python-sqlalchemy,
  python-sqlite,
  python-nova,
  python-dateutil
