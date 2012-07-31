@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"POT-Creation-Date: 2012-07-31 12:41+0000\n"
 "PO-Revision-Date: 2012-07-08 19:19+0100\n"
 "Last-Translator: Martin Bagge / brother <brother@bsnet.se>\n"
 "Language-Team: Swedish <debian-l10n-swedish@lists.debian.org>\n"
@@ -67,3 +67,9 @@ msgid ""
 msgstr ""
 "Inställningarna kan justeras senare genom att köra \"dpkg-reconfigure -plow "
 "keystone\"."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:2001
+msgid "Auth server admin token:"
+msgstr ""

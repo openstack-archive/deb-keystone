@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-22 11:34+0200\n"
+"POT-Creation-Date: 2012-07-31 12:41+0000\n"
 "PO-Revision-Date: 2012-07-25 18:37+0100\n"
 "Last-Translator: Ivan Masár <helix84@centrum.sk>\n"
 "Language-Team: Slovak <debian-l10n-slovak@lists.debian.org>\n"
@@ -19,23 +19,39 @@ msgstr ""
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
-msgid "Set up a database for keystone?"
+#, fuzzy
+#| msgid "Set up a database for keystone?"
+msgid "Set up a database for Keystone?"
 msgstr "Nastaviť databázu pre keystone?"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
-msgid "No database has been set up for keystone to use. Before continuing, you should make sure you have:"
-msgstr "Nebola nastavená žiadna databáza, ktorú by mohol keystone využiť. Predtým, než budete pokračovať, by ste sa mali uistiť, že máte:"
+#, fuzzy
+#| msgid ""
+#| "No database has been set up for keystone to use. Before continuing, you "
+#| "should make sure you have:"
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"Nebola nastavená žiadna databáza, ktorú by mohol keystone využiť. Predtým, "
+"než budete pokračovať, by ste sa mali uistiť, že máte:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
+#, fuzzy
+#| msgid ""
+#| " - the server host name (that server must allow TCP connections\n"
+#| "   from this machine);\n"
+#| " - a username and password to access the database.\n"
+#| " - A database type that you want to use."
 msgid ""
-" - the server host name (that server must allow TCP connections\n"
-"   from this machine);\n"
-" - a username and password to access the database.\n"
-" - A database type that you want to use."
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
 msgstr ""
 " - Názov počítača servera (tento server musá prijímať spojenia TCP\n"
 "   z tohto počítača).\n"
@@ -45,14 +61,24 @@ msgstr ""
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
-msgid "If some of these requirements are missing, reject this option and run with regular sqlite support."
-msgstr "Ak niektoré z týchto požiadaviek chýbajú, odmietnite túto voľbu a spúšťajte keystone s bežnou podporou sqlite."
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:1001
-msgid "Database configuration can be reconfigured later by running 'dpkg-reconfigure -plow keystone'."
-msgstr "Databázu je možné nastaviť kedykoľvek neskôr spustením príkazu „dpkg-reconfigure -plow keystone“."
+#, fuzzy
+#| msgid ""
+#| "Database configuration can be reconfigured later by running 'dpkg-"
+#| "reconfigure -plow keystone'."
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"Databázu je možné nastaviť kedykoľvek neskôr spustením príkazu „dpkg-"
+"reconfigure -plow keystone“."
 
 #. Type: string
 #. Description
@@ -60,3 +86,9 @@ msgstr "Databázu je možné nastaviť kedykoľvek neskôr spustením príkazu �
 msgid "Auth server admin token:"
 msgstr "Token správcu autentifikačného servera:"
 
+#~ msgid ""
+#~ "If some of these requirements are missing, reject this option and run "
+#~ "with regular sqlite support."
+#~ msgstr ""
+#~ "Ak niektoré z týchto požiadaviek chýbajú, odmietnite túto voľbu a "
+#~ "spúšťajte keystone s bežnou podporou sqlite."

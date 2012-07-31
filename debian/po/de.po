@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nova 2012.1-6\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"POT-Creation-Date: 2012-07-31 12:41+0000\n"
 "PO-Revision-Date: 2012-06-14 20:59+0200\n"
 "Last-Translator: Erik Pfannenstein <debianignatz@gmx.de>\n"
 "Language-Team: de <debian-l10n-german@lists.debian.org>\n"
@@ -68,3 +68,9 @@ msgid ""
 msgstr ""
 "Sie können diese Einstellung später durch Ausführen von »dpkg-reconfigure -"
 "plow keystone« ändern."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:2001
+msgid "Auth server admin token:"
+msgstr ""

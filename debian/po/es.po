@@ -31,7 +31,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"POT-Creation-Date: 2012-07-31 12:41+0000\n"
 "PO-Revision-Date: 2012-07-08 20:24+0200\n"
 "Last-Translator: SM Baby Siabef <siabef.debian@gmail.com>\n"
 "Language-Team: l10n-Spanish <debian-l10n-spanish@lists.debian.org>\n"
@@ -89,3 +89,9 @@ msgid ""
 msgstr ""
 "Podrá volver a configurarlo más adelante ejecutando «dpkg-reconfigure -plow "
 "keystone»."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:2001
+msgid "Auth server admin token:"
+msgstr ""

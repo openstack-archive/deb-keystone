@@ -1,3 +1,10 @@
+keystone (2012.1.1-3) unstable; urgency=low
+
+  * Re-added Debconf template which has been removed by the patch of 2012.1.1-2
+  from Bubulle (Closes: #683337).
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 31 Jul 2012 12:37:24 +0000
+
 keystone (2012.1.1-2) unstable; urgency=low
 
   * Debconf templates and debian/control reviewed by the debian-l10n-

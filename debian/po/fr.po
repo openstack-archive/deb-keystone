@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nova\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"POT-Creation-Date: 2012-07-31 12:41+0000\n"
 "PO-Revision-Date: 2012-06-26 06:58+0200\n"
 "Last-Translator: Julien Patriarca <patriarcaj@gmail.com>\n"
 "Language-Team: FRENCH <debian-l10n-french@lists.debian.org>\n"
@@ -68,6 +68,12 @@ msgid ""
 msgstr ""
 "Vous pouvez changer ce réglage plus tard en exécutant « dpkg-reconfigure -"
 "plow keystone »."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:2001
+msgid "Auth server admin token:"
+msgstr ""
 
 #~| msgid "Start Keystone services at boot?"
 #~ msgid "Start nova services at boot?"
