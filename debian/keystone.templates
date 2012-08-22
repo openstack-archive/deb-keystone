@@ -1,3 +1,12 @@
+# These templates have been reviewed by the debian-l10n-english
+# team
+#
+# If modifications/additions/rewording are needed, please ask
+# debian-l10n-english@lists.debian.org for advice.
+#
+# Even minor modifications require translation updates and such
+# changes should be coordinated with translators and reviewers.
+
 Template: keystone/configure_db
 Type: boolean
 Default: false
@@ -19,4 +28,6 @@ _Description: Set up a database for Keystone?
 
 Template: keystone/auth-token
 Type: string
-_Description: Auth server admin token:
+_Description: Authentication server administration token:
+ Please enter the token to use with the authentication
+ server.

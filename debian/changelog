@@ -1,3 +1,22 @@
+keystone (2012.1.1-4) unstable; urgency=low
+
+  * Updated debian/keystone.templates after review.
+  * Updated debconf translations with thanks to:
+  - de: Pfannenstein Erik <epfannenstein@gmx.de> (Closes: #684877)
+  - cs: Michal Šimůnek <michal.simunek@gmail.com> (Closes: #685434)
+  - pl: Michał Kułach <michalkulach@gmail.com> (Closes: #685431)
+  - fr: David Prévot <taffit@debian.org> (Closes: #685325)
+  - sv: Martin Bagge <brother@bsnet.se> (Closes: #684942)
+  - sk: helix84 <helix84@centrum.sk> (Closes: #684606)
+  - ru: Yuri Kozlov <yuray@komyakino.ru> (Closes: #684590)
+  - da: Joe Dalton <joedalton2@yahoo.dk> (Closes: #684565)
+  - pt: Pedro Ribeiro <p.m42.ribeiro@gmail.com> (Closes: #682438)
+  - es: SM Baby Siabef <siabef.debian@gmail.com> (Closes: #685435)
+  * Added debconf translations with thanks to:
+  - pt_BR: Adriano Rafael Gomes <adrianorg@gmail.com> (Closes: #685405)
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 21 Aug 2012 08:06:07 +0000
+
 keystone (2012.1.1-3) unstable; urgency=low
 
   * Re-added Debconf template which has been removed by the patch of 2012.1.1-2
