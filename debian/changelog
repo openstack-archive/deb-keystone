@@ -1,6 +1,6 @@
 keystone (2012.1.1-4) unstable; urgency=low
 
-  * Updated debian/keystone.templates after review.
+  * Updated debian/keystone.templates after review (Closes: #683414).
   * Updated debconf translations with thanks to:
   - de: Pfannenstein Erik <epfannenstein@gmx.de> (Closes: #684877)
   - cs: Michal Šimůnek <michal.simunek@gmail.com> (Closes: #685434)
