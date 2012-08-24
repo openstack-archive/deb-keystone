@@ -21,7 +21,7 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
-msgstr "Datenbank für Keystone einrichten?"
+msgstr "Datenbank fÃ¼r Keystone einrichten?"
 
 #. Type: boolean
 #. Description
@@ -32,7 +32,7 @@ msgid ""
 msgstr ""
 "Bisher ist noch keine Datenbank eingerichtet worden, die Keystone benutzen "
 "kann. Wenn Sie das jetzt tun wollen, stellen Sie bitte sicher, dass Sie alle "
-"benötigten Informationen haben:"
+"benÃ¶tigten Informationen haben:"
 
 #. Type: boolean
 #. Description
@@ -56,8 +56,8 @@ msgid ""
 "If you don't choose this option, no database will be set up and Keystone "
 "will use regular SQLite support."
 msgstr ""
-"Wenn Sie diese Option nicht auswählen, wird keine Datenbank eingerichtet und "
-"Keystone wird auf die normale SQLite-Unterstützung zurückgreifen."
+"Wenn Sie diese Option nicht auswÃ¤hlen, wird keine Datenbank eingerichtet und "
+"Keystone wird auf die normale SQLite-UnterstÃ¼tzung zurÃ¼ckgreifen."
 
 #. Type: boolean
 #. Description
@@ -66,8 +66,8 @@ msgid ""
 "You can change this setting later on by running \"dpkg-reconfigure -plow "
 "keystone\"."
 msgstr ""
-"Sie können diese Einstellung später durch Ausführen von »dpkg-reconfigure -"
-"plow keystone« ändern."
+"Sie kÃ¶nnen diese Einstellung spÃ¤ter durch AusfÃ¼hren von Â»dpkg-reconfigure -"
+"plow keystoneÂ« Ã¤ndern."
 
 #. Type: string
 #. Description
@@ -79,5 +79,6 @@ msgstr "Administrationstoken des Authentifizierungsservers:"
 #. Description
 #: ../keystone.templates:3001
 msgid "Please enter the token to use with the authentication server."
-msgstr "Bitte geben Sie das Token ein, der für den Authentifzierungsserver "
-"benutzt werden soll."
+msgstr ""
+"Bitte geben Sie das Token ein, der fÃ¼r den Authentifzierungsserver benutzt "
+"werden soll."

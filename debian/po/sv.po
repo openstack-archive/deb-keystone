@@ -22,7 +22,7 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
-msgstr "Aktivera en databas för keystone?"
+msgstr "Aktivera en databas fÃ¶r keystone?"
 
 #. Type: boolean
 #. Description
@@ -31,8 +31,8 @@ msgid ""
 "No database has been set up for Keystone to use. If you want to set one up "
 "now, please make sure you have all needed information:"
 msgstr ""
-"Ingen databas har aktiverats för Keystone. Om du vill aktivera en databas nu "
-"behöver följande information finnas tillhanda:"
+"Ingen databas har aktiverats fÃ¶r Keystone. Om du vill aktivera en databas nu "
+"behÃ¶ver fÃ¶ljande information finnas tillhanda:"
 
 #. Type: boolean
 #. Description
@@ -43,10 +43,10 @@ msgid ""
 " * a username and password to access the database;\n"
 " * the type of database management software you want to use."
 msgstr ""
-" * serverns värdnamn (som måste tillåta TCP-anslutningar från\n"
-"   den här maskinen)\n"
-" * användarnamn och lösenord för att komma åt databasen\n"
-" * vilken databashanterare du vill använda."
+" * serverns vÃ¤rdnamn (som mÃ¥ste tillÃ¥ta TCP-anslutningar frÃ¥n\n"
+"   den hÃ¤r maskinen)\n"
+" * anvÃ¤ndarnamn och lÃ¶senord fÃ¶r att komma Ã¥t databasen\n"
+" * vilken databashanterare du vill anvÃ¤nda."
 
 #. Type: boolean
 #. Description
@@ -55,8 +55,8 @@ msgid ""
 "If you don't choose this option, no database will be set up and Keystone "
 "will use regular SQLite support."
 msgstr ""
-"Väljer du inte detta kommer ingen databas att aktiveras och Keystone kommer "
-"då att använda SQLite-stödet."
+"VÃ¤ljer du inte detta kommer ingen databas att aktiveras och Keystone kommer "
+"dÃ¥ att anvÃ¤nda SQLite-stÃ¶det."
 
 #. Type: boolean
 #. Description
@@ -65,17 +65,17 @@ msgid ""
 "You can change this setting later on by running \"dpkg-reconfigure -plow "
 "keystone\"."
 msgstr ""
-"Inställningarna kan justeras senare genom att köra \"dpkg-reconfigure -plow "
+"InstÃ¤llningarna kan justeras senare genom att kÃ¶ra \"dpkg-reconfigure -plow "
 "keystone\"."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:3001
 msgid "Authentication server administration token:"
-msgstr "Administrationselement (token) för autentiseringsservern:"
+msgstr "Administrationselement (token) fÃ¶r autentiseringsservern:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:3001
 msgid "Please enter the token to use with the authentication server."
-msgstr "Ange elementet som ska användas med autentiseringsservern."
+msgstr "Ange elementet som ska anvÃ¤ndas med autentiseringsservern."

@@ -57,9 +57,9 @@ Recommends: python-memcache, python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the Python libraries.
 
@@ -75,9 +75,9 @@ Depends: ${python:Depends}, ${misc:Depends},
 Description: OpenStack identity service
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the daemons.
 
@@ -88,8 +88,8 @@ Depends: ${misc:Depends},  libjs-jquery, libjs-underscore
 Description: OpenStack identity service - documentation
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the documentation.

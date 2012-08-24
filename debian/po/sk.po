@@ -19,27 +19,23 @@ msgstr ""
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#| msgid "Set up a database for keystone?"
 msgid "Set up a database for Keystone?"
 msgstr "Nastaviť databázu pre keystone?"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#| msgid ""
-#| "No database has been set up for keystone to use. Before continuing, you "
-#| "should make sure you have:"
-msgid "No database has been set up for Keystone to use. If you want to set one up now, please make sure you have all needed information:"
-msgstr "Nebola nastavená žiadna databáza, ktorú by mohol Keystone využiť. Predtým, než budete pokračovať, by ste sa mali uistiť, že máte všetky potrebné informácie:"
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"Nebola nastavená žiadna databáza, ktorú by mohol Keystone využiť. Predtým, "
+"než budete pokračovať, by ste sa mali uistiť, že máte všetky potrebné "
+"informácie:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#| msgid ""
-#| " - the server host name (that server must allow TCP connections\n"
-#| "   from this machine);\n"
-#| " - a username and password to access the database.\n"
-#| " - A database type that you want to use."
 msgid ""
 " * the host name of the database server (which must allow TCP\n"
 "   connections from this machine);\n"
@@ -54,22 +50,26 @@ msgstr ""
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-msgid "If you don't choose this option, no database will be set up and Keystone will use regular SQLite support."
-msgstr "Ak túto voľbu nezvolíte, nenastaví sa žiadna databáza a Keystone použije bežnú podporu SQLite."
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
+"Ak túto voľbu nezvolíte, nenastaví sa žiadna databáza a Keystone použije "
+"bežnú podporu SQLite."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#| msgid ""
-#| "Database configuration can be reconfigured later by running 'dpkg-"
-#| "reconfigure -plow keystone'."
-msgid "You can change this setting later on by running \"dpkg-reconfigure -plow keystone\"."
-msgstr "Toto nastavenie môžete zmeniť kedykoľvek neskôr spustením príkazu „dpkg-reconfigure -plow keystone“."
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"Toto nastavenie môžete zmeniť kedykoľvek neskôr spustením príkazu „dpkg-"
+"reconfigure -plow keystone“."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:3001
-#| msgid "Auth server admin token:"
 msgid "Authentication server administration token:"
 msgstr "Token správcu autentifikačného servera:"
 

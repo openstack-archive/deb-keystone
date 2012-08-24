@@ -1,5 +1,5 @@
 # Danish translation keystone.
-# Copyright (C) 2012 keystone & nedenstående oversættere.
+# Copyright (C) 2012 keystone & nedenstÃ¥ende oversÃ¦ttere.
 # This file is distributed under the same license as the keystone package.
 # Joe Hansen <joedalton2@yahoo.dk>, 2012.
 #
@@ -20,7 +20,7 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
-msgstr "Opsæt en database for keystone?"
+msgstr "OpsÃ¦t en database for keystone?"
 
 #. Type: boolean
 #. Description
@@ -29,8 +29,8 @@ msgid ""
 "No database has been set up for Keystone to use. If you want to set one up "
 "now, please make sure you have all needed information:"
 msgstr ""
-"Ingen database er blevet opsat for Keystone. Hvis du ønsker at opsætte en "
-"database nu så sikr dig, at du har den krævede information:"
+"Ingen database er blevet opsat for Keystone. Hvis du Ã¸nsker at opsÃ¦tte en "
+"database nu sÃ¥ sikr dig, at du har den krÃ¦vede information:"
 
 #. Type: boolean
 #. Description
@@ -41,10 +41,10 @@ msgid ""
 " * a username and password to access the database;\n"
 " * the type of database management software you want to use."
 msgstr ""
-" * værtsnavnet for databaseserveren (som skal tillade TCP-\n"
+" * vÃ¦rtsnavnet for databaseserveren (som skal tillade TCP-\n"
 "   forbindelser fra denne maskine)\n"
-" * et brugernavn og adgangskode for at tilgå databasen\n"
-" * typen af håndteringsprogram for databasen du ønsker at bruge"
+" * et brugernavn og adgangskode for at tilgÃ¥ databasen\n"
+" * typen af hÃ¥ndteringsprogram for databasen du Ã¸nsker at bruge"
 
 #. Type: boolean
 #. Description
@@ -53,8 +53,8 @@ msgid ""
 "If you don't choose this option, no database will be set up and Keystone "
 "will use regular SQLite support."
 msgstr ""
-"Hvis du ikke vælger denne indstilling, så vil ingen database blive opsat og "
-"Keystone vil bruge den normale SQLite-understøttelse."
+"Hvis du ikke vÃ¦lger denne indstilling, sÃ¥ vil ingen database blive opsat og "
+"Keystone vil bruge den normale SQLite-understÃ¸ttelse."
 
 #. Type: boolean
 #. Description
@@ -63,8 +63,8 @@ msgid ""
 "You can change this setting later on by running \"dpkg-reconfigure -plow "
 "keystone\"."
 msgstr ""
-"Du kan ændre denne indstilling senere ved at køre »dpkg-reconfigure -plow "
-"keystone«."
+"Du kan Ã¦ndre denne indstilling senere ved at kÃ¸re Â»dpkg-reconfigure -plow "
+"keystoneÂ«."
 
 #. Type: string
 #. Description
@@ -77,4 +77,3 @@ msgstr "Symbol for godkendelse af serveradministration:"
 #: ../keystone.templates:3001
 msgid "Please enter the token to use with the authentication server."
 msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
-

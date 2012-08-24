@@ -1,6 +1,7 @@
 keystone (2012.1.1-4) unstable; urgency=low
 
-  * Updated debian/keystone.templates after review (Closes: #683414).
+  * Updated debian/keystone.templates, debian/control after review from
+  the internationalization team (Closes: #683414, #679295).
   * Updated debconf translations with thanks to:
   - de: Pfannenstein Erik <epfannenstein@gmx.de> (Closes: #684877)
   - cs: Michal Šimůnek <michal.simunek@gmail.com> (Closes: #685434)
@@ -12,8 +13,10 @@ keystone (2012.1.1-4) unstable; urgency=low
   - da: Joe Dalton <joedalton2@yahoo.dk> (Closes: #684565)
   - pt: Pedro Ribeiro <p.m42.ribeiro@gmail.com> (Closes: #682438)
   - es: SM Baby Siabef <siabef.debian@gmail.com> (Closes: #685435)
+  - it: Beatrice Torracca <beatricet@libero.it> (Closes: #685623)
   * Added debconf translations with thanks to:
   - pt_BR: Adriano Rafael Gomes <adrianorg@gmail.com> (Closes: #685405)
+  - nl: Jeroen Schot <schot@A-Eskwadraat.nl> (Closes: #685671)
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 21 Aug 2012 08:06:07 +0000
 
