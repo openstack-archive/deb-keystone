@@ -3,6 +3,7 @@ keystone (2012.1.1-5) unstable; urgency=low
   * CVE-2012-3542: Fixes lack of authorization for adding users to tenants
   (Closes: #686265)
   * Added Chinese debconf translation thanks to ben <duyujie.dyj@gmail.com>.
+  * Really adds the nl debconf translation this time (Closes: #685671).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 27 Aug 2012 11:45:44 +0000
 
