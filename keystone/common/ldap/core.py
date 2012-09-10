@@ -16,9 +16,9 @@
 
 import ldap
 
-from keystone import exception
-from keystone.common import logging
 from keystone.common.ldap import fakeldap
+from keystone.common import logging
+from keystone import exception
 
 
 LOG = logging.getLogger(__name__)
@@ -79,11 +79,11 @@ class BaseLdap(object):
 
         if self.options_name is not None:
             self.suffix = conf.ldap.suffix
-            if (self.suffix == None):
+            if self.suffix is None:
                 self.suffix = self.DEFAULT_SUFFIX
             dn = '%s_tree_dn' % self.options_name
             self.tree_dn = (getattr(conf.ldap, dn)
-                            or '%s,%s' % (self.suffix, self.DEFAULT_OU))
+                            or '%s,%s' % (self.DEFAULT_OU, self.suffix))
 
             idatt = '%s_id_attribute' % self.options_name
             self.id_attr = getattr(conf.ldap, idatt) or self.DEFAULT_ID_ATTR
@@ -107,7 +107,11 @@ class BaseLdap(object):
         if password is None:
             password = self.LDAP_PASSWORD
 
-        conn.simple_bind_s(user, password)
+        # not all LDAP servers require authentication, so we don't bind
+        # if we don't have any user/pass
+        if user and password:
+            conn.simple_bind_s(user, password)
+
         return conn
 
     def _id_to_dn(self, id):
@@ -138,16 +142,22 @@ class BaseLdap(object):
         return obj
 
     def affirm_unique(self, values):
-        if values['name'] is not None:
-            entity = self.get_by_name(values['name'])
-            if entity is not None:
+        if values.get('name') is not None:
+            try:
+                self.get_by_name(values['name'])
+            except exception.NotFound:
+                pass
+            else:
                 raise exception.Conflict(type=self.options_name,
                                          details='Duplicate name, %s.' %
                                                  values['name'])
 
-        if values['id'] is not None:
-            entity = self.get(values['id'])
-            if entity is not None:
+        if values.get('id') is not None:
+            try:
+                self.get(values['id'])
+            except exception.NotFound:
+                pass
+            else:
                 raise exception.Conflict(type=self.options_name,
                                          details='Duplicate ID, %s.' %
                                                  values['id'])
@@ -198,7 +208,7 @@ class BaseLdap(object):
     def get(self, id, filter=None):
         res = self._ldap_get(id, filter)
         if res is None:
-            return None
+            raise exception.NotFound(target=id)
         else:
             return self._ldap_res_to_model(res)
 

@@ -17,8 +17,14 @@
 import re
 
 import sqlalchemy
+from sqlalchemy import exc
 
+from keystone.common import logging
+from keystone.contrib.ec2.backends import sql as ec2_sql
 from keystone.identity.backends import sql as identity_sql
+
+
+LOG = logging.getLogger(__name__)
 
 
 def export_db(db):
@@ -50,6 +56,7 @@ class LegacyMigration(object):
         self.db = sqlalchemy.create_engine(db_string)
         self.identity_driver = identity_sql.Identity()
         self.identity_driver.db_sync()
+        self.ec2_driver = ec2_sql.Ec2()
         self._data = {}
         self._user_map = {}
         self._tenant_map = {}
@@ -62,6 +69,7 @@ class LegacyMigration(object):
         self._migrate_roles()
         self._migrate_user_roles()
         self._migrate_tokens()
+        self._migrate_ec2()
 
     def dump_catalog(self):
         """Generate the contents of a catalog templates file."""
@@ -136,8 +144,8 @@ class LegacyMigration(object):
         for x in self._data['user_roles']:
             # map
             if (not x.get('user_id')
-                or not x.get('tenant_id')
-                or not x.get('role_id')):
+                    or not x.get('tenant_id')
+                    or not x.get('role_id')):
                 continue
             user_id = self._user_map[x['user_id']]
             tenant_id = self._tenant_map[x['tenant_id']]
@@ -149,7 +157,18 @@ class LegacyMigration(object):
                 pass
 
             self.identity_driver.add_role_to_user_and_tenant(
-                    user_id, tenant_id, role_id)
+                user_id, tenant_id, role_id)
 
     def _migrate_tokens(self):
         pass
+
+    def _migrate_ec2(self):
+        for x in self._data['credentials']:
+            new_dict = {'user_id': x['user_id'],
+                        'tenant_id': x['tenant_id'],
+                        'access': x['key'],
+                        'secret': x['secret']}
+            try:
+                self.ec2_driver.create_credential(None, new_dict)
+            except exc.IntegrityError:
+                LOG.exception('Cannot migrate EC2 credential: %s' % x)

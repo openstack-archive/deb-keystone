@@ -16,16 +16,15 @@
 
 from __future__ import absolute_import
 
-import json
 import sys
 import textwrap
 
 from keystone import config
-from keystone.common import utils
-
+from keystone.common import openssl
+from keystone.openstack.common import importutils
+from keystone.openstack.common import jsonutils
 
 CONF = config.CONF
-CONF.set_usage('%prog COMMAND')
 
 
 class BaseApp(object):
@@ -52,9 +51,22 @@ class DbSync(BaseApp):
 
     def main(self):
         for k in ['identity', 'catalog', 'policy', 'token']:
-            driver = utils.import_object(getattr(CONF, k).driver)
+            driver = importutils.import_object(getattr(CONF, k).driver)
             if hasattr(driver, 'db_sync'):
                 driver.db_sync()
+
+
+class PKISetup(BaseApp):
+    """Set up Key pairs and certificates for token signing and verification."""
+
+    name = 'pki_setup'
+
+    def __init__(self, *args, **kw):
+        super(PKISetup, self).__init__(*args, **kw)
+
+    def main(self):
+        conf_ssl = openssl.ConfigurePKI()
+        conf_ssl.run()
 
 
 class ImportLegacy(BaseApp):
@@ -104,7 +116,7 @@ class ImportNovaAuth(BaseApp):
         if len(self.argv) < 2:
             return self.missing_param('dump_file')
         dump_file = self.argv[1]
-        dump_data = json.loads(open(dump_file).read())
+        dump_data = jsonutils.loads(open(dump_file).read())
         nova.import_auth(dump_data)
 
 
@@ -112,6 +124,7 @@ CMDS = {'db_sync': DbSync,
         'import_legacy': ImportLegacy,
         'export_legacy_catalog': ExportLegacyCatalog,
         'import_nova_auth': ImportNovaAuth,
+        'pki_setup': PKISetup,
         }
 
 
@@ -136,7 +149,10 @@ def run(cmd, args):
 
 def main(argv=None, config_files=None):
     CONF.reset()
-    args = CONF(config_files=config_files, args=argv)
+    args = CONF(args=argv,
+                project='keystone',
+                usage='%prog COMMAND',
+                default_config_files=config_files)
 
     if len(args) < 2:
         CONF.print_help()

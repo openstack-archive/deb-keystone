@@ -34,10 +34,10 @@ This WSGI component:
 """
 
 import httplib
-import json
 
 import webob
 
+from keystone.openstack.common import jsonutils
 from swift.common import utils as swift_utils
 
 
@@ -71,11 +71,9 @@ class S3Token(object):
 
     def deny_request(self, code):
         error_table = {
-            'AccessDenied':
-                (401, 'Access denied'),
-            'InvalidURI':
-                (400, 'Could not parse the specified URI'),
-            }
+            'AccessDenied': (401, 'Access denied'),
+            'InvalidURI': (400, 'Could not parse the specified URI'),
+        }
         resp = webob.Response(content_type='text/xml')
         resp.status = error_table[code][0]
         resp.body = error_table[code][1]
@@ -92,8 +90,10 @@ class S3Token(object):
             if self.auth_protocol == 'http':
                 conn = self.http_client_class(self.auth_host, self.auth_port)
             else:
-                conn = self.http_client_class(self.auth_host, self.auth_port,
-                    self.key_file, self.cert_file)
+                conn = self.http_client_class(self.auth_host,
+                                              self.auth_port,
+                                              self.key_file,
+                                              self.cert_file)
             conn.request('POST', '/v2.0/s3tokens',
                          body=creds_json,
                          headers=headers)
@@ -167,7 +167,7 @@ class S3Token(object):
         creds = {'credentials': {'access': access,
                                  'token': token,
                                  'signature': signature}}
-        creds_json = json.dumps(creds)
+        creds_json = jsonutils.dumps(creds)
         self.logger.debug('Connecting to Keystone sending this JSON: %s' %
                           creds_json)
         # NOTE(vish): We could save a call to keystone by having
@@ -187,10 +187,10 @@ class S3Token(object):
             return resp(environ, start_response)
 
         self.logger.debug('Keystone Reply: Status: %d, Output: %s' % (
-                resp.status, output))
+                          resp.status, output))
 
         try:
-            identity_info = json.loads(output)
+            identity_info = jsonutils.loads(output)
             token_id = str(identity_info['access']['token']['id'])
             tenant = identity_info['access']['token']['tenant']
         except (ValueError, KeyError):

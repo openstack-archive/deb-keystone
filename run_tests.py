@@ -55,7 +55,7 @@ To run a single test module:
     python run_tests.py api.test_wsgi
 
 """
-
+import eventlet
 import heapq
 import os
 import unittest
@@ -65,6 +65,8 @@ import time
 from nose import config
 from nose import core
 from nose import result
+
+from keystone.common.sql import util
 
 
 class _AnsiColorizer(object):
@@ -335,6 +337,7 @@ if __name__ == '__main__':
     # If any argument looks like a test name but doesn't have "nova.tests" in
     # front of it, automatically add that so we don't have to type as much
     show_elapsed = True
+    do_monkeypatch = True
     argv = []
     for x in sys.argv:
         if x.startswith('test_'):
@@ -343,9 +346,13 @@ if __name__ == '__main__':
             argv.append(x)
         elif x.startswith('--hide-elapsed'):
             show_elapsed = False
+        elif x.startswith('--no-monkeypatch'):
+            do_monkeypatch = False
         else:
             argv.append(x)
-
+    if do_monkeypatch:
+        eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
+                                       thread=True)
     testdir = os.path.abspath(os.path.join("tests"))
     c = config.Config(stream=sys.stdout,
                       env=os.environ,
@@ -357,4 +364,7 @@ if __name__ == '__main__':
                             verbosity=c.verbosity,
                             config=c,
                             show_elapsed=show_elapsed)
+    if os.path.exists('tests/test.db.pristine'):
+        os.unlink('tests/test.db.pristine')
+
     sys.exit(not core.run(config=c, testRunner=runner, argv=argv))

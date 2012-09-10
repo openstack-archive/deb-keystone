@@ -20,19 +20,18 @@
 
 """Utility methods for working with WSGI servers."""
 
-import json
 import sys
 
 import eventlet.wsgi
-eventlet.patcher.monkey_patch(all=False, socket=True, time=True)
 import routes.middleware
 import ssl
 import webob.dec
 import webob.exc
 
-from keystone import exception
 from keystone.common import logging
 from keystone.common import utils
+from keystone import exception
+from keystone.openstack.common import jsonutils
 
 
 LOG = logging.getLogger(__name__)
@@ -65,9 +64,9 @@ class Server(object):
     def start(self, key=None, backlog=128):
         """Run a WSGI server with the given application."""
         LOG.debug('Starting %(arg0)s on %(host)s:%(port)s' %
-                      {'arg0': sys.argv[0],
-                       'host': self.host,
-                       'port': self.port})
+                  {'arg0': sys.argv[0],
+                   'host': self.host,
+                   'port': self.port})
         socket = eventlet.listen((self.host, self.port), backlog=backlog)
         if key:
             self.socket_info[key] = socket.getsockname()
@@ -87,7 +86,7 @@ class Server(object):
         self.greenthread = self.pool.spawn(self._run, self.application, socket)
 
     def set_ssl(self, certfile, keyfile=None, ca_certs=None,
-              cert_required=True):
+                cert_required=True):
         self.certfile = certfile
         self.keyfile = keyfile
         self.ca_certs = ca_certs
@@ -231,7 +230,7 @@ class Application(BaseApplication):
         if not context['is_admin']:
             try:
                 user_token_ref = self.token_api.get_token(
-                        context=context, token_id=context['token_id'])
+                    context=context, token_id=context['token_id'])
             except exception.TokenNotFound:
                 raise exception.Unauthorized()
 
@@ -491,17 +490,22 @@ class ExtensionRouter(Router):
         return _factory
 
 
-def render_response(body=None, status=(200, 'OK'), headers=None):
+def render_response(body=None, status=None, headers=None):
     """Forms a WSGI response."""
-    resp = webob.Response()
-    resp.status = '%s %s' % status
-    resp.headerlist = headers or [('Content-Type', 'application/json'),
-                                  ('Vary', 'X-Auth-Token')]
+    headers = headers or []
+    headers.append(('Vary', 'X-Auth-Token'))
 
-    if body is not None:
-        resp.body = json.dumps(body, cls=utils.SmarterEncoder)
+    if body is None:
+        body = ''
+        status = status or (204, 'No Content')
+    else:
+        body = jsonutils.dumps(body, cls=utils.SmarterEncoder)
+        headers.append(('Content-Type', 'application/json'))
+        status = status or (200, 'OK')
 
-    return resp
+    return webob.Response(body=body,
+                          status='%s %s' % status,
+                          headerlist=headers)
 
 
 def render_exception(error):

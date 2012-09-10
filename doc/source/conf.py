@@ -79,7 +79,7 @@ release = '2012.1-dev'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = []
+exclude_patterns = ['old']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -238,18 +238,6 @@ latex_documents = [
 
 # If false, no module index is generated.
 #latex_domain_indices = True
-
-
-# -- Options for manual page output
-
-# One entry per manual page. List of tuples
-# (source start file, name, description, authors, manual section).
-man_pages = [
-    ('index', 'keystone', u'Keystone Documentation',
-     [u'OpenStack'], 1)]
-
-# If true, show URL addresses after external links.
-#man_show_urls = False
 
 
 # -- Options for Texinfo output

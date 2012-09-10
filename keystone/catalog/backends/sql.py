@@ -16,10 +16,10 @@
 # under the License.
 
 from keystone import catalog
-from keystone import config
-from keystone import exception
 from keystone.common import sql
 from keystone.common.sql import migration
+from keystone import config
+from keystone import exception
 
 
 CONF = config.CONF
@@ -93,11 +93,9 @@ class Catalog(sql.Base, catalog.Driver):
 
     def delete_service(self, service_id):
         session = self.get_session()
-        service_ref = session.query(Service).filter_by(id=service_id).first()
-        if not service_ref:
-            raise exception.ServiceNotFound(service_id=service_id)
         with session.begin():
-            session.delete(service_ref)
+            if not session.query(Service).filter_by(id=service_id).delete():
+                raise exception.ServiceNotFound(service_id=service_id)
             session.flush()
 
     def create_service(self, service_id, service_ref):
@@ -111,6 +109,7 @@ class Catalog(sql.Base, catalog.Driver):
     # Endpoints
     def create_endpoint(self, endpoint_id, endpoint_ref):
         session = self.get_session()
+        self.get_service(endpoint_ref['service_id'])
         new_endpoint = Endpoint.from_dict(endpoint_ref)
         with session.begin():
             session.add(new_endpoint)
@@ -119,18 +118,17 @@ class Catalog(sql.Base, catalog.Driver):
 
     def delete_endpoint(self, endpoint_id):
         session = self.get_session()
-        endpoint_ref = session.query(Endpoint)
-        endpoint_ref = endpoint_ref.filter_by(id=endpoint_id).first()
-        if not endpoint_ref:
-            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
         with session.begin():
-            session.delete(endpoint_ref)
+            if not session.query(Endpoint).filter_by(id=endpoint_id).delete():
+                raise exception.EndpointNotFound(endpoint_id=endpoint_id)
             session.flush()
 
     def get_endpoint(self, endpoint_id):
         session = self.get_session()
         endpoint_ref = session.query(Endpoint)
         endpoint_ref = endpoint_ref.filter_by(id=endpoint_id).first()
+        if not endpoint_ref:
+            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
         return endpoint_ref.to_dict()
 
     def list_endpoints(self):

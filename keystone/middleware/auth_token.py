@@ -76,6 +76,9 @@ HTTP_X_USER_NAME
 HTTP_X_ROLES
     Comma delimited list of case-sensitive Roles
 
+HTTP_X_SERVICE_CATALOG
+    json encoded keystone service catalog (optional).
+
 HTTP_X_TENANT
     *Deprecated* in favor of HTTP_X_TENANT_ID and HTTP_X_TENANT_NAME
     Keystone-assigned unique identifier, deprecated
@@ -93,11 +96,15 @@ HTTP_X_ROLE
 import httplib
 import json
 import logging
+import os
+import stat
+import subprocess
 import time
-
 import webob
 import webob.exc
 
+from keystone.openstack.common import jsonutils
+from keystone.common import cms
 
 LOG = logging.getLogger(__name__)
 
@@ -107,6 +114,10 @@ class InvalidUserToken(Exception):
 
 
 class ServiceError(Exception):
+    pass
+
+
+class ConfigurationError(Exception):
     pass
 
 
@@ -135,11 +146,32 @@ class AuthProtocol(object):
         default_auth_uri = '%s://%s:%s' % (self.auth_protocol,
                                            self.auth_host,
                                            self.auth_port)
+        self.auth_admin_prefix = conf.get('auth_admin_prefix', '')
         self.auth_uri = conf.get('auth_uri', default_auth_uri)
 
         # SSL
         self.cert_file = conf.get('certfile')
         self.key_file = conf.get('keyfile')
+
+        #signing
+        default_signing_dir = '%s/keystone-signing' % os.environ['HOME']
+        self.signing_dirname = conf.get('signing_dir', default_signing_dir)
+        LOG.info('Using %s as cache directory for signing certificate' %
+                 self.signing_dirname)
+        if (os.path.exists(self.signing_dirname) and
+                not os.access(self.signing_dirname, os.W_OK)):
+                raise ConfigurationError("unable to access signing dir %s" %
+                                         self.signing_dirname)
+
+        if not os.path.exists(self.signing_dirname):
+            os.makedirs(self.signing_dirname)
+        #will throw IOError  if it cannot change permissions
+        os.chmod(self.signing_dirname, stat.S_IRWXU)
+
+        val = '%s/signing_cert.pem' % self.signing_dirname
+        self.signing_cert_file_name = val
+        val = '%s/cacert.pem' % self.signing_dirname
+        self.ca_file_name = val
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
@@ -161,7 +193,7 @@ class AuthProtocol(object):
                 LOG.info('Using memcache for caching token')
                 self._cache = memcache.Client(memcache_servers.split(','))
                 self._iso8601 = iso8601
-            except NameError as e:
+            except ImportError as e:
                 LOG.warn('disabled caching due to missing libraries %s', e)
 
     def __call__(self, env, start_response):
@@ -207,13 +239,14 @@ class AuthProtocol(object):
             'X-User-Id',
             'X-User-Name',
             'X-Roles',
+            'X-Service-Catalog',
             # Deprecated
             'X-User',
             'X-Tenant',
             'X-Role',
         )
         LOG.debug('Removing headers from request environment: %s' %
-                     ','.join(auth_headers))
+                  ','.join(auth_headers))
         self._remove_headers(env, auth_headers)
 
     def _get_user_token_from_header(self, env):
@@ -260,8 +293,33 @@ class AuthProtocol(object):
         if self.auth_protocol == 'http':
             return self.http_client_class(self.auth_host, self.auth_port)
         else:
-            return self.http_client_class(self.auth_host, self.auth_port,
-                self.key_file, self.cert_file)
+            return self.http_client_class(self.auth_host,
+                                          self.auth_port,
+                                          self.key_file,
+                                          self.cert_file)
+
+    def _http_request(self, method, path):
+        """HTTP request helper used to make unspecified content type requests.
+
+        :param method: http method
+        :param path: relative request url
+        :return (http response object)
+        :raise ServerError when unable to communicate with keystone
+
+        """
+        conn = self._get_http_connection()
+
+        try:
+            conn.request(method, path)
+            response = conn.getresponse()
+            body = response.read()
+        except Exception, e:
+            LOG.error('HTTP connection exception: %s' % e)
+            raise ServiceError('Unable to communicate with keystone')
+        finally:
+            conn.close()
+
+        return response, body
 
     def _json_request(self, method, path, body=None, additional_headers=None):
         """HTTP request helper used to make json requests.
@@ -288,10 +346,11 @@ class AuthProtocol(object):
             kwargs['headers'].update(additional_headers)
 
         if body:
-            kwargs['body'] = json.dumps(body)
+            kwargs['body'] = jsonutils.dumps(body)
 
+        full_path = self.auth_admin_prefix + path
         try:
-            conn.request(method, path, **kwargs)
+            conn.request(method, full_path, **kwargs)
             response = conn.getresponse()
             body = response.read()
         except Exception, e:
@@ -301,7 +360,7 @@ class AuthProtocol(object):
             conn.close()
 
         try:
-            data = json.loads(body)
+            data = jsonutils.loads(body)
         except ValueError:
             LOG.debug('Keystone did not return json-encoded body')
             data = {}
@@ -338,49 +397,30 @@ class AuthProtocol(object):
             raise ServiceError('invalid json response')
 
     def _validate_user_token(self, user_token, retry=True):
-        """Authenticate user token with keystone.
+        """Authenticate user using PKI
 
         :param user_token: user's token id
-        :param retry: flag that forces the middleware to retry
-                      user authentication when an indeterminate
-                      response is received. Optional.
-        :return token object received from keystone on success
+        :param retry: Ignored, as it is not longer relevant
+        :return uncrypted body of the token if the token is valid
         :raise InvalidUserToken if token is rejected
-        :raise ServiceError if unable to authenticate token
+        :no longer raises ServiceError since it no longer makes RPC
 
         """
-        cached = self._cache_get(user_token)
-        if cached:
-            return cached
-
-        headers = {'X-Auth-Token': self.get_admin_token()}
-        response, data = self._json_request('GET',
-                                            '/v2.0/tokens/%s' % user_token,
-                                            additional_headers=headers)
-
-        if response.status == 200:
+        try:
+            cached = self._cache_get(user_token)
+            if cached:
+                return cached
+            if (len(user_token) > cms.UUID_TOKEN_LENGTH):
+                verified = self.verify_signed_token(user_token)
+                data = json.loads(verified)
+            else:
+                data = self.verify_uuid_token(user_token, retry)
             self._cache_put(user_token, data)
             return data
-        if response.status == 404:
-            # FIXME(ja): I'm assuming the 404 status means that user_token is
-            #            invalid - not that the admin_token is invalid
+        except Exception as e:
             self._cache_store_invalid(user_token)
             LOG.warn("Authorization failed for token %s", user_token)
             raise InvalidUserToken('Token authorization failed')
-        if response.status == 401:
-            LOG.info('Keystone rejected admin token %s, resetting', headers)
-            self.admin_token = None
-        else:
-            LOG.error('Bad response code while validating token: %s' %
-                         response.status)
-        if retry:
-            LOG.info('Retrying validation')
-            return self._validate_user_token(user_token, False)
-        else:
-            LOG.warn("Invalid user token: %s. Keystone response: %s.",
-                     user_token, data)
-
-            raise InvalidUserToken()
 
     def _build_user_headers(self, token_info):
         """Convert token object into headers.
@@ -392,6 +432,7 @@ class AuthProtocol(object):
          * X_USER_ID: id of user
          * X_USER_NAME: name of user
          * X_ROLES: list of roles
+         * X_SERVICE_CATALOG: service catalog
 
         Additional (deprecated) headers include:
          * X_USER: name of user
@@ -433,7 +474,7 @@ class AuthProtocol(object):
         user_id = user['id']
         user_name = user['name']
 
-        return {
+        rval = {
             'X-Identity-Status': 'Confirmed',
             'X-Tenant-Id': tenant_id,
             'X-Tenant-Name': tenant_name,
@@ -445,6 +486,14 @@ class AuthProtocol(object):
             'X-Tenant': tenant_name,
             'X-Role': roles,
         }
+
+        try:
+            catalog = token_info['access']['serviceCatalog']
+            rval['X-Service-Catalog'] = jsonutils.dumps(catalog)
+        except KeyError:
+            pass
+
+        return rval
 
     def _header_to_env_var(self, key):
         """Convert header to wsgi env variable.
@@ -522,6 +571,100 @@ class AuthProtocol(object):
             self._cache.set(key,
                             'invalid',
                             time=self.token_cache_time)
+
+    def cert_file_missing(self, called_proc_err, file_name):
+        return (called_proc_err.output.find(file_name)
+                and not os.path.exists(file_name))
+
+    def verify_uuid_token(self, user_token, retry=True):
+        """Authenticate user token with keystone.
+
+        :param user_token: user's token id
+        :param retry: flag that forces the middleware to retry
+                      user authentication when an indeterminate
+                      response is received. Optional.
+        :return token object received from keystone on success
+        :raise InvalidUserToken if token is rejected
+        :raise ServiceError if unable to authenticate token
+
+        """
+
+        headers = {'X-Auth-Token': self.get_admin_token()}
+        response, data = self._json_request('GET',
+                                            '/v2.0/tokens/%s' % user_token,
+                                            additional_headers=headers)
+
+        if response.status == 200:
+            self._cache_put(user_token, data)
+            return data
+        if response.status == 404:
+            # FIXME(ja): I'm assuming the 404 status means that user_token is
+            #            invalid - not that the admin_token is invalid
+            self._cache_store_invalid(user_token)
+            LOG.warn("Authorization failed for token %s", user_token)
+            raise InvalidUserToken('Token authorization failed')
+        if response.status == 401:
+            LOG.info('Keystone rejected admin token %s, resetting', headers)
+            self.admin_token = None
+        else:
+            LOG.error('Bad response code while validating token: %s' %
+                      response.status)
+        if retry:
+            LOG.info('Retrying validation')
+            return self._validate_user_token(user_token, False)
+        else:
+            LOG.warn("Invalid user token: %s. Keystone response: %s.",
+                     user_token, data)
+
+            raise InvalidUserToken()
+
+    def verify_signed_token(self, signed_text):
+        """
+            Converts a block of Base64 encoding to strict PEM format
+            and verifies the signature of the contensts IAW CMS syntax
+            If either of the certificate files are missing, fetch them
+            and retry
+        """
+
+        formatted = cms.token_to_cms(signed_text)
+
+        while True:
+            try:
+                output = cms.cms_verify(formatted, self.signing_cert_file_name,
+                                        self.ca_file_name)
+            except subprocess.CalledProcessError as err:
+                if self.cert_file_missing(err, self.signing_cert_file_name):
+                    self.fetch_signing_cert()
+                    continue
+                if self.cert_file_missing(err, self.ca_file_name):
+                    self.fetch_ca_cert()
+                    continue
+                raise err
+            return output
+
+    def fetch_signing_cert(self):
+        response, data = self._http_request('GET',
+                                            '/v2.0/certificates/signing')
+        try:
+            #todo check response
+            certfile = open(self.signing_cert_file_name, 'w')
+            certfile.write(data)
+            certfile.close()
+        except (AssertionError, KeyError):
+            LOG.warn("Unexpected response from keystone service: %s", data)
+            raise ServiceError('invalid json response')
+
+    def fetch_ca_cert(self):
+        response, data = self._http_request('GET',
+                                            '/v2.0/certificates/ca')
+        try:
+            #todo check response
+            certfile = open(self.ca_file_name, 'w')
+            certfile.write(data)
+            certfile.close()
+        except (AssertionError, KeyError):
+            LOG.warn("Unexpected response from keystone service: %s", data)
+            raise ServiceError('invalid json response')
 
 
 def filter_factory(global_conf, **local_conf):

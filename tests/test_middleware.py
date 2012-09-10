@@ -14,12 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
-
 import webob
 
 from keystone import config
 from keystone import middleware
+from keystone.openstack.common import jsonutils
 from keystone import test
 
 
@@ -90,9 +89,8 @@ class JsonBodyMiddlewareTest(test.TestCase):
         req = make_request(body='{"arg1": "on',
                            content_type='application/json',
                            method='POST')
-        _middleware = middleware.JsonBodyMiddleware(None)
-        self.assertRaises(webob.exc.HTTPBadRequest,
-                          _middleware.process_request, req)
+        resp = middleware.JsonBodyMiddleware(None).process_request(req)
+        self.assertEqual(resp.status_int, 400)
 
     def test_no_content_type(self):
         req = make_request(body='{"arg1": "one", "arg2": ["a"]}',
@@ -105,6 +103,12 @@ class JsonBodyMiddlewareTest(test.TestCase):
         req = make_request(body='{"arg1": "one", "arg2": ["a"]}',
                            content_type='text/plain',
                            method='POST')
+        resp = middleware.JsonBodyMiddleware(None).process_request(req)
+        self.assertEqual(resp.status_int, 400)
+
+    def test_unrecognized_content_type_without_body(self):
+        req = make_request(content_type='text/plain',
+                           method='GET')
         middleware.JsonBodyMiddleware(None).process_request(req)
         params = req.environ.get(middleware.PARAMS_ENV, {})
         self.assertEqual(params, {})
@@ -141,12 +145,12 @@ class XmlBodyMiddlewareTest(test.TestCase):
     def test_xml_replaced_by_json(self):
         """XML requests should be replaced by JSON requests."""
         req = make_request(
-                body='<container><element attribute="value" /></container>',
-                content_type='application/xml',
-                method='POST')
+            body='<container><element attribute="value" /></container>',
+            content_type='application/xml',
+            method='POST')
         middleware.XmlBodyMiddleware(None).process_request(req)
         self.assertTrue(req.content_type, 'application/json')
-        self.assertTrue(json.loads(req.body))
+        self.assertTrue(jsonutils.loads(req.body))
 
     def test_json_unnaffected(self):
         """JSON-only requests should be unnaffected by the XML middleware."""

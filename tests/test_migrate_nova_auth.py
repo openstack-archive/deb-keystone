@@ -68,9 +68,9 @@ FIXTURE = {
 class MigrateNovaAuth(test.TestCase):
     def setUp(self):
         super(MigrateNovaAuth, self).setUp()
-        CONF(config_files=[test.etcdir('keystone.conf.sample'),
-                           test.testsdir('test_overrides.conf'),
-                           test.testsdir('backend_sql.conf')])
+        self.config([test.etcdir('keystone.conf.sample'),
+                     test.testsdir('test_overrides.conf'),
+                     test.testsdir('backend_sql.conf')])
         sql_util.setup_test_database()
         self.identity_api = identity_sql.Identity()
         self.ec2_api = ec2_sql.Ec2()
@@ -138,7 +138,7 @@ class MigrateNovaAuth(test.TestCase):
                 user = users[old_user]
                 tenant = tenants[tenant_name]
                 roles = self.identity_api.get_roles_for_user_and_tenant(
-                        user['id'], tenant['id'])
+                    user['id'], tenant['id'])
                 actual = [self.identity_api.get_role(role_id)['name']
                           for role_id in roles]
                 expected = old_tenant_map.get(tenant_name, [])

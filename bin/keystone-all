@@ -2,6 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 import greenlet
+import eventlet
 import logging
 import os
 import signal
@@ -17,11 +18,14 @@ if os.path.exists(os.path.join(possible_topdir,
                                '__init__.py')):
     sys.path.insert(0, possible_topdir)
 
+eventlet.patcher.monkey_patch(all=False, socket=True, time=True, thread=True)
+
 from paste import deploy
 
 from keystone import config
 from keystone.common import wsgi
 from keystone.common import utils
+from keystone.openstack.common import importutils
 
 
 CONF = config.CONF
@@ -46,17 +50,18 @@ def serve(*servers):
     signal.signal(signal.SIGINT, sigint_handler)
 
     for server in servers:
-        logging.debug("starting server %s on port %s",
-                      server.application,
-                      server.port)
         server.start()
 
     # notify calling process we are ready to serve
     if CONF.onready:
         try:
-            utils.check_output(CONF.onready.split())
-        except Exception:
-            logging.exception('Failed to execute onready command')
+            notifier = importutils.import_module(CONF.onready)
+            notifier.notify()
+        except ImportError:
+            try:
+                utils.check_output(CONF.onready.split())
+            except Exception:
+                logging.exception('Failed to execute onready command')
 
     for server in servers:
         try:
@@ -73,7 +78,7 @@ if __name__ == '__main__':
     if os.path.exists(dev_conf):
         config_files = [dev_conf]
 
-    CONF(config_files=config_files, args=sys.argv)
+    CONF(project='keystone', default_config_files=config_files)
 
     config.setup_logging(CONF)
 

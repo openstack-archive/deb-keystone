@@ -14,16 +14,30 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from keystone import exception
+
 
 class DictKvs(dict):
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            if default is not None:
+                return default
+            raise exception.NotFound(target=key)
+
     def set(self, key, value):
-        if type(value) is type({}):
+        if isinstance(value, dict):
             self[key] = value.copy()
         else:
             self[key] = value[:]
 
     def delete(self, key):
-        del self[key]
+        """Deletes an item, returning True on success, False otherwise."""
+        try:
+            del self[key]
+        except KeyError:
+            raise exception.NotFound(target=key)
 
 
 INMEMDB = DictKvs()
@@ -33,6 +47,6 @@ class Base(object):
     def __init__(self, db=None):
         if db is None:
             db = INMEMDB
-        elif type(db) is type({}):
+        elif isinstance(db, dict):
             db = DictKvs(db)
         self.db = db

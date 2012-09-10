@@ -31,8 +31,8 @@
 
 import webob
 
-from swift.common import utils as swift_utils
 from swift.common.middleware import acl as swift_acl
+from swift.common import utils as swift_utils
 
 
 class SwiftAuth(object):
@@ -112,7 +112,7 @@ class SwiftAuth(object):
         # set the swift.authorize_override environ and want to control the
         # authentication
         if (self.allow_overrides and
-            environ.get('swift.authorize_override', False)):
+                environ.get('swift.authorize_override', False)):
             msg = 'Authorizing from an overriding middleware (i.e: tempurl)'
             self.logger.debug(msg)
             return self.app(environ, start_response)
@@ -135,9 +135,9 @@ class SwiftAuth(object):
         if environ.get('HTTP_X_IDENTITY_STATUS') != 'Confirmed':
             return
         roles = []
-        if 'HTTP_X_ROLE' in environ:
-            roles = environ['HTTP_X_ROLE'].split(',')
-        identity = {'user': environ.get('HTTP_X_USER'),
+        if 'HTTP_X_ROLES' in environ:
+            roles = environ['HTTP_X_ROLES'].split(',')
+        identity = {'user': environ.get('HTTP_X_USER_NAME'),
                     'tenant': (environ.get('HTTP_X_TENANT_ID'),
                                environ.get('HTTP_X_TENANT_NAME')),
                     'roles': roles}
@@ -208,7 +208,7 @@ class SwiftAuth(object):
         # Allow ACL at individual user level (tenant:user format)
         # For backward compatibility, check for ACL in tenant_id:user format
         if ('%s:%s' % (tenant_name, user) in roles
-             or '%s:%s' % (tenant_id, user) in roles):
+                or '%s:%s' % (tenant_id, user) in roles):
             log_msg = 'user %s:%s or %s:%s allowed in ACL authorizing'
             self.logger.debug(log_msg % (tenant_name, user, tenant_id, user))
             return

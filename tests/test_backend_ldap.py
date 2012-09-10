@@ -14,10 +14,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from keystone import config
-from keystone import test
+import uuid
+
 from keystone.common.ldap import fakeldap
+from keystone import config
+from keystone import exception
 from keystone.identity.backends import ldap as identity_ldap
+from keystone import test
 
 import default_fixtures
 import test_backend
@@ -34,12 +37,31 @@ def clear_database():
 class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
     def setUp(self):
         super(LDAPIdentity, self).setUp()
-        CONF(config_files=[test.etcdir('keystone.conf.sample'),
-                           test.testsdir('test_overrides.conf'),
-                           test.testsdir('backend_ldap.conf')])
+        self.config([test.etcdir('keystone.conf.sample'),
+                     test.testsdir('test_overrides.conf'),
+                     test.testsdir('backend_ldap.conf')])
         clear_database()
         self.identity_api = identity_ldap.Identity()
         self.load_fixtures(default_fixtures)
 
-    def tearDown(self):
-        test.TestCase.tearDown(self)
+    def test_role_crud(self):
+        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.identity_api.create_role(role['id'], role)
+        role_ref = self.identity_api.get_role(role['id'])
+        role_ref_dict = dict((x, role_ref[x]) for x in role_ref)
+        self.assertDictEqual(role_ref_dict, role)
+        self.identity_api.delete_role(role['id'])
+        self.assertRaises(exception.RoleNotFound,
+                          self.identity_api.get_role,
+                          role['id'])
+
+    def test_build_tree(self):
+        """Regression test for building the tree names
+        """
+        self.config([test.etcdir('keystone.conf.sample'),
+                     test.testsdir('test_overrides.conf'),
+                     test.testsdir('backend_ldap.conf')])
+
+        user_api = identity_ldap.UserApi(CONF)
+        self.assertTrue(user_api)
+        self.assertEquals(user_api.tree_dn, "ou=Users,%s" % CONF.ldap.suffix)

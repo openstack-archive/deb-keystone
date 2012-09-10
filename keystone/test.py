@@ -24,11 +24,12 @@ from paste import deploy
 import stubout
 import unittest2 as unittest
 
-from keystone import config
 from keystone.common import kvs
 from keystone.common import logging
 from keystone.common import utils
 from keystone.common import wsgi
+from keystone import config
+from keystone.openstack.common import importutils
 
 
 LOG = logging.getLogger(__name__)
@@ -116,7 +117,45 @@ class TestClient(object):
         return self.request('PUT', path=path, headers=headers, body=body)
 
 
-class TestCase(unittest.TestCase):
+class NoModule(object):
+    """A mixin class to provide support for unloading/disabling modules."""
+
+    def __init__(self, *args, **kw):
+        super(NoModule, self).__init__(*args, **kw)
+        self._finders = []
+        self._cleared_modules = {}
+
+    def tearDown(self):
+        super(NoModule, self).tearDown()
+        for finder in self._finders:
+            sys.meta_path.remove(finder)
+        sys.modules.update(self._cleared_modules)
+
+    def clear_module(self, module):
+        cleared_modules = {}
+        for fullname in sys.modules.keys():
+            if fullname == module or fullname.startswith(module + '.'):
+                cleared_modules[fullname] = sys.modules.pop(fullname)
+        return cleared_modules
+
+    def disable_module(self, module):
+        """Ensure ImportError for the specified module."""
+
+        # Clear 'module' references in sys.modules
+        self._cleared_modules.update(self.clear_module(module))
+
+        # Disallow further imports of 'module'
+        class NoModule(object):
+            def find_module(self, fullname, path):
+                if fullname == module or fullname.startswith(module + '.'):
+                    raise ImportError
+
+        finder = NoModule()
+        self._finders.append(finder)
+        sys.meta_path.insert(0, finder)
+
+
+class TestCase(NoModule, unittest.TestCase):
     def __init__(self, *args, **kw):
         super(TestCase, self).__init__(*args, **kw)
         self._paths = []
@@ -126,13 +165,13 @@ class TestCase(unittest.TestCase):
 
     def setUp(self):
         super(TestCase, self).setUp()
-        self.config()
+        self.config([etcdir('keystone.conf.sample'),
+                     testsdir('test_overrides.conf')])
         self.mox = mox.Mox()
         self.stubs = stubout.StubOutForTesting()
 
-    def config(self):
-        CONF(config_files=[etcdir('keystone.conf.sample'),
-                           testsdir('test_overrides.conf')])
+    def config(self, config_files):
+        CONF(args=[], project='keystone', default_config_files=config_files)
 
     def tearDown(self):
         try:
@@ -146,35 +185,21 @@ class TestCase(unittest.TestCase):
                 if path in sys.path:
                     sys.path.remove(path)
             kvs.INMEMDB.clear()
-            self.reset_opts()
+            CONF.reset()
 
     def opt_in_group(self, group, **kw):
         for k, v in kw.iteritems():
             CONF.set_override(k, v, group)
-        if group not in self._group_overrides:
-            self._group_overrides[group] = []
-        self._group_overrides[group].append(k)
 
     def opt(self, **kw):
         for k, v in kw.iteritems():
             CONF.set_override(k, v)
-        self._overrides.append(k)
-
-    def reset_opts(self):
-        for group, opt_list in self._group_overrides.iteritems():
-            for k in opt_list:
-                CONF.set_override(k, None, group)
-        for k in self._overrides:
-            CONF.set_override(k, None)
-        self._overrides = []
-        self._group_overrides = {}
-        CONF.reset()
 
     def load_backends(self):
         """Hacky shortcut to load the backends for data manipulation."""
-        self.identity_api = utils.import_object(CONF.identity.driver)
-        self.token_api = utils.import_object(CONF.token.driver)
-        self.catalog_api = utils.import_object(CONF.catalog.driver)
+        self.identity_api = importutils.import_object(CONF.identity.driver)
+        self.token_api = importutils.import_object(CONF.token.driver)
+        self.catalog_api = importutils.import_object(CONF.catalog.driver)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -199,7 +224,7 @@ class TestCase(unittest.TestCase):
                 user_copy = user.copy()
                 tenants = user_copy.pop('tenants')
                 rv = self.identity_api.create_user(user['id'],
-                        user_copy.copy())
+                                                   user_copy.copy())
                 for tenant_id in tenants:
                     self.identity_api.add_user_to_tenant(tenant_id, user['id'])
                 setattr(self, 'user_%s' % user['id'], user_copy)
@@ -237,12 +262,12 @@ class TestCase(unittest.TestCase):
         return deploy.appconfig(self._paste_config(config))
 
     def serveapp(self, config, name=None, cert=None, key=None, ca=None,
-        cert_required=None):
+                 cert_required=None):
         app = self.loadapp(config, name=name)
         server = wsgi.Server(app, host="127.0.0.1", port=0)
         if cert is not None and ca is not None and key is not None:
             server.set_ssl(certfile=cert, keyfile=key, ca_certs=ca,
-                cert_required=cert_required)
+                           cert_required=cert_required)
         server.start(key='socket')
 
         # Service catalog tests need to know the port we ran on.
@@ -256,8 +281,3 @@ class TestCase(unittest.TestCase):
     def add_path(self, path):
         sys.path.insert(0, path)
         self._paths.append(path)
-
-    def clear_module(self, module):
-        for x in sys.modules.keys():
-            if x.startswith(module):
-                del sys.modules[x]

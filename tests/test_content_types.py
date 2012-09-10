@@ -15,13 +15,14 @@
 # under the License.
 
 import httplib
-import json
+import uuid
 
 from lxml import etree
 import nose.exc
 
-from keystone import test
 from keystone.common import serializer
+from keystone.openstack.common import jsonutils
+from keystone import test
 
 import default_fixtures
 
@@ -70,9 +71,9 @@ class RestfulTestCase(test.TestCase):
         # TODO(termie): add an admin user to the fixtures and use that user
         # override the fixtures, for now
         self.metadata_foobar = self.identity_api.update_metadata(
-                self.user_foo['id'],
-                self.tenant_bar['id'],
-                dict(roles=['keystone_admin'], is_admin='1'))
+            self.user_foo['id'],
+            self.tenant_bar['id'],
+            dict(roles=['keystone_admin'], is_admin='1'))
 
     def tearDown(self):
         """Kill running servers and release references to avoid leaks."""
@@ -122,7 +123,8 @@ class RestfulTestCase(test.TestCase):
 
             >>> self.assertResponseSuccessful(response, 203)
         """
-        self.assertTrue(response.status >= 200 and response.status <= 299,
+        self.assertTrue(
+            response.status >= 200 and response.status <= 299,
             'Status code %d is outside of the expected range (2xx)\n\n%s' %
             (response.status, response.body))
 
@@ -136,7 +138,9 @@ class RestfulTestCase(test.TestCase):
 
             >>> self.assertResponseStatus(response, 203)
         """
-        self.assertEqual(response.status, expected_status,
+        self.assertEqual(
+            response.status,
+            expected_status,
             'Status code %s is not %s, as expected)\n\n%s' %
             (response.status, expected_status, response.body))
 
@@ -152,7 +156,7 @@ class RestfulTestCase(test.TestCase):
             headers['Accept'] = 'application/json'
             if body:
                 headers['Content-Type'] = 'application/json'
-                return json.dumps(body)
+                return jsonutils.dumps(body)
         elif content_type == 'xml':
             headers['Accept'] = 'application/xml'
             if body:
@@ -172,7 +176,7 @@ class RestfulTestCase(test.TestCase):
             self.assertIn(self.content_type, header)
 
             if self.content_type == 'json':
-                response.body = json.loads(response.body)
+                response.body = jsonutils.loads(response.body)
             elif self.content_type == 'xml':
                 response.body = etree.fromstring(response.body)
 
@@ -224,7 +228,10 @@ class RestfulTestCase(test.TestCase):
 
     def get_scoped_token(self):
         """Convenience method so that we can test authenticated requests."""
-        r = self.public_request(method='POST', path='/v2.0/tokens', body={
+        r = self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
                 'auth': {
                     'passwordCredentials': {
                         'username': self.user_foo['name'],
@@ -340,7 +347,10 @@ class CoreApiTests(object):
         self.assertValidExtensionResponse(r)
 
     def test_authenticate(self):
-        r = self.public_request(method='POST', path='/v2.0/tokens', body={
+        r = self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
                 'auth': {
                     'passwordCredentials': {
                         'username': self.user_foo['name'],
@@ -355,12 +365,13 @@ class CoreApiTests(object):
 
     def test_get_tenants_for_token(self):
         r = self.public_request(path='/v2.0/tenants',
-            token=self.get_scoped_token())
+                                token=self.get_scoped_token())
         self.assertValidTenantListResponse(r)
 
     def test_validate_token(self):
         token = self.get_scoped_token()
-        r = self.admin_request(path='/v2.0/tokens/%(token_id)s' % {
+        r = self.admin_request(
+            path='/v2.0/tokens/%(token_id)s' % {
                 'token_id': token,
             },
             token=token)
@@ -374,6 +385,13 @@ class CoreApiTests(object):
         self.assertValidAuthenticationResponse(r,
                                                require_service_catalog=True)
 
+    def test_validate_token_no_belongs_to_still_returns_catalog(self):
+        token = self.get_scoped_token()
+        path = ('/v2.0/tokens/%s' % token)
+        r = self.admin_request(path=path, token=token)
+        self.assertValidAuthenticationResponse(r,
+                                               require_service_catalog=True)
+
     def test_validate_token_head(self):
         """The same call as above, except using HEAD.
 
@@ -382,7 +400,9 @@ class CoreApiTests(object):
 
         """
         token = self.get_scoped_token()
-        self.admin_request(method='HEAD', path='/v2.0/tokens/%(token_id)s' % {
+        self.admin_request(
+            method='HEAD',
+            path='/v2.0/tokens/%(token_id)s' % {
                 'token_id': token,
             },
             token=token,
@@ -392,7 +412,8 @@ class CoreApiTests(object):
         raise nose.exc.SkipTest('Blocked by bug 933555')
 
         token = self.get_scoped_token()
-        r = self.admin_request(path='/v2.0/tokens/%(token_id)s/endpoints' % {
+        r = self.admin_request(
+            path='/v2.0/tokens/%(token_id)s/endpoints' % {
                 'token_id': token,
             },
             token=token)
@@ -400,7 +421,8 @@ class CoreApiTests(object):
 
     def test_get_tenant(self):
         token = self.get_scoped_token()
-        r = self.admin_request(path='/v2.0/tenants/%(tenant_id)s' % {
+        r = self.admin_request(
+            path='/v2.0/tenants/%(tenant_id)s' % {
                 'tenant_id': self.tenant_bar['id'],
             },
             token=token)
@@ -410,7 +432,8 @@ class CoreApiTests(object):
         raise nose.exc.SkipTest('Blocked by bug 933565')
 
         token = self.get_scoped_token()
-        r = self.admin_request(path='/v2.0/users/%(user_id)s/roles' % {
+        r = self.admin_request(
+            path='/v2.0/users/%(user_id)s/roles' % {
                 'user_id': self.user_foo['id'],
             },
             token=token)
@@ -428,7 +451,8 @@ class CoreApiTests(object):
 
     def test_get_user(self):
         token = self.get_scoped_token()
-        r = self.admin_request(path='/v2.0/users/%(user_id)s' % {
+        r = self.admin_request(
+            path='/v2.0/users/%(user_id)s' % {
                 'user_id': self.user_foo['id'],
             },
             token=token)
@@ -553,6 +577,49 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
 
     def assertValidVersionResponse(self, r):
         self.assertValidVersion(r.body.get('version'))
+
+    def test_service_crud_requires_auth(self):
+        """Service CRUD should 401 without an X-Auth-Token (bug 1006822)."""
+        # values here don't matter because we should 401 before they're checked
+        service_path = '/v2.0/OS-KSADM/services/%s' % uuid.uuid4().hex
+        service_body = {
+            'OS-KSADM:service': {
+                'name': uuid.uuid4().hex,
+                'type': uuid.uuid4().hex,
+            },
+        }
+
+        r = self.admin_request(method='GET',
+                               path='/v2.0/OS-KSADM/services',
+                               expected_status=401)
+        self.assertValidErrorResponse(r)
+
+        r = self.admin_request(method='POST',
+                               path='/v2.0/OS-KSADM/services',
+                               body=service_body,
+                               expected_status=401)
+        self.assertValidErrorResponse(r)
+
+        r = self.admin_request(method='GET',
+                               path=service_path,
+                               expected_status=401)
+        self.assertValidErrorResponse(r)
+
+        r = self.admin_request(method='DELETE',
+                               path=service_path,
+                               expected_status=401)
+        self.assertValidErrorResponse(r)
+
+    def test_user_role_list_requires_auth(self):
+        """User role list should 401 without an X-Auth-Token (bug 1006815)."""
+        # values here don't matter because we should 401 before they're checked
+        path = '/v2.0/tenants/%(tenant_id)s/users/%(user_id)s/roles' % {
+            'tenant_id': uuid.uuid4().hex,
+            'user_id': uuid.uuid4().hex,
+        }
+
+        r = self.admin_request(path=path, expected_status=401)
+        self.assertValidErrorResponse(r)
 
 
 class XmlTestCase(RestfulTestCase, CoreApiTests):

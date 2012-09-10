@@ -19,12 +19,12 @@ import os
 import sqlite3
 #import sqlalchemy
 
-from keystone import config
-from keystone import test
+from keystone.catalog.backends import templated as catalog_templated
 from keystone.common.sql import legacy
 from keystone.common.sql import util as sql_util
+from keystone import config
 from keystone.identity.backends import sql as identity_sql
-from keystone.catalog.backends import templated as catalog_templated
+from keystone import test
 
 
 CONF = config.CONF
@@ -33,9 +33,9 @@ CONF = config.CONF
 class ImportLegacy(test.TestCase):
     def setUp(self):
         super(ImportLegacy, self).setUp()
-        CONF(config_files=[test.etcdir('keystone.conf.sample'),
-                           test.testsdir('test_overrides.conf'),
-                           test.testsdir('backend_sql.conf')])
+        self.config([test.etcdir('keystone.conf.sample'),
+                     test.testsdir('test_overrides.conf'),
+                     test.testsdir('backend_sql.conf')])
         sql_util.setup_test_database()
         self.identity_api = identity_sql.Identity()
 

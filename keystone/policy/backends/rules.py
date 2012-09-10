@@ -19,13 +19,13 @@
 
 import os.path
 
-from keystone import config
-from keystone import exception
-from keystone import policy
 from keystone.common import logging
 from keystone.common import policy as common_policy
 from keystone.common import utils
+from keystone import config
+from keystone import exception
 from keystone.openstack.common import cfg
+from keystone import policy
 
 
 policy_opts = [
@@ -35,7 +35,7 @@ policy_opts = [
     cfg.StrOpt('policy_default_rule',
                default='default',
                help=_('Rule checked when requested rule is not found')),
-    ]
+]
 
 
 CONF = config.CONF
@@ -71,8 +71,8 @@ def init():
 
 def _set_brain(data):
     default_rule = CONF.policy_default_rule
-    common_policy.set_brain(
-            common_policy.HttpBrain.load_json(data, default_rule))
+    common_policy.set_brain(common_policy.HttpBrain.load_json(data,
+                                                              default_rule))
 
 
 def enforce(credentials, action, target):

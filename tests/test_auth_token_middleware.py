@@ -14,13 +14,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
-
-import webob
 import datetime
 import iso8601
+import webob
 
 from keystone.middleware import auth_token
+from keystone.openstack.common import jsonutils
+from keystone import config
 from keystone import test
 
 
@@ -43,6 +43,7 @@ TOKEN_RESPONSES = {
                     {'name': 'role2'},
                 ],
             },
+            'serviceCatalog': {}
         },
     },
     'default-tenant-token': {
@@ -92,7 +93,26 @@ TOKEN_RESPONSES = {
                 ],
             },
         },
-    }
+    },
+    'valid-token-no-service-catalog': {
+        'access': {
+            'token': {
+                'id': 'valid-token',
+                'tenant': {
+                    'id': 'tenant_id1',
+                    'name': 'tenant_name1',
+                },
+            },
+            'user': {
+                'id': 'user_id1',
+                'name': 'user_name1',
+                'roles': [
+                    {'name': 'role1'},
+                    {'name': 'role2'},
+                ],
+            }
+        },
+    },
 }
 
 
@@ -130,6 +150,8 @@ class FakeHTTPResponse(object):
 
 class FakeHTTPConnection(object):
 
+    last_requested_url = ''
+
     def __init__(self, *args):
         pass
 
@@ -144,9 +166,10 @@ class FakeHTTPConnection(object):
         a 404, indicating an unknown (therefore unauthorized) token.
 
         """
+        FakeHTTPConnection.last_requested_url = path
         if method == 'POST':
             status = 200
-            body = json.dumps({
+            body = jsonutils.dumps({
                 'access': {
                     'token': {'id': 'admin_token2'},
                 },
@@ -156,7 +179,7 @@ class FakeHTTPConnection(object):
             token_id = path.rsplit('/', 1)[1]
             if token_id in TOKEN_RESPONSES.keys():
                 status = 200
-                body = json.dumps(TOKEN_RESPONSES[token_id])
+                body = jsonutils.dumps(TOKEN_RESPONSES[token_id])
             else:
                 status = 404
                 body = str()
@@ -204,6 +227,7 @@ class BaseAuthTokenMiddlewareTest(test.TestCase):
             'admin_token': 'admin_token1',
             'auth_host': 'keystone.example.com',
             'auth_port': 1234,
+            'auth_admin_prefix': '/testadmin',
         }
 
         self.middleware = auth_token.AuthProtocol(FakeApp(expected_env), conf)
@@ -243,7 +267,12 @@ class AuthTokenMiddlewareTest(BaseAuthTokenMiddlewareTest):
         req = webob.Request.blank('/')
         req.headers['X-Auth-Token'] = 'valid-token'
         body = self.middleware(req.environ, self.start_fake_response)
+        self.assertEqual(self.middleware.conf['auth_admin_prefix'],
+                         "/testadmin")
+        self.assertEqual("/testadmin/v2.0/tokens/valid-token",
+                         FakeHTTPConnection.last_requested_url)
         self.assertEqual(self.response_status, 200)
+        self.assertTrue(req.headers.get('X-Service-Catalog'))
         self.assertEqual(body, ['SUCCESS'])
 
     def test_default_tenant_token(self):
@@ -312,6 +341,28 @@ class AuthTokenMiddlewareTest(BaseAuthTokenMiddlewareTest):
         self.middleware._cache.token_expiration = float(expired.strftime("%s"))
         self.middleware(req.environ, self.start_fake_response)
         self.assertEqual(len(self.middleware._cache.set_value), 2)
+
+    def test_nomemcache(self):
+        self.disable_module('memcache')
+
+        conf = {
+            'admin_token': 'admin_token1',
+            'auth_host': 'keystone.example.com',
+            'auth_port': 1234,
+            'memcache_servers': 'localhost:11211',
+        }
+
+        auth_token.AuthProtocol(FakeApp(), conf)
+
+    def test_request_prevent_service_catalog_injection(self):
+        req = webob.Request.blank('/')
+        req.headers['X-Service-Catalog'] = '[]'
+        req.headers['X-Auth-Token'] = 'valid-token-no-service-catalog'
+        body = self.middleware(req.environ, self.start_fake_response)
+        self.assertEqual(self.response_status, 200)
+        self.assertFalse(req.headers.get('X-Service-Catalog'))
+        self.assertEqual(body, ['SUCCESS'])
+
 
 if __name__ == '__main__':
     import unittest

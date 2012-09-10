@@ -15,17 +15,19 @@
 # under the License.
 
 import uuid
-
 import routes
+import json
 
+from keystone import config
 from keystone import catalog
+from keystone.common import cms
+from keystone.common import logging
+from keystone.common import wsgi
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common import timeutils
 from keystone import policy
 from keystone import token
-from keystone.common import logging
-from keystone.common import utils
-from keystone.common import wsgi
 
 
 LOG = logging.getLogger(__name__)
@@ -63,6 +65,17 @@ class AdminRouter(wsgi.ComposingRouter):
                        action='endpoints',
                        conditions=dict(method=['GET']))
 
+        #Certificates used for veritfy auth toekns
+        mapper.connect('/certificates/ca',
+                       controller=auth_controller,
+                       action='ca_cert',
+                       conditions=dict(method=['GET']))
+
+        mapper.connect('/certificates/signing',
+                       controller=auth_controller,
+                       action='signing_cert',
+                       conditions=dict(method=['GET']))
+
         # Miscellaneous Operations
         extensions_controller = AdminExtensionsController()
         mapper.connect('/extensions',
@@ -93,6 +106,16 @@ class PublicRouter(wsgi.ComposingRouter):
                        controller=auth_controller,
                        action='authenticate',
                        conditions=dict(method=['POST']))
+
+        mapper.connect('/certificates/ca',
+                       controller=auth_controller,
+                       action='ca_cert',
+                       conditions=dict(method=['GET']))
+
+        mapper.connect('/certificates/signing',
+                       controller=auth_controller,
+                       action='signing_cert',
+                       conditions=dict(method=['GET']))
 
         # Miscellaneous
         extensions_controller = PublicExtensionsController()
@@ -141,10 +164,9 @@ class VersionController(wsgi.Application):
         super(VersionController, self).__init__()
 
     def _get_identity_url(self, context):
-        catalog_ref = self.catalog_api.get_catalog(
-                context=context,
-                user_id=None,
-                tenant_id=None)
+        catalog_ref = self.catalog_api.get_catalog(context=context,
+                                                   user_id=None,
+                                                   tenant_id=None)
         for region, region_ref in catalog_ref.iteritems():
             for service, service_ref in region_ref.iteritems():
                 if service == 'identity':
@@ -171,24 +193,24 @@ class VersionController(wsgi.Application):
                     "rel": "describedby",
                     "type": "text/html",
                     "href": "http://docs.openstack.org/api/openstack-"
-                                "identity-service/2.0/content/"
+                            "identity-service/2.0/content/"
                 }, {
                     "rel": "describedby",
                     "type": "application/pdf",
                     "href": "http://docs.openstack.org/api/openstack-"
-                                "identity-service/2.0/identity-dev-guide-"
-                                "2.0.pdf"
+                            "identity-service/2.0/identity-dev-guide-"
+                            "2.0.pdf"
                 }
             ],
             "media-types": [
                 {
                     "base": "application/json",
                     "type": "application/vnd.openstack.identity-v2.0"
-                                "+json"
+                            "+json"
                 }, {
                     "base": "application/xml",
                     "type": "application/vnd.openstack.identity-v2.0"
-                                "+xml"
+                            "+xml"
                 }
             ]
         }
@@ -226,6 +248,18 @@ class TokenController(wsgi.Application):
         self.policy_api = policy.Manager()
         super(TokenController, self).__init__()
 
+    def ca_cert(self, context, auth=None):
+        ca_file = open(config.CONF.signing.ca_certs, 'r')
+        data = ca_file.read()
+        ca_file.close()
+        return data
+
+    def signing_cert(self, context, auth=None):
+        cert_file = open(config.CONF.signing.certfile, 'r')
+        data = cert_file.read()
+        cert_file.close()
+        return data
+
     def authenticate(self, context, auth=None):
         """Authenticate credentials and return a token.
 
@@ -248,26 +282,29 @@ class TokenController(wsgi.Application):
         that will return a token that is scoped to that tenant.
         """
 
-        token_id = uuid.uuid4().hex
         if 'passwordCredentials' in auth:
+            user_id = auth['passwordCredentials'].get('userId', None)
             username = auth['passwordCredentials'].get('username', '')
             password = auth['passwordCredentials'].get('password', '')
             tenant_name = auth.get('tenantName', None)
 
-            user_id = auth['passwordCredentials'].get('userId', None)
             if username:
-                user_ref = self.identity_api.get_user_by_name(
+                try:
+                    user_ref = self.identity_api.get_user_by_name(
                         context=context, user_name=username)
-                if user_ref:
                     user_id = user_ref['id']
+                except exception.UserNotFound:
+                    raise exception.Unauthorized()
 
             # more compat
             tenant_id = auth.get('tenantId', None)
             if tenant_name:
-                tenant_ref = self.identity_api.get_tenant_by_name(
+                try:
+                    tenant_ref = self.identity_api.get_tenant_by_name(
                         context=context, tenant_name=tenant_name)
-                if tenant_ref:
                     tenant_id = tenant_ref['id']
+                except exception.TenantNotFound:
+                    raise exception.Unauthorized()
 
             try:
                 auth_info = self.identity_api.authenticate(context=context,
@@ -280,88 +317,144 @@ class TokenController(wsgi.Application):
                 if not user_ref.get('enabled', True):
                     LOG.warning('User %s is disabled' % user_id)
                     raise exception.Unauthorized()
+
+                # If the tenant is disabled don't allow them to authenticate
+                if tenant_ref and not tenant_ref.get('enabled', True):
+                    LOG.warning('Tenant %s is disabled' % tenant_id)
+                    raise exception.Unauthorized()
             except AssertionError as e:
                 raise exception.Unauthorized(e.message)
+            auth_token_data = dict(zip(['user', 'tenant', 'metadata'],
+                                       auth_info))
+            expiry = self.token_api._get_default_expire_time(context=context)
 
-            token_ref = self.token_api.create_token(
-                    context, token_id, dict(id=token_id,
-                                            user=user_ref,
-                                            tenant=tenant_ref,
-                                            metadata=metadata_ref))
             if tenant_ref:
                 catalog_ref = self.catalog_api.get_catalog(
-                        context=context,
-                        user_id=user_ref['id'],
-                        tenant_id=tenant_ref['id'],
-                        metadata=metadata_ref)
+                    context=context,
+                    user_id=user_ref['id'],
+                    tenant_id=tenant_ref['id'],
+                    metadata=metadata_ref)
             else:
                 catalog_ref = {}
-
         elif 'token' in auth:
-            token = auth['token'].get('id', None)
-
+            old_token = auth['token'].get('id', None)
             tenant_name = auth.get('tenantName')
-
-            # more compat
-            if tenant_name:
-                tenant_ref = self.identity_api.get_tenant_by_name(
-                        context=context, tenant_name=tenant_name)
-                tenant_id = tenant_ref['id']
-            else:
-                tenant_id = auth.get('tenantId', None)
 
             try:
                 old_token_ref = self.token_api.get_token(context=context,
-                                                         token_id=token)
+                                                         token_id=old_token)
             except exception.NotFound:
                 raise exception.Unauthorized()
 
             user_ref = old_token_ref['user']
+            user_id = user_ref['id']
+
+            current_user_ref = self.identity_api.get_user(context=context,
+                                                          user_id=user_id)
 
             # If the user is disabled don't allow them to authenticate
-            current_user_ref = self.identity_api.get_user(
-                                                    context=context,
-                                                    user_id=user_ref['id'])
             if not current_user_ref.get('enabled', True):
-                LOG.warning('User %s is disabled' % user_ref['id'])
+                LOG.warning('User %s is disabled' % user_id)
                 raise exception.Unauthorized()
 
-            tenants = self.identity_api.get_tenants_for_user(context,
-                                                             user_ref['id'])
-            if tenant_id:
-                assert tenant_id in tenants
-
-            tenant_ref = self.identity_api.get_tenant(context=context,
-                                                      tenant_id=tenant_id)
-            if tenant_ref:
-                metadata_ref = self.identity_api.get_metadata(
-                        context=context,
-                        user_id=user_ref['id'],
-                        tenant_id=tenant_ref['id'])
-                catalog_ref = self.catalog_api.get_catalog(
-                        context=context,
-                        user_id=user_ref['id'],
-                        tenant_id=tenant_ref['id'],
-                        metadata=metadata_ref)
+            if tenant_name:
+                tenant_ref = self.identity_api.get_tenant_by_name(
+                    context=context,
+                    tenant_name=tenant_name)
+                tenant_id = tenant_ref['id']
             else:
+                tenant_id = auth.get('tenantId', None)
+            tenants = self.identity_api.get_tenants_for_user(context, user_id)
+
+            if tenant_id:
+                if not tenant_id in tenants:
+                    LOG.warning('User %s is authorized for tenant %s'
+                                % (user_id, tenant_id))
+                    raise exception.Unauthorized()
+
+                # if the old token is sufficient unpack and return it
+                if (old_token_ref['tenant']
+                        and tenant_id == old_token_ref['tenant']['id']
+                        and len(old_token) > cms.UUID_TOKEN_LENGTH):
+                    json_data = cms.verify_token(
+                        old_token,
+                        config.CONF.signing.certfile,
+                        config.CONF.signing.ca_certs)
+                    return_data = json.loads(json_data)
+                    return_data['access']['token']['id'] = old_token
+                    return return_data
+
+            expiry = old_token_ref['expires']
+            try:
+                tenant_ref = self.identity_api.get_tenant(context=context,
+                                                          tenant_id=tenant_id)
+            except exception.TenantNotFound:
+                tenant_ref = None
+                metadata_ref = {}
+                catalog_ref = {}
+            except exception.MetadataNotFound:
                 metadata_ref = {}
                 catalog_ref = {}
 
-            token_ref = self.token_api.create_token(
-                    context, token_id, dict(id=token_id,
-                                            user=user_ref,
-                                            tenant=tenant_ref,
-                                            metadata=metadata_ref,
-                                            expires=old_token_ref['expires']))
+            # If the tenant is disabled don't allow them to authenticate
+            if tenant_ref and not tenant_ref.get('enabled', True):
+                LOG.warning('Tenant %s is disabled' % tenant_id)
+                raise exception.Unauthorized()
 
-        # TODO(termie): optimize this call at some point and put it into the
-        #               the return for metadata
-        # fill out the roles in the metadata
+            if tenant_ref:
+                metadata_ref = self.identity_api.get_metadata(
+                    context=context,
+                    user_id=user_ref['id'],
+                    tenant_id=tenant_ref['id'])
+                catalog_ref = self.catalog_api.get_catalog(
+                    context=context,
+                    user_id=user_ref['id'],
+                    tenant_id=tenant_ref['id'],
+                    metadata=metadata_ref)
+
+            auth_token_data = dict(dict(user=current_user_ref,
+                                        tenant=tenant_ref,
+                                        metadata=metadata_ref))
+
+        auth_token_data['expires'] = expiry
+        auth_token_data['id'] = 'placeholder'
+
         roles_ref = []
         for role_id in metadata_ref.get('roles', []):
-            roles_ref.append(self.identity_api.get_role(context, role_id))
-        logging.debug('TOKEN_REF %s', token_ref)
-        return self._format_authenticate(token_ref, roles_ref, catalog_ref)
+            role_ref = self.identity_api.get_role(context, role_id)
+            roles_ref.append(dict(name=role_ref['name']))
+
+        token_data = self._format_token(auth_token_data, roles_ref)
+
+        service_catalog = self._format_catalog(catalog_ref)
+        token_data['access']['serviceCatalog'] = service_catalog
+
+        if config.CONF.signing.disable_pki:
+            token_id = uuid.uuid4().hex
+        else:
+            token_id = cms.cms_sign_text(json.dumps(token_data),
+                                         config.CONF.signing.certfile,
+                                         config.CONF.signing.keyfile)
+
+        try:
+            self.token_api.create_token(
+                context, token_id, dict(key=token_id,
+                                        id=token_id,
+                                        user=user_ref,
+                                        tenant=tenant_ref,
+                                        metadata=metadata_ref))
+        except Exception as e:
+            # an identical token may have been created already.
+            # if so, return the token_data as it is also identical
+            try:
+                self.token_api.get_token(context=context,
+                                         token_id=token_id)
+            except exception.TokenNotFound:
+                raise e
+
+        token_data['access']['token']['id'] = token_id
+
+        return token_data
 
     def _get_token_ref(self, context, token_id, belongs_to=None):
         """Returns a token if a valid one exists.
@@ -372,12 +465,18 @@ class TokenController(wsgi.Application):
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
 
-        token_ref = self.token_api.get_token(context=context,
-                                             token_id=token_id)
-
-        if belongs_to:
-            assert token_ref['tenant']['id'] == belongs_to
-
+        if len(token_id) > cms.UUID_TOKEN_LENGTH:
+            data = json.loads(cms.cms_verify(cms.token_to_cms(token_id),
+                                             config.CONF.signing.certfile,
+                                             config.CONF.signing.ca_certs))
+            data['access']['token']['user'] = data['access']['user']
+            data['access']['token']['metadata'] = data['access']['metadata']
+            if belongs_to:
+                assert data['access']['token']['tenant']['id'] == belongs_to
+            token_ref = data['access']['token']
+        else:
+            token_ref = self.token_api.get_token(context=context,
+                                                 token_id=token_id)
         return token_ref
 
     # admin only
@@ -389,7 +488,7 @@ class TokenController(wsgi.Application):
         Identical to ``validate_token``, except does not return a response.
 
         """
-        belongs_to = context['query_string'].get("belongsTo")
+        belongs_to = context['query_string'].get('belongsTo')
         assert self._get_token_ref(context, token_id, belongs_to)
 
     # admin only
@@ -412,10 +511,10 @@ class TokenController(wsgi.Application):
         for role_id in metadata_ref.get('roles', []):
             roles_ref.append(self.identity_api.get_role(context, role_id))
 
-        # Get a service catalog if belongs_to is not none
+        # Get a service catalog if possible
         # This is needed for on-behalf-of requests
         catalog_ref = None
-        if belongs_to is not None:
+        if token_ref.get('tenant'):
             catalog_ref = self.catalog_api.get_catalog(
                 context=context,
                 user_id=token_ref['user']['id'],
@@ -444,7 +543,8 @@ class TokenController(wsgi.Application):
         metadata_ref = token_ref['metadata']
         expires = token_ref['expires']
         if expires is not None:
-            expires = utils.isotime(expires)
+            if not isinstance(expires, unicode):
+                expires = timeutils.isotime(expires)
         o = {'access': {'token': {'id': token_ref['id'],
                                   'expires': expires,
                                   },
@@ -453,7 +553,7 @@ class TokenController(wsgi.Application):
                                  'username': user_ref['name'],
                                  'roles': roles_ref,
                                  'roles_links': metadata_ref.get('roles_links',
-                                                               [])
+                                                                 [])
                                  }
                         }
              }
@@ -462,6 +562,14 @@ class TokenController(wsgi.Application):
             o['access']['token']['tenant'] = token_ref['tenant']
         if catalog_ref is not None:
             o['access']['serviceCatalog'] = self._format_catalog(catalog_ref)
+        if metadata_ref:
+            if 'is_admin' in metadata_ref:
+                o['access']['metadata'] = {'is_admin':
+                                           metadata_ref['is_admin']}
+            else:
+                o['access']['metadata'] = {'is_admin': 0}
+        if 'roles' in metadata_ref:
+                o['access']['metadata']['roles'] = metadata_ref['roles']
         return o
 
     def _format_catalog(self, catalog_ref):
@@ -553,8 +661,7 @@ class AdminExtensionsController(ExtensionsController):
                     # TODO(dolph): link needs to be revised after
                     #              bug 928059 merges
                     'type': 'text/html',
-                    'href': ('https://github.com/openstack/'
-                        'identity-api'),
+                    'href': 'https://github.com/openstack/identity-api',
                 }
             ]
         }

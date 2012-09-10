@@ -16,9 +16,9 @@
 
 import uuid
 
+from keystone.common.sql import util as sql_util
 from keystone import config
 from keystone import test
-from keystone.common.sql import util as sql_util
 
 import test_keystoneclient
 
@@ -27,10 +27,11 @@ CONF = config.CONF
 
 
 class KcMasterSqlTestCase(test_keystoneclient.KcMasterTestCase):
-    def config(self):
-        CONF(config_files=[test.etcdir('keystone.conf.sample'),
-                           test.testsdir('test_overrides.conf'),
-                           test.testsdir('backend_sql.conf')])
+    def config(self, config_files):
+        super(KcMasterSqlTestCase, self).config([
+            test.etcdir('keystone.conf.sample'),
+            test.testsdir('test_overrides.conf'),
+            test.testsdir('backend_sql.conf')])
         sql_util.setup_test_database()
 
     def test_endpoint_crud(self):
@@ -72,6 +73,17 @@ class KcMasterSqlTestCase(test_keystoneclient.KcMasterTestCase):
         client.endpoints.delete(id=endpoint.id)
         self.assertRaises(client_exceptions.NotFound, client.endpoints.delete,
                           id=endpoint.id)
+
+    def test_endpoint_create_404(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client(admin=True)
+        self.assertRaises(client_exceptions.NotFound,
+                          client.endpoints.create,
+                          region=uuid.uuid4().hex,
+                          service_id=uuid.uuid4().hex,
+                          publicurl=uuid.uuid4().hex,
+                          adminurl=uuid.uuid4().hex,
+                          internalurl=uuid.uuid4().hex)
 
     def test_endpoint_delete_404(self):
         from keystoneclient import exceptions as client_exceptions
