@@ -1,0 +1,84 @@
+# GERMAN TRANSLATION OF THE NOVA DEBCONF TEMPLATE.
+# Copyright (C) 2012 Erik Pfannenstein
+# This file is distributed under the same license as the NOVA package.
+# Erik Pfannenstein <debianignatz@gmx.de>, 2012.
+msgid ""
+msgstr ""
+"Project-Id-Version: nova 2012.1-6\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-08-11 08:37+0200\n"
+"PO-Revision-Date: 2012-08-14 11:52+0200\n"
+"Last-Translator: Erik Pfannenstein <debianignatz@gmx.de>\n"
+"Language-Team: de <debian-l10n-german@lists.debian.org>\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Virtaal 0.7.1\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid "Set up a database for Keystone?"
+msgstr "Datenbank für Keystone einrichten?"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"Bisher ist noch keine Datenbank eingerichtet worden, die Keystone benutzen "
+"kann. Wenn Sie das jetzt tun wollen, stellen Sie bitte sicher, dass Sie alle "
+"benötigten Informationen haben:"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
+msgstr ""
+" * den Rechnernamen des Datenbank-Servers (welcher TCP-Verbindungen von "
+"dieser\n"
+"   Maschine aus zulassen muss)\n"
+" * einen Benutzernamen samt Passwort, um auf die Datenbank zuzugreifen\n"
+" * die Art der Datenbank-Verwaltungssoftware, die Sie verwenden wollen."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
+"Wenn Sie diese Option nicht auswählen, wird keine Datenbank eingerichtet und "
+"Keystone wird auf die normale SQLite-Unterstützung zurückgreifen."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"Sie können diese Einstellung später durch Ausführen von »dpkg-reconfigure -"
+"plow keystone« ändern."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:3001
+msgid "Authentication server administration token:"
+msgstr "Administrationstoken des Authentifizierungsservers:"
+
+#. Type: string
+#. Description
+#: ../keystone.templates:3001
+msgid "Please enter the token to use with the authentication server."
+msgstr ""
+"Bitte geben Sie das Token ein, der für den Authentifzierungsserver benutzt "
+"werden soll."

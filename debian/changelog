@@ -1,5 +1,65 @@
+keystone (2012.1.1-5) unstable; urgency=low
+
+  * CVE-2012-3542: Fixes lack of authorization for adding users to tenants
+  (Closes: #686265)
+  * Added Chinese debconf translation thanks to ben <duyujie.dyj@gmail.com>.
+  * Really adds the nl debconf translation this time (Closes: #685671).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 27 Aug 2012 11:45:44 +0000
+
+keystone (2012.1.1-4) unstable; urgency=low
+
+  * Updated debian/keystone.templates, debian/control after review from
+  the internationalization team (Closes: #683414, #679295).
+  * Updated debconf translations with thanks to:
+  - de: Pfannenstein Erik <epfannenstein@gmx.de> (Closes: #684877)
+  - cs: Michal Šimůnek <michal.simunek@gmail.com> (Closes: #685434)
+  - pl: Michał Kułach <michalkulach@gmail.com> (Closes: #685431)
+  - fr: David Prévot <taffit@debian.org> (Closes: #685325)
+  - sv: Martin Bagge <brother@bsnet.se> (Closes: #684942)
+  - sk: helix84 <helix84@centrum.sk> (Closes: #684606)
+  - ru: Yuri Kozlov <yuray@komyakino.ru> (Closes: #684590)
+  - da: Joe Dalton <joedalton2@yahoo.dk> (Closes: #684565)
+  - pt: Pedro Ribeiro <p.m42.ribeiro@gmail.com> (Closes: #682438)
+  - es: SM Baby Siabef <siabef.debian@gmail.com> (Closes: #685435)
+  - it: Beatrice Torracca <beatricet@libero.it> (Closes: #685623)
+  * Added debconf translations with thanks to:
+  - pt_BR: Adriano Rafael Gomes <adrianorg@gmail.com> (Closes: #685405)
+  - nl: Jeroen Schot <schot@A-Eskwadraat.nl> (Closes: #685671)
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 21 Aug 2012 08:06:07 +0000
+
+keystone (2012.1.1-3) unstable; urgency=low
+
+  * Re-added Debconf template which has been removed by the patch of 2012.1.1-2
+  from Bubulle (Closes: #683337).
+  * Removed one occurence of a dependency declared twice: python-sqlalchemy.
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 31 Jul 2012 12:37:24 +0000
+
+keystone (2012.1.1-2) unstable; urgency=low
+
+  * Debconf templates and debian/control reviewed by the debian-l10n-
+    english team as part of the Smith review project. Closes: #679295
+  * [Debconf translation updates]
+  * Recycle translations from nova for several languages. Additionnally:
+  * Danish (Joe Hansen).  Closes: #680082
+  * Swedish (Martin Bagge / brother).  Closes: #680847
+  * Spanish; (SM Baby Siabef).  Closes: #681003
+  * Italian (Beatrice Torracca).  Closes: #681249
+  * Slovak (Ivan Masár). Closes: #682784
+  * Fixed the get-vcs-source target in debian/rules.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 19 Jul 2012 06:21:30 +0000
+
+keystone (2012.1.1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Ghe Rivero <ghe.rivero@stackops.com>  Fri, 22 Jun 2012 09:41:24 +0200
+
 keystone (2012.1-3) unstable; urgency=low
-  
+
   * Add logrotate for keystone.log. Closes: #663717
 
  -- Mehdi Abaakouk <sileht@sileht.net>  Tue, 22 May 2012 14:48:56 +0200

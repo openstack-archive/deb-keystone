@@ -341,9 +341,6 @@ class Identity(sql.Base, identity.Driver):
                 for membership_ref in membership_refs:
                     session.delete(membership_ref)
                     session.flush()
-            if metadata_refs:
-                for metadata_ref in metadata_refs:
-                    session.delete(metadata_ref)
 
             session.delete(user_ref)
             session.flush()

@@ -34,11 +34,11 @@ then
                     ;;
 		mysql)
                     [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                    SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
+                    SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
                     ;;
 		pgsql)
                     [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                    SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/keystone"
+                    SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
                     ;;
 		*)
                     SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
@@ -72,15 +72,6 @@ fi
 if [ -z "$2" ]
 then
    keystone-manage db_sync
-   db_get keystone/auth-token
-   export SERVICE_TOKEN=${RET:-ADMIN}
-   export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
-   keystone role-create --name=admin
-   keystone role-create --name=Member
-   keystone role-create --name=KeystoneAdmin
-   keystone role-create --name=KeystoneServiceAdmin
-   keystone role-create --name=sysadmin
-   keystone role-create --name=netadmin
 fi
 
 exit 0

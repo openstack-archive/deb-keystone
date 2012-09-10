@@ -1,21 +1,33 @@
+# These templates have been reviewed by the debian-l10n-english
+# team
+#
+# If modifications/additions/rewording are needed, please ask
+# debian-l10n-english@lists.debian.org for advice.
+#
+# Even minor modifications require translation updates and such
+# changes should be coordinated with translators and reviewers.
+
 Template: keystone/configure_db
 Type: boolean
 Default: false
-Description: Set up a database for keystone?
- No database has been set up for keystone to use. Before continuing,
- you should make sure you have:
+_Description: Set up a database for Keystone?
+ No database has been set up for Keystone to use. If you want
+ to set one up now, please make sure you have all needed
+ information:
  .
-  - the server host name (that server must allow TCP connections
-    from this machine);
-  - a username and password to access the database.
-  - A database type that you want to use.
+  * the host name of the database server (which must allow TCP
+    connections from this machine);
+  * a username and password to access the database;
+  * the type of database management software you want to use.
  .
- If some of these requirements are missing, reject this option and
- run with regular sqlite support.
+ If you don't choose this option, no database will be set up and
+ Keystone will use regular SQLite support.
  .
- Database configuration can be reconfigured later by running
- 'dpkg-reconfigure -plow keystone'.
+ You can change this setting later on by running "dpkg-reconfigure
+ -plow keystone".
 
 Template: keystone/auth-token
 Type: string
-_Description: Auth server admin token:
+_Description: Authentication server administration token:
+ Please enter the token to use with the authentication
+ server.

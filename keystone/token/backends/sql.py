@@ -87,7 +87,7 @@ class Token(sql.Base, token.Driver):
         tokens = []
         now = datetime.datetime.utcnow()
         for token_ref in session.query(TokenModel)\
-                                .filter(TokenModel.expires > now):
+                                      .filter(TokenModel.expires > now):
             token_ref_dict = token_ref.to_dict()
             if 'user' not in token_ref_dict:
                 continue

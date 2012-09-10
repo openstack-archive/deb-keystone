@@ -1,0 +1,83 @@
+# Translation of keystone debconf templates to french.
+# Copyright (C) 2012, French l10n team <debian-l10n-french@lists.debian.org>
+# This file is distributed under the same license as the keystone package.
+# Julien Patriarca <patriarcaj@gmail.com>, 2012.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: keystone\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-08-11 08:37+0200\n"
+"PO-Revision-Date: 2012-08-12 18:22+0100\n"
+"Last-Translator: Julien Patriarca <patriarcaj@gmail.com>\n"
+"Language-Team: FRENCH <debian-l10n-french@lists.debian.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid "Set up a database for Keystone?"
+msgstr "Faut-il configurer une base de données pour Keystone ?"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
+msgstr ""
+"Aucune base de données n'a été configurée pour Keystone. Si vous souhaitez "
+"en configurer une maintenant, veuillez vous assurer de disposer de toutes "
+"les informations nécessaires."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
+msgstr ""
+" * le nom d'hôte du serveur de bases de données (qui doit autoriser\n"
+"   les connexions TCP depuis cette machine) ;\n"
+" * un identifiant et un mot de passe pour accéder à la base de\n"
+"   données ;\n"
+" * le type de gestionnaire de base de données que vous souhaitez\n"
+"   utiliser."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
+msgstr ""
+"Si vous ne choisissez pas cette option, aucune base de données ne sera "
+"configurée et Keystone utilisera la gestion SQLite de base."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:2001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
+msgstr ""
+"Vous pouvez changer ce réglage plus tard en exécutant « dpkg-reconfigure -"
+"plow keystone »."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:3001
+msgid "Authentication server administration token:"
+msgstr "Jeton d'authentification pour le serveur d'administration :"
+
+#. Type: string
+#. Description
+#: ../keystone.templates:3001
+msgid "Please enter the token to use with the authentication server."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."

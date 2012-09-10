@@ -1,2 +1,4 @@
+logging.conf.patch
 pip-require_versions
 sql_conn.patch
+CVE-2012-3542_Lack-of-authorization-for-adding-users-to-tenants.patch

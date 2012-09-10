@@ -2,7 +2,8 @@ Source: keystone
 Section: net
 Priority: extra
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
-Uploaders: Julien Danjou <acid@debian.org>,
+Uploaders: Loic Dachary (OuoU) <loic@debian.org>,
+           Julien Danjou <acid@debian.org>,
            Thomas Goirand <zigo@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
 Build-Depends: debhelper (>= 7.0.50),
@@ -28,7 +29,8 @@ Build-Depends: debhelper (>= 7.0.50),
  python-mox,
  python-dateutil,
  pep8,
- git-core
+ git-core,
+ po-debconf
 Standards-Version: 3.9.3
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
@@ -48,7 +50,6 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-pastedeploy,
  python-pastescript,
  python-webob,
- python-sqlalchemy,
  python-sqlite,
  python-nova,
  python-dateutil
@@ -56,9 +57,9 @@ Recommends: python-memcache, python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the Python libraries.
 
@@ -74,21 +75,21 @@ Depends: ${python:Depends}, ${misc:Depends},
 Description: OpenStack identity service
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the daemons.
 
 Package: keystone-doc
 Architecture: all
 Section: doc
-Depends: ${misc:Depends}
+Depends: ${misc:Depends},  libjs-jquery, libjs-underscore
 Description: OpenStack identity service - documentation
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
- authN and user-service authorization. It is scalable to include OAuth, SAML
- and openID in future versions. Out of the box, Keystone uses a SQLite DB as
- an identity store with the option to connect to external LDAP.
+ authN with user/service authZ, and is scalable to support OAuth, SAML,
+ and OpenID in future versions. Out of the box, Keystone uses SQLite for
+ its identity store database, with the option to connect to external LDAP.
  .
  This package contains the documentation.

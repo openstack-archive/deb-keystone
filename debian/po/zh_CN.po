@@ -1,0 +1,55 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: keystone\n"
+"Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
+"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"PO-Revision-Date: 2012-08-27 16:22+0800\n"
+"Last-Translator: ben <duyujie.dyj@gmail.com>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "Set up a database for Keystone?"
+msgstr "为Keystone设置数据库"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "No database has been set up for Keystone to use. If you want to set one up now, please make sure you have all needed information:"
+msgstr "未曾为Keystone设置数据库。如果你想现在设置，请确定你有以下信息："
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid ""
+" * the host name of the database server (which must allow TCP\n"
+"   connections from this machine);\n"
+" * a username and password to access the database;\n"
+" * the type of database management software you want to use."
+msgstr ""
+" * 数据库服务器的主机名 （需要这台主机的TCP链接）；\n"
+" * 访问这个数据库的用户名及密码；\n"
+" * 你希望使用的数据库管理软件的类型。"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "If you don't choose this option, no database will be set up and Keystone will use regular SQLite support."
+msgstr "如果你没有选择该项，不会设置数据库并且Keystone将会使用SQLite。"
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:1001
+msgid "You can change this setting later on by running \"dpkg-reconfigure -plow keystone\"."
+msgstr "您可以通过运行\"dpkg-reconfigure-plow keystone\" 命令来修改配置。"
+
