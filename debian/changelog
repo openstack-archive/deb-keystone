@@ -1,3 +1,10 @@
+keystone (2012.1.1-6) unstable; urgency=high
+
+  * CVE-2012-4413: Revoking a role does not affect existing tokens
+  (Closes: #687428).
+
+ -- Thomas Goirand <zigo@debian.org>  Sun, 09 Sep 2012 02:21:11 +0000
+
 keystone (2012.1.1-5) unstable; urgency=low
 
   * CVE-2012-3542: Fixes lack of authorization for adding users to tenants

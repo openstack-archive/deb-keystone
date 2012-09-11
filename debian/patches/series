@@ -3,3 +3,4 @@ pip-require_versions
 default_catalog.patch
 sql_conn.patch
 CVE-2012-3542_Lack-of-authorization-for-adding-users-to-tenants.patch
+CVE-2012-4413_Revoking-a-role-does-not-affect-existing-tokens.patch
