@@ -1,0 +1,63 @@
+.TH keystone 8
+.SH NAME
+keystone \- Starts/Stops keystone server.
+.SH SYNOPSIS
+.I [OPTION]...
+.SH DESCRIPTION
+.BR keystone is a Python implementation of the Openstack
+identity service.
+.TP
+.B --version
+show program's version number and exit
+.TP
+.B \-h, --help
+show help messag and exit
+.TP
+.B \-v, --verbose
+Print more verbose output
+.TP
+.B \-d, --debug
+Prrint debugging output to console.
+.TP
+.B \-c PATH, --config-file=PATH
+Path to the config file to use. When not specified (the default),
+we generally look at the first arguement specified to be a config file,
+and if that is also missing, we search standard directories for a config
+file.
+.TP
+.B \-p BIND_PORT, --port=BIND_PORT, --bind-port=BIND_PORT
+Specifies port to listen on.
+.TP
+.B --host=BIND_HOST, --bind-host=BIND_HOST
+Specifies host address to listen on (default is all or 0.0.0.0)
+.TP 
+.B \-t, --trace-calls
+Turns on call tracing for troubleshooting
+.TP
+.B \-a PORT, --admin-port=PORT
+Specifies port for Admin API to listen on (default is 
+35357)
+.TP
+.B --log-config=PATH
+If this opion is specified, the logging configuration
+file specified is used and overrides any other logging
+options specified. Please see the Python logging
+modules documentation for details on logging 
+confgiuration files.
+.TP
+.B --log-date-format=FORMAT
+Format string for %(asctime)s in log records.
+Default: %Y-%m-%d %H:%M:%S
+.TP
+.B --log-file=PATH
+(Optional) Name of log file to output to. If not set,
+logging will go to stdout.
+.TP
+.B --log-didr=LOG_DIR
+(Optional) The directory to keep log files in (will
+be prepended to --logfile)
+
+.SH FILES
+.IR /etc/keystone/keystone.conf
+.SH AUTHOR
+This manual page was written by Chuck Short <zulcss@ubuntu.com>.

@@ -1,2 +1,3 @@
 /var/lib/keystone
+/var/lib/keystone/cache
 /var/log/keystone

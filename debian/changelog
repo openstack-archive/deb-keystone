@@ -1,6 +1,11 @@
 keystone (2012.2~e3-1) experimental; urgency=low
 
-  * New upstream version
+  [ Mehdi Abaakouk ]
+  * New upstream version.
+
+  [ Thomas Goirand ]
+  * Fixed build-dependencies correctly.
+  * Made the package compatible with Ubuntu.
 
  -- Mehdi Abaakouk <sileht@sileht.net>  Mon, 10 Sep 2012 17:56:09 +0200
 

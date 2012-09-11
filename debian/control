@@ -7,30 +7,36 @@ Uploaders: Loic Dachary (OuoU) <loic@debian.org>,
            Thomas Goirand <zigo@debian.org>,
            Ghe Rivero <ghe.rivero@stackops.com>
 Build-Depends: debhelper (>= 7.0.50),
+ git-core,
+ pep8,
+ po-debconf,
+ pylint,
  python-all (>= 2.6.6-3~),
  python-all-dev (>= 2.6.6-3~) | python-support,
+ python-dateutil,
+ python-eventlet,
+ python-keystoneclient,
+ python-ldap,
  python-lxml,
  python-setuptools,
- python-sphinx,
- python-unittest2,
+ python-memcache,
+ python-migrate,
+ python-mox,
+ python-nose,
+ python-nova,
+ python-pam,
+ python-passlib,
  python-paste,
  python-pastedeploy,
- python-routes,
- python-eventlet,
- python-webob,
- python-sqlalchemy,
- python-passlib,
- python-ldap,
- python-memcache,
- python-swift,
- python-nose,
- python-migrate,
  python-prettytable,
- python-mox,
- python-dateutil,
- pep8,
- git-core,
- po-debconf
+ python-routes,
+ python-sphinx,
+ python-sqlalchemy,
+ python-swift,
+ python-unittest2,
+ python-webob,
+ python-webtest,
+ python-iso8601
 Standards-Version: 3.9.3
 Homepage: http://launchpad.net/keystone
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
@@ -40,19 +46,24 @@ Package: python-keystone
 Architecture: all
 Section: python
 Depends: ${python:Depends}, ${misc:Depends},
- python-passlib,
- python-sqlalchemy,
- python-routes,
- python-lxml,
- python-httplib2,
+ python-dateutil,
  python-eventlet,
+ python-greenlet,
+ python-httplib2,
+ python-keystoneclient,
+ python-lxml,
+ python-pam,
+ python-passlib,
  python-paste,
- python-pastedeploy,
  python-pastescript,
+ python-pastedeploy,
+ python-prettytable,
+ python-routes,
+ python-sqlalchemy,
+ python-migrate,
  python-webob,
  python-sqlite,
- python-nova,
- python-dateutil
+ python-nova
 Recommends: python-memcache, python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
@@ -67,9 +78,10 @@ Package: keystone
 Architecture: all
 Section: python
 Depends: ${python:Depends}, ${misc:Depends},
+ ${ostack-lsb-base},
  python-keystone (= ${source:Version}),
  adduser,
- lsb-base (>= 3.0-6),
+ ssl-cert (>= 1.0.12),
  dbconfig-common,
  python-keystoneclient
 Description: OpenStack identity service

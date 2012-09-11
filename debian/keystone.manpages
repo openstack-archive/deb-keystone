@@ -1,1 +1,2 @@
 #doc/build/man/*.1
+debian/man/*

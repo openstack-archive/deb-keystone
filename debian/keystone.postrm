@@ -8,7 +8,7 @@ then
 fi
 
 db_get keystone/configure_db
-if [ "$RET" = "true" ]; then
+if [ "$RET" = "true" ] && [ -f /etc/dbconfig-common/keystone.conf ] ; then
     if [ -f /usr/share/dbconfig-common/dpkg/postrm ]
     then
 	. /usr/share/dbconfig-common/dpkg/postrm

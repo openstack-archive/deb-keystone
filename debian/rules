@@ -3,6 +3,10 @@
 # Verbose mode
 #export DH_VERBOSE=1
 
+# auth_token middleware now requires access to HOME, otherwise
+# test suite cause FTBFS.  See (LP: #1031022)
+export HOME="$(CURDIR)/debian/tests/"
+
 %:
 	dh $@ --with python2
 
@@ -22,10 +26,9 @@ override_dh_auto_test:
 	cp tests/test_overrides.conf tests/test_overrides.conf.orig
 	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/tests/test_overrides.conf
 	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/tests/test_overrides.conf
-	# TEMP: ignore failures until bug 961871 is resolved
 	bash run_tests.sh -N
 	mv $(CURDIR)/tests/test_overrides.conf.orig $(CURDIR)/tests/test_overrides.conf
-	rm -rf $(CURDIR)/debian/tests/testing.db
+	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
 endif
 
 override_dh_auto_build:
@@ -42,7 +45,9 @@ override_dh_install:
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
+	install -D -m 0600 $(CURDIR)/debian/logging.conf $(CURDIR)/debian/keystone/etc/keystone/logging.conf
 
+# DEBIAN
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
 	rm -rf $(CURDIR)/keystone/test/keystone.sql.log $(CURDIR)/keystone/test/keystone.ldap.log
@@ -55,8 +60,24 @@ override_dh_clean:
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
 	dh_clean
 
+override_dh_installinit:
+	if dpkg-vendor --derives-from ubuntu ; then \
+		for i in *.upstart.in ; do \
+			MYPKG=`echo $i | cut -d. -f1` ; \
+			cp $MYPKG.upstart.in $MYPKG.upstart ; \
+		done ; \
+	fi
+	dh_installinit --error-handler=true
+
 get-orig-source:
 	uscan --verbose --force-download --rename --destdir=../build-area
+
+override_dh_gencontrol:
+	if dpkg-vendor --derives-from ubuntu ; then \
+		dh_gencontrol -- -T$(CURDIR)/debian/ubuntu_control_vars ; \
+	else \
+		dh_gencontrol -- -T$(CURDIR)/debian/debian_control_vars ; \
+	fi
 
 get-vcs-source:
 	git remote add upstream git://github.com/openstack/keystone.git || true

@@ -1,7 +1,14 @@
 /var/log/keystone/*.log {
     daily
-    rotate 5
     missingok
+    rotate 5
     compress
     minsize 100k
+    postrotate
+        if dpkg-vendor --derives-from ubuntu ; then
+            restart keystone >/dev/null 2>&1 || true
+        else
+            invoke-rc.d restart keystone
+        fi
+    endscript
 }
