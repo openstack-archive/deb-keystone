@@ -13,6 +13,13 @@ then
             --disabled-password \
             --group keystone
 
+    # Create config files if they don't exist
+    if ! [ -e /etc/keystone ] ; then
+        mkdir /etc/keystone
+    fi
+    if ! [ -e /etc/keystone/keystone.conf ] ; then
+        cp /usr/share/doc/keystone/keystone.conf.sample /etc/nova/keystone.conf
+    fi
 
     db_get keystone/configure_db
     if [ "$RET" = "true" ]; then

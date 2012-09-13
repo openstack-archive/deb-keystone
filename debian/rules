@@ -42,6 +42,7 @@ override_dh_install:
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
+	cp -f etc/keystone.conf /usr/share/doc/keystone/keystone.conf.sample
 
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
