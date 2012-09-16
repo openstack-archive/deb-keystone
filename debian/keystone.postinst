@@ -1,5 +1,7 @@
 #!/bin/sh
+
 set -e
+set -x
 
 if [ "$1" = "configure" ]
 then
@@ -12,14 +14,6 @@ then
             --quiet \
             --disabled-password \
             --group keystone
-
-    # Create config files if they don't exist
-    if ! [ -e /etc/keystone ] ; then
-        mkdir /etc/keystone
-    fi
-    if ! [ -e /etc/keystone/keystone.conf ] ; then
-        cp /usr/share/doc/keystone/keystone.conf.sample /etc/nova/keystone.conf
-    fi
 
     db_get keystone/configure_db
     if [ "$RET" = "true" ]; then
@@ -35,19 +29,12 @@ then
 
 	if [ "$dbc_install" = "true" ]
 	then
-            case "$dbc_dbtype" in
-		sqlite3)
-                    SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
-                    ;;
-		mysql)
-		pgsql)
-                    [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                    SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-                    ;;
-		*)
-                    SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
-                    ;;
-            esac
+	    if [ "$dbc_dbtype" = "mysql" ] || [ "$dbc_dbtype" = "pgsql" ] ; then
+	        [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
+	        SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+	    else
+	        SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
+	    fi
 
             sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
 
