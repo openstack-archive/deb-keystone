@@ -61,12 +61,9 @@ then
 	fi
     fi
 
-    if [ -z "$2" ]
-    then
-	db_get keystone/auth-token
-	AUTH_TOKEN=${RET:-ADMIN}
-	sed -s "s,^admin_token = ADMIN,admin_token = $AUTH_TOKEN," -i /etc/keystone/keystone.conf
-    fi
+    db_get keystone/auth-token
+    AUTH_TOKEN=${RET:-ADMIN}
+    sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = ADMIN|' /etc/keystone/keystone.conf
 
     chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
     chmod 0750 /etc/keystone
