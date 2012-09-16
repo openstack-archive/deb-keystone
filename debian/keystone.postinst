@@ -40,12 +40,9 @@ then
                     SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
                     ;;
 		mysql)
-                    [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                    SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-                    ;;
 		pgsql)
                     [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-                    SQL_CONNECTION="pgsql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+                    SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
                     ;;
 		*)
                     SQL_CONNECTION="sqlite:////var/lib/keystone/$dbc_dbname"
