@@ -47,7 +47,7 @@ then
 
     db_get keystone/auth-token
     AUTH_TOKEN=${RET:-ADMIN}
-    sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = ADMIN|' /etc/keystone/keystone.conf
+    sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = '${AUTH_TOKEN}'|' /etc/keystone/keystone.conf
 
     chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
     chmod 0750 /etc/keystone
