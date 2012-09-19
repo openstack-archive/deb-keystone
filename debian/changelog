@@ -6,6 +6,7 @@ keystone (2012.2~e3-1) experimental; urgency=low
   [ Thomas Goirand ]
   * Fixed build-dependencies correctly.
   * Made the package compatible with Ubuntu.
+  * Now using xz level 9 compression.
 
  -- Mehdi Abaakouk <sileht@sileht.net>  Mon, 10 Sep 2012 17:56:09 +0200
 

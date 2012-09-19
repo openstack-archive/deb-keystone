@@ -31,6 +31,9 @@ override_dh_auto_test:
 	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
 endif
 
+override_dh_builddeb:
+	dh_builddeb -- -Zxz -z9
+
 override_dh_auto_build:
 	dh_auto_build
 ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
