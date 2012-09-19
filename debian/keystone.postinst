@@ -18,11 +18,6 @@ then
     db_get keystone/configure_db
     if [ "$RET" = "true" ]; then
 	db_get keystone/database-type
-	if [ $RET = "sqlite3" ]
-	then
-	    dbc_name="keystone.sqlite"
-	    db_set keystone/db/dbname $dbc_name
-	fi
 	dbc_dbfile_owner="keystone:keystone"
 
 	dbc_go keystone $@
