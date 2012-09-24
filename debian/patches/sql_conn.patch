@@ -1,6 +1,6 @@
 --- a/etc/keystone.conf.sample
 +++ b/etc/keystone.conf.sample
-@@ -52,7 +52,7 @@
+@@ -55,7 +55,7 @@
  
  [sql]
  # The SQLAlchemy connection string used to connect to the database
