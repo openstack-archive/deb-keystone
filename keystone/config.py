@@ -125,8 +125,8 @@ register_str('keyfile', group='ssl', default=None)
 register_str('ca_certs', group='ssl', default=None)
 register_bool('cert_required', group='ssl', default=False)
 #signing options
-register_bool('disable_pki', group='signing',
-              default=True)
+register_str('token_format', group='signing',
+             default="UUID")
 register_str('certfile', group='signing',
              default="/etc/keystone/ssl/certs/signing_cert.pem")
 register_str('keyfile', group='signing',
@@ -179,3 +179,8 @@ register_str('role_tree_dn', group='ldap', default=None)
 register_str('role_objectclass', group='ldap', default='organizationalRole')
 register_str('role_id_attribute', group='ldap', default='cn')
 register_str('role_member_attribute', group='ldap', default='roleOccupant')
+
+#pam
+register_str('url', group='pam', default=None)
+register_str('userid', group='pam', default=None)
+register_str('password', group='pam', default=None)

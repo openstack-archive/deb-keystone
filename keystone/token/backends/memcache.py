@@ -22,6 +22,7 @@ import memcache
 from keystone.common import utils
 from keystone import config
 from keystone import exception
+from keystone.openstack.common import jsonutils
 from keystone import token
 
 
@@ -30,6 +31,8 @@ config.register_str('servers', group='memcache', default='localhost:11211')
 
 
 class Token(token.Driver):
+    revocation_key = 'revocation-list'
+
     def __init__(self, client=None):
         self._memcache_client = client
 
@@ -63,10 +66,52 @@ class Token(token.Driver):
             expires_ts = utils.unixtime(data_copy['expires'])
             kwargs['time'] = expires_ts
         self.client.set(ptk, data_copy, **kwargs)
+        if 'id' in data['user']:
+            token_data = jsonutils.dumps(token_id)
+            user_id = data['user']['id']
+            user_key = 'usertokens-%s' % user_id
+            if not self.client.append(user_key, ',%s' % token_data):
+                if not self.client.add(user_key, token_data):
+                    if not self.client.append(user_key, ',%s' % token_data):
+                        msg = _('Unable to add token user list.')
+                        raise exception.UnexpectedError(msg)
         return copy.deepcopy(data_copy)
+
+    def _add_to_revocation_list(self, data):
+        data_json = jsonutils.dumps(data)
+        if not self.client.append(self.revocation_key, ',%s' % data_json):
+            if not self.client.add(self.revocation_key, data_json):
+                if not self.client.append(self.revocation_key,
+                                          ',%s' % data_json):
+                    msg = _('Unable to add token to revocation list.')
+                    raise exception.UnexpectedError(msg)
 
     def delete_token(self, token_id):
         # Test for existence
-        self.get_token(token_id)
+        data = self.get_token(token_id)
         ptk = self._prefix_token_id(token_id)
-        return self.client.delete(ptk)
+        result = self.client.delete(ptk)
+        self._add_to_revocation_list(data)
+        return result
+
+    def list_tokens(self, user_id, tenant_id=None):
+        tokens = []
+        user_record = self.client.get('usertokens-%s' % user_id) or ""
+        token_list = jsonutils.loads('[%s]' % user_record)
+        for token_id in token_list:
+            ptk = self._prefix_token_id(token_id)
+            token_ref = self.client.get(ptk)
+            if token_ref:
+                if tenant_id is not None:
+                    if 'tenant' not in token_ref:
+                        continue
+                    if token_ref['tenant'].get('id') != tenant_id:
+                        continue
+                tokens.append(token_id)
+        return tokens
+
+    def list_revoked_tokens(self):
+        list_json = self.client.get(self.revocation_key)
+        if list_json:
+            return jsonutils.loads('[%s]' % list_json)
+        return []

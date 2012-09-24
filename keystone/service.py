@@ -48,6 +48,10 @@ class AdminRouter(wsgi.ComposingRouter):
                        controller=auth_controller,
                        action='authenticate',
                        conditions=dict(method=['POST']))
+        mapper.connect('/tokens/revoked',
+                       controller=auth_controller,
+                       action='revocation_list',
+                       conditions=dict(method=['GET']))
         mapper.connect('/tokens/{token_id}',
                        controller=auth_controller,
                        action='validate_token',
@@ -65,7 +69,7 @@ class AdminRouter(wsgi.ComposingRouter):
                        action='endpoints',
                        conditions=dict(method=['GET']))
 
-        #Certificates used for veritfy auth toekns
+        # Certificates used to verify auth tokens
         mapper.connect('/certificates/ca',
                        controller=auth_controller,
                        action='ca_cert',
@@ -159,7 +163,7 @@ class AdminVersionRouter(wsgi.ComposingRouter):
 class VersionController(wsgi.Application):
     def __init__(self, version_type):
         self.catalog_api = catalog.Manager()
-        self.url_key = "%sURL" % version_type
+        self.url_key = '%sURL' % version_type
 
         super(VersionController, self).__init__()
 
@@ -182,35 +186,35 @@ class VersionController(wsgi.Application):
 
         versions = {}
         versions['v2.0'] = {
-            "id": "v2.0",
-            "status": "beta",
-            "updated": "2011-11-19T00:00:00Z",
-            "links": [
+            'id': 'v2.0',
+            'status': 'beta',
+            'updated': '2011-11-19T00:00:00Z',
+            'links': [
                 {
-                    "rel": "self",
-                    "href": identity_url,
+                    'rel': 'self',
+                    'href': identity_url,
                 }, {
-                    "rel": "describedby",
-                    "type": "text/html",
-                    "href": "http://docs.openstack.org/api/openstack-"
-                            "identity-service/2.0/content/"
+                    'rel': 'describedby',
+                    'type': 'text/html',
+                    'href': 'http://docs.openstack.org/api/openstack-'
+                            'identity-service/2.0/content/'
                 }, {
-                    "rel": "describedby",
-                    "type": "application/pdf",
-                    "href": "http://docs.openstack.org/api/openstack-"
-                            "identity-service/2.0/identity-dev-guide-"
-                            "2.0.pdf"
+                    'rel': 'describedby',
+                    'type': 'application/pdf',
+                    'href': 'http://docs.openstack.org/api/openstack-'
+                            'identity-service/2.0/identity-dev-guide-'
+                            '2.0.pdf'
                 }
             ],
-            "media-types": [
+            'media-types': [
                 {
-                    "base": "application/json",
-                    "type": "application/vnd.openstack.identity-v2.0"
-                            "+json"
+                    'base': 'application/json',
+                    'type': 'application/vnd.openstack.identity-v2.0'
+                            '+json'
                 }, {
-                    "base": "application/xml",
-                    "type": "application/vnd.openstack.identity-v2.0"
-                            "+xml"
+                    'base': 'application/xml',
+                    'type': 'application/vnd.openstack.identity-v2.0'
+                            '+xml'
                 }
             ]
         }
@@ -220,15 +224,15 @@ class VersionController(wsgi.Application):
     def get_versions(self, context):
         versions = self._get_versions_list(context)
         return wsgi.render_response(status=(300, 'Multiple Choices'), body={
-            "versions": {
-                "values": versions.values()
+            'versions': {
+                'values': versions.values()
             }
         })
 
     def get_version(self, context):
         versions = self._get_versions_list(context)
         return wsgi.render_response(body={
-            "version": versions['v2.0']
+            'version': versions['v2.0']
         })
 
 
@@ -344,6 +348,7 @@ class TokenController(wsgi.Application):
                 old_token_ref = self.token_api.get_token(context=context,
                                                          token_id=old_token)
             except exception.NotFound:
+                LOG.warning("Token not found: " + str(old_token))
                 raise exception.Unauthorized()
 
             user_ref = old_token_ref['user']
@@ -371,18 +376,6 @@ class TokenController(wsgi.Application):
                     LOG.warning('User %s is authorized for tenant %s'
                                 % (user_id, tenant_id))
                     raise exception.Unauthorized()
-
-                # if the old token is sufficient unpack and return it
-                if (old_token_ref['tenant']
-                        and tenant_id == old_token_ref['tenant']['id']
-                        and len(old_token) > cms.UUID_TOKEN_LENGTH):
-                    json_data = cms.verify_token(
-                        old_token,
-                        config.CONF.signing.certfile,
-                        config.CONF.signing.ca_certs)
-                    return_data = json.loads(json_data)
-                    return_data['access']['token']['id'] = old_token
-                    return return_data
 
             expiry = old_token_ref['expires']
             try:
@@ -429,13 +422,18 @@ class TokenController(wsgi.Application):
         service_catalog = self._format_catalog(catalog_ref)
         token_data['access']['serviceCatalog'] = service_catalog
 
-        if config.CONF.signing.disable_pki:
+        if config.CONF.signing.token_format == 'UUID':
             token_id = uuid.uuid4().hex
-        else:
-            token_id = cms.cms_sign_text(json.dumps(token_data),
-                                         config.CONF.signing.certfile,
-                                         config.CONF.signing.keyfile)
+        elif config.CONF.signing.token_format == 'PKI':
 
+            token_id = cms.cms_sign_token(json.dumps(token_data),
+                                          config.CONF.signing.certfile,
+                                          config.CONF.signing.keyfile)
+        else:
+            raise exception.UnexpectedError(
+                'Invalid value for token_format: %s.'
+                '  Allowed values are PKI or UUID.' %
+                config.CONF.signing.token_format)
         try:
             self.token_api.create_token(
                 context, token_id, dict(key=token_id,
@@ -500,7 +498,7 @@ class TokenController(wsgi.Application):
         Returns metadata about the token along any associated roles.
 
         """
-        belongs_to = context['query_string'].get("belongsTo")
+        belongs_to = context['query_string'].get('belongsTo')
         token_ref = self._get_token_ref(context, token_id, belongs_to)
 
         # TODO(termie): optimize this call at some point and put it into the
@@ -526,12 +524,39 @@ class TokenController(wsgi.Application):
         """Delete a token, effectively invalidating it for authz."""
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
-
         self.token_api.delete_token(context=context, token_id=token_id)
+
+    def revocation_list(self, context, auth=None):
+        self.assert_admin(context)
+        tokens = self.token_api.list_revoked_tokens(context)
+
+        for t in tokens:
+            expires = t['expires']
+            if not (expires and isinstance(expires, unicode)):
+                    t['expires'] = timeutils.isotime(expires)
+        data = {'revoked': tokens}
+        json_data = json.dumps(data)
+        signed_text = cms.cms_sign_text(json_data,
+                                        config.CONF.signing.certfile,
+                                        config.CONF.signing.keyfile)
+
+        return {'signed': signed_text}
 
     def endpoints(self, context, token_id):
         """Return a list of endpoints available to the token."""
-        raise exception.NotImplemented()
+        self.assert_admin(context)
+
+        token_ref = self._get_token_ref(context, token_id)
+
+        catalog_ref = None
+        if token_ref.get('tenant'):
+            catalog_ref = self.catalog_api.get_catalog(
+                context=context,
+                user_id=token_ref['user']['id'],
+                tenant_id=token_ref['tenant']['id'],
+                metadata=token_ref['metadata'])
+
+        return self._format_endpoint_list(catalog_ref)
 
     def _format_authenticate(self, token_ref, roles_ref, catalog_ref):
         o = self._format_token(token_ref, roles_ref)
@@ -616,6 +641,43 @@ class TokenController(wsgi.Application):
                 services[service] = new_service_ref
 
         return services.values()
+
+    def _format_endpoint_list(self, catalog_ref):
+        """Formats a list of endpoints according to Identity API v2.
+
+        The v2.0 API wants an endpoint list to look like::
+
+            {
+                'endpoints': [
+                    {
+                        'id': $endpoint_id,
+                        'name': $SERVICE[name],
+                        'type': $SERVICE,
+                        'tenantId': $tenant_id,
+                        'region': $REGION,
+                    }
+                ],
+                'endpoints_links': [],
+            }
+
+        """
+        if not catalog_ref:
+            return {}
+
+        endpoints = []
+        for region_name, region_ref in catalog_ref.iteritems():
+            for service_type, service_ref in region_ref.iteritems():
+                endpoints.append({
+                    'id': service_ref.get('id'),
+                    'name': service_ref.get('name'),
+                    'type': service_type,
+                    'region': region_name,
+                    'publicURL': service_ref.get('publicURL'),
+                    'internalURL': service_ref.get('internalURL'),
+                    'adminURL': service_ref.get('adminURL'),
+                })
+
+        return {'endpoints': endpoints, 'endpoints_links': []}
 
 
 class ExtensionsController(wsgi.Application):

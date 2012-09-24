@@ -19,7 +19,6 @@ import uuid
 import memcache
 
 from keystone.common import utils
-from keystone import exception
 from keystone.openstack.common import timeutils
 from keystone import test
 from keystone.token.backends import memcache as token_memcache
@@ -34,6 +33,18 @@ class MemcacheClient(object):
         """Ignores the passed in args."""
         self.cache = {}
 
+    def add(self, key, value):
+        if self.get(key):
+            return False
+        return self.set(key, value)
+
+    def append(self, key, value):
+        existing_value = self.get(key)
+        if existing_value:
+            self.set(key, existing_value + value)
+            return True
+        return False
+
     def check_key(self, key):
         if not isinstance(key, str):
             raise memcache.Client.MemcachedStringEncodingError()
@@ -45,8 +56,6 @@ class MemcacheClient(object):
         now = utils.unixtime(timeutils.utcnow())
         if obj and (obj[1] == 0 or obj[1] > now):
             return obj[0]
-        else:
-            raise exception.TokenNotFound(token_id=key)
 
     def set(self, key, value, time=0):
         """Sets the value for a key."""
@@ -71,6 +80,7 @@ class MemcacheToken(test.TestCase, test_backend.TokenTests):
 
     def test_get_unicode(self):
         token_id = unicode(uuid.uuid4().hex)
-        data = {'id': token_id, 'a': 'b'}
+        data = {'id': token_id, 'a': 'b',
+                'user': {'id': 'testuserid'}}
         self.token_api.create_token(token_id, data)
         self.token_api.get_token(token_id)

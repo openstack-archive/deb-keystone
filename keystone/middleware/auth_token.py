@@ -93,6 +93,7 @@ HTTP_X_ROLE
 
 """
 
+import datetime
 import httplib
 import json
 import logging
@@ -105,8 +106,57 @@ import webob.exc
 
 from keystone.openstack.common import jsonutils
 from keystone.common import cms
+from keystone.common import utils
+from keystone.openstack.common import timeutils
 
+CONF = None
+try:
+    from openstack.common import cfg
+    CONF = cfg.CONF
+except ImportError:
+    # cfg is not a library yet, try application copies
+    for app in 'nova', 'glance', 'quantum', 'cinder':
+        try:
+            cfg = __import__('%s.openstack.common.cfg' % app,
+                             fromlist=['%s.openstack.common' % app])
+            # test which application middleware is running in
+            if hasattr(cfg, 'CONF') and 'config_file' in cfg.CONF:
+                CONF = cfg.CONF
+                break
+        except ImportError:
+            pass
+if not CONF:
+    from keystone.openstack.common import cfg
+    CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
+
+# alternative middleware configuration in the main application's
+# configuration file e.g. in nova.conf
+# [keystone_authtoken]
+# auth_host = 127.0.0.1
+# auth_port = 35357
+# auth_protocol = http
+# admin_tenant_name = admin
+# admin_user = admin
+# admin_password = badpassword
+opts = [
+    cfg.StrOpt('auth_admin_prefix', default=''),
+    cfg.StrOpt('auth_host', default='127.0.0.1'),
+    cfg.IntOpt('auth_port', default=35357),
+    cfg.StrOpt('auth_protocol', default='https'),
+    cfg.StrOpt('auth_uri', default=None),
+    cfg.BoolOpt('delay_auth_decision', default=False),
+    cfg.StrOpt('admin_token'),
+    cfg.StrOpt('admin_user'),
+    cfg.StrOpt('admin_password'),
+    cfg.StrOpt('admin_tenant_name', default='admin'),
+    cfg.StrOpt('certfile'),
+    cfg.StrOpt('keyfile'),
+    cfg.StrOpt('signing_dir'),
+    cfg.ListOpt('memcache_servers'),
+    cfg.IntOpt('token_cache_time', default=300),
+]
+CONF.register_opts(opts, group='keystone_authtoken')
 
 
 class InvalidUserToken(Exception):
@@ -131,31 +181,33 @@ class AuthProtocol(object):
 
         # delay_auth_decision means we still allow unauthenticated requests
         # through and we let the downstream service make the final decision
-        self.delay_auth_decision = (conf.get('delay_auth_decision', False)
-                                    in ('true', 't', '1', 'on', 'yes', 'y'))
+        self.delay_auth_decision = (self._conf_get('delay_auth_decision') in
+                                    (True, 'true', 't', '1', 'on', 'yes', 'y'))
 
         # where to find the auth service (we use this to validate tokens)
-        self.auth_host = conf.get('auth_host')
-        self.auth_port = int(conf.get('auth_port', 35357))
-        self.auth_protocol = conf.get('auth_protocol', 'https')
+        self.auth_host = self._conf_get('auth_host')
+        self.auth_port = int(self._conf_get('auth_port'))
+        self.auth_protocol = self._conf_get('auth_protocol')
         if self.auth_protocol == 'http':
             self.http_client_class = httplib.HTTPConnection
         else:
             self.http_client_class = httplib.HTTPSConnection
 
-        default_auth_uri = '%s://%s:%s' % (self.auth_protocol,
-                                           self.auth_host,
-                                           self.auth_port)
-        self.auth_admin_prefix = conf.get('auth_admin_prefix', '')
-        self.auth_uri = conf.get('auth_uri', default_auth_uri)
+        self.auth_admin_prefix = self._conf_get('auth_admin_prefix')
+        self.auth_uri = self._conf_get('auth_uri')
+        if self.auth_uri is None:
+            self.auth_uri = '%s://%s:%s' % (self.auth_protocol,
+                                            self.auth_host,
+                                            self.auth_port)
 
         # SSL
-        self.cert_file = conf.get('certfile')
-        self.key_file = conf.get('keyfile')
+        self.cert_file = self._conf_get('certfile')
+        self.key_file = self._conf_get('keyfile')
 
         #signing
-        default_signing_dir = '%s/keystone-signing' % os.environ['HOME']
-        self.signing_dirname = conf.get('signing_dir', default_signing_dir)
+        self.signing_dirname = self._conf_get('signing_dir')
+        if self.signing_dirname is None:
+            self.signing_dirname = '%s/keystone-signing' % os.environ['HOME']
         LOG.info('Using %s as cache directory for signing certificate' %
                  self.signing_dirname)
         if (os.path.exists(self.signing_dirname) and
@@ -172,20 +224,26 @@ class AuthProtocol(object):
         self.signing_cert_file_name = val
         val = '%s/cacert.pem' % self.signing_dirname
         self.ca_file_name = val
+        val = '%s/revoked.pem' % self.signing_dirname
+        self.revoked_file_name = val
 
         # Credentials used to verify this component with the Auth service since
         # validating tokens is a privileged call
-        self.admin_token = conf.get('admin_token')
-        self.admin_user = conf.get('admin_user')
-        self.admin_password = conf.get('admin_password')
-        self.admin_tenant_name = conf.get('admin_tenant_name', 'admin')
+        self.admin_token = self._conf_get('admin_token')
+        self.admin_user = self._conf_get('admin_user')
+        self.admin_password = self._conf_get('admin_password')
+        self.admin_tenant_name = self._conf_get('admin_tenant_name')
 
         # Token caching via memcache
         self._cache = None
         self._iso8601 = None
-        memcache_servers = conf.get('memcache_servers')
+        memcache_servers = self._conf_get('memcache_servers')
         # By default the token will be cached for 5 minutes
-        self.token_cache_time = conf.get('token_cache_time', 300)
+        self.token_cache_time = int(self._conf_get('token_cache_time'))
+        self._token_revocation_list = None
+        self._token_revocation_list_fetched_time = None
+        self.token_revocation_list_cache_timeout = \
+            datetime.timedelta(seconds=0)
         if memcache_servers:
             try:
                 import memcache
@@ -195,6 +253,13 @@ class AuthProtocol(object):
                 self._iso8601 = iso8601
             except ImportError as e:
                 LOG.warn('disabled caching due to missing libraries %s', e)
+
+    def _conf_get(self, name):
+        # try config from paste-deploy first
+        if name in self.conf:
+            return self.conf[name]
+        else:
+            return CONF.keystone_authtoken[name]
 
     def __call__(self, env, start_response):
         """Handle incoming request.
@@ -418,6 +483,7 @@ class AuthProtocol(object):
             self._cache_put(user_token, data)
             return data
         except Exception as e:
+            LOG.debug('Token validation failure.', exc_info=True)
             self._cache_store_invalid(user_token)
             LOG.warn("Authorization failed for token %s", user_token)
             raise InvalidUserToken('Token authorization failed')
@@ -618,19 +684,30 @@ class AuthProtocol(object):
 
             raise InvalidUserToken()
 
-    def verify_signed_token(self, signed_text):
-        """
-            Converts a block of Base64 encoding to strict PEM format
-            and verifies the signature of the contensts IAW CMS syntax
-            If either of the certificate files are missing, fetch them
-            and retry
-        """
+    def is_signed_token_revoked(self, signed_text):
+        """Indicate whether the token appears in the revocation list."""
+        revocation_list = self.token_revocation_list
+        revoked_tokens = revocation_list.get('revoked', [])
+        if not revoked_tokens:
+            return
+        revoked_ids = (x['id'] for x in revoked_tokens)
+        token_id = utils.hash_signed_token(signed_text)
+        for revoked_id in revoked_ids:
+            if token_id == revoked_id:
+                LOG.debug('Token %s is marked as having been revoked',
+                          token_id)
+                return True
+        return False
 
-        formatted = cms.token_to_cms(signed_text)
+    def cms_verify(self, data):
+        """Verifies the signature of the provided data's IAW CMS syntax.
 
+        If either of the certificate files are missing, fetch them and
+        retry.
+        """
         while True:
             try:
-                output = cms.cms_verify(formatted, self.signing_cert_file_name,
+                output = cms.cms_verify(data, self.signing_cert_file_name,
                                         self.ca_file_name)
             except subprocess.CalledProcessError as err:
                 if self.cert_file_missing(err, self.signing_cert_file_name):
@@ -641,6 +718,68 @@ class AuthProtocol(object):
                     continue
                 raise err
             return output
+
+    def verify_signed_token(self, signed_text):
+        """Check that the token is unrevoked and has a valid signature."""
+        if self.is_signed_token_revoked(signed_text):
+            raise InvalidUserToken('Token has been revoked')
+
+        formatted = cms.token_to_cms(signed_text)
+        return self.cms_verify(formatted)
+
+    @property
+    def token_revocation_list_fetched_time(self):
+        if not self._token_revocation_list_fetched_time:
+            # If the fetched list has been written to disk, use its
+            # modification time.
+            if os.path.exists(self.revoked_file_name):
+                mtime = os.path.getmtime(self.revoked_file_name)
+                fetched_time = datetime.datetime.fromtimestamp(mtime)
+            # Otherwise the list will need to be fetched.
+            else:
+                fetched_time = datetime.datetime.min
+            self._token_revocation_list_fetched_time = fetched_time
+        return self._token_revocation_list_fetched_time
+
+    @token_revocation_list_fetched_time.setter
+    def token_revocation_list_fetched_time(self, value):
+        self._token_revocation_list_fetched_time = value
+
+    @property
+    def token_revocation_list(self):
+        timeout = self.token_revocation_list_fetched_time +\
+            self.token_revocation_list_cache_timeout
+        list_is_current = timeutils.utcnow() < timeout
+        if list_is_current:
+            # Load the list from disk if required
+            if not self._token_revocation_list:
+                with open(self.revoked_file_name, 'r') as f:
+                    self._token_revocation_list = jsonutils.loads(f.read())
+        else:
+            self.token_revocation_list = self.fetch_revocation_list()
+        return self._token_revocation_list
+
+    @token_revocation_list.setter
+    def token_revocation_list(self, value):
+        """Save a revocation list to memory and to disk.
+
+        :param value: A json-encoded revocation list
+
+        """
+        self._token_revocation_list = jsonutils.loads(value)
+        self.token_revocation_list_fetched_time = timeutils.utcnow()
+        with open(self.revoked_file_name, 'w') as f:
+            f.write(value)
+
+    def fetch_revocation_list(self):
+        headers = {'X-Auth-Token': self.get_admin_token()}
+        response, data = self._json_request('GET', '/v2.0/tokens/revoked',
+                                            additional_headers=headers)
+        if response.status != 200:
+            raise ServiceError('Unable to fetch token revocation list.')
+        if (not 'signed' in data):
+            raise ServiceError('Revocation list inmproperly formatted.')
+        return self.cms_verify(data['signed'])
 
     def fetch_signing_cert(self):
         response, data = self._http_request('GET',

@@ -78,7 +78,7 @@ class Identity(identity.Driver):
         in the list of tenants on the user.
         """
         tenant_ref = None
-        metadata_ref = None
+        metadata_ref = {}
 
         try:
             user_ref = self._get_user(user_id)
@@ -116,6 +116,9 @@ class Identity(identity.Driver):
         except exception.NotFound:
             raise exception.TenantNotFound(tenant_id=tenant_id)
 
+    def get_tenants(self):
+        return self.tenant.get_all()
+
     def get_tenant_by_name(self, tenant_name):
         try:
             return self.tenant.get_by_name(tenant_name)
@@ -130,6 +133,9 @@ class Identity(identity.Driver):
 
     def get_user(self, user_id):
         return _filter_user(self._get_user(user_id))
+
+    def list_users(self):
+        return self.user.get_all()
 
     def get_user_by_name(self, user_name):
         try:
@@ -151,6 +157,9 @@ class Identity(identity.Driver):
             return self.role.get(role_id)
         except exception.NotFound:
             raise exception.RoleNotFound(role_id=role_id)
+
+    def list_roles(self):
+        return self.role.get_all()
 
     # These should probably be part of the high-level API
     # When this happens, then change TenantAPI.add_user to not ignore
@@ -324,7 +333,7 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_OBJECTCLASS = 'inetOrgPerson'
     options_name = 'user'
     attribute_mapping = {'password': 'userPassword',
-                         #'email': 'mail',
+                         'email': 'mail',
                          'name': 'sn'}
 
     # NOTE(ayoung): The RFC based schemas don't have a way to indicate
@@ -332,7 +341,7 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
     # be part of any objectclass.
     # in the future, we need to provide a way for the end user to
     # indicate the field to use and what it indicates
-    attribute_ignore = ['tenant_id', 'enabled', 'tenants']
+    attribute_ignore = ['tenantId', 'enabled', 'tenants']
     model = models.User
 
     def __init__(self, conf):
@@ -457,7 +466,8 @@ class TenantApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
     options_name = 'tenant'
-    attribute_mapping = {'description': 'desc', 'name': 'ou'}
+    attribute_mapping = {'name': 'ou', 'tenantId': 'cn'}
+    attribute_ignore = ['enabled']
     model = models.Tenant
 
     def __init__(self, conf):
@@ -577,14 +587,6 @@ class TenantApi(common_ldap.BaseLdap, ApiShimMixin):
 
 class UserRoleAssociation(object):
     """Role Grant model."""
-
-    hints = {
-        'contract_attributes': ['id', 'role_id', 'user_id', 'tenant_id'],
-        'types': [('user_id', basestring), ('tenant_id', basestring)],
-        'maps': {'userId': 'user_id',
-                 'roleId': 'role_id',
-                 'tenantId': 'tenant_id'}
-    }
 
     def __init__(self, user_id=None, role_id=None, tenant_id=None,
                  *args, **kw):

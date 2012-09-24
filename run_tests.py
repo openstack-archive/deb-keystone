@@ -66,8 +66,6 @@ from nose import config
 from nose import core
 from nose import result
 
-from keystone.common.sql import util
-
 
 class _AnsiColorizer(object):
     """
@@ -139,7 +137,7 @@ class _Win32Colorizer(object):
             'magenta': red | blue | bold,
             'cyan': green | blue | bold,
             'white': red | green | blue | bold
-            }
+        }
 
     def supported(cls, stream=sys.stdout):
         try:
@@ -350,9 +348,8 @@ if __name__ == '__main__':
             do_monkeypatch = False
         else:
             argv.append(x)
-    if do_monkeypatch:
-        eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
-                                       thread=True)
+    eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
+                                  thread=do_monkeypatch)
     testdir = os.path.abspath(os.path.join("tests"))
     c = config.Config(stream=sys.stdout,
                       env=os.environ,

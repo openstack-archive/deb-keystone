@@ -202,6 +202,10 @@ class Application(BaseApplication):
 
         try:
             result = method(context, **params)
+        except exception.Unauthorized as e:
+            LOG.warning("Authorization failed. %s from %s"
+                        % (e, req.environ['REMOTE_ADDR']))
+            return render_exception(e)
         except exception.Error as e:
             LOG.warning(e)
             return render_exception(e)
@@ -355,11 +359,8 @@ class Debug(Middleware):
         """Iterator that prints the contents of a wrapper string."""
         LOG.debug('%s %s %s', ('*' * 20), 'RESPONSE BODY', ('*' * 20))
         for part in app_iter:
-            #sys.stdout.write(part)
             LOG.debug(part)
-            #sys.stdout.flush()
             yield part
-        print
 
 
 class Router(object):

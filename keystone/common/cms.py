@@ -1,5 +1,3 @@
-import os
-import stat
 import subprocess
 
 from keystone.common import logging
@@ -76,6 +74,11 @@ def cms_sign_text(text, signing_cert_file_name, signing_key_file_name):
         LOG.error('Signing error: %s' % err)
         raise subprocess.CalledProcessError(retcode,
                                             "openssl", output=output)
+    return output
+
+
+def cms_sign_token(text, signing_cert_file_name, signing_key_file_name):
+    output = cms_sign_text(text, signing_cert_file_name, signing_key_file_name)
     return cms_to_token(output)
 
 

@@ -15,6 +15,7 @@ General
 - Include your name with TODOs as in "#TODO(termie)"
 - Do not name anything the same name as a built-in or reserved word
 - When defining global constants, define them before functions and classes
+- Avoid using "double quotes" where you can reasonably use 'single quotes'
 
 
 TODO vs FIXME
@@ -24,6 +25,7 @@ TODO vs FIXME
   etc), but is expected to be functional.
 - FIXME(name): implies that the method/function/etc shouldn't be used until
   that code is resolved and bug fixed.
+
 
 Logging
 -------
@@ -35,6 +37,7 @@ Use the built-in logging module, and ensure you ``getLogger``::
     LOG = logging.getLogger(__name__)
 
     LOG.debug('Foobar')
+
 
 Imports
 -------
@@ -48,18 +51,18 @@ Imports
 Example::
 
   # vim: tabstop=4 shiftwidth=4 softtabstop=4
-  {{stdlib imports in human alphabetical order}}
+  {{stdlib imports ordered by full module path}}
   \n
-  {{third-party lib imports in human alphabetical order}}
+  {{third-party lib imports ordered by full module path}}
   \n
-  {{nova imports in human alphabetical order}}
+  {{nova imports ordered by full module path}}
   \n
   \n
   {{begin your code}}
 
 
-Human Alphabetical Order Examples
----------------------------------
+Import by Full Module Path Examples
+-----------------------------------
 
 Example::
 
@@ -73,14 +76,14 @@ Example::
   import eventlet
   import webob.exc
 
-  from nova import test
-  from nova import utils
+  import nova.api.ec2
   from nova.api import openstack
   from nova.auth import ldap
   from nova.auth import users
   from nova.endpoint import cloud
   import nova.flags
-  import nova.api.ec2
+  from nova import test
+  from nova import utils
 
 
 Docstrings

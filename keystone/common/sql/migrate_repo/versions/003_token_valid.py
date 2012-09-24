@@ -14,34 +14,27 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+
 from migrate import *
 from sqlalchemy import *
 
-from keystone.common import sql
 
-# these are to make sure all the models we care about are defined
-import keystone.catalog.backends.sql
-import keystone.contrib.ec2.backends.sql
-import keystone.identity.backends.sql
-#inentionally leave off token.  We bring it up to V1 here manually
+from keystone.common import sql
 
 
 def upgrade(migrate_engine):
     # Upgrade operations go here. Don't create your own engine; bind
-    # migrate_engine to your metadata
+
     meta = MetaData()
     meta.bind = migrate_engine
-
-    sql.ModelBase.metadata.create_all(migrate_engine)
-
-    token = Table('token', meta,
-                  Column('id', sql.String(64), primary_key=True),
-                  Column('expires', sql.DateTime()),
-                  Column('extra', sql.JsonBlob()))
-
-    token.create(migrate_engine, checkfirst=True)
+    dialect = migrate_engine.url.get_dialect().name
+    token = Table('token', meta, autoload=True)
+    valid = Column("valid", Boolean(), ColumnDefault(True), nullable=False)
+    token.create_column(valid)
 
 
 def downgrade(migrate_engine):
-    # Operations to reverse the above upgrade go here.
-    pass
+    meta = MetaData()
+    meta.bind = migrate_engine
+    token = Table('token', meta, autoload=True)
+    token.drop_column('valid')

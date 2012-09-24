@@ -362,6 +362,8 @@ class TenantController(wsgi.Application):
             token_ref = self.token_api.get_token(context=context,
                                                  token_id=context['token_id'])
         except exception.NotFound:
+            LOG.warning("Authentication failed. Could not find token " +
+                        str(context['token_id']))
             raise exception.Unauthorized()
 
         user_ref = token_ref['user']
@@ -515,6 +517,7 @@ class UserController(wsgi.Application):
 
     def update_user_tenant(self, context, user_id, user):
         """Update the default tenant."""
+        self.assert_admin(context)
         # ensure that we're a member of that tenant
         tenant_id = user.get('tenantId')
         self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
@@ -589,6 +592,8 @@ class RoleController(wsgi.Application):
         self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
         self.identity_api.add_role_to_user_and_tenant(
             context, user_id, tenant_id, role_id)
+        self.token_api.revoke_tokens(context, user_id, tenant_id)
+
         role_ref = self.identity_api.get_role(context, role_id)
         return {'role': role_ref}
 
@@ -613,7 +618,7 @@ class RoleController(wsgi.Application):
         if not roles:
             self.identity_api.remove_user_from_tenant(
                 context, tenant_id, user_id)
-        return
+        self.token_api.revoke_tokens(context, user_id, tenant_id)
 
     # COMPAT(diablo): CRUD extension
     def get_role_refs(self, context, user_id):
@@ -656,6 +661,8 @@ class RoleController(wsgi.Application):
         self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
         self.identity_api.add_role_to_user_and_tenant(
             context, user_id, tenant_id, role_id)
+        self.token_api.revoke_tokens(context, user_id, tenant_id)
+
         role_ref = self.identity_api.get_role(context, role_id)
         return {'role': role_ref}
 
@@ -683,3 +690,4 @@ class RoleController(wsgi.Application):
         if not roles:
             self.identity_api.remove_user_from_tenant(
                 context, tenant_id, user_id)
+        self.token_api.revoke_tokens(context, user_id, tenant_id)

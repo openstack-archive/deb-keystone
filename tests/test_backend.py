@@ -16,6 +16,7 @@
 
 import datetime
 import uuid
+import default_fixtures
 
 from keystone import exception
 from keystone.openstack.common import timeutils
@@ -67,6 +68,16 @@ class IdentityTests(object):
         self.assertDictEqual(user_ref, self.user_foo)
         self.assertDictEqual(tenant_ref, self.tenant_bar)
         self.assertDictEqual(metadata_ref, self.metadata_foobar)
+
+    def test_authenticate_role_return(self):
+        self.identity_api.add_role_to_user_and_tenant(
+            self.user_foo['id'], self.tenant_bar['id'], 'keystone_admin')
+        user_ref, tenant_ref, metadata_ref = self.identity_api.authenticate(
+            user_id=self.user_foo['id'],
+            tenant_id=self.tenant_bar['id'],
+            password=self.user_foo['password'])
+        self.assertIn('roles', metadata_ref)
+        self.assertIn('keystone_admin', metadata_ref['roles'])
 
     def test_authenticate_no_metadata(self):
         user = self.user_no_meta
@@ -598,11 +609,27 @@ class IdentityTests(object):
                           'fake1',
                           user)
 
+    def test_list_users(self):
+        users = self.identity_api.list_users()
+        for test_user in default_fixtures.USERS:
+            self.assertTrue(x for x in users if x['id'] == test_user['id'])
+
+    def test_list_roles(self):
+        roles = self.identity_api.list_roles()
+        for test_role in default_fixtures.ROLES:
+            self.assertTrue(x for x in roles if x['id'] == test_role['id'])
+
+    def test_get_tenants(self):
+        tenants = self.identity_api.get_tenants()
+        for test_tenant in default_fixtures.TENANTS:
+            self.assertTrue(x for x in tenants if x['id'] == test_tenant['id'])
+
 
 class TokenTests(object):
     def test_token_crud(self):
         token_id = uuid.uuid4().hex
-        data = {'id': token_id, 'id_hash': token_id, 'a': 'b'}
+        data = {'id': token_id, 'a': 'b',
+                'user': {'id': 'testuserid'}}
         data_ref = self.token_api.create_token(token_id, data)
         expires = data_ref.pop('expires')
         self.assertTrue(isinstance(expires, datetime.datetime))
@@ -619,6 +646,54 @@ class TokenTests(object):
         self.assertRaises(exception.TokenNotFound,
                           self.token_api.delete_token, token_id)
 
+    def create_token_sample_data(self, tenant_id=None):
+        token_id = uuid.uuid4().hex
+        data = {'id': token_id, 'a': 'b',
+                'user': {'id': 'testuserid'}}
+        if tenant_id is not None:
+            data['tenant'] = {'id': tenant_id, 'name': tenant_id}
+        self.token_api.create_token(token_id, data)
+        return token_id
+
+    def test_token_list(self):
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertEquals(len(tokens), 0)
+        token_id1 = self.create_token_sample_data()
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertEquals(len(tokens), 1)
+        self.assertIn(token_id1, tokens)
+        token_id2 = self.create_token_sample_data()
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertEquals(len(tokens), 2)
+        self.assertIn(token_id2, tokens)
+        self.assertIn(token_id1, tokens)
+        self.token_api.delete_token(token_id1)
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertIn(token_id2, tokens)
+        self.assertNotIn(token_id1, tokens)
+        self.token_api.delete_token(token_id2)
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertNotIn(token_id2, tokens)
+        self.assertNotIn(token_id1, tokens)
+
+        # tenant-specific tokens
+        tenant1 = uuid.uuid4().hex
+        tenant2 = uuid.uuid4().hex
+        token_id3 = self.create_token_sample_data(tenant_id=tenant1)
+        token_id4 = self.create_token_sample_data(tenant_id=tenant2)
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertEquals(len(tokens), 2)
+        self.assertNotIn(token_id1, tokens)
+        self.assertNotIn(token_id2, tokens)
+        self.assertIn(token_id3, tokens)
+        self.assertIn(token_id4, tokens)
+        tokens = self.token_api.list_tokens('testuserid', tenant2)
+        self.assertEquals(len(tokens), 1)
+        self.assertNotIn(token_id1, tokens)
+        self.assertNotIn(token_id2, tokens)
+        self.assertNotIn(token_id3, tokens)
+        self.assertIn(token_id4, tokens)
+
     def test_get_token_404(self):
         self.assertRaises(exception.TokenNotFound,
                           self.token_api.get_token,
@@ -633,7 +708,8 @@ class TokenTests(object):
         token_id = uuid.uuid4().hex
         expire_time = timeutils.utcnow() - datetime.timedelta(minutes=1)
         data = {'id_hash': token_id, 'id': token_id, 'a': 'b',
-                'expires': expire_time}
+                'expires': expire_time,
+                'user': {'id': 'testuserid'}}
         data_ref = self.token_api.create_token(token_id, data)
         self.assertDictEqual(data_ref, data)
         self.assertRaises(exception.TokenNotFound,
@@ -641,11 +717,44 @@ class TokenTests(object):
 
     def test_null_expires_token(self):
         token_id = uuid.uuid4().hex
-        data = {'id': token_id, 'id_hash': token_id, 'a': 'b', 'expires': None}
+        data = {'id': token_id, 'id_hash': token_id, 'a': 'b', 'expires': None,
+                'user': {'id': 'testuserid'}}
         data_ref = self.token_api.create_token(token_id, data)
         self.assertDictEqual(data_ref, data)
         new_data_ref = self.token_api.get_token(token_id)
         self.assertEqual(data_ref, new_data_ref)
+
+    def check_list_revoked_tokens(self, token_ids):
+        revoked_ids = [x['id'] for x in self.token_api.list_revoked_tokens()]
+        for token_id in token_ids:
+            self.assertIn(token_id, revoked_ids)
+
+    def delete_token(self):
+        token_id = uuid.uuid4().hex
+        data = {'id_hash': token_id, 'id': token_id, 'a': 'b',
+                'user': {'id': 'testuserid'}}
+        data_ref = self.token_api.create_token(token_id, data)
+        self.token_api.delete_token(token_id)
+        self.assertRaises(
+            exception.TokenNotFound,
+            self.token_api.get_token,
+            data_ref['id'])
+        self.assertRaises(
+            exception.TokenNotFound,
+            self.token_api.delete_token,
+            data_ref['id'])
+        return token_id
+
+    def test_list_revoked_tokens_returns_empty_list(self):
+        revoked_ids = [x['id'] for x in self.token_api.list_revoked_tokens()]
+        self.assertEqual(revoked_ids, [])
+
+    def test_list_revoked_tokens_for_single_token(self):
+        self.check_list_revoked_tokens([self.delete_token()])
+
+    def test_list_revoked_tokens_for_multiple_tokens(self):
+        self.check_list_revoked_tokens([self.delete_token()
+                                        for x in xrange(2)])
 
 
 class CatalogTests(object):
