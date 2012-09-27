@@ -2,58 +2,62 @@
 
 set -e
 
-if [ "$1" = "configure" ]
-then
-    . /usr/share/debconf/confmodule
-    . /usr/share/dbconfig-common/dpkg/postinst
+if [ "$1" = "configure" ] ; then
+	. /usr/share/debconf/confmodule
+	. /usr/share/dbconfig-common/dpkg/postinst
 
-    adduser --system \
-            --home /var/lib/keystone \
-            --no-create-home \
-            --quiet \
-            --disabled-password \
-            --group keystone
-
-    db_get keystone/configure_db
-    if [ "$RET" = "true" ]; then
-	db_get keystone/database-type
-	dbc_dbfile_owner="keystone:keystone"
-
-	dbc_go keystone $@
-
-	if [ "$dbc_install" = "true" ]
-	then
-	    if [ "$dbc_dbtype" = "mysql" ] || [ "$dbc_dbtype" = "pgsql" ] ; then
-	        [ -n "$dbc_dbport" ] && dbport=:$dbc_dbport
-	        SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-	    else
-	        SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
-	    fi
-
-            sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
-
-            if [ "$dbc_upgrade" = "true" ]
-            then
-		keystone-manage db_sync
-            fi
+	# Create config files if they don't exist
+	if ! [ -e /etc/keystone ] ; then
+		mkdir /etc/keystone
 	fi
-    fi
+	if ! [ -e /etc/keystone/keystone.conf ] ; then
+		cp /usr/share/doc/keystone/keystone.conf.sample ${KEY_CONF}
+	fi
 
-    db_get keystone/auth-token
-    AUTH_TOKEN=${RET:-ADMIN}
-    sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = '${AUTH_TOKEN}'|' /etc/keystone/keystone.conf
+	adduser --system \
+		--home /var/lib/keystone \
+		--no-create-home \
+		--quiet \
+		--disabled-password \
+		--group keystone
 
-    chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
-    chmod 0750 /etc/keystone
-    chmod 0750 /var/log/keystone
+	db_get keystone/configure_db
+	if [ "$RET" = "true" ] ; then
+		db_get keystone/database-type
+		dbc_dbfile_owner="keystone:keystone"
+
+		dbc_go keystone $@
+		if [ "$dbc_install" = "true" ] ; then
+			if [ "$dbc_dbtype" = "mysql" ] || [ "$dbc_dbtype" = "pgsql" ] ; then
+				if [ -n "$dbc_dbport" ] ; then
+					dbport=:$dbc_dbport
+				fi
+				SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+			else
+				SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
+			fi
+		fi
+
+		sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
+
+		if [ "$dbc_upgrade" = "true" ] ; then
+			keystone-manage db_sync
+		fi
+	fi
+
+	db_get keystone/auth-token
+	AUTH_TOKEN=${RET:-ADMIN}
+	sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = '${AUTH_TOKEN}'|' /etc/keystone/keystone.conf
+
+	chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
+	chmod 0750 /etc/keystone
+	chmod 0750 /var/log/keystone
+	# On first install, create basics configuration and add roles
+	if [ -z "$2" ] ; then
+		keystone-manage db_sync
+	fi
 fi
 
 #DEBHELPER#
-
-# On first install, create basics configuration and add roles
-if [ -z "$2" ]
-then
-   keystone-manage db_sync
-fi
 
 exit 0
