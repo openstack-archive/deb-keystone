@@ -7,10 +7,11 @@ if [ "$1" = "configure" ] ; then
 	. /usr/share/dbconfig-common/dpkg/postinst
 
 	# Create config files if they don't exist
+	KEY_CONF=/etc/keystone/keystone.conf
 	if ! [ -e /etc/keystone ] ; then
 		mkdir /etc/keystone
 	fi
-	if ! [ -e /etc/keystone/keystone.conf ] ; then
+	if ! [ -e "${KEY_CONF}" ] ; then
 		cp /usr/share/doc/keystone/keystone.conf.sample ${KEY_CONF}
 	fi
 
@@ -38,7 +39,7 @@ if [ "$1" = "configure" ] ; then
 			fi
 		fi
 
-		sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i /etc/keystone/keystone.conf
+		sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i ${KEY_CONF}
 
 		if [ "$dbc_upgrade" = "true" ] ; then
 			keystone-manage db_sync
@@ -47,7 +48,7 @@ if [ "$1" = "configure" ] ; then
 
 	db_get keystone/auth-token
 	AUTH_TOKEN=${RET:-ADMIN}
-	sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = '${AUTH_TOKEN}'|' /etc/keystone/keystone.conf
+	sed -ie 's|^[ \t]*admin_token[ \t]*=.*|admin_token = '${AUTH_TOKEN}'|' ${KEY_CONF}
 
 	chown keystone:keystone -R /var/lib/keystone /var/log/keystone /etc/keystone
 	chmod 0750 /etc/keystone
