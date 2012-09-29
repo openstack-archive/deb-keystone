@@ -1,2 +1,4 @@
 usr/bin/*
-etc/* etc/keystone
+etc/default_catalog.templates	/etc/keystone
+etc/logging.conf.sample	/usr/share/doc/keystone
+etc/policy.json		/etc/keystone

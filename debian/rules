@@ -49,6 +49,7 @@ override_dh_install:
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
 	install -D -m 0600 $(CURDIR)/debian/logging.conf $(CURDIR)/debian/keystone/etc/keystone/logging.conf
+	cp -f etc/keystone.conf debian/keystone/usr/share/doc/keystone/keystone.conf.sample
 
 # DEBIAN
 override_dh_clean:
