@@ -1,3 +1,9 @@
+keystone (2012.1.1-8) unstable; urgency=low
+
+  * Fixes parsing of the SQL connection in keystone.config.
+
+ -- Thomas Goirand <zigo@debian.org>  Sun, 30 Sep 2012 01:48:50 +0000
+
 keystone (2012.1.1-7) unstable; urgency=low
 
   * Fixes band handling (eg: policy violation) of keystone.conf which was
