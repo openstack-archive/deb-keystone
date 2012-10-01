@@ -2,6 +2,9 @@ keystone (2012.1.1-9) unstable; urgency=low
 
   * Fixes sometimes failing keystone.postrm (db_get in some conditions can
   return false), and fixed non-consistant indenting.
+  * Uses /usr/share/keystone/keystone.conf instead of /usr/share/doc/keystone
+  /keystone.conf.sample for temporary storing the conf file (this was a policy
+  violation, as the doc folder should never be required).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 01 Oct 2012 05:52:23 +0000
 
