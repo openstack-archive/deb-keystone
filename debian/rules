@@ -42,7 +42,11 @@ override_dh_install:
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
-	install -D -m 0644 etc/keystone.conf debian/keystone/usr/share/keystone/keystone.conf
+	install -D -m 0640 etc/keystone.conf debian/keystone/usr/share/keystone/keystone.conf
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0640 debian/keystone/usr/share/keystone/keystone.conf
 
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
