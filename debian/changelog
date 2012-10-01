@@ -1,10 +1,12 @@
-keystone (2012.1.1-9) unstable; urgency=low
+keystone (2012.1.1-9) unstable; urgency=high
 
   * Fixes sometimes failing keystone.postrm (db_get in some conditions can
   return false), and fixed non-consistant indenting.
   * Uses /usr/share/keystone/keystone.conf instead of /usr/share/doc/keystone
   /keystone.conf.sample for temporary storing the conf file (this was a policy
   violation, as the doc folder should never be required).
+  * Fixes CVE-2012-4457: fails to raise Unauthorized user error for disabled,
+  CVE-2012-4456: fails to validate tokens in Admin API (Closes: #689210).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 01 Oct 2012 05:52:23 +0000
 

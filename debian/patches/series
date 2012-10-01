@@ -4,3 +4,5 @@ default_catalog.patch
 sql_conn.patch
 CVE-2012-3542_Lack-of-authorization-for-adding-users-to-tenants.patch
 CVE-2012-4413_Revoking-a-role-does-not-affect-existing-tokens.patch
+CVE-2012-4456-Some_actions_in_Keystone_admin_API_do_not_validate_token.patch
+CVE-2012-4457-Raise_unauthorized_if_tenant_disabled.patch
