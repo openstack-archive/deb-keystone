@@ -1,3 +1,10 @@
+keystone (2012.1.1-9) unstable; urgency=low
+
+  * Fixes sometimes failing keystone.postrm (db_get in some conditions can
+  return false), and fixed non-consistant indenting.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 01 Oct 2012 05:52:23 +0000
+
 keystone (2012.1.1-8) unstable; urgency=low
 
   * Fixes parsing of the SQL connection in keystone.config.
