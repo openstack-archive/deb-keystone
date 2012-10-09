@@ -7,6 +7,11 @@
 # test suite cause FTBFS.  See (LP: #1031022)
 export HOME="$(CURDIR)/debian/tests/"
 
+DEBVERS := $(shell dpkg-parsechangelog | sed -n -e 's/^Version: //p')
+VERSION := $(shell echo '$(DEBVERS)' | sed -e 's/^[[:digit:]]*://' -e 's/[~-].*//')
+DEBFLAVOR :=$(shell dpkg-parsechangelog | grep -E ^Distribution: | cut -d" " -f2)
+DEBPKGNAME :=$(shell dpkg-parsechangelog | grep -E ^Source: | cut -d" " -f2)
+
 %:
 	dh $@ --with python2
 
@@ -85,14 +90,14 @@ override_dh_gencontrol:
 	fi
 
 get-vcs-source:
-	git remote add upstream git://github.com/openstack/keystone.git || true
+	git remote add upstream git://github.com/openstack/$(DEBPKGNAME).git || true
 	git fetch upstream
-	git archive --prefix=keystone-2012.1.1/ 2012.1.1 | xz >../keystone_2012.1.1.orig.tar.xz
+	git archive --prefix=$(DEBPKGNAME)-$(VERSION)/ $(VERSION) | xz >../keystone_$(VERSION).orig.tar.xz
 	if ! git checkout master ; then \
 		echo "No upstream branch: checking out" ; \
 		git checkout -b master upstream/master ; \
 	fi
-	git checkout debian/unstable
+	git checkout debian/experimental
 
 display-po-stats:
 	cd $(CURDIR)/debian/po ; for i in *.po ; do \
