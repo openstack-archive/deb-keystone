@@ -1,3 +1,10 @@
+keystone (2012.1.1-10) unstable; urgency=low
+
+  * Fixes keystone.config which wasn't starting dbconfig-common at first
+  setup.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 10 Oct 2012 15:46:14 +0000
+
 keystone (2012.1.1-9) unstable; urgency=high
 
   * Fixes sometimes failing keystone.postrm (db_get in some conditions can
