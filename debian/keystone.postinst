@@ -33,6 +33,9 @@ if [ "$1" = "configure" ] ; then
 				if [ -n "$dbc_dbport" ] ; then
 					dbport=:$dbc_dbport
 				fi
+				if [ "${KEY_CONF_DB_NAME}" = "keystone.sqlite" ] ; then
+					dbc_dbname="keystone"
+				fi
 				SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
 			else
 				SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
