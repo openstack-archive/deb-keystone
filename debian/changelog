@@ -4,7 +4,7 @@ keystone (2012.2-1) experimental; urgency=low
   * New upstream version. 
 
   [ Thomas Goirand ]
-  * Lots of debconf clean ups.
+  * Lots of debconf clean ups..
 
  -- Mehdi Abaakouk <sileht@sileht.net>  Sat, 29 Sep 2012 08:37:44 +0200
 
