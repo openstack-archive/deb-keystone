@@ -64,7 +64,7 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-migrate,
  python-webob,
  python-sqlite,
- python-nova
+ python-novaclient
 Recommends: python-memcache, python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
