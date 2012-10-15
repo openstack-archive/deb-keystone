@@ -1,6 +1,6 @@
 #!/bin/sh
 
-set -e
+set -ex
 
 get_id () {
     SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'
@@ -37,11 +37,11 @@ if [ "$1" = "configure" ] ; then
 				if [ -n "$dbc_dbport" ] ; then
 					dbport=:$dbc_dbport
 				fi
-				if [ "${KEY_CONF_DB_NAME}" = "keystonedb" ] ; then
-					dbc_dbname="keystone"
-				else
-					dbc_dbname=${KEY_CONF_DB_NAME}
-				fi
+				KEY_CONF_DB_CON_INFO=`grep -E "^([ \t])*connection([ \t])*=([ \t])*" ${KEY_CONF} | awk '{print $3}'`
+				KEY_CONF_AFTER_AT=`echo "${KEY_CONF_ADDR}" | cut -d"@" -f2`
+				KEY_CONF_DB_NAME=`echo "${KEY_CONF_AFTER_AT}" | cut -d"/" -f2`
+
+				dbc_dbname=${KEY_CONF_DB_NAME}
 				SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
 			else
 				SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
