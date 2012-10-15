@@ -9,7 +9,7 @@ get_id () {
 gen_password () {
     i=$(dd if=/dev/random bs=64 count=1 2>|/dev/null | md5sum)
     echo ${i% *}
-fi
+}
 
 if [ "$1" = "configure" ] ; then
 	. /usr/share/debconf/confmodule
