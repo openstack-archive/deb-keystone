@@ -84,7 +84,8 @@ Depends: ${python:Depends}, ${misc:Depends},
  adduser,
  ssl-cert (>= 1.0.12),
  dbconfig-common,
- python-keystoneclient
+ python-keystoneclient,
+ confget
 Description: OpenStack identity service
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
