@@ -6,6 +6,11 @@ get_id () {
     SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'
 }
 
+gen_password () {
+    i=$(dd if=/dev/random bs=64 count=1 2>|/dev/null | md5sum)
+    echo ${i% *}
+fi
+
 if [ "$1" = "configure" ] ; then
 	. /usr/share/debconf/confmodule
 	. /usr/share/dbconfig-common/dpkg/postinst
@@ -70,12 +75,7 @@ if [ "$1" = "configure" ] ; then
 		db_get keystone/admin-username
 		ADMIN_USER_NAME=${RET:-admin}
 		db_get keystone/admin-password
-		TMP_ADMIN_USER_PW=${RET}
-		if [ -z "${TMP_ADMIN_USER_PW}" ] ; then
-			ADMIN_USER_PW=`dd if=/dev/random bs=64 count=1 2>|/dev/null | md5sum | cut -d' ' -f1 | awk '{print substr($0,0,16)}'`
-		else
-			ADMIN_USER_PW=${TMP_ADMIN_USER_PW}
-		fi
+		ADMIN_USER_PW=${RET:-$(gen_password)}
 		db_get keystone/admin-email
 		ADMIN_USER_EMAIL=${RET:-root@localhost}
 		db_get keystone/admin-tenantname
