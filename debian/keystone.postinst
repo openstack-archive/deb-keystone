@@ -37,11 +37,6 @@ if [ "$1" = "configure" ] ; then
 				if [ -n "$dbc_dbport" ] ; then
 					dbport=:$dbc_dbport
 				fi
-				KEY_CONF_DB_CON_INFO=`grep -E "^([ \t])*connection([ \t])*=([ \t])*" ${KEY_CONF} | awk '{print $3}'`
-				KEY_CONF_AFTER_AT=`echo "${KEY_CONF_ADDR}" | cut -d"@" -f2`
-				KEY_CONF_DB_NAME=`echo "${KEY_CONF_AFTER_AT}" | cut -d"/" -f2`
-
-				dbc_dbname=${KEY_CONF_DB_NAME}
 				SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
 			else
 				SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
@@ -68,6 +63,8 @@ if [ "$1" = "configure" ] ; then
 		keystone-manage db_sync
 
 		invoke-rc.d keystone start
+
+		sleep 5
 
 		ADMIN_TENANT_NAME=admin-tenant
 		ADMIN_USER_NAME=admin-user
