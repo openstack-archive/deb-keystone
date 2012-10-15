@@ -39,14 +39,22 @@ if [ "$1" = "configure" ] ; then
 
 		dbc_go keystone $@
 		if [ "$dbc_install" = "true" ] ; then
-			if [ "$dbc_dbtype" = "mysql" ] || [ "$dbc_dbtype" = "pgsql" ] ; then
+		    	case "$dbc_dbtype" in
+			    mysql)
 				if [ -n "$dbc_dbport" ] ; then
-					dbport=:$dbc_dbport
+				    dbport=:$dbc_dbport
 				fi
-				SQL_CONNECTION="$dbc_dbtype://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
-			else
+				SQL_CONNECTION="mysql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+				;;
+			    postgresql*|pgsql)
+				if [ -n "$dbc_dbport" ] ; then
+				    dbport=:$dbc_dbport
+				fi
+				SQL_CONNECTION="postgresql://$dbc_dbuser:$dbc_dbpass@${dbc_dbserver:-localhost}$dbport/$dbc_dbname"
+				;;
+			    *)
 				SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
-			fi
+			esac
 		fi
 
 		sed -e "s,^connection\s*=\s*.\+$,connection = $SQL_CONNECTION," -i ${KEY_CONF}
