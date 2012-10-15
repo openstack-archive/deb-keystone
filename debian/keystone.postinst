@@ -2,6 +2,10 @@
 
 set -e
 
+get_id () {
+    SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'
+}
+
 if [ "$1" = "configure" ] ; then
 	. /usr/share/debconf/confmodule
 	. /usr/share/dbconfig-common/dpkg/postinst
@@ -60,12 +64,10 @@ if [ "$1" = "configure" ] ; then
 	chmod 0750 /var/log/keystone
 	# On first install, create basics configuration and add roles
 
-	function get_id () {
-	    echo `SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'`
-	}
-
 	if [ -z "$2" ] ; then
 		keystone-manage db_sync
+
+		invoke-rc.d keystone start
 
 		ADMIN_TENANT_NAME=admin-tenant
 		ADMIN_USER_NAME=admin-user
