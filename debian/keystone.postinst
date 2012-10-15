@@ -17,6 +17,7 @@ if [ "$1" = "configure" ] ; then
 	fi
 	if ! [ -e "${KEY_CONF}" ] && [ -r /usr/share/keystone/keystone.conf ] ; then
 		cp -auxf /usr/share/keystone/keystone.conf ${KEY_CONF}
+		chmod 0640 ${KEY_CONF}
 	fi
 
 	adduser --system \
