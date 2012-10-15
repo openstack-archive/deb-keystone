@@ -31,3 +31,42 @@ Type: string
 _Description: Authentication server administration token:
  Please enter the token to use with the authentication
  server.
+
+Template: keystone/admin-username
+Type: string
+Default: admin
+_Description: User name of the admin user
+ Please enter an user name for the administrative user
+
+Template: keystone/admin-email
+Type: string
+_Description: Email address of the admin user
+ Please enter the email address of the administrative user
+
+Template: keystone/admin-password
+Type: password
+_Description: Password of the admin user
+ Please enter a password for the administrative user
+
+Template: keystone/admin-password-confirm
+Type: password
+_Description: Password of the admin user (confirm)
+ Please confirm the password for the administrative user
+
+Template: keystone/passwords-do-not-match
+Type: error
+Description: Password mismatch
+ The password and its confirmation do not match.
+
+Template: keystone/admin-rolename
+Type: string
+Default: admin
+_Description: Name of the admin role
+ Please enter the name of the administrative role
+
+Template: keystone/admin-tenantname
+Type: string
+Default: admin
+_Description: Name of the admin tenant
+ Please enter the name of the administrative tenant (project)
+

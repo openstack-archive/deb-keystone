@@ -67,11 +67,16 @@ if [ "$1" = "configure" ] ; then
 
 		sleep 5
 
-		ADMIN_TENANT_NAME=admin-tenant
-		ADMIN_USER_NAME=admin-user
-		ADMIN_USER_PW=admin-user-pw
-		ADMIN_USER_EMAIL=foo@example.com
-		ADMIN_ROLE_NAME=admin-role
+		db_get keystone/admin-username
+		ADMIN_USER_NAME=${RET:-admin}
+		db_get keystone/admin-password
+		ADMIN_USER_PW=${RET:-admin-user-pw}
+		db_get keystone/admin-email
+		ADMIN_USER_EMAIL=${RET:-root@localhost}
+		db_get keystone/admin-tenantname
+		ADMIN_TENANT_NAME=${RET:-admin}
+		db_get keystone/admin-rolename
+		ADMIN_ROLE_NAME=${RET:-admin}
 
 		ADMIN_USER=$(get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
 
