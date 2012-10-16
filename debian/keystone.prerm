@@ -2,6 +2,8 @@
 
 set -e
 
+exit 0
+
 . /usr/share/debconf/confmodule
 
 db_get keystone/configure_db

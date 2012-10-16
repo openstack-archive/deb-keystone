@@ -1,0 +1,64 @@
+#!/bin/sh
+
+set -e
+
+. /usr/share/debconf/confmodule
+KEY_CONF=/etc/keystone/keystone.conf
+
+#PKGOS-INCLUDE#
+
+prompt_initial_keystone_admins () {
+	local have_pass
+	db_input high keystone/configure_db || true
+	db_input high keystone/admin-username || true
+	db_input high keystone/admin-email || true
+	db_input high keystone/admin-password || true
+	db_input high keystone/admin-password-confirm || true
+	db_input medium keystone/admin-rolename || true
+	db_input medium keystone/admin-tenantname || true
+	db_go
+
+	# Loop until passwords match
+	have_pass=false
+	while [ "$have_pass" != "true" ] ; do
+		db_get keystone/admin-password || true
+		p1=$RET
+		db_get keystone/admin-password-confirm || true
+		p2=$RET
+		if [ -n "$p1" ] && [ "$p1" = "$p2" ] ; then
+			have_pass=true
+			continue
+		fi
+
+		# If we didn't see the screen yet, it means that
+		# we are running in non-interactive mode, so we generate
+		# a password randomly.
+		db_fget keystone/admin-password seen || true
+		if [ "$RET" != "true" ] ; then
+			p=$(pkgos_gen_pass)
+			db_set keystone/admin-password $p
+			db_set keystone/admin-password-confirm $p
+			have_pass=true
+			continue
+		fi
+
+		db_reset keystone/admin-password
+		db_fset keystone/admin-password seen false
+		db_reset keystone/admin-password-confirm
+		db_fset keystone/admin-password-confirm seen false
+
+		db_input high keystone/passwords-do-not-match || true
+		db_input high keystone/admin-password || true
+		db_input high keystone/admin-password-confirm || true
+		db_go || true
+	done
+}
+
+pkgos_read_config ${KEY_CONF} admin_token keystone/auth-token
+if [ -z "$RET" ] ; then
+	db_set keystone/auth-token $(pkgos_gen_pass)
+fi
+prompt_initial_keystone_admins
+pkgos_dbc_read_conf ${KEY_CONF} keystone connection
+
+exit 0

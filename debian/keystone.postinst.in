@@ -1,0 +1,75 @@
+#!/bin/sh
+
+set -e
+
+#PKGOS-INCLUDE#
+
+KEY_CONF=/etc/keystone/keystone.conf
+
+get_id () {
+    SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'
+}
+
+keystone_create_admin_tenant () {
+	db_get keystone/admin-username
+	ADMIN_USER_NAME=${RET:-admin}
+	db_get keystone/admin-password
+	ADMIN_USER_PW=${RET:-$(gen_password)}
+	db_get keystone/admin-email
+	ADMIN_USER_EMAIL=${RET:-root@localhost}
+	db_get keystone/admin-tenantname
+	ADMIN_TENANT_NAME=${RET:-admin}
+	db_get keystone/admin-rolename
+	ADMIN_ROLE_NAME=${RET:-admin}
+
+	ADMIN_USER=$(get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
+	ADMIN_TENANT=$(get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
+
+	ADMIN_ROLE=$(get_id keystone role-create --name $ADMIN_ROLE_NAME)
+	KEYSTONEADMIN_ROLE=$(get_id keystone role-create --name KeystoneAdmin)
+	KEYSTONESERVICEADMIN_ROLE=$(get_id keystone role-create --name KeystoneServiceAdmin)
+	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
+	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+}
+
+if [ "$1" = "configure" ] ; then
+	. /usr/share/debconf/confmodule
+	. /usr/share/dbconfig-common/dpkg/postinst
+
+	# Create user and group keystone, plus /var/log and /var/lib owned by it
+	pkgos_var_user_group keystone
+	# Create keystone.conf if it's not there
+	pkgos_write_new_conf keystone keystone.conf
+	# Configure the SQL connection of keystone.conf according to dbconfig-common
+	pkgos_dbc_postinst ${KEY_CONF} keystone connection $@
+
+	# Upgrade or create the db if directed to do so
+	db_get keystone/configure_db
+	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
+		keystone-manage db_sync
+	fi
+
+	# Set the auth_token directive in in keystone.conf
+	db_get keystone/auth-token
+	if [ -z "${AUTH_TOKEN}" ] ; then
+		AUTH_TOKEN=`pkgos_gen_pass`
+	fi
+	pkgos_edit_config admin_token ${AUTH_TOKEN} ${KEY_CONF}
+
+	# Setup init script and start keystone
+	pkgos_init keystone
+
+	# On first install, create basics configuration and add roles
+	if [ -z "$2" ] ; then
+		echo -n "Sleeping 5 seconds... "
+		sleep 5
+		echo -n "Upgrading db... "
+		keystone-manage db_sync
+		echo -n "Creating tenants... "
+		keystone_create_admin_tenant
+		echo "done!"
+	fi
+fi
+
+exit 0

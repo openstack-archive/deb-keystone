@@ -2,25 +2,18 @@
 
 set -e
 
-if [ -f /usr/share/debconf/confmodule ]
-then
-    . /usr/share/debconf/confmodule
+if [ -f /usr/share/debconf/confmodule ] ; then
+	. /usr/share/debconf/confmodule
 fi
 
 db_get keystone/configure_db
-if [ "$RET" = "true" ] && [ -f /etc/dbconfig-common/keystone.conf ] ; then
-    if [ -f /usr/share/dbconfig-common/dpkg/postrm ]
-    then
+if [ "$RET" = "true" ] && [ -f /etc/dbconfig-common/keystone.conf ] && [ -f /usr/share/dbconfig-common/dpkg/postrm ] ; then
 	. /usr/share/dbconfig-common/dpkg/postrm
 	dbc_go keystone $@
-    fi
 fi
 
-case "$1" in
-    purge)
-        rm -rf /var/log/keystone
-	rm -rf /var/lib/keystone
-	rm -rf /etc/keystone
-esac
+if [ "${1}" = "purge" ] ; then
+	rm -rf /var/log/keystone /var/lib/keystone /etc/keystone
+fi
 
 #DEBHELPER#
