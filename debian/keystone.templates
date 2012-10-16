@@ -40,6 +40,7 @@ _Description: User name of the admin user
 
 Template: keystone/admin-email
 Type: string
+Default: root@localhost
 _Description: Email address of the admin user
  Please enter the email address of the administrative user
 
