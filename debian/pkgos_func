@@ -23,7 +23,7 @@ pkgos_read_config () {
 	DEBCONF_NAME=${3}
 	if [ -e ${CONF_PATH} ] ; then
 		VALUE=`grep -E "^([ \t])*${DIRECTIVE}([ \t])*=([ \t])*" ${CONF_PATH} | awk '{print $3}'`
-		db_set ${DEBCONF_NAME}
+		db_set ${DEBCONF_NAME} ${VALUE}
 	fi
 	db_input high ${DEBCONF_NAME} || true
 	db_go
@@ -129,7 +129,9 @@ pkgos_dbc_postinst () {
 
 	# Create config files if they don't exist
 	if [ ! -d ${CONF_DIR} ] ; then
-		install -d -m 0770 -o ${PKG_NAME} -g ${PKG_NAME} ${CONF_DIR}
+		mkdir -p ${CONF_DIR}
+		chmod 0770 ${CONF_DIR}
+		chown ${PKG_NAME}:${PKG_NAME}
 	fi
 	if [ ! -e ${CONF_PATH} ] ; then
 		install -D -m 0660 -o ${PKG_NAME} -g ${PKG_NAME} /usr/share/${DPKG_MAINTSCRIPT_PACKAGE}/${CONF_FNAME} ${CONF_PATH}
@@ -171,7 +173,9 @@ pkgos_write_new_conf () {
 	DST_DIR=/etc/${PKG_NAME}
 	DST_PATH=${DST_DIR}/${CONF_FNAME}
 	if [ ! -d ${DST_DIR} ] ; then
-		install -d -m 750 -o ${PKG_NAME} -g ${PKG_NAME} ${DST_DIR}
+		mkdir -p ${DST_DIR}
+		chmod 0750 ${DST_DIR}
+		chown ${PKG_NAME}:${PKG_NAME} ${DST_DIR}
 	fi
 	if [ ! -e ${DST_PATH} ] ; then
 		install -D -m 640 -o ${PKG_NAME} -g ${PKG_NAME} ${SRC_PATH} ${DST_PATH}
@@ -197,10 +201,14 @@ pkgos_var_user_group () {
 
 	# Create /var/{lib,log}/<package> with that user/group if it doesn't exist
 	if [ ! -d /var/lib/${PKG_NAME} ] ; then
-		install -d -m 750 -o ${PKG_NAME} -g ${PKG_NAME} /var/lib/${PKG_NAME}
+		mkdir -p /var/lib/${PKG_NAME}
+		chown ${PKG_NAME}:${PKG_NAME} /var/lib/${PKG_NAME}
+		chmod 0750 /var/lib/${PKG_NAME}
 	fi
 	if [ ! -d /var/log/${PKG_NAME} ] ; then
-		install -d -m 750 -o ${PKG_NAME} -g ${PKG_NAME} /var/log/${PKG_NAME}
+		mkdir -p /var/log/${PKG_NAME}
+		chown ${PKG_NAME}:${PKG_NAME} /var/log/${PKG_NAME}
+		chmod 0750 /var/log/${PKG_NAME}
 	fi
 }
 
