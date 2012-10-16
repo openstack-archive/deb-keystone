@@ -59,6 +59,6 @@ if [ -z "$RET" ] ; then
 	db_set keystone/auth-token $(pkgos_gen_pass)
 fi
 prompt_initial_keystone_admins
-pkgos_dbc_read_conf ${KEY_CONF} keystone connection
+pkgos_dbc_read_conf ${KEY_CONF} keystone connection $@
 
 exit 0

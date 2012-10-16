@@ -38,7 +38,9 @@ pkgos_dbc_read_conf () {
 	CONF_PATH=${1}
 	PKG_NAME=${2}
 	CONN_DIRECTIVE=${3}
-
+	shift
+	shift
+	shift
 
 	db_get ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db
 	if [ "$RET" = "true" ] && [ -f /usr/share/dbconfig-common/dpkg/config ] ; then
@@ -62,7 +64,7 @@ pkgos_dbc_read_conf () {
 				;;
 		esac
 		if [ "${DB_TYPE}" = "sqlite" ] ; then
-			if [ "${CONN_STRING}" = "sqlite:///${PKG_NAME}.db" ] || [ "${CONN_STRING}" = "sqlite:///${PKG_NAME}.sqlite" ] ; then
+			if [ "${CONN_STRING}" = "sqlite:///${PKG_NAME}.db" ] ; then
 				CONN_STRING="sqlite:///var/lib/${PKG_NAME}/${PKG_NAME}db"
 			fi
 			PARSED_DB_PATH=${CONN_STRING#sqlite://}
