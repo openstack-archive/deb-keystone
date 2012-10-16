@@ -103,8 +103,20 @@ pkgos_dbc_read_conf () {
 			else
 				dbc_dbtypes="pgsql, mysql, sqlite3"
 			fi
-			db_authmethod_user="password"
+			dbc_authmethod_user="password"
 		fi
+echo "
+dbc_dbuser=${dbc_user}
+dbc_dbpass=${dbc_pass}
+dbc_dbserver=${dbc_dbserver}
+dbc_dbport=${dbc_dbport}
+dbc_dbname=${dbc_dbname}
+dbc_basepath=${dbc_basepath}
+dbc_dbtypes=${dbc_dbtypes}
+dbc_authmethod_user=${db_authmethod_user}
+Now calling: dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
+
+"
 	dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
 	fi
 }
