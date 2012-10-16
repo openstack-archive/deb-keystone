@@ -120,6 +120,7 @@ Now calling: dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
 
 "
 	dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
+	echo "After dbc_go"
 	fi
 }
 
