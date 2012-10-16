@@ -42,6 +42,8 @@ pkgos_dbc_read_conf () {
 	shift
 	shift
 
+	db_input high ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db || true
+	db_go || true
 	db_get ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db
 	if [ "$RET" = "true" ] && [ -f /usr/share/dbconfig-common/dpkg/config ] ; then
 		. /usr/share/dbconfig-common/dpkg/config
