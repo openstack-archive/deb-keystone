@@ -130,9 +130,9 @@ pkgos_dbc_postinst () {
 	# Create config files if they don't exist
 	if [ ! -d ${CONF_DIR} ] ; then
 		mkdir -p ${CONF_DIR}
-		chmod 0770 ${CONF_DIR}
-		chown ${PKG_NAME}:${PKG_NAME}
 	fi
+	chmod 0770 ${CONF_DIR}
+	chown ${PKG_NAME}:${PKG_NAME} ${CONF_DIR}
 	if [ ! -e ${CONF_PATH} ] ; then
 		install -D -m 0660 -o ${PKG_NAME} -g ${PKG_NAME} /usr/share/${DPKG_MAINTSCRIPT_PACKAGE}/${CONF_FNAME} ${CONF_PATH}
 	fi
@@ -174,9 +174,9 @@ pkgos_write_new_conf () {
 	DST_PATH=${DST_DIR}/${CONF_FNAME}
 	if [ ! -d ${DST_DIR} ] ; then
 		mkdir -p ${DST_DIR}
-		chmod 0750 ${DST_DIR}
-		chown ${PKG_NAME}:${PKG_NAME} ${DST_DIR}
 	fi
+	chmod 0750 ${DST_DIR}
+	chown ${PKG_NAME}:${PKG_NAME} ${DST_DIR}
 	if [ ! -e ${DST_PATH} ] ; then
 		install -D -m 640 -o ${PKG_NAME} -g ${PKG_NAME} ${SRC_PATH} ${DST_PATH}
 	fi
@@ -201,15 +201,15 @@ pkgos_var_user_group () {
 
 	# Create /var/{lib,log}/<package> with that user/group if it doesn't exist
 	if [ ! -d /var/lib/${PKG_NAME} ] ; then
-		mkdir -p /var/lib/${PKG_NAME}
-		chown ${PKG_NAME}:${PKG_NAME} /var/lib/${PKG_NAME}
-		chmod 0750 /var/lib/${PKG_NAME}
+		mkdir -p /var/lib/${PKG_NAME}/cache
 	fi
+	chown -R ${PKG_NAME}:${PKG_NAME} /var/lib/${PKG_NAME}
+	chmod -R 0750 /var/lib/${PKG_NAME}
 	if [ ! -d /var/log/${PKG_NAME} ] ; then
 		mkdir -p /var/log/${PKG_NAME}
-		chown ${PKG_NAME}:${PKG_NAME} /var/log/${PKG_NAME}
-		chmod 0750 /var/log/${PKG_NAME}
 	fi
+	chown ${PKG_NAME}:${PKG_NAME} /var/log/${PKG_NAME}
+	chmod 0750 /var/log/${PKG_NAME}
 }
 
 pkgos_init () {
