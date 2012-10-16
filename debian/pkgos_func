@@ -46,9 +46,9 @@ pkgos_dbc_read_conf () {
 	if [ "$RET" = "true" ] && [ -f /usr/share/dbconfig-common/dpkg/config ] ; then
 		. /usr/share/dbconfig-common/dpkg/config
 		if [ -e "${CONF_PATH}" ] ; then
-			CON_INFO=`grep -E "^([ \t])*${CONN_DIRECTIVE}([ \t])*=([ \t])*" ${CONF_PATH} | awk '{print $3}'`
+			CONN_STRING=`grep -E "^([ \t])*${CONN_DIRECTIVE}([ \t])*=([ \t])*" ${CONF_PATH} | awk '{print $3}'`
 		else
-			CON_INFO=""
+			CONN_STRING=""
 		fi
 		PARSED_DB_TYPE=${CONN_STRING%%:*}
 		# If we have an undefined SQL type, we go back to a more sane default (eg: SQLite)
