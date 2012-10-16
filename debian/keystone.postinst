@@ -34,10 +34,9 @@ if [ "$1" = "configure" ] ; then
 
 	db_get keystone/configure_db
 	if [ "$RET" = "true" ] ; then
-		db_get keystone/database-type
 		dbc_dbfile_owner="keystone:keystone"
-
 		dbc_go keystone $@
+
 		if [ "$dbc_install" = "true" ] ; then
 		    	case "$dbc_dbtype" in
 			    mysql)
