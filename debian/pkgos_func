@@ -34,7 +34,7 @@ pkgos_read_config () {
 # and fills the dbc_* variable accordingly,
 # then call dbconfig to do the actual configuration.
 pkgos_dbc_read_conf () {
-	local ADDR BEFORE_AT AFTER_AT SERVER_PORT CONN_STRING PKG_NAME CONF_PATH PARSED_USER PARSED_PASS PARSED_DB_NAME PARSED_SERVER PARSED_PORT
+	local ADDR BEFORE_AT AFTER_AT SERVER_PORT CONN_STRING PKG_NAME CONF_PATH PARSED_DB_TYPE PARSED_USER PARSED_PASS PARSED_DB_NAME PARSED_SERVER PARSED_PORT
 	CONF_PATH=${1}
 	PKG_NAME=${2}
 	CONN_DIRECTIVE=${3}
@@ -65,7 +65,7 @@ pkgos_dbc_read_conf () {
 				PARSED_DB_TYPE="sqlite"
 				;;
 		esac
-		if [ "${DB_TYPE}" = "sqlite" ] ; then
+		if [ "${PARSED_DB_TYPE}" = "sqlite" ] ; then
 			if [ "${CONN_STRING}" = "sqlite:///${PKG_NAME}.db" ] ; then
 				CONN_STRING="sqlite:///var/lib/${PKG_NAME}/${PKG_NAME}db"
 			fi
