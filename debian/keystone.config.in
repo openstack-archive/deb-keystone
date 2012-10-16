@@ -54,6 +54,7 @@ prompt_initial_keystone_admins () {
 	done
 }
 
+pkgos_var_user_group keystone
 pkgos_read_config ${KEY_CONF} admin_token keystone/auth-token
 if [ -z "$RET" ] ; then
 	db_set keystone/auth-token $(pkgos_gen_pass)
