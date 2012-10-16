@@ -10,7 +10,7 @@ pkgos_edit_config () {
 	DIRECTIVE=${1}
 	VALUE=${2}
 	FILE=${3}
-	sed -ie 's|^[ \t#]*'${DIRECTIVE}'[ \t]*=.*|'${DIRECTIVE}' = '${AUTH_TOKEN}'|' ${FILE}
+	sed -ie 's|^[ \t#]*'${DIRECTIVE}'[ \t]*=.*|'${DIRECTIVE}' = '${VALUE}'|' ${FILE}
 }
 
 # Read the value of a directive in a config file,
@@ -176,7 +176,7 @@ pkgos_dbc_postinst () {
 					SQL_CONNECTION="sqlite:///$dbc_basepath/$dbc_dbname"
 					;;
 			esac
-			pkgos_edit_config ${CONF_PATH} ${CONN_DIRECTIVE} ${SQL_CONNECTION}
+			pkgos_edit_config ${CONN_DIRECTIVE} ${SQL_CONNECTION} ${CONF_PATH}
 		fi
 	fi
 }
