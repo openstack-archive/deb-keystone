@@ -45,10 +45,10 @@ pkgos_dbc_read_conf () {
 	shift
 	shift
 
-	db_fset ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db seen false
-	db_input high ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db || true
+	db_fset ${PKG_NAME}/configure_db seen false
+	db_input high ${PKG_NAME}/configure_db || true
 	db_go || true
-	db_get ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db
+	db_get ${PKG_NAME}/configure_db
 	if [ "$RET" = "true" ] && [ -f /usr/share/dbconfig-common/dpkg/config ] ; then
 		. /usr/share/dbconfig-common/dpkg/config
 		if [ -e "${CONF_PATH}" ] ; then
@@ -144,7 +144,7 @@ pkgos_dbc_postinst () {
 	if [ ! -e ${CONF_PATH} ] ; then
 		install -D -m 0660 -o ${PKG_NAME} -g ${PKG_NAME} /usr/share/${DPKG_MAINTSCRIPT_PACKAGE}/${CONF_FNAME} ${CONF_PATH}
 	fi
-	db_get ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db
+	db_get ${PKG_NAME}/configure_db
 	if [ "$RET" = "true" ] && [ -r /usr/share/dbconfig-common/dpkg/postinst ] ; then
 		. /usr/share/dbconfig-common/dpkg/postinst
 		dbc_dbfile_owner="${PKG_NAME}:${PKG_NAME}"
