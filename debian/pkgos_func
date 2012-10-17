@@ -17,7 +17,6 @@ pkgos_edit_config () {
 # then prompt the user about it.
 # Example: 
 pkgos_read_config () {
-	set -x
 	local DIRECTIVE CONF_PATH DEBCONF_NAME VALUE
 	CONF_PATH=${1}
 	DIRECTIVE=${2}
@@ -30,7 +29,6 @@ pkgos_read_config () {
 	db_input high ${DEBCONF_NAME} || true
 	db_go
 	db_get ${DEBCONF_NAME}
-	set +x
 }
 
 # Read the connection directive from a config file
