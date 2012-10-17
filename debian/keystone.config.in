@@ -9,7 +9,12 @@ KEY_CONF=/etc/keystone/keystone.conf
 
 prompt_initial_keystone_admins () {
 	local have_pass
-	db_input high keystone/configure_db || true
+	db_fset keystone/admin-username seen false
+	db_fset keystone/admin-email seen false
+	db_fset keystone/admin-password seen false
+	db_fset keystone/admin-password-confirm seen false
+	db_fset keystone/admin-rolename seen false
+	db_fset keystone/admin-tenantname seen false
 	db_input high keystone/admin-username || true
 	db_input high keystone/admin-email || true
 	db_input high keystone/admin-password || true
