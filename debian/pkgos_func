@@ -26,6 +26,7 @@ pkgos_read_config () {
 		VALUE=`grep -E "^([ \t])*${DIRECTIVE}([ \t])*=([ \t])*" ${CONF_PATH} | awk '{print $3}'`
 		db_set ${DEBCONF_NAME} ${VALUE}
 	fi
+	db_fset ${DEBCONF_NAME} seen false
 	db_input high ${DEBCONF_NAME} || true
 	db_go
 	db_get ${DEBCONF_NAME}
@@ -44,6 +45,7 @@ pkgos_dbc_read_conf () {
 	shift
 	shift
 
+	db_fset ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db seen false
 	db_input high ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db || true
 	db_go || true
 	db_get ${DPKG_MAINTSCRIPT_PACKAGE}/configure_db
