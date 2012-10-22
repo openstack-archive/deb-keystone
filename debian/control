@@ -80,6 +80,7 @@ Architecture: all
 Section: python
 Depends: ${python:Depends}, ${misc:Depends},
  ${ostack-lsb-base},
+ python-configobj,
  python-keystone (= ${source:Version}),
  adduser,
  ssl-cert (>= 1.0.12),
