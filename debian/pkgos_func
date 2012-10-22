@@ -279,7 +279,7 @@ pkgos_var_user_group () {
 	if ! getent group ${PKG_NAME} > /dev/null 2>&1 ; then
 		addgroup --quiet --system ${PKG_NAME}
 	fi
-	if ! getent passwd glance > /dev/null 2>&1 ; then
+	if ! getent passwd ${PKG_NAME} > /dev/null 2>&1 ; then
 		adduser --system \
 			--home /var/lib/${PKG_NAME} \
 			--no-create-home \
