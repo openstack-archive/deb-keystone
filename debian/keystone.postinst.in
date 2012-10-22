@@ -30,9 +30,9 @@ keystone_create_admin_tenant () {
 	ADMIN_ROLE=$(get_id keystone role-create --name $ADMIN_ROLE_NAME)
 	KEYSTONEADMIN_ROLE=$(get_id keystone role-create --name KeystoneAdmin)
 	KEYSTONESERVICEADMIN_ROLE=$(get_id keystone role-create --name KeystoneServiceAdmin)
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	get_id keystone user-role-add --user $ADMIN_USER --role $ADMIN_ROLE --tenant_id $ADMIN_TENANT
+	get_id keystone user-role-add --user $ADMIN_USER --role $KEYSTONEADMIN_ROLE --tenant_id $ADMIN_TENANT
+	get_id keystone user-role-add --user $ADMIN_USER --role $KEYSTONESERVICEADMIN_ROLE --tenant_id $ADMIN_TENANT
 }
 
 if [ "$1" = "configure" ] ; then
