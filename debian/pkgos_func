@@ -111,10 +111,17 @@ pkgos_dbc_read_conf () {
 	fi
 	CONF_PATH=${1}
 	PKG_NAME=${2}
-	CONN_DIRECTIVE=${3}
 	shift
 	shift
-	shift
+	if [ "${SHELL_SCRIPT_MODE}" = "yes" ] ; then
+	    CONN_DIRECTIVE=${1}
+	    shift
+	else
+	    CONN_SECTION=${1}
+	    CONN_DIRECTIVE=${2}
+	    shift
+	    shift
+	fi	    
 
 	db_fset ${PKG_NAME}/configure_db seen false
 	db_input high ${PKG_NAME}/configure_db || true
@@ -123,13 +130,9 @@ pkgos_dbc_read_conf () {
 	if [ "$RET" = "true" ] && [ -f /usr/share/dbconfig-common/dpkg/config ] ; then
 		. /usr/share/dbconfig-common/dpkg/config
 		if [ -e "${CONF_PATH}" ] ; then
-			if [ "${SHELL_SCRIPT_MODE}" = "yes" ] ; then
-				CONN_STRING=`grep -E "^([ \t])*${CONN_DIRECTIVE}=" ${CONF_PATH} | cut -d"=" -f2`
-			else
-				CONN_STRING=`grep -E "^([ \t])*${CONN_DIRECTIVE}([ \t])*=([ \t])*" ${CONF_PATH} | awk '{print $3}'`
-			fi
+		    CONN_STRING=$(pkgos_get_config "${CONF_PATH}" "${CONN_DIRECTIVE}" "${CONN_SECTION}")
 		else
-			CONN_STRING=""
+		    CONN_STRING=""
 		fi
 		PARSED_DB_TYPE=${CONN_STRING%%:*}
 		# If we have an undefined SQL type, we go back to a more sane default (eg: SQLite)
@@ -158,6 +161,7 @@ pkgos_dbc_read_conf () {
 		else
 			ADDR=${CONN_STRING#*sql://}
 			BEFORE_AT=${ADDR%%@*}
+			AFTER_AT=${ADDR#*@}
 			SERVER_PORT=${AFTER_AT%%/*}
 
 			PARSED_USER=${BEFORE_AT%%:*}
@@ -204,10 +208,17 @@ pkgos_dbc_postinst () {
 	fi
 	CONF_PATH=${1}
 	PKG_NAME=${2}
-	CONN_DIRECTIVE=${3}
 	shift
 	shift
-	shift
+	if [ "${SHELL_SCRIPT_MODE}" = "yes" ] ; then
+	    CONN_DIRECTIVE=${1}
+	    shift
+	else
+	    CONN_SECTION=${1}
+	    CONN_DIRECTIVE=${2}
+	    shift
+	    shift
+	fi	    
 
 	CONF_DIR=`dirname ${CONF_PATH}`
 	CONF_FNAME=`basename ${CONF_PATH}`
@@ -245,9 +256,9 @@ pkgos_dbc_postinst () {
 					;;
 			esac
 			if [ "${SHELL_SCRIPT_MODE}" = "yes" ] ; then
-				pkgos_edit_config -sh ${CONN_DIRECTIVE} ${SQL_CONNECTION} ${CONF_PATH}
+				pkgos_edit_config -sh "${CONN_DIRECTIVE}" "${SQL_CONNECTION}" "${CONF_PATH}"
 			else
-				pkgos_edit_config ${CONN_DIRECTIVE} ${SQL_CONNECTION} ${CONF_PATH}
+				pkgos_edit_config "${CONN_DIRECTIVE}" "${SQL_CONNECTION}" "${CONF_PATH}" "${CONN_SECTION}"
 			fi
 		fi
 	fi

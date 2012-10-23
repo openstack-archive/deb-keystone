@@ -64,7 +64,7 @@ pkgos_read_config -r ${KEY_CONF} admin_token keystone/auth-token
 if [ -z "$RET" ] ; then
 	db_set keystone/auth-token $(pkgos_gen_pass)
 fi
-pkgos_dbc_read_conf ${KEY_CONF} keystone connection $@
+pkgos_dbc_read_conf ${KEY_CONF} keystone sql connection $@
 prompt_initial_keystone_admins
 
 exit 0
