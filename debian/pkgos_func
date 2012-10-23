@@ -190,7 +190,7 @@ pkgos_dbc_read_conf () {
 			fi
 			dbc_authmethod_user="password"
 		fi
-		dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
+		dbc_go "${DPKG_MAINTSCRIPT_PACKAGE}" $@
 	fi
 }
 
@@ -236,7 +236,7 @@ pkgos_dbc_postinst () {
 	if [ "$RET" = "true" ] && [ -r /usr/share/dbconfig-common/dpkg/postinst ] ; then
 		. /usr/share/dbconfig-common/dpkg/postinst
 		dbc_dbfile_owner="${PKG_NAME}:${PKG_NAME}"
-		dbc_go ${DPKG_MAINTSCRIPT_PACKAGE} $@
+		dbc_go "${DPKG_MAINTSCRIPT_PACKAGE}" $@
 		if [ "$dbc_install" = "true" ] ; then
 			case "$dbc_dbtype" in
 				mysql)
