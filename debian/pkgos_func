@@ -88,7 +88,7 @@ pkgos_read_config () {
 			pkgos_get_config ${CONF_PATH} ${DIRECTIVE}
 		fi
 	fi
-	if [ -n ${RET} ] ; then
+	if [ -n "${RET}" ] ; then
 		db_set ${DEBCONF_NAME} ${RET}
 	fi
 	if [ "${FSET_SEEN}" = "yes" ] ; then
