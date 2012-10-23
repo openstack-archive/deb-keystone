@@ -1,0 +1,3 @@
+keystone binary: script-in-etc-init.d-not-registered-via-update-rc.d etc/init.d/keystone
+keystone binary: postrm-contains-additional-updaterc.d-calls etc/init.d/keystone
+
