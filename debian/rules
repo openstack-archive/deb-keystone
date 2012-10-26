@@ -1,6 +1,5 @@
 #!/usr/bin/make -f
 
-# Verbose mode
 #export DH_VERBOSE=1
 
 # auth_token middleware now requires access to HOME, otherwise
