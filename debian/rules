@@ -41,9 +41,8 @@ override_dh_builddeb:
 override_dh_auto_build:
 	dh_auto_build
 
-	chmod +x $(CURDIR)/debian/pkgos_insert_include
-	$(CURDIR)/debian/pkgos_insert_include pkgos_func keystone.config
-	$(CURDIR)/debian/pkgos_insert_include pkgos_func keystone.postinst
+	/usr/share/openstack-pkg-tools/pkgos_insert_include pkgos_func keystone.config
+	/usr/share/openstack-pkg-tools/pkgos_insert_include pkgos_func keystone.postinst
 
 ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
 	python setup.py build_sphinx
