@@ -6,10 +6,6 @@ set -e
 
 KEY_CONF=/etc/keystone/keystone.conf
 
-get_id () {
-    SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/ SERVICE_TOKEN=${AUTH_TOKEN} $@ | awk '/ id / { print $4 }'
-}
-
 get_debconf_tenant_vars () {
 	db_get keystone/admin-username
 	ADMIN_USER_NAME=${RET:-admin}
@@ -24,15 +20,15 @@ get_debconf_tenant_vars () {
 }
 
 keystone_create_admin_tenant () {
-	ADMIN_USER=$(get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
-	ADMIN_TENANT=$(get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
+	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
+	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
 
-	ADMIN_ROLE=$(get_id keystone role-create --name $ADMIN_ROLE_NAME)
-	KEYSTONEADMIN_ROLE=$(get_id keystone role-create --name KeystoneAdmin)
-	KEYSTONESERVICEADMIN_ROLE=$(get_id keystone role-create --name KeystoneServiceAdmin)
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
-	get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	ADMIN_ROLE=$(pkgos_get_id keystone role-create --name $ADMIN_ROLE_NAME)
+	KEYSTONEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneAdmin)
+	KEYSTONESERVICEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneServiceAdmin)
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
 }
 
 if [ "$1" = "configure" ] ; then
