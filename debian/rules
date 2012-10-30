@@ -59,6 +59,8 @@ override_dh_install:
 	install -D -m 0600 $(CURDIR)/debian/logging.conf $(CURDIR)/debian/keystone/etc/keystone/logging.conf
 	install -D -m 0640 etc/keystone.conf.sample $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
 	sed -i -e "s|^[ \t#]*template_file[ \t#]*=.*|template_file = /etc/keystone/default_catalog.templates|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	sed -i -e "s|^[ \t#]*log_dir[ \t#]*=.*|log_dir = /var/log/keystone|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	sed -i -e "s|^[ \t#]*log_file[ \t#]*=.*|log_file = keystone.log|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
 	cp -f etc/keystone.conf.sample debian/keystone/usr/share/doc/keystone/keystone.conf.sample
 
 override_dh_clean:
