@@ -32,7 +32,7 @@ _Description: Authentication server administration token:
  Please enter the token to use with the authentication
  server.
 
-Template: keystone/admin-user-name
+Template: keystone/admin-user
 Type: string
 Default: admin
 _Description: User name of the admin user
