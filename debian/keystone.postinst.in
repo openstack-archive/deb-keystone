@@ -7,15 +7,15 @@ set -e
 KEY_CONF=/etc/keystone/keystone.conf
 
 get_debconf_tenant_vars () {
-	db_get keystone/admin-username
+	db_get keystone/admin-user-name
 	ADMIN_USER_NAME=${RET:-admin}
 	db_get keystone/admin-password
 	ADMIN_USER_PW=${RET:-$(gen_password)}
 	db_get keystone/admin-email
 	ADMIN_USER_EMAIL=${RET:-root@localhost}
-	db_get keystone/admin-tenantname
+	db_get keystone/admin-tenant-name
 	ADMIN_TENANT_NAME=${RET:-admin}
-	db_get keystone/admin-rolename
+	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 }
 

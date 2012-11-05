@@ -9,12 +9,12 @@ KEY_CONF=/etc/keystone/keystone.conf
 
 prompt_initial_keystone_admins () {
 	local have_pass
-	db_input high keystone/admin-username || true
+	db_input high keystone/admin-user-name || true
 	db_input high keystone/admin-email || true
 	db_input high keystone/admin-password || true
 	db_input high keystone/admin-password-confirm || true
-	db_input medium keystone/admin-rolename || true
-	db_input medium keystone/admin-tenantname || true
+	db_input medium keystone/admin-role-name || true
+	db_input medium keystone/admin-tenant-name || true
 	db_go
 
 	# Loop until passwords match
