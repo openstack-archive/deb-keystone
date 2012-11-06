@@ -1,0 +1,62 @@
+Description: Fixes etc/default_catalog.templates in include Quantum
+ By default, etc/default_catalog.templates uses RegionOne, and not
+ regionOne like documented everywhere in the docs of Openstack, and
+ it also doesn't have a config for Quantum. This patche fixes that.
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: no
+
+--- keystone-2012.2.orig/etc/default_catalog.templates
++++ keystone-2012.2/etc/default_catalog.templates
+@@ -1,27 +1,32 @@
+ # config for TemplatedCatalog, using camelCase because I don't want to do
+ # translations for keystone compat
+-catalog.RegionOne.identity.publicURL = http://localhost:$(public_port)s/v2.0
+-catalog.RegionOne.identity.adminURL = http://localhost:$(admin_port)s/v2.0
+-catalog.RegionOne.identity.internalURL = http://localhost:$(public_port)s/v2.0
+-catalog.RegionOne.identity.name = Identity Service
++catalog.regionOne.identity.publicURL = http://localhost:$(public_port)s/v2.0
++catalog.regionOne.identity.adminURL = http://localhost:$(admin_port)s/v2.0
++catalog.regionOne.identity.internalURL = http://localhost:$(public_port)s/v2.0
++catalog.regionOne.identity.name = Identity Service
+ 
+ # fake compute service for now to help novaclient tests work
+-catalog.RegionOne.compute.publicURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
+-catalog.RegionOne.compute.adminURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
+-catalog.RegionOne.compute.internalURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
+-catalog.RegionOne.compute.name = Compute Service
++catalog.regionOne.compute.publicURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
++catalog.regionOne.compute.adminURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
++catalog.regionOne.compute.internalURL = http://localhost:$(compute_port)s/v1.1/$(tenant_id)s
++catalog.regionOne.compute.name = Compute Service
+ 
+-catalog.RegionOne.volume.publicURL = http://localhost:8776/v1/$(tenant_id)s
+-catalog.RegionOne.volume.adminURL = http://localhost:8776/v1/$(tenant_id)s
+-catalog.RegionOne.volume.internalURL = http://localhost:8776/v1/$(tenant_id)s
+-catalog.RegionOne.volume.name = Volume Service
++catalog.regionOne.volume.publicURL = http://localhost:8776/v1/$(tenant_id)s
++catalog.regionOne.volume.adminURL = http://localhost:8776/v1/$(tenant_id)s
++catalog.regionOne.volume.internalURL = http://localhost:8776/v1/$(tenant_id)s
++catalog.regionOne.volume.name = Volume Service
+ 
+-catalog.RegionOne.ec2.publicURL = http://localhost:8773/services/Cloud
+-catalog.RegionOne.ec2.adminURL = http://localhost:8773/services/Admin
+-catalog.RegionOne.ec2.internalURL = http://localhost:8773/services/Cloud
+-catalog.RegionOne.ec2.name = EC2 Service
++catalog.regionOne.ec2.publicURL = http://localhost:8773/services/Cloud
++catalog.regionOne.ec2.adminURL = http://localhost:8773/services/Admin
++catalog.regionOne.ec2.internalURL = http://localhost:8773/services/Cloud
++catalog.regionOne.ec2.name = EC2 Service
+ 
+-catalog.RegionOne.image.publicURL = http://localhost:9292/v1
+-catalog.RegionOne.image.adminURL = http://localhost:9292/v1
+-catalog.RegionOne.image.internalURL = http://localhost:9292/v1
+-catalog.RegionOne.image.name = Image Service
++catalog.regionOne.image.publicURL = http://localhost:9292/v1
++catalog.regionOne.image.adminURL = http://localhost:9292/v1
++catalog.regionOne.image.internalURL = http://localhost:9292/v1
++catalog.regionOne.image.name = Image Service
++
++catalog.regionOne.network.publicURL = http://$IP:9696
++catalog.regionOne.network.adminURL = http://$IP:9696
++catalog.regionOne.network.internalURL = http://$IP:9696
++catalog.regionOne.network.name = Network Service 
