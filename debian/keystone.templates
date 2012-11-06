@@ -32,7 +32,7 @@ _Description: Authentication server administration token:
  Please enter the token to use with the authentication
  server.
 
-Template: keystone/admin-username
+Template: keystone/admin-user
 Type: string
 Default: admin
 _Description: User name of the admin user
@@ -59,13 +59,13 @@ Type: error
 Description: Password mismatch
  The password and its confirmation do not match.
 
-Template: keystone/admin-rolename
+Template: keystone/admin-role-name
 Type: string
 Default: admin
 _Description: Name of the admin role
  Please enter the name of the administrative role
 
-Template: keystone/admin-tenantname
+Template: keystone/admin-tenant-name
 Type: string
 Default: admin
 _Description: Name of the admin tenant
