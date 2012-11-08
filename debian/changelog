@@ -2,6 +2,8 @@ keystone (2012.1.1-10) unstable; urgency=low
 
   * Fixes keystone.config which wasn't starting dbconfig-common at first
   setup.
+  * Do not use override_dh_fixperms:, sets the permissions of keystone.conf in
+  the postinst using "install -m" instead of cp -auxf.
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 10 Oct 2012 15:46:14 +0000
 

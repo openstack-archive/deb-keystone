@@ -12,7 +12,7 @@ if [ "$1" = "configure" ] ; then
 		mkdir /etc/keystone
 	fi
 	if ! [ -e "${KEY_CONF}" ] && [ -r /usr/share/keystone/keystone.conf ] ; then
-		cp -auxf /usr/share/keystone/keystone.conf ${KEY_CONF}
+		install -D -m 0640 /usr/share/keystone/keystone.conf ${KEY_CONF}
 	fi
 
 	adduser --system \
