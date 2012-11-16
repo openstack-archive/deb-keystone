@@ -47,6 +47,7 @@ Vcs-Git: git://anonscm.debian.org/openstack/keystone.git
 Package: python-keystone
 Architecture: all
 Section: python
+Pre-Depends: dpkg (>= 1.15.6~)
 Depends: ${python:Depends}, ${misc:Depends},
  python-dateutil,
  python-eventlet,
@@ -79,6 +80,7 @@ Description: OpenStack identity service - library
 Package: keystone
 Architecture: all
 Section: python
+Pre-Depends: dpkg (>= 1.15.6~)
 Depends: ${python:Depends}, ${misc:Depends},
  ${ostack-lsb-base},
  python-configobj,
@@ -99,6 +101,7 @@ Description: OpenStack identity service
 Package: keystone-doc
 Architecture: all
 Section: doc
+Pre-Depends: dpkg (>= 1.15.6~)
 Depends: ${misc:Depends},  libjs-jquery, libjs-underscore
 Description: OpenStack identity service - documentation
  This is the identity service used by OpenStack for authentication (authN)
