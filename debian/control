@@ -40,7 +40,7 @@ Build-Depends-Indep: openstack-pkg-tools,
  python-webob,
  python-webtest
 Standards-Version: 3.9.3
-Homepage: http://launchpad.net/keystone
+Homepage: http://keystone.openstack.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
 Vcs-Git: git://anonscm.debian.org/openstack/keystone.git
 
