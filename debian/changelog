@@ -7,6 +7,8 @@ keystone (2012.2-1) experimental; urgency=low
   * Rewrite of the maintainer scripts using the pkgos scripts.
   * Fixes etc/default_catalog.templates to include Quantum config and
   to use regionOne and not RegionOne by default.
+  * Increased compat level to 9 (and debhelper build-dep).
+  * Fixes build-dep git-core -> git.
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 17 Oct 2012 13:57:17 +0000
 
