@@ -64,6 +64,7 @@ Depends: ${python:Depends}, ${misc:Depends},
  python-routes,
  python-sqlalchemy,
  python-migrate,
+ python-mysqldb,
  python-webob,
  python-sqlite,
  python-novaclient
