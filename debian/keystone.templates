@@ -35,24 +35,24 @@ _Description: Authentication server administration token:
 Template: keystone/admin-user
 Type: string
 Default: admin
-_Description: User name of the admin user
- Please enter an user name for the administrative user
+_Description: User name of the admin user:
+ Please enter an user name for the administrative user.
 
 Template: keystone/admin-email
 Type: string
 Default: root@localhost
-_Description: Email address of the admin user
- Please enter the email address of the administrative user
+_Description: Email address of the admin user:
+ Please enter the email address of the administrative user.
 
 Template: keystone/admin-password
 Type: password
-_Description: Password of the admin user
- Please enter a password for the administrative user
+_Description: Password of the admin user:
+ Please enter a password for the administrative user.
 
 Template: keystone/admin-password-confirm
 Type: password
-_Description: Password of the admin user (confirm)
- Please confirm the password for the administrative user
+_Description: Password of the admin user (confirm):
+ Please confirm the password for the administrative user.
 
 Template: keystone/passwords-do-not-match
 Type: error
@@ -62,12 +62,24 @@ Description: Password mismatch
 Template: keystone/admin-role-name
 Type: string
 Default: admin
-_Description: Name of the admin role
- Please enter the name of the administrative role
+_Description: Name of the admin role:
+ Please enter the name of the administrative role.
 
 Template: keystone/admin-tenant-name
 Type: string
 Default: admin
-_Description: Name of the admin tenant
- Please enter the name of the administrative tenant (project)
+_Description: Name of the admin tenant:
+ Please enter the name of the administrative tenant (project).
 
+Template: keystone/register-endpoint
+Type: boolean
+Default: false
+_Description: Register keystone endpoint?
+ Each Openstack services (each API) should be registered in order to be
+ accessible. This is done using "keystone service-create" and "keystone
+ endpoint-create". Select if you want to run these commands now.
+
+Template: keystone/endpoint-ip
+Type: string
+_Description: Keystone endpoint IP address:
+ Enter the IP address that will be used to contact keystone.
