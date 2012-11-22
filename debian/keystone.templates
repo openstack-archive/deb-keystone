@@ -83,3 +83,11 @@ Template: keystone/endpoint-ip
 Type: string
 _Description: Keystone endpoint IP address:
  Enter the IP address that will be used to contact keystone.
+
+Template: keystone/region-name
+Type: string
+Default: regionOne
+_Description: Name of the region to register:
+ Openstack can be used using availability zones, with each region representing
+ a location. Please enter the zone that you wish to use when registering the
+ endpoint.

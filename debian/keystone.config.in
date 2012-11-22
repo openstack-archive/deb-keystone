@@ -53,6 +53,31 @@ prompt_initial_keystone_admins () {
 	done
 }
 
+keystone_create_endpoint_config () {
+	local DEFAULT_GW_IF
+	db_input high keystone/register-endpoint || true
+	db_go
+	db_get keystone/register-endpoint
+	if [ "${RET}" = "true" ] ; then
+		# Find the IP address of the interface used to connect to the default gateway
+		# then if it's a valid IP address, we set this as a default value for
+		# the keystone endpoint.
+		db_get keystone/endpoint-ip
+		IP=${RET}
+		if [ -z "${IP}" ] ; then
+			DEFAULT_GW_IF=`LC_ALL=C route | grep default |awk -- '{ print $8 }'`
+			DEFAULT_GW_IP=`LC_ALL=C ifconfig ${DEFAULT_GW_IF} | grep 'inet addr' | sed 's/.\+inet addr:\([0-9.]\+\).\+/\1/'`
+			DEFAULT_GW_IP=`echo ${DEFAULT_GW_IP} | egrep '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'`
+			if [ -z "${DEFAULT_GW_IP}" ] ; then
+				db_set keystone/endpoint-ip ${DEFAULT_GW_IP}
+			fi
+		fi
+		db_input high keystone/endpoint-ip || true
+		db_input high keystone/region-name || true
+		db_go
+	fi
+}
+
 pkgos_var_user_group keystone
 pkgos_read_config -r ${KEY_CONF} admin_token keystone/auth-token
 if [ -z "$RET" ] ; then
@@ -60,5 +85,6 @@ if [ -z "$RET" ] ; then
 fi
 pkgos_dbc_read_conf ${KEY_CONF} keystone sql connection $@
 prompt_initial_keystone_admins
+keystone_create_endpoint_config
 
 exit 0

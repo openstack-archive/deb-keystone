@@ -6,7 +6,7 @@ set -e
 
 KEY_CONF=/etc/keystone/keystone.conf
 
-get_debconf_tenant_vars () {
+keystone_create_admin_tenant () {
 	db_get keystone/admin-user
 	ADMIN_USER_NAME=${RET:-admin}
 	db_get keystone/admin-password
@@ -17,9 +17,7 @@ get_debconf_tenant_vars () {
 	ADMIN_TENANT_NAME=${RET:-admin}
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
-}
 
-keystone_create_admin_tenant () {
 	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
 	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
 
@@ -29,6 +27,30 @@ keystone_create_admin_tenant () {
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+}
+
+keystone_create_endpoint_postinst () {
+	local PKG_NAME
+	PKG_NAME=${1}
+	db_get keystone/register-endpoint
+	if [ "${RET}" = "true" ] ; then
+		db_get keystone/endpoint-ip
+		# Make sure a valid IP has been entered in Debconf.
+		KEYSTONE_ENDPOINT_IP=`echo ${RET} | egrep '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'`
+		if [ -n ${KEYSTONE_ENDPOINT_IP} ] ; then
+			db_get keystone/region-name
+			REGION_NAME=${RET}
+			if [ -n "${REGION_NAME}" ] ; then
+				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
+					--name=keystone --type=identity --description="Keystone Identity Service")
+				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
+					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
+					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
+					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
+					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0)
+			fi
+		fi
+	fi
 }
 
 if [ "$1" = "configure" ] ; then
@@ -55,23 +77,31 @@ if [ "$1" = "configure" ] ; then
 		keystone-manage db_sync
 	fi
 
-	get_debconf_tenant_vars
-
-	db_stop
-
 	# Setup init script and start keystone
 	pkgos_init keystone
 
 	# On first install, create basics configuration and add roles
 	if [ -z "$2" ] ; then
-		echo -n "Sleeping 5 seconds... "
-		sleep 5
+		echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
+		sleep 1
+		echo -n "4..."
+		sleep 1
+		echo -n "3..."
+		sleep 1
+		echo -n "2..."
+		sleep 1
+		echo -n "1..."
+		sleep 1
+		echo "0"
 		echo -n "Upgrading db... "
 		keystone-manage db_sync
 		echo -n "Creating tenants... "
 		keystone_create_admin_tenant
+		echo -n "Registering keystone endpoint..."
+		keystone_create_endpoint_postinst
 		echo "done!"
 	fi
+	db_stop
 fi
 
 exit 0
