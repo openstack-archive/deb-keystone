@@ -27,7 +27,7 @@ _Description: Set up a database for Keystone?
  -plow keystone".
 
 Template: keystone/auth-token
-Type: string
+Type: password
 _Description: Authentication server administration token:
  Please enter the token to use with the authentication
  server.
