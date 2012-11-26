@@ -1,3 +1,10 @@
+keystone (2012.1.1-11) unstable; urgency=high
+
+  * Applies security patch from upstream: Ensures User is member of tenant in
+  ec2 validation (Closes: #694433).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 26 Nov 2012 14:05:33 +0000
+
 keystone (2012.1.1-10) unstable; urgency=low
 
   * Fixes keystone.config which wasn't starting dbconfig-common at first
