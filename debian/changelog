@@ -2,6 +2,8 @@ keystone (2012.1.1-11) unstable; urgency=high
 
   * Applies security patch from upstream: Ensures User is member of tenant in
   ec2 validation (Closes: #694433).
+  * Added Japanese debconf template translation, thanks to victory
+  <victory.deb@gmail.com> (Closes: #693056).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 26 Nov 2012 14:05:33 +0000
 
