@@ -1,3 +1,7 @@
+Description: Fixes path to keystone.log file in etc/logging.conf.sample
+Author: Ghe Rivero <ghe@debian.org>
+Forwarded: not-needed
+
 --- a/etc/logging.conf.sample
 +++ b/etc/logging.conf.sample
 @@ -21,7 +21,7 @@

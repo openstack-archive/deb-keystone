@@ -1,3 +1,7 @@
+Description: Uncomments the default connection directive of etc/keystone.conf.sample
+Author: Ghe Rivero <ghe@debian.org>
+Forwarded: not-needed
+
 --- a/etc/keystone.conf.sample
 +++ b/etc/keystone.conf.sample
 @@ -55,7 +55,7 @@

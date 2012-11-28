@@ -1,3 +1,7 @@
+Description: Fixes tools/pip-requires which declares == when >= is actually ok
+Author: Ghe Rivero <ghe@debian.org>
+Forwarded: not-needed
+
 --- a/tools/pip-requires
 +++ b/tools/pip-requires
 @@ -1,6 +1,6 @@
