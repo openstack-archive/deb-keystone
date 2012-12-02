@@ -9,8 +9,8 @@ KEY_CONF=/etc/keystone/keystone.conf
 
 prompt_initial_keystone_admins () {
 	local have_pass
-	db_input high keystone/admin-user || true
-	db_input high keystone/admin-email || true
+	db_input medium keystone/admin-user || true
+	db_input medium keystone/admin-email || true
 	db_input high keystone/admin-password || true
 	db_input high keystone/admin-password-confirm || true
 	db_input medium keystone/admin-role-name || true
@@ -73,13 +73,13 @@ keystone_create_endpoint_config () {
 			fi
 		fi
 		db_input high keystone/endpoint-ip || true
-		db_input high keystone/region-name || true
+		db_input medium keystone/region-name || true
 		db_go
 	fi
 }
 
 pkgos_var_user_group keystone
-pkgos_read_config -r ${KEY_CONF} admin_token keystone/auth-token
+pkgos_read_config ${KEY_CONF} admin_token keystone/auth-token
 if [ -z "$RET" ] ; then
 	db_set keystone/auth-token $(pkgos_gen_pass)
 fi
