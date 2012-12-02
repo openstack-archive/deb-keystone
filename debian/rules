@@ -69,10 +69,3 @@ override_dh_clean:
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
 	rm -f $(CURDIR)/debian/keystone.config $(CURDIR)/debian/keystone.postinst
 	dh_clean
-
-override_dh_gencontrol:
-	if dpkg-vendor --derives-from ubuntu ; then \
-		dh_gencontrol -- -T$(CURDIR)/debian/ubuntu_control_vars ; \
-	else \
-		dh_gencontrol -- -T$(CURDIR)/debian/debian_control_vars ; \
-	fi
