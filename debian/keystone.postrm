@@ -1,7 +1,6 @@
 #!/bin/sh
 
 set -e
-set -x
 
 if [ "${1}" = "purge" ] ; then
 	if [ -f /usr/share/debconf/confmodule ] && [ -f /usr/share/dbconfig-common/dpkg/postrm ] ; then
