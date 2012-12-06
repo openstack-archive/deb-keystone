@@ -56,7 +56,7 @@ Forwarded: no
 +catalog.regionOne.image.internalURL = http://localhost:9292/v1
 +catalog.regionOne.image.name = Image Service
 +
-+catalog.regionOne.network.publicURL = http://$IP:9696
-+catalog.regionOne.network.adminURL = http://$IP:9696
-+catalog.regionOne.network.internalURL = http://$IP:9696
++catalog.regionOne.network.publicURL = http://localhost:9696
++catalog.regionOne.network.adminURL = http://localhost:9696
++catalog.regionOne.network.internalURL = http://localhost:9696
 +catalog.regionOne.network.name = Network Service 
