@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nova 2012.1-6\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2013-01-14 16:11+0000\n"
+"POT-Creation-Date: 2013-01-14 16:21+0000\n"
 "PO-Revision-Date: 2012-08-14 11:52+0200\n"
 "Last-Translator: Erik Pfannenstein <debianignatz@gmx.de>\n"
 "Language-Team: de <debian-l10n-german@lists.debian.org>\n"
@@ -83,13 +83,13 @@ msgstr ""
 "Bitte geben Sie das Token ein, der für den Authentifzierungsserver benutzt "
 "werden soll."
 
-#. Type: Type:
+#. Type: boolean
 #. Description
 #: ../keystone.templates:4001
 msgid "Register admin tenants?"
 msgstr ""
 
-#. Type: Type:
+#. Type: boolean
 #. Description
 #: ../keystone.templates:4001
 msgid ""

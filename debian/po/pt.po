@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nova\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2013-01-14 16:11+0000\n"
+"POT-Creation-Date: 2013-01-14 16:21+0000\n"
 "PO-Revision-Date: 2012-08-19 18:48+0100\n"
 "Last-Translator: Miguel Figueiredo <elmig@debianpt.org>\n"
 "Language-Team: Portuguese <traduz@debianpt.org>\n"
@@ -79,13 +79,13 @@ msgstr "Token de administração do servidor de autenticação:"
 msgid "Please enter the token to use with the authentication server."
 msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
 
-#. Type: Type:
+#. Type: boolean
 #. Description
 #: ../keystone.templates:4001
 msgid "Register admin tenants?"
 msgstr ""
 
-#. Type: Type:
+#. Type: boolean
 #. Description
 #: ../keystone.templates:4001
 msgid ""
