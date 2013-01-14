@@ -95,10 +95,16 @@ if [ "$1" = "configure" ] ; then
 		echo "0"
 		echo -n "Upgrading db... "
 		keystone-manage db_sync
-		echo -n "Creating tenants... "
-		keystone_create_admin_tenant
-		echo -n "Registering keystone endpoint..."
-		keystone_create_endpoint_postinst
+		db_get keystone/create-admin-tenant
+		if [ "$RET" = "true" ] ; then
+			echo -n "Creating tenants... "
+			keystone_create_admin_tenant
+		fi
+		db_get keystone/register-endpoint
+		if [ "$RET" = "true" ] ; then
+			echo -n "Registering keystone endpoint..."
+			keystone_create_endpoint_postinst
+		fi
 		echo "done!"
 	fi
 	db_stop

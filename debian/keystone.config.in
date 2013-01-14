@@ -83,7 +83,12 @@ pkgos_read_config ${KEY_CONF} admin_token keystone/auth-token
 if [ -z "$RET" ] ; then
 	db_set keystone/auth-token $(pkgos_gen_pass)
 fi
-prompt_initial_keystone_admins
+db_input high keystone/create-admin-tenant || true
+db_go || true
+db_get keystone/create-admin-tenant
+if [ "${RET}" = "true" ] ; then
+	prompt_initial_keystone_admins
+fi
 keystone_create_endpoint_config
 
 exit 0
