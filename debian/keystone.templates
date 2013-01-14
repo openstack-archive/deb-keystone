@@ -33,7 +33,7 @@ _Description: Authentication server administration token:
  server.
 
 Template: keystone/create-admin-tenant
-Type: Type: boolean
+Type: boolean
 Default: false
 _Description: Register admin tenants?
  For Openstack to work, you need a basic tenant configuration. The keystone
