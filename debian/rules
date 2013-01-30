@@ -13,21 +13,21 @@ include /usr/share/openstack-pkg-tools/pkgos.make
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-        # create a dummy db for testing
+	# create a dummy db for testing
 	rm -rf $(CURDIR)/debian/tests/testing.db
-        migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
-                $(CURDIR)/keystone/common/sql/migrate_repo
-        # run migrations
+	migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
+		$(CURDIR)/keystone/common/sql/migrate_repo
+	# run migrations
 	PYTHONPATH=$(CURDIR)  migrate upgrade \
-                sqlite:////$(CURDIR)/debian/tests/testing.db \
-                $(CURDIR)/keystone/common/sql/migrate_repo
+		sqlite:////$(CURDIR)/debian/tests/testing.db \
+		$(CURDIR)/keystone/common/sql/migrate_repo
 
-        # tests/test_overrides.conf can be used to setup the environment
-        # for unit testing.
+	# tests/test_overrides.conf can be used to setup the environment
+	# for unit testing.
 	cp tests/test_overrides.conf tests/test_overrides.conf.orig
 	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/tests/test_overrides.conf
 	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/tests/test_overrides.conf
-	bash run_tests.sh -N
+	PYTHONPATH=$(CURDIR) bash run_tests.sh -N
 	mv $(CURDIR)/tests/test_overrides.conf.orig $(CURDIR)/tests/test_overrides.conf
 	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
 endif
@@ -46,7 +46,7 @@ else
 endif
 
 override_dh_install:
-	dh_install
+	dh_install --fail-missing
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
@@ -61,8 +61,8 @@ override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
 	rm -rf $(CURDIR)/keystone/test/keystone.sql.log $(CURDIR)/keystone/test/keystone.ldap.log
 	rm -rf $(CURDIR)/doc/build
-        # NOTE(adam_g) The following stuff is built in /doc/source.  Safe for now, but
-        # should be fixed upstream or updated here post-essex
+	# NOTE(adam_g) The following stuff is built in /doc/source.  Safe for now, but
+	# should be fixed upstream or updated here post-essex
 	rm -rf $(CURDIR)/doc/source/keystone*.rst
 	rm -rf $(CURDIR)/doc/source/modules.rst
 	rm -rf $(CURDIR)/doc/source/sourcecode

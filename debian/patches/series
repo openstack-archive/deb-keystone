@@ -1,4 +1,2 @@
 logging.conf.patch
-pip-require_versions
 sql_conn.patch
-fixes-keystone-default-catalog.patch
