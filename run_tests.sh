@@ -32,6 +32,7 @@ function usage {
   echo "  -h, --help               Print this usage message"
   echo "  -xintegration            Ignore all keystoneclient test cases (integration tests)"
   echo "  --hide-elapsed           Don't print the elapsed time for each test along with slow test list"
+  echo "  --standard-threads       Don't do the eventlet threading monkeypatch."
   echo ""
   echo "Note: with no options specified, the script will try to run the tests in a virtual environment,"
   echo "      If no virtualenv is found, the script will ask if you would like to create one.  If you "
@@ -50,7 +51,10 @@ function process_option {
     -p|--pep8) just_pep8=1;;
     -P|--no-pep8) no_pep8=1;;
     -c|--coverage) coverage=1;;
-	-xintegration) nokeystoneclient=1;;
+    -xintegration) nokeystoneclient=1;;
+    --standard-threads)
+        export STANDARD_THREADS=1
+        ;;
     -*) noseopts="$noseopts $1";;
     *) noseargs="$noseargs $1"
   esac
@@ -80,13 +84,13 @@ if [ $coverage -eq 1 ]; then
 fi
 
 if [ $nokeystoneclient -eq 1 ]; then
-	# disable the integration tests
+    # disable the integration tests
     noseopts="$noseopts -I test_keystoneclient*"
 fi
 
 function run_tests {
   # Just run the test suites in current environment
-  ${wrapper} $NOSETESTS 2> run_tests.log
+  ${wrapper} $NOSETESTS
   # If we get some short import error right away, print the error log directly
   RESULT=$?
   if [ "$RESULT" -ne "0" ];
@@ -103,18 +107,17 @@ function run_tests {
 function run_pep8 {
   echo "Running pep8 ..."
   # Opt-out files from pep8
-  ignore_scripts="*.sh:"
-  ignore_files="*eventlet-patch:*pip-requires"
-  ignore_dirs="*ajaxterm*"
-  GLOBIGNORE="$ignore_scripts:$ignore_files:$ignore_dirs"
-  srcfiles=`find bin -type f ! -name .*.swp`
-  srcfiles+=" keystone tests"
+  ignore_scripts="*.pyc,*.pyo,*.sh,*.swp,*.rst"
+  ignore_files="*pip-requires"
+  ignore_dirs=".venv,.tox,dist,doc,openstack,vendor,*egg"
+  ignore="$ignore_scripts,$ignore_files,$ignore_dirs"
+  srcfiles="."
   # Just run PEP8 in current environment
-  ${wrapper} pep8 --repeat --show-pep8 --show-source \
-    --exclude=vcsversion.py ${srcfiles} | tee pep8.txt
+  ${wrapper} pep8 --repeat --show-source \
+    --exclude=${ignore} ${srcfiles} | tee pep8.txt
 }
 
-NOSETESTS="python run_tests.py $noseopts $noseargs"
+NOSETESTS="nosetests $noseopts $noseargs"
 
 if [ $never_venv -eq 0 ]
 then

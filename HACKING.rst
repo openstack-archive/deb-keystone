@@ -11,6 +11,8 @@ General
 
 - Put two newlines between top-level code (funcs, classes, etc)
 - Put one newline between methods in classes and anywhere else
+- Long lines should be wrapped in parentheses
+  in preference to using a backslash for line continuation.
 - Do not write "except:", use "except Exception:" at the very least
 - Include your name with TODOs as in "#TODO(termie)"
 - Do not name anything the same name as a built-in or reserved word
@@ -42,7 +44,7 @@ Use the built-in logging module, and ensure you ``getLogger``::
 Imports
 -------
 
-- Do not import objects, only modules
+- Import modules, not module attributes
 - Do not import more than one module per line
 - Do not make relative imports
 - Order your imports by the full module path

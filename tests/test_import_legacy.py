@@ -16,8 +16,10 @@
 
 import os
 
-import sqlite3
-#import sqlalchemy
+try:
+    import sqlite3 as dbapi
+except ImportError:
+    from pysqlite2 import dbapi2 as dbapi
 
 from keystone.catalog.backends import templated as catalog_templated
 from keystone.common.sql import legacy
@@ -35,9 +37,14 @@ class ImportLegacy(test.TestCase):
         super(ImportLegacy, self).setUp()
         self.config([test.etcdir('keystone.conf.sample'),
                      test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_sql.conf')])
+                     test.testsdir('backend_sql.conf'),
+                     test.testsdir('backend_sql_disk.conf')])
         sql_util.setup_test_database()
         self.identity_api = identity_sql.Identity()
+
+    def tearDown(self):
+        sql_util.teardown_test_database()
+        super(ImportLegacy, self).tearDown()
 
     def setup_old_database(self, sql_dump):
         sql_path = test.testsdir(sql_dump)
@@ -47,7 +54,7 @@ class ImportLegacy(test.TestCase):
         except OSError:
             pass
         script_str = open(sql_path).read().strip()
-        conn = sqlite3.connect(db_path)
+        conn = dbapi.connect(db_path)
         conn.executescript(script_str)
         conn.commit()
         return db_path

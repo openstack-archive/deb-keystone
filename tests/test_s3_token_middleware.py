@@ -31,9 +31,9 @@ def denied_request(code):
         'AccessDenied': (401, 'Access denied'),
         'InvalidURI': (400, 'Could not parse the specified URI'),
     }
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Error>\r\n  ' \
-        '<Code>%s</Code>\r\n  <Message>%s</Message>\r\n</Error>\r\n' \
-        % (code, error_table[code][1])
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\r\n<Error>\r\n  '
+           '<Code>%s</Code>\r\n  <Message>%s</Message>\r\n</Error>\r\n' %
+           (code, error_table[code][1]))
     return xml
 
 
@@ -71,7 +71,7 @@ class FakeHTTPConnection(object):
         if self.status == 503:
             raise Exception
         ret = {'access': {'token': {'id': 'TOKEN_ID',
-                                    'tenant': {'id':  'TENANT_ID'}}}}
+                                    'tenant': {'id': 'TENANT_ID'}}}}
         body = jsonutils.dumps(ret)
         status = self.status
         self.resp = FakeHTTPResponse(status, body)
@@ -154,15 +154,15 @@ class S3TokenMiddlewareTest(unittest.TestCase):
         req = webob.Request.blank('/v1/AUTH_cfa/c/o')
         req.headers['Authorization'] = 'access:signature'
         req.headers['X-Storage-Token'] = 'token'
-        resp = webob.Request(req.get_response(self.middleware).environ)
-        self.assertTrue(resp.path.startswith('/v1/AUTH_TENANT_ID'))
-        self.assertEqual(resp.headers['X-Auth-Token'], 'TOKEN_ID')
+        req.get_response(self.middleware)
+        self.assertTrue(req.path.startswith('/v1/AUTH_TENANT_ID'))
+        self.assertEqual(req.headers['X-Auth-Token'], 'TOKEN_ID')
 
     def test_authorization_nova_toconnect(self):
         req = webob.Request.blank('/v1/AUTH_swiftint/c/o')
         req.headers['Authorization'] = 'access:FORCED_TENANT_ID:signature'
         req.headers['X-Storage-Token'] = 'token'
-        req = req.get_response(self.middleware)
+        req.get_response(self.middleware)
         path = req.environ['PATH_INFO']
         self.assertTrue(path.startswith('/v1/AUTH_FORCED_TENANT_ID'))
 

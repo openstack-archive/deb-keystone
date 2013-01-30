@@ -1,16 +1,34 @@
-import subprocess
+import hashlib
 
 from keystone.common import logging
 
 
+subprocess = None
 LOG = logging.getLogger(__name__)
 PKI_ANS1_PREFIX = 'MII'
+
+
+def _ensure_subprocess():
+    # NOTE(vish): late loading subprocess so we can
+    #             use the green version if we are in
+    #             eventlet.
+    global subprocess
+    if not subprocess:
+        try:
+            from eventlet import patcher
+            if patcher.already_patched.get('os'):
+                from eventlet.green import subprocess
+            else:
+                import subprocess
+        except ImportError:
+            import subprocess
 
 
 def cms_verify(formatted, signing_cert_file_name, ca_file_name):
     """
         verifies the signature of the contents IAW CMS syntax
     """
+    _ensure_subprocess()
     process = subprocess.Popen(["openssl", "cms", "-verify",
                                 "-certfile", signing_cert_file_name,
                                 "-CAfile", ca_file_name,
@@ -23,7 +41,7 @@ def cms_verify(formatted, signing_cert_file_name, ca_file_name):
     output, err = process.communicate(formatted)
     retcode = process.poll()
     if retcode:
-        LOG.error('Verify error: %s' % err)
+        LOG.error(_('Verify error: %s') % err)
         raise subprocess.CalledProcessError(retcode, "openssl", output=err)
     return output
 
@@ -100,7 +118,7 @@ def cms_sign_text(text, signing_cert_file_name, signing_key_file_name):
     Produces a Base64 encoding of a DER formatted CMS Document
     http://en.wikipedia.org/wiki/Cryptographic_Message_Syntax
     """
-
+    _ensure_subprocess()
     process = subprocess.Popen(["openssl", "cms", "-sign",
                                 "-signer", signing_cert_file_name,
                                 "-inkey", signing_key_file_name,
@@ -112,10 +130,9 @@ def cms_sign_text(text, signing_cert_file_name, signing_key_file_name):
                                stderr=subprocess.PIPE)
     output, err = process.communicate(text)
     retcode = process.poll()
-    if retcode:
-        LOG.error('Signing error: %s' % err)
-        raise subprocess.CalledProcessError(retcode,
-                                            "openssl", output=output)
+    if retcode or "Error" in err:
+        LOG.error(_('Signing error: %s') % err)
+        raise subprocess.CalledProcessError(retcode, "openssl")
     return output
 
 
@@ -135,3 +152,18 @@ def cms_to_token(cms_text):
     signed_text = signed_text.replace('\n', '')
 
     return signed_text
+
+
+def cms_hash_token(token_id):
+    """
+    return: for ans1_token, returns the hash of the passed in token
+            otherwise, returns what it was passed in.
+    """
+    if token_id is None:
+        return None
+    if is_ans1_token(token_id):
+        hasher = hashlib.md5()
+        hasher.update(token_id)
+        return hasher.hexdigest()
+    else:
+        return token_id

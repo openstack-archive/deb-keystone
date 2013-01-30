@@ -15,6 +15,13 @@
 # under the License.
 import re
 
+from keystone.common import logging
+from keystone import config
+
+
+CONF = config.CONF
+LOG = logging.getLogger(__name__)
+
 
 class Error(StandardError):
     """Base error class.
@@ -27,8 +34,23 @@ class Error(StandardError):
 
     def __init__(self, message=None, **kwargs):
         """Use the doc string as the error message by default."""
-        message = message or self.__doc__ % kwargs
+
+        try:
+            message = self._build_message(message, **kwargs)
+        except KeyError:
+            # if you see this warning in your logs, please raise a bug report
+            LOG.warning('missing expected exception kwargs (programmer error)')
+            message = self.__doc__
+
         super(Error, self).__init__(message)
+
+    def _build_message(self, message, **kwargs):
+        """Builds and returns an exception message.
+
+        :raises: KeyError given insufficient kwargs
+
+        """
+        return message or self.__doc__ % kwargs
 
     def __str__(self):
         """Cleans up line breaks and indentation from doc strings."""
@@ -51,13 +73,24 @@ class ValidationError(Error):
     title = 'Bad Request'
 
 
-class Unauthorized(Error):
+class SecurityError(Error):
+    """Avoids exposing details of security failures, unless in debug mode."""
+
+    def _build_message(self, message, **kwargs):
+        """Only returns detailed messages in debug mode."""
+        if CONF.debug:
+            return message or self.__doc__ % kwargs
+        else:
+            return self.__doc__ % kwargs
+
+
+class Unauthorized(SecurityError):
     """The request you have made requires authentication."""
     code = 401
     title = 'Not Authorized'
 
 
-class Forbidden(Error):
+class Forbidden(SecurityError):
     """You are not authorized to perform the requested action."""
     code = 403
     title = 'Not Authorized'
@@ -83,6 +116,10 @@ class MetadataNotFound(NotFound):
     #          so this exception should not be exposed
 
 
+class PolicyNotFound(NotFound):
+    """Could not find policy: %(policy_id)s"""
+
+
 class RoleNotFound(NotFound):
     """Could not find role: %(role_id)s"""
 
@@ -91,8 +128,16 @@ class ServiceNotFound(NotFound):
     """Could not find service: %(service_id)s"""
 
 
+class DomainNotFound(NotFound):
+    """Could not find domain: %(domain_id)s"""
+
+
 class TenantNotFound(NotFound):
     """Could not find tenant: %(tenant_id)s"""
+
+
+class ProjectNotFound(TenantNotFound):
+    """Could not find project: %(project_id)s"""
 
 
 class TokenNotFound(NotFound):
@@ -101,6 +146,10 @@ class TokenNotFound(NotFound):
 
 class UserNotFound(NotFound):
     """Could not find user: %(user_id)s"""
+
+
+class GroupNotFound(NotFound):
+    """Could not find group: %(group_id)s"""
 
 
 class Conflict(Error):
@@ -121,6 +170,10 @@ class UnexpectedError(Error):
     """
     code = 500
     title = 'Internal Server Error'
+
+
+class MalformedEndpoint(UnexpectedError):
+    """Malformed endpoint URL (see ERROR log for details): %(endpoint)s"""
 
 
 class NotImplemented(Error):

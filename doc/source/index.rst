@@ -48,7 +48,7 @@ Getting Started
     community
 
 Man Pages
----------
+=========
 
 .. toctree::
     :maxdepth: 1
@@ -66,13 +66,14 @@ Developers Documentation
    middlewarearchitecture
    api_curl_examples
    apache-httpd
+   external-auth
 
 Code Documentation
 ==================
 .. toctree::
    :maxdepth: 1
 
-   modules
+   api/autoindex
 
 Indices and tables
 ==================

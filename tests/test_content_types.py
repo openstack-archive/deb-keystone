@@ -258,10 +258,6 @@ class RestfulTestCase(test.TestCase):
 class CoreApiTests(object):
     def assertValidError(self, error):
         """Applicable to XML and JSON."""
-        try:
-            print error.attrib
-        except:
-            pass
         self.assertIsNotNone(error.get('code'))
         self.assertIsNotNone(error.get('title'))
         self.assertIsNotNone(error.get('message'))
@@ -312,6 +308,18 @@ class CoreApiTests(object):
         self.assertIsNotNone(tenant.get('id'))
         self.assertIsNotNone(tenant.get('name'))
 
+    def test_public_not_found(self):
+        r = self.public_request(
+            path='/%s' % uuid.uuid4().hex,
+            expected_status=404)
+        self.assertValidErrorResponse(r)
+
+    def test_admin_not_found(self):
+        r = self.admin_request(
+            path='/%s' % uuid.uuid4().hex,
+            expected_status=404)
+        self.assertValidErrorResponse(r)
+
     def test_public_multiple_choice(self):
         r = self.public_request(path='/', expected_status=300)
         self.assertValidMultipleChoiceResponse(r)
@@ -361,6 +369,22 @@ class CoreApiTests(object):
                         'password': self.user_foo['password'],
                     },
                     'tenantId': self.tenant_bar['id'],
+                },
+            },
+            # TODO(dolph): creating a token should result in a 201 Created
+            expected_status=200)
+        self.assertValidAuthenticationResponse(r)
+
+    def test_authenticate_unscoped(self):
+        r = self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
+                'auth': {
+                    'passwordCredentials': {
+                        'username': self.user_foo['name'],
+                        'password': self.user_foo['password'],
+                    },
                 },
             },
             # TODO(dolph): creating a token should result in a 201 Created
@@ -430,6 +454,15 @@ class CoreApiTests(object):
             token=token)
         self.assertValidTenantResponse(r)
 
+    def test_get_tenant_by_name(self):
+        token = self.get_scoped_token()
+        r = self.admin_request(
+            path='/v2.0/tenants?name=%(tenant_name)s' % {
+                'tenant_name': self.tenant_bar['name'],
+            },
+            token=token)
+        self.assertValidTenantResponse(r)
+
     def test_get_user_roles(self):
         raise nose.exc.SkipTest('Blocked by bug 933565')
 
@@ -456,6 +489,15 @@ class CoreApiTests(object):
         r = self.admin_request(
             path='/v2.0/users/%(user_id)s' % {
                 'user_id': self.user_foo['id'],
+            },
+            token=token)
+        self.assertValidUserResponse(r)
+
+    def test_get_user_by_name(self):
+        token = self.get_scoped_token()
+        r = self.admin_request(
+            path='/v2.0/users?name=%(user_name)s' % {
+                'user_name': self.user_foo['name'],
             },
             token=token)
         self.assertValidUserResponse(r)
@@ -520,7 +562,7 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
         if require_service_catalog:
             self.assertIsNotNone(serviceCatalog)
         if serviceCatalog is not None:
-            self.assertTrue(len(r.body['access']['serviceCatalog']))
+            self.assertTrue(isinstance(serviceCatalog, list))
             for service in r.body['access']['serviceCatalog']:
                 # validate service
                 self.assertIsNotNone(service.get('name'))
@@ -783,7 +825,6 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
         if require_service_catalog:
             self.assertIsNotNone(serviceCatalog)
         if serviceCatalog is not None:
-            self.assertTrue(len(serviceCatalog.findall(self._tag('service'))))
             for service in serviceCatalog.findall(self._tag('service')):
                 # validate service
                 self.assertIsNotNone(service.get('name'))

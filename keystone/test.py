@@ -14,11 +14,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import os
 import subprocess
 import sys
 import time
 
+import eventlet
 import mox
 from paste import deploy
 import stubout
@@ -29,15 +31,23 @@ from keystone.common import logging
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
-from keystone.openstack.common import importutils
+from keystone import catalog
+from keystone import identity
+from keystone import policy
+from keystone import token
 
+
+do_monkeypatch = not os.getenv('STANDARD_THREADS')
+eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
+                              thread=do_monkeypatch)
 
 LOG = logging.getLogger(__name__)
-ROOTDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOTDIR = os.path.dirname(os.path.abspath(os.curdir))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
 TESTSDIR = os.path.join(ROOTDIR, 'tests')
 ETCDIR = os.path.join(ROOTDIR, 'etc')
 CONF = config.CONF
+DRIVERS = {}
 
 
 cd = os.chdir
@@ -53,6 +63,14 @@ def etcdir(*p):
 
 def testsdir(*p):
     return os.path.join(TESTSDIR, *p)
+
+
+def initialize_drivers():
+    DRIVERS['catalog_api'] = catalog.Manager()
+    DRIVERS['identity_api'] = identity.Manager()
+    DRIVERS['policy_api'] = policy.Manager()
+    DRIVERS['token_api'] = token.Manager()
+    return DRIVERS
 
 
 def checkout_vendor(repo, rev):
@@ -82,7 +100,7 @@ def checkout_vendor(repo, rev):
         with open(modcheck, 'w') as fd:
             fd.write('1')
     except subprocess.CalledProcessError:
-        LOG.warning('Failed to checkout %s', repo)
+        LOG.warning(_('Failed to checkout %s'), repo)
     cd(working_dir)
     return revdir
 
@@ -196,10 +214,9 @@ class TestCase(NoModule, unittest.TestCase):
             CONF.set_override(k, v)
 
     def load_backends(self):
-        """Hacky shortcut to load the backends for data manipulation."""
-        self.identity_api = importutils.import_object(CONF.identity.driver)
-        self.token_api = importutils.import_object(CONF.token.driver)
-        self.catalog_api = importutils.import_object(CONF.catalog.driver)
+        """Create shortcut references to each driver for data manipulation."""
+        for name, manager in initialize_drivers().iteritems():
+            setattr(self, name, manager.driver)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -210,11 +227,6 @@ class TestCase(NoModule, unittest.TestCase):
         """
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
-        if hasattr(self, 'catalog_api'):
-            for service in fixtures.SERVICES:
-                rv = self.catalog_api.create_service(service['id'], service)
-                setattr(self, 'service_%s' % service['id'], rv)
-
         if hasattr(self, 'identity_api'):
             for tenant in fixtures.TENANTS:
                 rv = self.identity_api.create_tenant(tenant['id'], tenant)
@@ -281,3 +293,10 @@ class TestCase(NoModule, unittest.TestCase):
     def add_path(self, path):
         sys.path.insert(0, path)
         self._paths.append(path)
+
+    def assertCloseEnoughForGovernmentWork(self, a, b, delta=3):
+        """Asserts that two datetimes are nearly equal within a small delta.
+
+        :param delta: Maximum allowable time delta, defined in seconds.
+        """
+        self.assertAlmostEqual(a, b, delta=datetime.timedelta(seconds=delta))

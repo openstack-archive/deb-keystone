@@ -73,6 +73,7 @@ values are organized into the following sections:
 * ``[catalog]`` - service catalog driver configuration
 * ``[token]`` - token driver configuration
 * ``[policy]`` - policy system driver configuration for RBAC
+* ``[signing]`` - cryptographic signatures for PKI based tokens
 * ``[ssl]`` - SSL configuration
 
 The Keystone configuration file is expected to be named ``keystone.conf``.
@@ -85,6 +86,111 @@ order:
 * ``~/``
 * ``/etc/keystone/``
 * ``/etc/``
+
+
+Certificates for PKI
+--------------------
+
+PKI stands for Public Key Infrastructure.  Tokens are documents,
+cryptographically signed using the X509 standard.  In order to work correctly
+token generation requires a public/private key pair.  The public key must be
+signed in an X509 certificate, and the certificate used to sign it must be
+available as Certificate Authority (CA) certificate.  These files can be
+generated either using the keystone-manage utility, or externally generated.
+The files need to be in the locations specified by the top level Keystone
+configuration file as specified in the above section.  Additionally, the
+private key should only be readable by the system user that will run Keystone.
+The values that specify where to read the certificates are under the
+``[signing]`` section of the configuration file.  The configuration values are:
+
+* ``token_format`` - Determines the algorithm used to generate tokens.  Can be either ``UUID`` or ``PKI``. Defaults to ``PKI``
+* ``certfile`` - Location of certificate used to verify tokens.  Default is ``/etc/keystone/ssl/certs/signing_cert.pem``
+* ``keyfile`` - Location of private key used to sign tokens.  Default is ``/etc/keystone/ssl/private/signing_key.pem``
+* ``ca_certs`` - Location of certificate for the authority that issued the above certificate. Default is ``/etc/keystone/ssl/certs/ca.pem``
+* ``key_size`` - Default is ``1024``
+* ``valid_days`` - Default is ``3650``
+* ``ca_password``  - Password required to read the ca_file. Default is None
+
+Signing Certificate Issued by External CA
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You may use a signing certificate issued by an external CA instead of generated
+by keystone-manage. However, certificate issued by external CA must satisfy
+the following conditions:
+
+* all certificate and key files must be in Privacy Enhanced Mail (PEM) format
+* private key files must not be protected by a password
+
+When using signing certificate issued by an external CA, you do not need to
+specify ``key_size``, ``valid_days``, and ``ca_password`` as they will be
+ignored.
+
+The basic workflow for using a signing certificate issed by an external CA involves:
+
+1. `Request Signing Certificate from External CA`_
+2. convert certificate and private key to PEM if needed
+3. `Install External Signing Certificate`_
+
+
+Request Signing Certificate from External CA
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+One way to request a signing certificate from an external CA is to first
+generate a PKCS #10 Certificate Request Syntax (CRS) using OpenSSL CLI.
+
+First create a certificate request configuration file (e.g. ``cert_req.conf``)::
+
+    [ req ]
+    default_bits            = 1024
+    default_keyfile         = keystonekey.pem
+    default_md              = sha1
+
+    prompt                  = no
+    distinguished_name      = distinguished_name
+
+    [ distinguished_name ]
+    countryName             = US
+    stateOrProvinceName     = CA
+    localityName            = Sunnyvale
+    organizationName        = OpenStack
+    organizationalUnitName  = Keystone
+    commonName              = Keystone Signing
+    emailAddress            = keystone@openstack.org
+
+Then generate a CRS with OpenSSL CLI. **Do not encrypt the generated private
+key. Must use the -nodes option.**
+
+For example::
+
+    openssl req -newkey rsa:1024 -keyout signing_key.pem -keyform PEM -out signing_cert_req.pem -outform PEM -config cert_req.conf -nodes
+
+
+If everything is successfully, you should end up with ``signing_cert_req.pem``
+and ``signing_key.pem``. Send ``signing_cert_req.pem`` to your CA to request a token signing certificate and make sure to ask the certificate to be in PEM format. Also, make sure your trusted CA certificate chain is also in PEM format.
+
+
+Install External Signing Certificate
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Assuming you have the following already:
+
+* ``signing_cert.pem`` - (Keystone token) signing certificate in PEM format
+* ``signing_key.pem`` - corresponding (non-encrypted) private key in PEM format
+* ``cacert.pem`` - trust CA certificate chain in PEM format
+
+Copy the above to your certificate directory. For example::
+
+    mkdir -p /etc/keystone/ssl/certs
+    cp signing_cert.pem /etc/keystone/ssl/certs/
+    cp signing_key.pem /etc/keystone/ssl/certs/
+    cp cacert.pem /etc/keystone/ssl/certs/
+    chmod -R 700 /etc/keystone/ssl/certs
+
+**Make sure the certificate directory is root-protected.**
+
+If your certificate directory path is different from the default ``/etc/keystone/ssl/certs``, make sure it is reflected in the ``[signing]`` section of the
+configuration file.
+
 
 Service Catalog
 ---------------
@@ -202,16 +308,16 @@ SSL
 Keystone may be configured to support 2-way SSL out-of-the-box.  The x509
 certificates used by Keystone must be obtained externally and configured for use
 with Keystone as described in this section.  However, a set of sample certficates
-is provided in the examples/ssl directory with the Keystone distribution for testing.
+is provided in the examples/pki/certs and examples/pki/private directories with the Keystone distribution for testing.
 Here is the description of each of them and their purpose:
 
 Types of certificates
 ^^^^^^^^^^^^^^^^^^^^^
 
-ca.pem
+cacert.pem
     Certificate Authority chain to validate against.
 
-keystone.pem
+ssl_cert.pem
     Public certificate for Keystone server.
 
 middleware.pem
@@ -220,7 +326,7 @@ middleware.pem
 cakey.pem
     Private key for the CA.
 
-keystonekey.pem
+ssl_key.pem
     Private key for the Keystone server.
 
 Note that you may choose whatever names you want for these certificates, or combine
@@ -282,10 +388,10 @@ files for each Server application.
 * ``etc/logging.conf.sample``
 * ``etc/default_catalog.templates``
 
-.. _`prepare your Essex deployment`:
+.. _`prepare your deployment`:
 
-Preparing your Essex deployment
-===============================
+Preparing your deployment
+=========================
 
 Step 1: Configure keystone.conf
 -------------------------------
@@ -344,9 +450,9 @@ Migration support is provided for the following legacy Keystone versions:
 .. NOTE::
 
     Before you can import your legacy data, you must first
-    `prepare your Essex deployment`_.
+    `prepare your deployment`_.
 
-Step 1: Ensure your Essex deployment can access your legacy database
+Step 1: Ensure your deployment can access your legacy database
 --------------------------------------------------------------------
 
 Your legacy ``keystone.conf`` contains a SQL configuration section called
@@ -355,7 +461,7 @@ looks like::
 
     sql_connection = sqlite:///keystone.db
 
-This connection string needs to be accessible from your Essex deployment (e.g.
+This connection string needs to be accessible from your deployment (e.g.
 you may need to copy your SQLite ``*.db`` file to a new server, adjust the
 relative path as appropriate, or open a firewall for MySQL, etc).
 
@@ -368,7 +474,7 @@ Use the following command to import your old data using the value of
     $ keystone-manage import_legacy <sql_connection>
 
 You should now be able to run the same command you used to test your new
-database above, but now you'll see your legacy Keystone data in Essex::
+database above, but now you'll see your legacy Keystone data::
 
     $ keystone --token ADMIN --endpoint http://127.0.0.1:35357/v2.0/ tenant-list
     +----------------------------------+----------------+---------+
@@ -385,7 +491,7 @@ Migrating your Service Catalog from legacy versions of Keystone
 ===============================================================
 
 While legacy Keystone deployments stored the service catalog in the database,
-the service catalog in Essex is stored in a flat ``template_file``. An example
+the service catalog is stored in a flat ``template_file``. An example
 service catalog template file may be found in
 ``etc/default_catalog.templates``. You can change the path to your service
 catalog template in ``keystone.conf`` by changing the value of
@@ -404,13 +510,13 @@ Migrating from Nova Auth
 ========================
 
 Migration of users, projects (aka tenants), roles and EC2 credentials
-is supported for the Essex release of Nova. To migrate your auth
+is supported for the Essex and later releases of Nova. To migrate your auth
 data from Nova, use the following steps:
 
 .. NOTE::
 
     Before you can migrate from nova auth, you must first
-    `prepare your Essex deployment`_.
+    `prepare your deployment`_.
 
 Step 1: Export your data from Nova
 ----------------------------------
@@ -459,9 +565,16 @@ through the normal REST API. At the moment, the following calls are supported:
 * ``import_legacy``: Import data from a legacy (pre-Essex) database.
 * ``export_legacy_catalog``: Export service catalog from a legacy (pre-Essex) database.
 * ``import_nova_auth``: Load auth data from a dump created with ``nova-manage``.
+* ``pki_setup``: Initialize the certificates for PKI based tokens.
 
 Invoking ``keystone-manage`` by itself will give you additional usage
 information.
+
+The private key used for token signing can only be read by its owner.  This
+prevents unauthorized users from spuriously signing tokens.
+``keystone-manage pki_setup`` Should be run as the same system user that will
+be running the Keystone service to ensure proper ownership for the private key
+file and the associated certificates.
 
 Adding Users, Tenants, and Roles with python-keystoneclient
 ===========================================================
@@ -808,15 +921,26 @@ for openstack would look like this::
   dn: ou=Roles,cn=openstack,cn=org
   objectClass: top
   objectClass: organizationalUnit
-  ou: users
+  ou: roles
 
 The corresponding entries in the Keystone configuration file are::
 
   [ldap]
   url = ldap://localhost
-  suffix = dc=openstack,dc=org
   user = dc=Manager,dc=openstack,dc=org
   password = badpassword
+  suffix = dc=openstack,dc=org
+  use_dumb_member = False
+  allow_subtree_delete = False
+
+  user_tree_dn = ou=Users,dc=openstack,dc=com
+  user_objectclass = inetOrgPerson
+
+  tenant_tree_dn = ou=Groups,dc=openstack,dc=com
+  tenant_objectclass = groupOfNames
+
+  role_tree_dn = ou=Roles,dc=example,dc=com
+  role_objectclass = organizationalRole
 
 The default object classes and attributes are intentionally simplistic.  They
 reflect the common standard objects according to the LDAP RFCs.  However,
@@ -830,3 +954,77 @@ corresponding entries in the Keystone configuration file are::
   [ldap]
   user_id_attribute = uidNumber
   user_name_attribute = cn
+
+
+There is a set of allowed actions per object type that you can modify
+depending on your specific deployment. For example, the users are managed by
+another tool and you have only read access, in such case the configuration
+is::
+
+  [ldap]
+  user_allow_create = False
+  user_allow_update = False
+  user_allow_delete = False
+
+  tenant_allow_create = True
+  tenant_allow_update = True
+  tenant_allow_delete = True
+
+  role_allow_create = True
+  role_allow_update = True
+  role_allow_delete = True
+
+There are some configuration options for filtering users, tenants and roles,
+if the backend is providing too much output, in such case the configuration
+will look like::
+  
+  [ldap]
+  user_filter = (memberof=CN=openstack-users,OU=workgroups,DC=openstack,DC=com)
+  tenant_filter =
+  role_filter =
+
+In case that the directory server does not have an attribute enabled of type
+boolean for the user, there is several configuration parameters that can be used
+to extract the value from an integer attribute like in Active Directory::
+
+  [ldap]
+  user_enabled_attribute = userAccountControl
+  user_enabled_mask      = 2
+  user_enabled_default   = 512
+
+In this case the attribute is an integer and the enabled attribute is listed
+in bit 1, so the if the mask configured *user_enabled_mask* is different from 0,
+it gets the value from the field *user_enabled_attribute* and it makes an ADD
+operation with the value indicated on *user_enabled_mask* and if the value matches
+the mask then the account is disabled.
+
+It also saves the value without mask to the user identity in the attribute
+*enabled_nomask*. This is needed in order to set it back in case that we need to
+change it to enable/disable a user because it contains more information than the 
+status like password expiration. Last setting *user_enabled_mask* is needed in order
+to create a default value on the integer attribute (512 = NORMAL ACCOUNT on AD)
+
+In case of Active Directory the classes and attributes could not match the
+specified classes in the LDAP module so you can configure them like::
+
+  [ldap]
+  user_objectclass         = person
+  user_id_attribute        = cn
+  user_name_attribute      = cn
+  user_mail_attribute      = mail
+  user_enabled_attribute   = userAccountControl
+  user_enabled_mask        = 2
+  user_enabled_default     = 512
+  user_attribute_ignore    = tenant_id,tenants
+  tenant_objectclass       = groupOfNames
+  tenant_id_attribute      = cn
+  tenant_member_attribute  = member
+  tenant_name_attribute    = ou
+  tenant_desc_attribute    = description
+  tenant_enabled_attribute = extensionName
+  tenant_attribute_ignore  =
+  role_objectclass         = organizationalRole
+  role_id_attribute        = cn
+  role_name_attribute      = ou
+  role_member_attribute    = roleOccupant
+  role_attribute_ignore    =

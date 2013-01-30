@@ -31,6 +31,7 @@ import passlib.hash
 
 from keystone.common import logging
 from keystone import config
+from keystone import exception
 
 
 CONF = config.CONF
@@ -89,8 +90,8 @@ class Ec2Signer(object):
                                           credentials['verb'],
                                           credentials['host'],
                                           credentials['path'])
-        raise Exception('Unknown Signature Version: %s' %
-                        credentials['params']['SignatureVersion'])
+        raise Exception(_('Unknown Signature Version: %s' %
+                        credentials['params']['SignatureVersion']))
 
     @staticmethod
     def _get_utf8_value(value):
@@ -120,7 +121,7 @@ class Ec2Signer(object):
 
     def _calc_signature_2(self, params, verb, server_string, path):
         """Generate AWS signature version 2 string."""
-        LOG.debug('using _calc_signature_2')
+        LOG.debug(_('using _calc_signature_2'))
         string_to_sign = '%s\n%s\n%s\n' % (verb, server_string, path)
         if self.hmac_256:
             current_hmac = self.hmac_256
@@ -136,22 +137,45 @@ class Ec2Signer(object):
             val = urllib.quote(val, safe='-_~')
             pairs.append(urllib.quote(key, safe='') + '=' + val)
         qs = '&'.join(pairs)
-        LOG.debug('query string: %s', qs)
+        LOG.debug(_('query string: %s'), qs)
         string_to_sign += qs
-        LOG.debug('string_to_sign: %s', string_to_sign)
+        LOG.debug(_('string_to_sign: %s'), string_to_sign)
         current_hmac.update(string_to_sign)
         b64 = base64.b64encode(current_hmac.digest())
-        LOG.debug('len(b64)=%d', len(b64))
-        LOG.debug('base64 encoded digest: %s', b64)
+        LOG.debug(_('len(b64)=%d'), len(b64))
+        LOG.debug(_('base64 encoded digest: %s'), b64)
         return b64
 
 
 def trunc_password(password):
     """Truncate passwords to the MAX_PASSWORD_LENGTH."""
-    if len(password) > MAX_PASSWORD_LENGTH:
-        return password[:MAX_PASSWORD_LENGTH]
+    try:
+        if len(password) > MAX_PASSWORD_LENGTH:
+            return password[:MAX_PASSWORD_LENGTH]
+        else:
+            return password
+    except TypeError:
+        raise exception.ValidationError(attribute='string', target='password')
+
+
+def hash_user_password(user):
+    """Hash a user dict's password without modifying the passed-in dict"""
+    try:
+        password = user['password']
+    except KeyError:
+        return user
     else:
-        return password
+        return dict(user, password=hash_password(password))
+
+
+def hash_ldap_user_password(user):
+    """Hash a user dict's password without modifying the passed-in dict"""
+    try:
+        password = user['password']
+    except KeyError:
+        return user
+    else:
+        return dict(user, password=ldap_hash_password(password))
 
 
 def hash_password(password):
@@ -268,3 +292,22 @@ def hash_signed_token(signed_text):
     hash_ = hashlib.md5()
     hash_.update(signed_text)
     return hash_.hexdigest()
+
+
+def setup_remote_pydev_debug():
+    if CONF.pydev_debug_host and CONF.pydev_debug_port:
+        error_msg = ('Error setting up the debug environment.  Verify that the'
+                     ' option --debug-url has the format <host>:<port> and '
+                     'that a debugger processes is listening on that port.')
+
+        try:
+            from pydev import pydevd
+
+            pydevd.settrace(CONF.pydev_debug_host,
+                            port=CONF.pydev_debug_port,
+                            stdoutToServer=True,
+                            stderrToServer=True)
+            return True
+        except:
+            LOG.exception(_(error_msg))
+            raise

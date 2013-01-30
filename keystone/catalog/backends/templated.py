@@ -17,6 +17,7 @@
 import os.path
 
 from keystone.catalog.backends import kvs
+from keystone.catalog import core
 from keystone.common import logging
 from keystone import config
 
@@ -105,7 +106,7 @@ class TemplatedCatalog(kvs.Catalog):
         try:
             self.templates = parse_templates(open(template_file))
         except IOError:
-            LOG.critical('Unable to open template file %s' % template_file)
+            LOG.critical(_('Unable to open template file %s') % template_file)
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
@@ -119,7 +120,6 @@ class TemplatedCatalog(kvs.Catalog):
             for service, service_ref in region_ref.iteritems():
                 o[region][service] = {}
                 for k, v in service_ref.iteritems():
-                    v = v.replace('$(', '%(')
-                    o[region][service][k] = v % d
+                    o[region][service][k] = core.format_url(v, d)
 
         return o

@@ -24,24 +24,10 @@ from keystone.common import policy as common_policy
 from keystone.common import utils
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import cfg
 from keystone import policy
 
 
-policy_opts = [
-    cfg.StrOpt('policy_file',
-               default='policy.json',
-               help=_('JSON file representing policy')),
-    cfg.StrOpt('policy_default_rule',
-               default='default',
-               help=_('Rule checked when requested rule is not found')),
-]
-
-
 CONF = config.CONF
-CONF.register_opts(policy_opts)
-
-
 LOG = logging.getLogger(__name__)
 
 
@@ -79,19 +65,19 @@ def enforce(credentials, action, target):
     """Verifies that the action is valid on the target in this context.
 
        :param credentials: user credentials
-       :param action: string representing the action to be checked
-
-           this should be colon separated for clarity.
-           i.e. compute:create_instance
-                compute:attach_volume
-                volume:attach_volume
-
+       :param action: string representing the action to be checked, which
+                      should be colon separated for clarity.
        :param target: dictionary representing the object of the action
                       for object creation this should be a dictionary
                       representing the location of the object e.g.
                       {'tenant_id': object.tenant_id}
-
        :raises: `exception.Forbidden` if verification fails.
+
+       Actions should be colon separated for clarity. For example:
+
+        * compute:create_instance
+        * compute:attach_volume
+        * volume:attach_volume
 
     """
     init()
@@ -106,5 +92,5 @@ def enforce(credentials, action, target):
 
 class Policy(policy.Driver):
     def enforce(self, credentials, action, target):
-        LOG.debug('enforce %s: %s', action, credentials)
+        LOG.debug(_('enforce %s: %s'), action, credentials)
         enforce(credentials, action, target)

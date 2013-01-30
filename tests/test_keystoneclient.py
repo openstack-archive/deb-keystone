@@ -22,6 +22,7 @@ import nose.exc
 
 from keystone import test
 from keystone.openstack.common import jsonutils
+from keystone.openstack.common import timeutils
 
 
 import default_fixtures
@@ -139,6 +140,14 @@ class KeystoneClientTests(object):
         self.assertRaises(client_exceptions.Unauthorized,
                           self._client, token=token,
                           tenant_id=uuid.uuid4().hex)
+
+    def test_authenticate_token_invalid_tenant_name(self):
+        from keystoneclient import exceptions as client_exceptions
+        client = self.get_client()
+        token = client.auth_token
+        self.assertRaises(client_exceptions.Unauthorized,
+                          self._client, token=token,
+                          tenant_name=uuid.uuid4().hex)
 
     def test_authenticate_token_tenant_name(self):
         client = self.get_client()
@@ -387,14 +396,15 @@ class KeystoneClientTests(object):
 
     def test_token_expiry_maintained(self):
         foo_client = self.get_client(self.user_foo)
-        orig_token = foo_client.service_catalog.catalog['token']
 
-        time.sleep(1.01)
+        orig_token = foo_client.service_catalog.catalog['token']
+        time.sleep(.5)
         reauthenticated_token = foo_client.tokens.authenticate(
             token=foo_client.auth_token)
 
-        self.assertEquals(orig_token['expires'],
-                          reauthenticated_token.expires)
+        self.assertCloseEnoughForGovernmentWork(
+            timeutils.parse_isotime(orig_token['expires']),
+            timeutils.parse_isotime(reauthenticated_token.expires))
 
     def test_user_create_update_delete(self):
         from keystoneclient import exceptions as client_exceptions
@@ -701,7 +711,7 @@ class KeystoneClientTests(object):
         self.assertEquals(service_type, service.type)
         self.assertEquals(service_desc, service.description)
 
-        # update is not supported...
+        # update is not supported in API v2...
 
         # delete & read
         client.services.delete(id=service.id)
@@ -726,10 +736,9 @@ class KeystoneClientTests(object):
                           id=uuid.uuid4().hex)
 
     def test_endpoint_delete_404(self):
-        # the catalog backend is expected to return Not Implemented
         from keystoneclient import exceptions as client_exceptions
         client = self.get_client(admin=True)
-        self.assertRaises(client_exceptions.HTTPNotImplemented,
+        self.assertRaises(client_exceptions.NotFound,
                           client.endpoints.delete,
                           id=uuid.uuid4().hex)
 
@@ -795,12 +804,12 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         client = self.get_client(admin=True)
         client.roles.add_user_role(tenant=self.tenant_baz['id'],
                                    user=self.user_two['id'],
-                                   role=self.role_useless['id'])
+                                   role=self.role_member['id'])
         user_refs = client.tenants.list_users(tenant=self.tenant_baz['id'])
         self.assert_(self.user_two['id'] in [x.id for x in user_refs])
         client.roles.remove_user_role(tenant=self.tenant_baz['id'],
                                       user=self.user_two['id'],
-                                      role=self.role_useless['id'])
+                                      role=self.role_member['id'])
         user_refs = client.tenants.list_users(tenant=self.tenant_baz['id'])
         self.assert_(self.user_two['id'] not in [x.id for x in user_refs])
 
@@ -811,12 +820,12 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                           client.roles.add_user_role,
                           tenant=uuid.uuid4().hex,
                           user=self.user_foo['id'],
-                          role=self.role_useless['id'])
+                          role=self.role_member['id'])
         self.assertRaises(client_exceptions.NotFound,
                           client.roles.add_user_role,
                           tenant=self.tenant_baz['id'],
                           user=uuid.uuid4().hex,
-                          role=self.role_useless['id'])
+                          role=self.role_member['id'])
         self.assertRaises(client_exceptions.NotFound,
                           client.roles.add_user_role,
                           tenant=self.tenant_baz['id'],
@@ -830,12 +839,12 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                           client.roles.remove_user_role,
                           tenant=uuid.uuid4().hex,
                           user=self.user_foo['id'],
-                          role=self.role_useless['id'])
+                          role=self.role_member['id'])
         self.assertRaises(client_exceptions.NotFound,
                           client.roles.remove_user_role,
                           tenant=self.tenant_baz['id'],
                           user=uuid.uuid4().hex,
-                          role=self.role_useless['id'])
+                          role=self.role_member['id'])
         self.assertRaises(client_exceptions.NotFound,
                           client.roles.remove_user_role,
                           tenant=self.tenant_baz['id'],
@@ -845,7 +854,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                           client.roles.remove_user_role,
                           tenant=self.tenant_baz['id'],
                           user=self.user_foo['id'],
-                          role=self.role_useless['id'])
+                          role=self.role_member['id'])
 
     def test_tenant_list_marker(self):
         client = self.get_client()
@@ -924,8 +933,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
             '/v2.0/OS-KSCRUD/users/%s' % self.user_two['id'],
             headers={'X-Auth-Token': token_id})
         req.method = 'PATCH'
-        req.body = '{"user":{"password":"%s","original_password":"%s"}}' % \
-            (new_password, self.user_two['password'])
+        req.body = ('{"user":{"password":"%s","original_password":"%s"}}' %
+                    (new_password, self.user_two['password']))
         self.public_server.application(req.environ,
                                        responseobject.start_fake_response)
 
@@ -951,8 +960,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
             '/v2.0/OS-KSCRUD/users/%s' % self.user_foo['id'],
             headers={'X-Auth-Token': token_id})
         req.method = 'PATCH'
-        req.body = '{"user":{"password":"%s","original_password":"%s"}}' % \
-            (new_password, self.user_two['password'])
+        req.body = ('{"user":{"password":"%s","original_password":"%s"}}' %
+                    (new_password, self.user_two['password']))
         self.public_server.application(req.environ,
                                        responseobject.start_fake_response)
         self.assertEquals(403, responseobject.response_status)
@@ -980,8 +989,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
             '/v2.0/OS-KSCRUD/users/%s' % self.user_two['id'],
             headers={'X-Auth-Token': token_id})
         req.method = 'PATCH'
-        req.body = '{"user":{"password":"%s","original_password":"%s"}}' % \
-            (new_password, self.user_two['password'])
+        req.body = ('{"user":{"password":"%s","original_password":"%s"}}' %
+                    (new_password, self.user_two['password']))
 
         rv = self.public_server.application(
             req.environ,
@@ -1002,7 +1011,7 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         client = self.get_client(admin=True)
         client.roles.add_user_to_tenant(tenant_id=self.tenant_baz['id'],
                                         user_id=self.user_two['id'],
-                                        role_id=self.role_useless['id'])
+                                        role_id=self.role_member['id'])
         role_refs = client.roles.get_user_role_refs(
             user_id=self.user_two['id'])
         self.assert_(self.tenant_baz['id'] in [x.tenantId for x in role_refs])
@@ -1012,7 +1021,7 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         roleref_refs = client.roles.get_user_role_refs(
             user_id=self.user_two['id'])
         for roleref_ref in roleref_refs:
-            if (roleref_ref.roleId == self.role_useless['id']
+            if (roleref_ref.roleId == self.role_member['id']
                     and roleref_ref.tenantId == self.tenant_baz['id']):
                 # use python's scope fall through to leave roleref_ref set
                 break
@@ -1087,7 +1096,14 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
     def test_endpoint_delete_404(self):
         raise nose.exc.SkipTest('N/A')
 
+    def test_policy_crud(self):
+        """Due to lack of endpoint CRUD"""
+        raise nose.exc.SkipTest('N/A')
+
 
 class Kc11TestCase(CompatTestCase, KeystoneClientTests):
     def get_checkout(self):
         return KEYSTONECLIENT_REPO, '0.1.1'
+
+    def test_policy_crud(self):
+        raise nose.exc.SkipTest('N/A')

@@ -22,28 +22,14 @@ from ldap import filter as ldap_filter
 from keystone import clean
 from keystone.common import ldap as common_ldap
 from keystone.common.ldap import fakeldap
+from keystone.common import models
 from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.common import models
 
 
 CONF = config.CONF
-
-
-def _filter_user(user_ref):
-    if user_ref:
-        user_ref.pop('password', None)
-    return user_ref
-
-
-def _ensure_hashed_password(user_ref):
-    pw = user_ref.get('password', None)
-    if pw is not None:
-        pw = utils.ldap_hash_password(pw)
-        user_ref['password'] = pw
-    return user_ref
 
 
 class Identity(identity.Driver):
@@ -57,6 +43,7 @@ class Identity(identity.Driver):
         self.user = UserApi(CONF)
         self.tenant = TenantApi(CONF)
         self.role = RoleApi(CONF)
+        self.group = GroupApi(CONF)
 
     def get_connection(self, user=None, password=None):
         if self.LDAP_URL.startswith('fake://'):
@@ -108,7 +95,7 @@ class Identity(identity.Driver):
             except exception.MetadataNotFound:
                 metadata_ref = {}
 
-        return (_filter_user(user_ref), tenant_ref, metadata_ref)
+        return (identity.filter_user(user_ref), tenant_ref, metadata_ref)
 
     def get_tenant(self, tenant_id):
         try:
@@ -132,14 +119,14 @@ class Identity(identity.Driver):
             raise exception.UserNotFound(user_id=user_id)
 
     def get_user(self, user_id):
-        return _filter_user(self._get_user(user_id))
+        return identity.filter_user(self._get_user(user_id))
 
     def list_users(self):
         return self.user.get_all()
 
     def get_user_by_name(self, user_name):
         try:
-            return _filter_user(self.user.get_by_name(user_name))
+            return identity.filter_user(self.user.get_by_name(user_name))
         except exception.NotFound:
             raise exception.UserNotFound(user_id=user_name)
 
@@ -202,7 +189,7 @@ class Identity(identity.Driver):
     # CRUD
     def create_user(self, user_id, user):
         user['name'] = clean.user_name(user['name'])
-        return self.user.create(user)
+        return identity.filter_user(self.user.create(user))
 
     def update_user(self, user_id, user):
         if 'name' in user:
@@ -273,6 +260,27 @@ class Identity(identity.Driver):
         self.get_role(role_id)
         self.role.update(role_id, role)
 
+    def create_group(self, group_id, group):
+        group['name'] = clean.group_name(group['name'])
+        return self.group.create(group)
+
+    def get_group(self, group_id):
+        try:
+            return self.group.get(group_id)
+        except exception.NotFound:
+            raise exception.GroupNotFound(group_id=group_id)
+
+    def update_group(self, group_id, group):
+        if 'name' in group:
+            group['name'] = clean.group_name(group['name'])
+        return self.group.update(group_id, group)
+
+    def delete_group(self, group_id):
+        try:
+            return self.group.delete(group_id)
+        except ldap.NO_SUCH_OBJECT:
+            raise exception.GroupNotFound(group_id=group_id)
+
 
 # TODO(termie): remove this and move cross-api calls into driver
 class ApiShim(object):
@@ -285,6 +293,7 @@ class ApiShim(object):
     _role = None
     _tenant = None
     _user = None
+    _group = None
 
     def __init__(self, conf):
         self.conf = conf
@@ -307,6 +316,12 @@ class ApiShim(object):
             self._user = UserApi(self.conf)
         return self._user
 
+    @property
+    def group(self):
+        if not self.group:
+            self.group = GroupApi(self.conf)
+        return self.group
+
 
 # TODO(termie): remove this and move cross-api calls into driver
 class ApiShimMixin(object):
@@ -324,6 +339,10 @@ class ApiShimMixin(object):
     def user_api(self):
         return self.api.user
 
+    @property
+    def group_api(self):
+        return self.api.group
+
 
 # TODO(termie): turn this into a data object and move logic to driver
 class UserApi(common_ldap.BaseLdap, ApiShimMixin):
@@ -331,23 +350,43 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_STRUCTURAL_CLASSES = ['person']
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_OBJECTCLASS = 'inetOrgPerson'
+    DEFAULT_ATTRIBUTE_IGNORE = ['tenant_id', 'tenants']
     options_name = 'user'
     attribute_mapping = {'password': 'userPassword',
                          'email': 'mail',
-                         'name': 'sn'}
+                         'name': 'sn',
+                         'enabled': 'enabled'}
 
-    # NOTE(ayoung): The RFC based schemas don't have a way to indicate
-    # 'enabled' the closest is the nsAccount lock, which is on defined to
-    # be part of any objectclass.
-    # in the future, we need to provide a way for the end user to
-    # indicate the field to use and what it indicates
-    attribute_ignore = ['tenantId', 'enabled', 'tenants']
     model = models.User
 
     def __init__(self, conf):
         super(UserApi, self).__init__(conf)
         self.attribute_mapping['name'] = conf.ldap.user_name_attribute
+        self.attribute_mapping['email'] = conf.ldap.user_mail_attribute
+        self.attribute_mapping['password'] = conf.ldap.user_pass_attribute
+        self.attribute_mapping['enabled'] = conf.ldap.user_enabled_attribute
+        self.enabled_mask = conf.ldap.user_enabled_mask
+        self.enabled_default = conf.ldap.user_enabled_default
+        self.attribute_ignore = (getattr(conf.ldap, 'user_attribute_ignore')
+                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
         self.api = ApiShim(conf)
+
+    def _ldap_res_to_model(self, res):
+        obj = super(UserApi, self)._ldap_res_to_model(res)
+        if self.enabled_mask != 0:
+            obj['enabled_nomask'] = obj['enabled']
+            obj['enabled'] = ((obj['enabled'] & self.enabled_mask) !=
+                              self.enabled_mask)
+        return obj
+
+    def mask_enabled_attribute(self, values):
+        value = values['enabled']
+        values.setdefault('enabled_nomask', self.enabled_default)
+        if value != ((values['enabled_nomask'] & self.enabled_mask) !=
+                     self.enabled_mask):
+            values['enabled_nomask'] ^= self.enabled_mask
+        values['enabled'] = values['enabled_nomask']
+        del values['enabled_nomask']
 
     def get(self, id, filter=None):
         """Replaces exception.NotFound with exception.UserNotFound."""
@@ -357,9 +396,9 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
             raise exception.UserNotFound(user_id=id)
 
     def get_by_name(self, name, filter=None):
-        users = self.get_all('(%s=%s)' %
-                             (self.attribute_mapping['name'],
+        query = ('(%s=%s)' % (self.attribute_mapping['name'],
                               ldap_filter.escape_filter_chars(name)))
+        users = self.get_all(query)
         try:
             return users[0]
         except IndexError:
@@ -367,7 +406,9 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
 
     def create(self, values):
         self.affirm_unique(values)
-        _ensure_hashed_password(values)
+        values = utils.hash_ldap_user_password(values)
+        if self.enabled_mask:
+            self.mask_enabled_attribute(values)
         values = super(UserApi, self).create(values)
         tenant_id = values.get('tenant_id')
         if tenant_id is not None:
@@ -394,7 +435,10 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
                 if new_tenant:
                     self.tenant_api.add_user(new_tenant, id)
 
-        _ensure_hashed_password(values)
+        values = utils.hash_ldap_user_password(values)
+        if self.enabled_mask:
+            values['enabled_nomask'] = old_obj['enabled_nomask']
+            self.mask_enabled_attribute(values)
         super(UserApi, self).update(id, values, old_obj)
 
     def delete(self, id):
@@ -411,8 +455,9 @@ class UserApi(common_ldap.BaseLdap, ApiShimMixin):
             self.role_api.rolegrant_delete(ref.id)
 
     def get_by_email(self, email):
-        users = self.get_all('(mail=%s)' %
-                             (ldap_filter.escape_filter_chars(email),))
+        query = ('(%s=%s)' % (self.attribute_mapping['mail'],
+                              ldap_filter.escape_filter_chars(email)))
+        users = self.get_all(query)
         try:
             return users[0]
         except IndexError:
@@ -465,17 +510,24 @@ class TenantApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_OBJECTCLASS = 'groupOfNames'
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
+    DEFAULT_ATTRIBUTE_IGNORE = []
     options_name = 'tenant'
-    attribute_mapping = {'name': 'ou', 'tenantId': 'cn'}
-    attribute_ignore = ['enabled']
+    attribute_mapping = {'name': 'ou',
+                         'description': 'desc',
+                         'tenantId': 'cn',
+                         'enabled': 'enabled'}
     model = models.Tenant
 
     def __init__(self, conf):
         super(TenantApi, self).__init__(conf)
         self.api = ApiShim(conf)
         self.attribute_mapping['name'] = conf.ldap.tenant_name_attribute
+        self.attribute_mapping['description'] = conf.ldap.tenant_desc_attribute
+        self.attribute_mapping['enabled'] = conf.ldap.tenant_enabled_attribute
         self.member_attribute = (getattr(conf.ldap, 'tenant_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
+        self.attribute_ignore = (getattr(conf.ldap, 'tenant_attribute_ignore')
+                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
 
     def get(self, id, filter=None):
         """Replaces exception.NotFound with exception.TenantNotFound."""
@@ -522,7 +574,7 @@ class TenantApi(common_ldap.BaseLdap, ApiShimMixin):
         tenant = self._ldap_get(id)
         members = tenant[1].get(self.member_attribute, [])
         if self.use_dumb_member:
-            empty = members == [self.DUMB_MEMBER_DN]
+            empty = members == [self.dumb_member]
         else:
             empty = len(members) == 0
         return empty and len(self.role_api.get_role_assignments(id)) == 0
@@ -556,23 +608,27 @@ class TenantApi(common_ldap.BaseLdap, ApiShimMixin):
 
     def get_users(self, tenant_id, role_id=None):
         tenant = self._ldap_get(tenant_id)
-        res = []
+        res = set()
         if not role_id:
             # Get users who have default tenant mapping
             for user_dn in tenant[1].get(self.member_attribute, []):
-                if self.use_dumb_member and user_dn == self.DUMB_MEMBER_DN:
+                if self.use_dumb_member and user_dn == self.dumb_member:
                     continue
-                res.append(self.user_api.get(self.user_api._dn_to_id(user_dn)))
+                res.add(self.user_api.get(self.user_api._dn_to_id(user_dn)))
 
         # Get users who are explicitly mapped via a tenant
         rolegrants = self.role_api.get_role_assignments(tenant_id)
         for rolegrant in rolegrants:
             if role_id is None or rolegrant.role_id == role_id:
-                res.append(self.user_api.get(rolegrant.user_id))
-        return res
+                res.add(self.user_api.get(rolegrant.user_id))
+        return list(res)
 
     def delete(self, id):
-        super(TenantApi, self).delete(id)
+        if self.subtree_delete_enabled:
+            super(TenantApi, self).deleteTree(id)
+        else:
+            self.role_api.roles_delete_subtree_by_tenant(id)
+            super(TenantApi, self).delete(id)
 
     def update(self, id, values):
         try:
@@ -595,6 +651,16 @@ class UserRoleAssociation(object):
         self.tenant_id = str(tenant_id)
 
 
+class GroupRoleAssociation(object):
+    """Role Grant model."""
+
+    def __init__(self, group_id=None, role_id=None, tenant_id=None,
+                 *args, **kw):
+        self.group_id = str(group_id)
+        self.role_id = role_id
+        self.tenant_id = str(tenant_id)
+
+
 # TODO(termie): turn this into a data object and move logic to driver
 class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_OU = 'ou=Roles'
@@ -602,6 +668,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
     options_name = 'role'
     DEFAULT_OBJECTCLASS = 'organizationalRole'
     DEFAULT_MEMBER_ATTRIBUTE = 'roleOccupant'
+    DEFAULT_ATTRIBUTE_IGNORE = []
     attribute_mapping = {'name': 'cn',
                          #'serviceId': 'service_id',
                          }
@@ -610,8 +677,11 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
     def __init__(self, conf):
         super(RoleApi, self).__init__(conf)
         self.api = ApiShim(conf)
+        self.attribute_mapping['name'] = conf.ldap.role_name_attribute
         self.member_attribute = (getattr(conf.ldap, 'role_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
+        self.attribute_ignore = (getattr(conf.ldap, 'role_attribute_ignore')
+                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
 
     @staticmethod
     def _create_ref(role_id, tenant_id, user_id):
@@ -641,7 +711,8 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
         if tenant_id is None:
             return self._id_to_dn(role_id)
         else:
-            return 'cn=%s,%s' % (ldap.dn.escape_dn_chars(role_id),
+            return '%s=%s,%s' % (self.id_attr,
+                                 ldap.dn.escape_dn_chars(role_id),
                                  self.tenant_api._id_to_dn(tenant_id))
 
     def get(self, id, filter=None):
@@ -677,13 +748,13 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
             raise exception.Conflict(type='role grant', details=msg)
         except ldap.NO_SUCH_OBJECT:
             if tenant_id is None or self.get(role_id) is None:
-                raise Exception("Role %s not found" % (role_id,))
+                raise Exception(_("Role %s not found" % (role_id,)))
 
             attrs = [('objectClass', [self.object_class]),
                      (self.member_attribute, [user_dn])]
 
             if self.use_dumb_member:
-                attrs[1][1].append(self.DUMB_MEMBER_DN)
+                attrs[1][1].append(self.dumb_member)
             try:
                 conn.add_s(role_dn, attrs)
             except Exception as inst:
@@ -704,12 +775,12 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
                                      self.member_attribute, user_dn)])
         except ldap.NO_SUCH_OBJECT:
             if tenant_id is None or self.get(role_id) is None:
-                raise exception.RoleNotFound(role_id=roll_id)
+                raise exception.RoleNotFound(role_id=role_id)
             attrs = [('objectClass', [self.object_class]),
                      (self.member_attribute, [user_dn])]
 
             if self.use_dumb_member:
-                attrs[1][1].append(self.DUMB_MEMBER_DN)
+                attrs[1][1].append(self.dumb_member)
             try:
                 conn.add_s(role_dn, attrs)
             except Exception as inst:
@@ -746,7 +817,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
             except KeyError:
                 continue
             for user_dn in user_dns:
-                if self.use_dumb_member and user_dn == self.DUMB_MEMBER_DN:
+                if self.use_dumb_member and user_dn == self.dumb_member:
                     continue
                 user_id = self.user_api._dn_to_id(user_dn)
                 role_id = self._dn_to_id(role_dn)
@@ -879,7 +950,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
                 continue
 
             for user_dn in user_dns:
-                if self.use_dumb_member and user_dn == self.DUMB_MEMBER_DN:
+                if self.use_dumb_member and user_dn == self.dumb_member:
                     continue
                 user_id = self.user_api._dn_to_id(user_dn)
                 tenant_id = None
@@ -893,6 +964,20 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
                     role_id=role_id,
                     tenant_id=tenant_id))
         return res
+
+    def roles_delete_subtree_by_tenant(self, tenant_id):
+        conn = self.get_connection()
+        query = '(objectClass=%s)' % self.object_class
+        tenant_dn = self.tenant_api._id_to_dn(tenant_id)
+        try:
+            roles = conn.search_s(tenant_dn, ldap.SCOPE_ONELEVEL, query)
+            for role_dn, _ in roles:
+                try:
+                    conn.delete_s(role_dn)
+                except Exception as inst:
+                    raise inst
+        except ldap.NO_SUCH_OBJECT:
+            pass
 
     def rolegrant_get_by_ids(self, user_id, role_id, tenant_id):
         conn = self.get_connection()
@@ -947,6 +1032,85 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
         except exception.NotFound:
             pass
         try:
-            super(RoleApi, self).update(id, role)
+            super(RoleApi, self).update(role_id, role)
         except exception.NotFound:
-            raise exception.UserNotFound(user_id=id)
+            raise exception.RoleNotFound(role_id=role_id)
+
+    def delete(self, id):
+        conn = self.get_connection()
+        query = '(objectClass=%s)' % self.object_class
+        tenant_dn = self.tenant_api.tree_dn
+        try:
+            for role_dn, _ in conn.search_s(tenant_dn,
+                                            ldap.SCOPE_SUBTREE,
+                                            query):
+                conn.delete_s(role_dn)
+        except ldap.NO_SUCH_OBJECT:
+            pass
+        super(RoleApi, self).delete(id)
+
+
+# TODO (henry-nash) This is a placeholder for the full LDPA implementation
+# This needs to be completed (see Bug #1092187)
+class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
+    DEFAULT_OU = 'ou=UserGroups'
+    DEFAULT_STRUCTURAL_CLASSES = []
+    DEFAULT_OBJECTCLASS = 'groupOfNames'
+    DEFAULT_ID_ATTR = 'cn'
+    DEFAULT_MEMBER_ATTRIBUTE = 'member'
+    DEFAULT_ATTRIBUTE_IGNORE = []
+    options_name = 'group'
+    attribute_mapping = {'name': 'ou',
+                         'description': 'desc',
+                         'groupId': 'cn'}
+    model = models.Group
+
+    def __init__(self, conf):
+        super(GroupApi, self).__init__(conf)
+        self.api = ApiShim(conf)
+        self.attribute_mapping['name'] = conf.ldap.group_name_attribute
+        self.attribute_mapping['description'] = conf.ldap.group_desc_attribute
+        self.member_attribute = (getattr(conf.ldap, 'group_member_attribute')
+                                 or self.DEFAULT_MEMBER_ATTRIBUTE)
+        self.attribute_ignore = (getattr(conf.ldap, 'group_attribute_ignore')
+                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
+
+    def get(self, id, filter=None):
+        """Replaces exception.NotFound with exception.GroupNotFound."""
+        try:
+            return super(GroupApi, self).get(id, filter)
+        except exception.NotFound:
+            raise exception.GroupNotFound(group_id=id)
+
+    def get_by_name(self, name, filter=None):
+        query = ('(%s=%s)' % (self.attribute_mapping['name'],
+                              ldap_filter.escape_filter_chars(name)))
+        groups = self.get_all(query)
+        try:
+            return groups[0]
+        except IndexError:
+            raise exception.GroupNotFound(group_id=name)
+
+    def create(self, values):
+        self.affirm_unique(values)
+        data = values.copy()
+        if data.get('id') is None:
+            data['id'] = uuid.uuid4().hex
+        return super(GroupApi, self).create(data)
+
+    def delete(self, id):
+        if self.subtree_delete_enabled:
+            super(GroupApi, self).deleteTree(id)
+        else:
+            self.role_api.roles_delete_subtree_by_group(id)
+            super(GroupApi, self).delete(id)
+
+    def update(self, id, values):
+        try:
+            old_obj = self.get(id)
+        except exception.NotFound:
+            raise exception.GroupNotFound(group_id=id)
+        if old_obj['name'] != values['name']:
+            msg = _('Changing Name not supported by LDAP')
+            raise exception.NotImplemented(message=msg)
+        super(GroupApi, self).update(id, values, old_obj)

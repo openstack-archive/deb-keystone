@@ -23,6 +23,8 @@ Unless marked otherwise, all fields are strings.
 
 class Model(dict):
     """Base model class."""
+    def __hash__(self):
+        return self['id'].__hash__()
 
     @property
     def known_keys(cls):
@@ -76,7 +78,7 @@ class Endpoint(Model):
     """
 
     required_keys = ('id', 'region', 'service_id')
-    optional_keys = ('interalurl', 'publicurl', 'adminurl')
+    optional_keys = ('internalurl', 'publicurl', 'adminurl')
 
 
 class User(Model):
@@ -95,6 +97,23 @@ class User(Model):
 
     required_keys = ('id', 'name')
     optional_keys = ('password', 'description', 'email', 'enabled')
+
+
+class Group(Model):
+    """Group object.
+
+    Required keys:
+        id
+        name
+
+    Optional keys:
+        domain_id
+        description
+
+    """
+
+    required_keys = ('id', 'name')
+    optional_keys = ('domain_id', 'description')
 
 
 class Tenant(Model):

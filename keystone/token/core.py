@@ -18,6 +18,8 @@
 
 import datetime
 
+from keystone.common import cms
+from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
 from keystone import exception
@@ -28,6 +30,32 @@ CONF = config.CONF
 config.register_int('expiration', group='token', default=86400)
 
 
+def unique_id(token_id):
+    """Return a unique ID for a token.
+
+    The returned value is useful as the primary key of a database table,
+    memcache store, or other lookup table.
+
+    :returns: Given a PKI token, returns it's hashed value. Otherwise, returns
+              the passed-in value (such as a UUID token ID or an existing
+              hash).
+    """
+    return cms.cms_hash_token(token_id)
+
+
+def default_expire_time():
+    """Determine when a fresh token should expire.
+
+    Expiration time varies based on configuration (see ``[token] expiration``).
+
+    :returns: a naive UTC datetime.datetime object
+
+    """
+    expire_delta = datetime.timedelta(seconds=CONF.token.expiration)
+    return timeutils.utcnow() + expire_delta
+
+
+@dependency.provider('token_api')
 class Manager(manager.Manager):
     """Default pivot point for the Token backend.
 
@@ -122,12 +150,3 @@ class Driver(object):
                  keystone.exception.TenantNotFound
         """
         raise exception.NotImplemented()
-
-    def _get_default_expire_time(self):
-        """Determine when a token should expire based on the config.
-
-        :returns: a naive utc datetime.datetime object
-
-        """
-        expire_delta = datetime.timedelta(seconds=CONF.token.expiration)
-        return timeutils.utcnow() + expire_delta

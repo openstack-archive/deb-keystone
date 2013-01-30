@@ -30,12 +30,22 @@ from keystone.openstack.common import timeutils
 from keystone import test
 
 
+CERTDIR = test.rootdir("examples/pki/certs")
+KEYDIR = test.rootdir("examples/pki/private")
+CMSDIR = test.rootdir("examples/pki/cms")
+SIGNING_CERT = os.path.join(CERTDIR, 'signing_cert.pem')
+SIGNING_KEY = os.path.join(KEYDIR, 'signing_key.pem')
+CA = os.path.join(CERTDIR, 'ca.pem')
+
 REVOCATION_LIST = None
 REVOKED_TOKEN = None
 REVOKED_TOKEN_HASH = None
 SIGNED_REVOCATION_LIST = None
 SIGNED_TOKEN_SCOPED = None
 SIGNED_TOKEN_UNSCOPED = None
+SIGNED_TOKEN_SCOPED_KEY = None
+SIGNED_TOKEN_UNSCOPED_KEY = None
+
 VALID_SIGNED_REVOCATION_LIST = None
 
 UUID_TOKEN_DEFAULT = "ec6c0710ec2f471498484c1b53ab4f9d"
@@ -69,6 +79,7 @@ TOKEN_RESPONSES = {
         'access': {
             'token': {
                 'id': UUID_TOKEN_DEFAULT,
+                'expires': '2999-01-01T00:00:10Z',
                 'tenant': {
                     'id': 'tenant_id1',
                     'name': 'tenant_name1',
@@ -89,6 +100,7 @@ TOKEN_RESPONSES = {
         'access': {
             'token': {
                 'id': VALID_DIABLO_TOKEN,
+                'expires': '2999-01-01T00:00:10',
                 'tenantId': 'tenant_id1',
             },
             'user': {
@@ -105,6 +117,7 @@ TOKEN_RESPONSES = {
         'access': {
             'token': {
                 'id': UUID_TOKEN_UNSCOPED,
+                'expires': '2999-01-01T00:00:10Z',
             },
             'user': {
                 'id': 'user_id1',
@@ -120,6 +133,7 @@ TOKEN_RESPONSES = {
         'access': {
             'token': {
                 'id': 'valid-token',
+                'expires': '2999-01-01T00:00:10Z',
                 'tenant': {
                     'id': 'tenant_id1',
                     'name': 'tenant_name1',
@@ -137,12 +151,14 @@ TOKEN_RESPONSES = {
     },
 }
 
+FAKE_RESPONSE_STACK = []
+
 
 # The data for these tests are signed using openssl and are stored in files
 # in the signing subdirectory.  In order to keep the values consistent between
 # the tests and the signed documents, we read them in for use in the tests.
 def setUpModule(self):
-    signing_path = os.path.join(os.path.dirname(__file__), 'signing')
+    signing_path = CMSDIR
     with open(os.path.join(signing_path, 'auth_token_scoped.pem')) as f:
         self.SIGNED_TOKEN_SCOPED = cms.cms_to_token(f.read())
     with open(os.path.join(signing_path, 'auth_token_unscoped.pem')) as f:
@@ -155,11 +171,15 @@ def setUpModule(self):
     with open(os.path.join(signing_path, 'revocation_list.pem')) as f:
         self.VALID_SIGNED_REVOCATION_LIST = jsonutils.dumps(
             {'signed': f.read()})
+    self.SIGNED_TOKEN_SCOPED_KEY =\
+        cms.cms_hash_token(self.SIGNED_TOKEN_SCOPED)
+    self.SIGNED_TOKEN_UNSCOPED_KEY =\
+        cms.cms_hash_token(self.SIGNED_TOKEN_UNSCOPED)
 
-    self.TOKEN_RESPONSES[self.SIGNED_TOKEN_SCOPED] = {
+    self.TOKEN_RESPONSES[self.SIGNED_TOKEN_SCOPED_KEY] = {
         'access': {
             'token': {
-                'id': self.SIGNED_TOKEN_SCOPED,
+                'id': self.SIGNED_TOKEN_SCOPED_KEY,
             },
             'user': {
                 'id': 'user_id1',
@@ -174,10 +194,10 @@ def setUpModule(self):
         },
     }
 
-    self.TOKEN_RESPONSES[self.SIGNED_TOKEN_UNSCOPED] = {
+    self.TOKEN_RESPONSES[SIGNED_TOKEN_UNSCOPED_KEY] = {
         'access': {
             'token': {
-                'id': self.SIGNED_TOKEN_UNSCOPED,
+                'id': SIGNED_TOKEN_UNSCOPED_KEY,
             },
             'user': {
                 'id': 'user_id1',
@@ -198,7 +218,7 @@ class FakeMemcache(object):
         self.token_expiration = None
 
     def get(self, key):
-        data = TOKEN_RESPONSES[SIGNED_TOKEN_SCOPED].copy()
+        data = TOKEN_RESPONSES[SIGNED_TOKEN_SCOPED_KEY].copy()
         if not data or key != "tokens/%s" % (data['access']['token']['id']):
             return
         if not self.token_expiration:
@@ -221,6 +241,23 @@ class FakeHTTPResponse(object):
 
     def read(self):
         return self.body
+
+
+class FakeStackHTTPConnection(object):
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def getresponse(self):
+        if len(FAKE_RESPONSE_STACK):
+            return FAKE_RESPONSE_STACK.pop()
+        return FakeHTTPResponse(500, jsonutils.dumps('UNEXPECTED RESPONSE'))
+
+    def request(self, *_args, **_kwargs):
+        pass
+
+    def close(self):
+        pass
 
 
 class FakeHTTPConnection(object):
@@ -307,7 +344,7 @@ class BaseAuthTokenMiddlewareTest(test.TestCase):
             'auth_host': 'keystone.example.com',
             'auth_port': 1234,
             'auth_admin_prefix': '/testadmin',
-            'signing_dir': 'signing',
+            'signing_dir': CERTDIR,
         }
 
         self.middleware = auth_token.AuthProtocol(FakeApp(expected_env), conf)
@@ -317,13 +354,14 @@ class BaseAuthTokenMiddlewareTest(test.TestCase):
         self.response_status = None
         self.response_headers = None
         self.middleware.revoked_file_name = tempfile.mkstemp()[1]
-        self.middleware.token_revocation_list_cache_timeout =\
-            datetime.timedelta(days=1)
+        cache_timeout = datetime.timedelta(days=1)
+        self.middleware.token_revocation_list_cache_timeout = cache_timeout
         self.middleware.token_revocation_list = jsonutils.dumps(
             {"revoked": [], "extra": "success"})
 
-        globals()['SIGNED_REVOCATION_LIST'] =\
-            globals()['VALID_SIGNED_REVOCATION_LIST']
+        signed_list = 'SIGNED_REVOCATION_LIST'
+        valid_signed_list = 'VALID_SIGNED_REVOCATION_LIST'
+        globals()[signed_list] = globals()[valid_signed_list]
 
         super(BaseAuthTokenMiddlewareTest, self).setUp()
 
@@ -337,6 +375,60 @@ class BaseAuthTokenMiddlewareTest(test.TestCase):
     def start_fake_response(self, status, headers):
         self.response_status = int(status.split(' ', 1)[0])
         self.response_headers = dict(headers)
+
+
+class StackResponseAuthTokenMiddlewareTest(BaseAuthTokenMiddlewareTest):
+    """Auth Token middleware test setup that allows the tests to define
+    a stack of responses to HTTP requests in the test and get those
+    responses back in sequence for testing.
+
+    Example::
+
+        resp1 = FakeHTTPResponse(401, jsonutils.dumps(''))
+        resp2 = FakeHTTPResponse(200, jsonutils.dumps({
+            'access': {
+                'token': {'id': 'admin_token2'},
+            },
+            })
+        FAKE_RESPONSE_STACK.append(resp1)
+        FAKE_RESPONSE_STACK.append(resp2)
+
+        ... do your testing code here ...
+
+    """
+
+    def setUp(self, expected_env=None):
+        super(StackResponseAuthTokenMiddlewareTest, self).setUp(expected_env)
+        self.middleware.http_client_class = FakeStackHTTPConnection
+
+    def test_fetch_revocation_list_with_expire(self):
+        # first response to revocation list should return 401 Unauthorized
+        # to pretend to be an expired token
+        resp1 = FakeHTTPResponse(200, jsonutils.dumps({
+            'access': {
+                'token': {'id': 'admin_token2'},
+            },
+        }))
+        resp2 = FakeHTTPResponse(401, jsonutils.dumps(''))
+        resp3 = FakeHTTPResponse(200, jsonutils.dumps({
+            'access': {
+                'token': {'id': 'admin_token2'},
+            },
+        }))
+        resp4 = FakeHTTPResponse(200, SIGNED_REVOCATION_LIST)
+
+        # first get_admin_token() call
+        FAKE_RESPONSE_STACK.append(resp1)
+        # request revocation list, get "unauthorized" due to simulated expired
+        # token
+        FAKE_RESPONSE_STACK.append(resp2)
+        # request a new admin_token
+        FAKE_RESPONSE_STACK.append(resp3)
+        # request revocation list, get the revocation list properly
+        FAKE_RESPONSE_STACK.append(resp4)
+
+        fetched_list = jsonutils.loads(self.middleware.fetch_revocation_list())
+        self.assertEqual(fetched_list, REVOCATION_LIST)
 
 
 class DiabloAuthTokenMiddlewareTest(BaseAuthTokenMiddlewareTest):
@@ -564,3 +656,11 @@ class AuthTokenMiddlewareTest(BaseAuthTokenMiddlewareTest):
         self.assertEqual(self.response_status, 200)
         self.assertFalse(req.headers.get('X-Service-Catalog'))
         self.assertEqual(body, ['SUCCESS'])
+
+    def test_will_expire_soon(self):
+        tenseconds = datetime.datetime.utcnow() + datetime.timedelta(
+            seconds=10)
+        self.assertTrue(auth_token.will_expire_soon(tenseconds))
+        fortyseconds = datetime.datetime.utcnow() + datetime.timedelta(
+            seconds=40)
+        self.assertFalse(auth_token.will_expire_soon(fortyseconds))

@@ -70,10 +70,15 @@ class MigrateNovaAuth(test.TestCase):
         super(MigrateNovaAuth, self).setUp()
         self.config([test.etcdir('keystone.conf.sample'),
                      test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_sql.conf')])
+                     test.testsdir('backend_sql.conf'),
+                     test.testsdir('backend_sql_disk.conf')])
         sql_util.setup_test_database()
         self.identity_api = identity_sql.Identity()
         self.ec2_api = ec2_sql.Ec2()
+
+    def tearDown(self):
+        sql_util.teardown_test_database()
+        super(MigrateNovaAuth, self).tearDown()
 
     def _create_role(self, role_name):
         role_id = uuid.uuid4().hex

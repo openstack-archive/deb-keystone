@@ -29,7 +29,7 @@ class XmlSerializerTestCase(test.TestCase):
         """
         try:
             self.assertEqual(a, b)
-        except:
+        except AssertionError:
             a = re.sub('[ \n]+', ' ', a).strip().split()
             b = re.sub('[ \n]+', ' ', b).strip().split()
             self.assertEqual(a, b)
@@ -100,9 +100,7 @@ class XmlSerializerTestCase(test.TestCase):
         xmlns = "http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0"
 
         d = {
-            # FIXME(dolph): should be...
-            # "OS-KSADM:service": {
-            "service": {
+            "OS-KSADM:service": {
                 "id": "123",
                 "name": "nova",
                 "type": "compute",

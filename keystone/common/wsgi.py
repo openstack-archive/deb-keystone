@@ -36,6 +36,13 @@ from keystone.openstack.common import jsonutils
 
 LOG = logging.getLogger(__name__)
 
+# Environment variable used to pass the request context
+CONTEXT_ENV = 'openstack.context'
+
+
+# Environment variable used to pass the request params
+PARAMS_ENV = 'openstack.params'
+
 
 class WritableLogger(object):
     """A thin wrapper that responds to `write` and logs."""
@@ -63,7 +70,7 @@ class Server(object):
 
     def start(self, key=None, backlog=128):
         """Run a WSGI server with the given application."""
-        LOG.debug('Starting %(arg0)s on %(host)s:%(port)s' %
+        LOG.debug(_('Starting %(arg0)s on %(host)s:%(port)s') %
                   {'arg0': sys.argv[0],
                    'host': self.host,
                    'port': self.port})
@@ -186,12 +193,16 @@ class Application(BaseApplication):
         arg_dict = req.environ['wsgiorg.routing_args'][1]
         action = arg_dict.pop('action')
         del arg_dict['controller']
-        LOG.debug('arg_dict: %s', arg_dict)
+        LOG.debug(_('arg_dict: %s'), arg_dict)
 
         # allow middleware up the stack to provide context & params
-        context = req.environ.get('openstack.context', {})
+        context = req.environ.get(CONTEXT_ENV, {})
         context['query_string'] = dict(req.params.iteritems())
-        params = req.environ.get('openstack.params', {})
+        params = req.environ.get(PARAMS_ENV, {})
+        if 'REMOTE_USER' in req.environ:
+            context['REMOTE_USER'] = req.environ['REMOTE_USER']
+        elif context.get('REMOTE_USER', None) is not None:
+            del context['REMOTE_USER']
         params.update(arg_dict)
 
         # TODO(termie): do some basic normalization on methods
@@ -203,7 +214,7 @@ class Application(BaseApplication):
         try:
             result = method(context, **params)
         except exception.Unauthorized as e:
-            LOG.warning("Authorization failed. %s from %s"
+            LOG.warning(_("Authorization failed. %s from %s")
                         % (e, req.environ['REMOTE_ADDR']))
             return render_exception(e)
         except exception.Error as e:
@@ -235,8 +246,8 @@ class Application(BaseApplication):
             try:
                 user_token_ref = self.token_api.get_token(
                     context=context, token_id=context['token_id'])
-            except exception.TokenNotFound:
-                raise exception.Unauthorized()
+            except exception.TokenNotFound as e:
+                raise exception.Unauthorized(e)
 
             creds = user_token_ref['metadata'].copy()
 
@@ -415,7 +426,8 @@ class Router(object):
         """
         match = req.environ['wsgiorg.routing_args'][1]
         if not match:
-            return webob.exc.HTTPNotFound()
+            return render_exception(
+                exception.NotFound(_('The resource could not be found.')))
         app = match['controller']
         return app
 

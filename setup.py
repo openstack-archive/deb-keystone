@@ -16,7 +16,6 @@
 
 from setuptools import find_packages
 from setuptools import setup
-import subprocess
 
 from keystone.openstack.common.setup import get_cmdclass
 from keystone.openstack.common.setup import parse_requirements
@@ -30,7 +29,7 @@ depend_links = parse_dependency_links()
 write_requirements()
 
 setup(name='keystone',
-      version='2012.2.1',
+      version='2013.1',
       description="Authentication service for OpenStack",
       license='Apache License (2.0)',
       author='OpenStack, LLC.',
@@ -44,4 +43,14 @@ setup(name='keystone',
       install_requires=requires,
       dependency_links=depend_links,
       test_suite='nose.collector',
+      classifiers=[
+          'Environment :: OpenStack',
+          'Intended Audience :: Information Technology',
+          'Intended Audience :: System Administrators',
+          'License :: OSI Approved :: Apache Software License',
+          'Operating System :: POSIX :: Linux',
+          'Programming Language :: Python',
+          'Programming Language :: Python :: 2',
+          'Programming Language :: Python :: 2.7',
+      ],
       )

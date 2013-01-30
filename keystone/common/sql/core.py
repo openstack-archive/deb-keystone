@@ -31,6 +31,9 @@ from keystone.openstack.common import jsonutils
 
 CONF = config.CONF
 
+# maintain a single engine reference for sqlite in-memory
+GLOBAL_ENGINE = None
+
 
 ModelBase = declarative.declarative_base()
 
@@ -41,7 +44,19 @@ String = sql.String
 ForeignKey = sql.ForeignKey
 DateTime = sql.DateTime
 IntegrityError = sql.exc.IntegrityError
+NotFound = sql.orm.exc.NoResultFound
 Boolean = sql.Boolean
+Text = sql.Text
+
+
+def set_global_engine(engine):
+    global GLOBAL_ENGINE
+    GLOBAL_ENGINE = engine
+
+
+def get_global_engine():
+    global GLOBAL_ENGINE
+    return GLOBAL_ENGINE
 
 
 # Special Fields
@@ -57,9 +72,33 @@ class JsonBlob(sql_types.TypeDecorator):
 
 
 class DictBase(object):
+    attributes = []
 
-    def to_dict(self):
-        return dict(self.iteritems())
+    @classmethod
+    def from_dict(cls, d):
+        new_d = d.copy()
+
+        new_d['extra'] = dict((k, new_d.pop(k)) for k in d.iterkeys()
+                              if k not in cls.attributes and k != 'extra')
+
+        return cls(**new_d)
+
+    def to_dict(self, include_extra_dict=False):
+        """Returns the model's attributes as a dictionary.
+
+        If include_extra_dict is True, 'extra' attributes are literally
+        included in the resulting dictionary twice, for backwards-compatibility
+        with a broken implementation.
+
+        """
+        d = self.extra.copy()
+        for attr in self.__class__.attributes:
+            d[attr] = getattr(self, attr)
+
+        if include_extra_dict:
+            d['extra'] = self.extra.copy()
+
+        return d
 
     def __setitem__(self, key, value):
         setattr(self, key, value)
@@ -119,9 +158,9 @@ class MySQLPingListener(object):
     def checkout(self, dbapi_con, con_record, con_proxy):
         try:
             dbapi_con.cursor().execute('select 1')
-        except dbapi_con.OperationalError, ex:
-            if ex.args[0] in (2006, 2013, 2014, 2045, 2055):
-                logging.warn('Got mysql server has gone away: %s', ex)
+        except dbapi_con.OperationalError as e:
+            if e.args[0] in (2006, 2013, 2014, 2045, 2055):
+                logging.warn(_('Got mysql server has gone away: %s'), e)
                 raise DisconnectionError("Database server went away")
             else:
                 raise
@@ -129,40 +168,53 @@ class MySQLPingListener(object):
 
 # Backends
 class Base(object):
-
-    _MAKER = None
-    _ENGINE = None
+    _engine = None
+    _sessionmaker = None
 
     def get_session(self, autocommit=True, expire_on_commit=False):
         """Return a SQLAlchemy session."""
-        if self._MAKER is None or self._ENGINE is None:
-            self._ENGINE = self.get_engine()
-            self._MAKER = self.get_maker(self._ENGINE,
-                                         autocommit,
-                                         expire_on_commit)
+        self._engine = self._engine or self.get_engine()
+        self._sessionmaker = self._sessionmaker or self.get_sessionmaker(
+            self._engine)
+        return self._sessionmaker()
 
-        session = self._MAKER()
-        return session
+    def get_engine(self, allow_global_engine=True):
+        """Return a SQLAlchemy engine.
 
-    def get_engine(self):
-        """Return a SQLAlchemy engine."""
-        connection_dict = sql.engine.url.make_url(CONF.sql.connection)
+        If allow_global_engine is True and an in-memory sqlite connection
+        string is provided by CONF, all backends will share a global sqlalchemy
+        engine.
 
-        engine_args = {'pool_recycle': CONF.sql.idle_timeout,
-                       'echo': False,
-                       'convert_unicode': True
-                       }
+        """
+        def new_engine():
+            connection_dict = sql.engine.url.make_url(CONF.sql.connection)
 
-        if 'sqlite' in connection_dict.drivername:
-            engine_args['poolclass'] = sqlalchemy.pool.NullPool
+            engine_config = {
+                'convert_unicode': True,
+                'echo': CONF.debug and CONF.verbose,
+                'pool_recycle': CONF.sql.idle_timeout,
+            }
 
-        if 'mysql' in connection_dict.drivername:
-            engine_args['listeners'] = [MySQLPingListener()]
+            if 'sqlite' in connection_dict.drivername:
+                engine_config['poolclass'] = sqlalchemy.pool.StaticPool
+            elif 'mysql' in connection_dict.drivername:
+                engine_config['listeners'] = [MySQLPingListener()]
 
-        return sql.create_engine(CONF.sql.connection, **engine_args)
+            return sql.create_engine(CONF.sql.connection, **engine_config)
 
-    def get_maker(self, engine, autocommit=True, expire_on_commit=False):
+        engine = get_global_engine() or new_engine()
+
+        # auto-build the db to support wsgi server w/ in-memory backend
+        if allow_global_engine and CONF.sql.connection == 'sqlite://':
+            ModelBase.metadata.create_all(bind=engine)
+            set_global_engine(engine)
+
+        return engine
+
+    def get_sessionmaker(self, engine, autocommit=True,
+                         expire_on_commit=False):
         """Return a SQLAlchemy sessionmaker using the given engine."""
-        return sqlalchemy.orm.sessionmaker(bind=engine,
-                                           autocommit=autocommit,
-                                           expire_on_commit=expire_on_commit)
+        return sqlalchemy.orm.sessionmaker(
+            bind=engine,
+            autocommit=autocommit,
+            expire_on_commit=expire_on_commit)

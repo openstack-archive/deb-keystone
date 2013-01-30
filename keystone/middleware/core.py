@@ -29,11 +29,11 @@ AUTH_TOKEN_HEADER = 'X-Auth-Token'
 
 
 # Environment variable used to pass the request context
-CONTEXT_ENV = 'openstack.context'
+CONTEXT_ENV = wsgi.CONTEXT_ENV
 
 
 # Environment variable used to pass the request params
-PARAMS_ENV = 'openstack.params'
+PARAMS_ENV = wsgi.PARAMS_ENV
 
 
 class TokenAuthMiddleware(wsgi.Middleware):
@@ -147,7 +147,7 @@ class XmlBodyMiddleware(wsgi.Middleware):
             try:
                 body_obj = jsonutils.loads(response.body)
                 response.body = serializer.to_xml(body_obj)
-            except:
+            except Exception:
                 raise exception.Error(message=response.body)
         return response
 

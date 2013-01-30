@@ -25,6 +25,7 @@ LOG = logging.getLogger(__name__)
 
 
 LDAP_VALUES = {'TRUE': True, 'FALSE': False}
+CONTROL_TREEDELETE = '1.2.840.113556.1.4.805'
 
 
 def py2ldap(val):
@@ -64,6 +65,7 @@ class BaseLdap(object):
     DEFAULT_STRUCTURAL_CLASSES = None
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_OBJECTCLASS = None
+    DEFAULT_FILTER = None
     DUMB_MEMBER_DN = 'cn=dumb,dc=nonexistent'
     options_name = None
     model = None
@@ -72,7 +74,7 @@ class BaseLdap(object):
     model = None
     tree_dn = None
 
-    def __init__(self,  conf):
+    def __init__(self, conf):
         self.LDAP_URL = conf.ldap.url
         self.LDAP_USER = conf.ldap.user
         self.LDAP_PASSWORD = conf.ldap.password
@@ -92,8 +94,25 @@ class BaseLdap(object):
             self.object_class = (getattr(conf.ldap, objclass)
                                  or self.DEFAULT_OBJECTCLASS)
 
+            filter = '%s_filter' % self.options_name
+            self.filter = getattr(conf.ldap, filter) or self.DEFAULT_FILTER
+
+            allow_create = '%s_allow_create' % self.options_name
+            self.allow_create = getattr(conf.ldap, allow_create)
+
+            allow_update = '%s_allow_update' % self.options_name
+            self.allow_update = getattr(conf.ldap, allow_update)
+
+            allow_delete = '%s_allow_delete' % self.options_name
+            self.allow_delete = getattr(conf.ldap, allow_delete)
+
             self.structural_classes = self.DEFAULT_STRUCTURAL_CLASSES
-        self.use_dumb_member = getattr(conf.ldap, 'use_dumb_member') or True
+        self.use_dumb_member = getattr(conf.ldap, 'use_dumb_member')
+        self.dumb_member = (getattr(conf.ldap, 'dumb_member') or
+                            self.DUMB_MEMBER_DN)
+
+        self.subtree_delete_enabled = getattr(conf.ldap,
+                                              'allow_subtree_delete')
 
     def get_connection(self, user=None, password=None):
         if self.LDAP_URL.startswith('fake://'):
@@ -149,8 +168,8 @@ class BaseLdap(object):
                 pass
             else:
                 raise exception.Conflict(type=self.options_name,
-                                         details='Duplicate name, %s.' %
-                                                 values['name'])
+                                         details=_('Duplicate name, %s.') %
+                                         values['name'])
 
         if values.get('id') is not None:
             try:
@@ -159,10 +178,15 @@ class BaseLdap(object):
                 pass
             else:
                 raise exception.Conflict(type=self.options_name,
-                                         details='Duplicate ID, %s.' %
-                                                 values['id'])
+                                         details=_('Duplicate ID, %s.') %
+                                         values['id'])
 
     def create(self, values):
+        if not self.allow_create:
+            msg = _('LDAP backend does not allow %s create') \
+                % self.options_name
+            raise exception.ForbiddenAction(msg)
+
         conn = self.get_connection()
         object_classes = self.structural_classes + [self.object_class]
         attrs = [('objectClass', object_classes)]
@@ -174,7 +198,7 @@ class BaseLdap(object):
                 attrs.append((attr_type, [v]))
 
         if 'groupOfNames' in object_classes and self.use_dumb_member:
-            attrs.append(('member', [self.DUMB_MEMBER_DN]))
+            attrs.append(('member', [self.dumb_member]))
 
         conn.add_s(self._id_to_dn(values['id']), attrs)
         return values
@@ -182,9 +206,10 @@ class BaseLdap(object):
     def _ldap_get(self, id, filter=None):
         conn = self.get_connection()
         query = '(objectClass=%s)' % self.object_class
-        if filter is not None:
-            query = '(&%s%s)' % (filter, query)
-
+        if (filter is not None or self.filter is not None):
+            localfilter = self.filter if self.filter is not None else ''
+            paramfilter = filter if filter is not None else ''
+            query = '(&%s%s%s)' % (localfilter, paramfilter, query)
         try:
             res = conn.search_s(self._id_to_dn(id), ldap.SCOPE_BASE, query)
         except ldap.NO_SUCH_OBJECT:
@@ -198,8 +223,10 @@ class BaseLdap(object):
     def _ldap_get_all(self, filter=None):
         conn = self.get_connection()
         query = '(objectClass=%s)' % (self.object_class,)
-        if filter is not None:
-            query = '(&%s%s)' % (filter, query)
+        if (filter is not None or self.filter is not None):
+            localfilter = self.filter if self.filter is not None else ''
+            paramfilter = filter if filter is not None else ''
+            query = '(&%s%s%s)' % (localfilter, paramfilter, query)
         try:
             return conn.search_s(self.tree_dn, ldap.SCOPE_ONELEVEL, query)
         except ldap.NO_SUCH_OBJECT:
@@ -262,6 +289,11 @@ class BaseLdap(object):
         return (prv, nxt)
 
     def update(self, id, values, old_obj=None):
+        if not self.allow_update:
+            msg = _('LDAP backend does not allow %s update') \
+                % self.options_name
+            raise exception.ForbiddenAction(msg)
+
         if old_obj is None:
             old_obj = self.get(id)
 
@@ -285,17 +317,30 @@ class BaseLdap(object):
         conn.modify_s(self._id_to_dn(id), modlist)
 
     def delete(self, id):
+        if not self.allow_delete:
+            msg = _('LDAP backend does not allow %s delete') \
+                % self.options_name
+            raise exception.ForbiddenAction(msg)
+
         conn = self.get_connection()
         conn.delete_s(self._id_to_dn(id))
+
+    def deleteTree(self, id):
+        conn = self.get_connection()
+        tree_delete_control = ldap.controls.LDAPControl(CONTROL_TREEDELETE,
+                                                        0,
+                                                        None)
+        conn.delete_ext_s(self._id_to_dn(id),
+                          serverctrls=[tree_delete_control])
 
 
 class LdapWrapper(object):
     def __init__(self, url):
-        LOG.debug("LDAP init: url=%s", url)
+        LOG.debug(_("LDAP init: url=%s", url))
         self.conn = ldap.initialize(url)
 
     def simple_bind_s(self, user, password):
-        LOG.debug("LDAP bind: dn=%s", user)
+        LOG.debug(_("LDAP bind: dn=%s", user))
         return self.conn.simple_bind_s(user, password)
 
     def add_s(self, dn, attrs):
@@ -306,15 +351,15 @@ class LdapWrapper(object):
                            if kind != 'userPassword'
                            else ['****'])
                           for kind, values in ldap_attrs]
-            LOG.debug('LDAP add: dn=%s, attrs=%s', dn, sane_attrs)
+            LOG.debug(_('LDAP add: dn=%s, attrs=%s', dn, sane_attrs))
         return self.conn.add_s(dn, ldap_attrs)
 
     def search_s(self, dn, scope, query):
         if LOG.isEnabledFor(logging.DEBUG):
-            LOG.debug('LDAP search: dn=%s, scope=%s, query=%s',
+            LOG.debug(_('LDAP search: dn=%s, scope=%s, query=%s',
                       dn,
                       scope,
-                      query)
+                      query))
         res = self.conn.search_s(dn, scope, query)
 
         o = []
@@ -334,10 +379,14 @@ class LdapWrapper(object):
             sane_modlist = [(op, kind, (values if kind != 'userPassword'
                                         else ['****']))
                             for op, kind, values in ldap_modlist]
-            LOG.debug("LDAP modify: dn=%s, modlist=%s", dn, sane_modlist)
+            LOG.debug(_("LDAP modify: dn=%s, modlist=%s", dn, sane_modlist))
 
         return self.conn.modify_s(dn, ldap_modlist)
 
     def delete_s(self, dn):
-        LOG.debug("LDAP delete: dn=%s", dn)
+        LOG.debug(_("LDAP delete: dn=%s", dn))
         return self.conn.delete_s(dn)
+
+    def delete_ext_s(self, dn, serverctrls):
+        LOG.debug(_("LDAP delete_ext: dn=%s, serverctrls=%s", dn, serverctrls))
+        return self.conn.delete_ext_s(dn, serverctrls)

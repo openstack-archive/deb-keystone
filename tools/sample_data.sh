@@ -49,6 +49,10 @@
 # demo                 demo      Member,sysadmin,netadmin
 # invisible_to_admin   demo      Member
 
+CONTROLLER_PUBLIC_ADDRESS=${CONTROLLER_PUBLIC_ADDRESS:-localhost}
+CONTROLLER_ADMIN_ADDRESS=${CONTROLLER_ADMIN_ADDRESS:-localhost}
+CONTROLLER_INTERNAL_ADDRESS=${CONTROLLER_INTERNAL_ADDRESS:-localhost}
+
 TOOLS_DIR=$(cd $(dirname "$0") && pwd)
 KEYSTONE_CONF=${KEYSTONE_CONF:-/etc/keystone/keystone.conf}
 if [[ -r "$KEYSTONE_CONF" ]]; then
@@ -87,7 +91,7 @@ if [[ -z "$SERVICE_TOKEN" ]]; then
     exit 1
 fi
 
-export SERVICE_ENDPOINT=${SERVICE_ENDPOINT:-http://127.0.0.1:${CONFIG_ADMIN_PORT:-35357}/v2.0}
+export SERVICE_ENDPOINT=${SERVICE_ENDPOINT:-http://$CONTROLLER_PUBLIC_ADDRESS:${CONFIG_ADMIN_PORT:-35357}/v2.0}
 
 function get_id () {
     echo `"$@" | grep ' id ' | awk '{print $4}'`
@@ -120,16 +124,16 @@ NETADMIN_ROLE=$(get_id keystone role-create --name=netadmin)
 
 
 # Add Roles to Users in Tenants
-keystone user-role-add --user_id $ADMIN_USER --role_id $ADMIN_ROLE --tenant_id $ADMIN_TENANT
-keystone user-role-add --user_id $DEMO_USER --role_id $MEMBER_ROLE --tenant_id $DEMO_TENANT
-keystone user-role-add --user_id $DEMO_USER --role_id $SYSADMIN_ROLE --tenant_id $DEMO_TENANT
-keystone user-role-add --user_id $DEMO_USER --role_id $NETADMIN_ROLE --tenant_id $DEMO_TENANT
-keystone user-role-add --user_id $DEMO_USER --role_id $MEMBER_ROLE --tenant_id $INVIS_TENANT
-keystone user-role-add --user_id $ADMIN_USER --role_id $ADMIN_ROLE --tenant_id $DEMO_TENANT
+keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
+keystone user-role-add --user-id $DEMO_USER --role-id $MEMBER_ROLE --tenant-id $DEMO_TENANT
+keystone user-role-add --user-id $DEMO_USER --role-id $SYSADMIN_ROLE --tenant-id $DEMO_TENANT
+keystone user-role-add --user-id $DEMO_USER --role-id $NETADMIN_ROLE --tenant-id $DEMO_TENANT
+keystone user-role-add --user-id $DEMO_USER --role-id $MEMBER_ROLE --tenant-id $INVIS_TENANT
+keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $DEMO_TENANT
 
 # TODO(termie): these two might be dubious
-keystone user-role-add --user_id $ADMIN_USER --role_id $KEYSTONEADMIN_ROLE --tenant_id $ADMIN_TENANT
-keystone user-role-add --user_id $ADMIN_USER --role_id $KEYSTONESERVICE_ROLE --tenant_id $ADMIN_TENANT
+keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
+keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICE_ROLE --tenant-id $ADMIN_TENANT
 
 
 # Services
@@ -139,16 +143,16 @@ keystone service-create --name=nova \
                         --description="Nova Compute Service")
 NOVA_USER=$(get_id keystone user-create --name=nova \
                                         --pass="$SERVICE_PASSWORD" \
-                                        --tenant_id $SERVICE_TENANT \
+                                        --tenant-id $SERVICE_TENANT \
                                         --email=nova@example.com)
-keystone user-role-add --tenant_id $SERVICE_TENANT \
-                       --user_id $NOVA_USER \
-                       --role_id $ADMIN_ROLE
+keystone user-role-add --tenant-id $SERVICE_TENANT \
+                       --user-id $NOVA_USER \
+                       --role-id $ADMIN_ROLE
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
-    keystone endpoint-create --region RegionOne --service_id $NOVA_SERVICE \
-        --publicurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s' \
-        --adminurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s' \
-        --internalurl 'http://localhost:$(compute_port)s/v1.1/$(tenant_id)s'
+    keystone endpoint-create --region RegionOne --service-id $NOVA_SERVICE \
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:\$(compute_port)s/v1.1/\$(tenant_id)s"
 fi
 
 EC2_SERVICE=$(get_id \
@@ -156,10 +160,10 @@ keystone service-create --name=ec2 \
                         --type=ec2 \
                         --description="EC2 Compatibility Layer")
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
-    keystone endpoint-create --region RegionOne --service_id $EC2_SERVICE \
-        --publicurl http://localhost:8773/services/Cloud \
-        --adminurl http://localhost:8773/services/Admin \
-        --internalurl http://localhost:8773/services/Cloud
+    keystone endpoint-create --region RegionOne --service-id $EC2_SERVICE \
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:8773/services/Cloud" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:8773/services/Admin" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:8773/services/Cloud"
 fi
 
 GLANCE_SERVICE=$(get_id \
@@ -168,16 +172,16 @@ keystone service-create --name=glance \
                         --description="Glance Image Service")
 GLANCE_USER=$(get_id keystone user-create --name=glance \
                                           --pass="$SERVICE_PASSWORD" \
-                                          --tenant_id $SERVICE_TENANT \
+                                          --tenant-id $SERVICE_TENANT \
                                           --email=glance@example.com)
-keystone user-role-add --tenant_id $SERVICE_TENANT \
-                       --user_id $GLANCE_USER \
-                       --role_id $ADMIN_ROLE
+keystone user-role-add --tenant-id $SERVICE_TENANT \
+                       --user-id $GLANCE_USER \
+                       --role-id $ADMIN_ROLE
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
-    keystone endpoint-create --region RegionOne --service_id $GLANCE_SERVICE \
-        --publicurl http://localhost:9292/v1 \
-        --adminurl http://localhost:9292/v1 \
-        --internalurl http://localhost:9292/v1
+    keystone endpoint-create --region RegionOne --service-id $GLANCE_SERVICE \
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:9292/v1" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:9292/v1" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:9292/v1"
 fi
 
 KEYSTONE_SERVICE=$(get_id \
@@ -185,10 +189,10 @@ keystone service-create --name=keystone \
                         --type=identity \
                         --description="Keystone Identity Service")
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
-    keystone endpoint-create --region RegionOne --service_id $KEYSTONE_SERVICE \
-        --publicurl 'http://localhost:$(public_port)s/v2.0' \
-        --adminurl 'http://localhost:$(admin_port)s/v2.0' \
-        --internalurl 'http://localhost:$(admin_port)s/v2.0'
+    keystone endpoint-create --region RegionOne --service-id $KEYSTONE_SERVICE \
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:\$(public_port)s/v2.0" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:\$(admin_port)s/v2.0" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:\$(public_port)s/v2.0"
 fi
 
 VOLUME_SERVICE=$(get_id \
@@ -196,49 +200,63 @@ keystone service-create --name="nova-volume" \
                         --type=volume \
                         --description="Nova Volume Service")
 if [[ -n "$ENABLE_ENDPOINTS" ]]; then
-    keystone endpoint-create --region RegionOne --service_id $VOLUME_SERVICE \
-        --publicurl 'http://localhost:8776/v1/$(tenant_id)s' \
-        --adminurl 'http://localhost:8776/v1/$(tenant_id)s' \
-        --internalurl 'http://localhost:8776/v1/$(tenant_id)s'
+    keystone endpoint-create --region RegionOne --service-id $VOLUME_SERVICE \
+        --publicurl "http://$CONTROLLER_PUBLIC_ADDRESS:8776/v1/\$(tenant_id)s" \
+        --adminurl "http://$CONTROLLER_ADMIN_ADDRESS:8776/v1/\$(tenant_id)s" \
+        --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:8776/v1/\$(tenant_id)s"
 fi
 
 keystone service-create --name="horizon" \
-						--type=dashboard \
-						--description="OpenStack Dashboard"
+                        --type=dashboard \
+                        --description="OpenStack Dashboard"
 
 if [[ -n "$ENABLE_SWIFT" ]]; then
+    SWIFT_SERVICE=$(get_id \
     keystone service-create --name=swift \
                             --type="object-store" \
-                            --description="Swift Service"
+                            --description="Swift Service")
     SWIFT_USER=$(get_id keystone user-create --name=swift \
                                              --pass="$SERVICE_PASSWORD" \
-                                             --tenant_id $SERVICE_TENANT \
+                                             --tenant-id $SERVICE_TENANT \
                                              --email=swift@example.com)
-    keystone user-role-add --tenant_id $SERVICE_TENANT \
-                           --user_id $SWIFT_USER \
-                           --role_id $ADMIN_ROLE
+    keystone user-role-add --tenant-id $SERVICE_TENANT \
+                           --user-id $SWIFT_USER \
+                           --role-id $ADMIN_ROLE
+    if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+        keystone endpoint-create --region RegionOne --service-id $SWIFT_SERVICE \
+            --publicurl   "http://$CONTROLLER_PUBLIC_ADDRESS:8080/v1/AUTH_\$(tenant_id)s" \
+            --adminurl    "http://$CONTROLLER_ADMIN_ADDRESS:8080/v1/AUTH_\$(tenant_id)s" \
+            --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:8080/v1/AUTH_\$(tenant_id)s"
+    fi
 fi
 
 if [[ -n "$ENABLE_QUANTUM" ]]; then
+    QUANTUM_SERVICE=$(get_id \
     keystone service-create --name=quantum \
                             --type=network \
-                            --description="Quantum Service"
+                            --description="Quantum Service")
     QUANTUM_USER=$(get_id keystone user-create --name=quantum \
                                                --pass="$SERVICE_PASSWORD" \
-                                               --tenant_id $SERVICE_TENANT \
+                                               --tenant-id $SERVICE_TENANT \
                                                --email=quantum@example.com)
-    keystone user-role-add --tenant_id $SERVICE_TENANT \
-                           --user_id $QUANTUM_USER \
-                           --role_id $ADMIN_ROLE
+    keystone user-role-add --tenant-id $SERVICE_TENANT \
+                           --user-id $QUANTUM_USER \
+                           --role-id $ADMIN_ROLE
+    if [[ -n "$ENABLE_ENDPOINTS" ]]; then
+        keystone endpoint-create --region RegionOne --service-id $QUANTUM_SERVICE \
+            --publicurl   "http://$CONTROLLER_PUBLIC_ADDRESS:9696" \
+            --adminurl    "http://$CONTROLLER_ADMIN_ADDRESS:9696" \
+            --internalurl "http://$CONTROLLER_INTERNAL_ADDRESS:9696"
+    fi
 fi
 
 
 # create ec2 creds and parse the secret and access key returned
-RESULT=$(keystone ec2-credentials-create --tenant_id=$ADMIN_TENANT --user_id=$ADMIN_USER)
+RESULT=$(keystone ec2-credentials-create --tenant-id=$ADMIN_TENANT --user-id=$ADMIN_USER)
 ADMIN_ACCESS=`echo "$RESULT" | grep access | awk '{print $4}'`
 ADMIN_SECRET=`echo "$RESULT" | grep secret | awk '{print $4}'`
 
-RESULT=$(keystone ec2-credentials-create --tenant_id=$DEMO_TENANT --user_id=$DEMO_USER)
+RESULT=$(keystone ec2-credentials-create --tenant-id=$DEMO_TENANT --user-id=$DEMO_USER)
 DEMO_ACCESS=`echo "$RESULT" | grep access | awk '{print $4}'`
 DEMO_SECRET=`echo "$RESULT" | grep secret | awk '{print $4}'`
 

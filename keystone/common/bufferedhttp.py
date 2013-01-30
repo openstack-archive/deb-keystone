@@ -99,8 +99,8 @@ class BufferedHTTPConnection(HTTPConnection):
 
     def getresponse(self):
         response = HTTPConnection.getresponse(self)
-        LOG.debug('HTTP PERF: %(time).5f seconds to %(method)s '
-                  '%(host)s:%(port)s %(path)s)',
+        LOG.debug(_('HTTP PERF: %(time).5f seconds to %(method)s '
+                  '%(host)s:%(port)s %(path)s)'),
                   {'time': time.time() - self._connected_time,
                    'method': self._method,
                    'host': self.host,
@@ -129,6 +129,7 @@ def http_connect(ipaddr, port, device, partition, method, path,
     :param key_file Private key file (not needed if cert_file has private key)
     :param cert_file Certificate file (Keystore)
     :returns: HTTPConnection object
+
     """
     path = quote('/' + device + '/' + str(partition) + path)
     return http_connect_raw(ipaddr, port, device, partition, method, path,
@@ -153,6 +154,7 @@ def http_connect_raw(ipaddr, port, method, path, headers=None,
     :param key_file Private key file (not needed if cert_file has private key)
     :param cert_file Certificate file (Keystore)
     :returns: HTTPConnection object
+
     """
     if ssl:
         conn = HTTPSConnection('%s:%s' % (ipaddr, port), key_file=key_file,

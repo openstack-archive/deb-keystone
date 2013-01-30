@@ -16,6 +16,7 @@
 # under the License.
 
 from keystone import catalog
+from keystone.catalog import core
 from keystone.common import sql
 from keystone.common.sql import migration
 from keystone import config
@@ -27,51 +28,23 @@ CONF = config.CONF
 
 class Service(sql.ModelBase, sql.DictBase):
     __tablename__ = 'service'
+    attributes = ['id', 'type']
     id = sql.Column(sql.String(64), primary_key=True)
     type = sql.Column(sql.String(255))
     extra = sql.Column(sql.JsonBlob())
 
-    @classmethod
-    def from_dict(cls, service_dict):
-        extra = {}
-        for k, v in service_dict.copy().iteritems():
-            if k not in ['id', 'type', 'extra']:
-                extra[k] = service_dict.pop(k)
-
-        service_dict['extra'] = extra
-        return cls(**service_dict)
-
-    def to_dict(self):
-        extra_copy = self.extra.copy()
-        extra_copy['id'] = self.id
-        extra_copy['type'] = self.type
-        return extra_copy
-
 
 class Endpoint(sql.ModelBase, sql.DictBase):
     __tablename__ = 'endpoint'
+    attributes = ['id', 'interface', 'region', 'service_id', 'url']
     id = sql.Column(sql.String(64), primary_key=True)
+    interface = sql.Column(sql.String(8), primary_key=True)
     region = sql.Column('region', sql.String(255))
     service_id = sql.Column(sql.String(64),
                             sql.ForeignKey('service.id'),
                             nullable=False)
+    url = sql.Column(sql.Text())
     extra = sql.Column(sql.JsonBlob())
-
-    @classmethod
-    def from_dict(cls, endpoint_dict):
-        extra = {}
-        for k, v in endpoint_dict.copy().iteritems():
-            if k not in ['id', 'region', 'service_id', 'extra']:
-                extra[k] = endpoint_dict.pop(k)
-        endpoint_dict['extra'] = extra
-        return cls(**endpoint_dict)
-
-    def to_dict(self):
-        extra_copy = self.extra.copy()
-        extra_copy['id'] = self.id
-        extra_copy['region'] = self.region
-        extra_copy['service_id'] = self.service_id
-        return extra_copy
 
 
 class Catalog(sql.Base, catalog.Driver):
@@ -81,21 +54,25 @@ class Catalog(sql.Base, catalog.Driver):
     # Services
     def list_services(self):
         session = self.get_session()
-        services = session.query(Service)
-        return [s['id'] for s in list(services)]
+        services = session.query(Service).all()
+        return [s.to_dict() for s in list(services)]
+
+    def _get_service(self, session, service_id):
+        try:
+            return session.query(Service).filter_by(id=service_id).one()
+        except sql.NotFound:
+            raise exception.ServiceNotFound(service_id=service_id)
 
     def get_service(self, service_id):
         session = self.get_session()
-        service_ref = session.query(Service).filter_by(id=service_id).first()
-        if not service_ref:
-            raise exception.ServiceNotFound(service_id=service_id)
-        return service_ref.to_dict()
+        return self._get_service(session, service_id).to_dict()
 
     def delete_service(self, service_id):
         session = self.get_session()
         with session.begin():
-            if not session.query(Service).filter_by(id=service_id).delete():
-                raise exception.ServiceNotFound(service_id=service_id)
+            ref = self._get_service(session, service_id)
+            session.query(Endpoint).filter_by(service_id=service_id).delete()
+            session.delete(ref)
             session.flush()
 
     def create_service(self, service_id, service_ref):
@@ -105,6 +82,20 @@ class Catalog(sql.Base, catalog.Driver):
             session.add(service)
             session.flush()
         return service.to_dict()
+
+    def update_service(self, service_id, service_ref):
+        session = self.get_session()
+        with session.begin():
+            ref = self._get_service(session, service_id)
+            old_dict = ref.to_dict()
+            old_dict.update(service_ref)
+            new_service = Service.from_dict(old_dict)
+            for attr in Service.attributes:
+                if attr != 'id':
+                    setattr(ref, attr, getattr(new_service, attr))
+            ref.extra = new_service.extra
+            session.flush()
+        return ref.to_dict()
 
     # Endpoints
     def create_endpoint(self, endpoint_id, endpoint_ref):
@@ -123,45 +114,61 @@ class Catalog(sql.Base, catalog.Driver):
                 raise exception.EndpointNotFound(endpoint_id=endpoint_id)
             session.flush()
 
+    def _get_endpoint(self, session, endpoint_id):
+        try:
+            return session.query(Endpoint).filter_by(id=endpoint_id).one()
+        except sql.NotFound:
+            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
+
     def get_endpoint(self, endpoint_id):
         session = self.get_session()
-        endpoint_ref = session.query(Endpoint)
-        endpoint_ref = endpoint_ref.filter_by(id=endpoint_id).first()
-        if not endpoint_ref:
-            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
-        return endpoint_ref.to_dict()
+        return self._get_endpoint(session, endpoint_id).to_dict()
 
     def list_endpoints(self):
         session = self.get_session()
         endpoints = session.query(Endpoint)
-        return [e['id'] for e in list(endpoints)]
+        return [e.to_dict() for e in list(endpoints)]
+
+    def update_endpoint(self, endpoint_id, endpoint_ref):
+        session = self.get_session()
+        with session.begin():
+            ref = self._get_endpoint(session, endpoint_id)
+            old_dict = ref.to_dict()
+            old_dict.update(endpoint_ref)
+            new_endpoint = Endpoint.from_dict(old_dict)
+            for attr in Endpoint.attributes:
+                if attr != 'id':
+                    setattr(ref, attr, getattr(new_endpoint, attr))
+            ref.extra = new_endpoint.extra
+            session.flush()
+        return ref.to_dict()
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
         d = dict(CONF.iteritems())
         d.update({'tenant_id': tenant_id,
                   'user_id': user_id})
+
         catalog = {}
+        services = {}
+        for endpoint in self.list_endpoints():
+            # look up the service
+            services.setdefault(
+                endpoint['service_id'],
+                self.get_service(endpoint['service_id']))
+            service = services[endpoint['service_id']]
 
-        endpoints = [self.get_endpoint(e)
-                     for e in self.list_endpoints()]
-        for ep in endpoints:
-            service = self.get_service(ep['service_id'])
-            srv_type = service['type']
-            srv_name = service['name']
-            region = ep['region']
+            # add the endpoint to the catalog if it's not already there
+            catalog.setdefault(endpoint['region'], {})
+            catalog[endpoint['region']].setdefault(
+                service['type'], {
+                    'id': endpoint['id'],
+                    'name': service['name'],
+                    'publicURL': '',  # this may be overridden, but must exist
+                })
 
-            if region not in catalog:
-                catalog[region] = {}
-
-            catalog[region][srv_type] = {}
-
-            internal_url = ep['internalurl'].replace('$(', '%(')
-            public_url = ep['publicurl'].replace('$(', '%(')
-            admin_url = ep['adminurl'].replace('$(', '%(')
-            catalog[region][srv_type]['id'] = ep['id']
-            catalog[region][srv_type]['name'] = srv_name
-            catalog[region][srv_type]['publicURL'] = public_url % d
-            catalog[region][srv_type]['adminURL'] = admin_url % d
-            catalog[region][srv_type]['internalURL'] = internal_url % d
+            # add the interface's url
+            url = core.format_url(endpoint.get('url'), d)
+            interface_url = '%sURL' % endpoint['interface']
+            catalog[endpoint['region']][service['type']][interface_url] = url
 
         return catalog
