@@ -154,3 +154,52 @@ class SqlCatalog(test.TestCase, test_backend.CatalogTests):
         self.catalog_api = catalog_sql.Catalog()
         self.catalog_man = catalog.Manager()
         self.load_fixtures(default_fixtures)
+
+    def test_malformed_catalog_throws_error(self):
+        self.catalog_api.create_service('a', {"id": "a", "desc": "a1",
+                                        "name": "b"})
+        badurl = "http://192.168.1.104:$(compute_port)s/v2/$(tenant)s"
+        self.catalog_api.create_endpoint('b', {"id": "b", "region": "b1",
+                                         "service_id": "a", "adminurl": badurl,
+                                         "internalurl": badurl,
+                                         "publicurl": badurl})
+        with self.assertRaises(exception.MalformedEndpoint):
+            self.catalog_api.get_catalog('fake-user', 'fake-tenant')
+
+    def test_get_catalog_without_endpoint(self):
+        new_service = {
+            'id': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_service(
+            new_service['id'],
+            new_service.copy())
+        service_id = new_service['id']
+
+        new_endpoint = {
+            'id': uuid.uuid4().hex,
+            'region': uuid.uuid4().hex,
+            'service_id': service_id,
+        }
+
+        self.catalog_api.create_endpoint(
+            new_endpoint['id'],
+            new_endpoint.copy())
+
+        catalog = self.catalog_api.get_catalog('user', 'tenant')
+
+        service_type = new_service['type']
+        region = new_endpoint['region']
+
+        self.assertEqual(catalog[region][service_type]['name'],
+                         new_service['name'])
+        self.assertEqual(catalog[region][service_type]['id'],
+                         new_endpoint['id'])
+        self.assertEqual(catalog[region][service_type]['publicURL'],
+                         "")
+        self.assertEqual(catalog[region][service_type]['adminURL'],
+                         None)
+        self.assertEqual(catalog[region][service_type]['internalURL'],
+                         None)
