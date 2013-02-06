@@ -1,3 +1,10 @@
+keystone (2012.1.1-12) unstable; urgency=low
+
+  * CVE-2013-0247: Keystone denial of service through invalid token requests
+    (Closes: #699835).
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 06 Feb 2013 09:52:07 +0800
+
 keystone (2012.1.1-11) unstable; urgency=high
 
   * Applies security patch from upstream: Ensures User is member of tenant in
