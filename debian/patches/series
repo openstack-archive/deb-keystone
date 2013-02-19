@@ -9,3 +9,4 @@ CVE-2012-4457-Raise_unauthorized_if_tenant_disabled.patch
 ensures-User-is-member-of-tenant-in-ec2-validation.patch
 CVE-2013-0247_denial_of_service_through_invalid_token_requests.patch
 CVE-2013-0282_ensure-user-tenant-enabled-ec2.patch
+CVE-2013-0280_Information-leak-and-Denial-of-Service-using-XML-entities.patch
