@@ -1,8 +1,8 @@
 keystone (2012.1.1-13) unstable; urgency=high
 
-  * CVE-2013-0282: Ensure EC2 users and tenant are enabled (Closes: #).
+  * CVE-2013-0282: Ensure EC2 users and tenant are enabled (Closes: #700947).
   * CVE-2013-0280: Information leak and Denial of Service using XML entities
-    (Closes: #)
+    (Closes: #700948).
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 19 Feb 2013 12:56:42 +0800
 
