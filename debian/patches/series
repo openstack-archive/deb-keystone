@@ -4,3 +4,4 @@ sql_conn.patch
 fixes-keystone-default-catalog.patch
 CVE-2013-0247_denial_of_service_through_invalid_token_requests.patch
 CVE-2013-0282_ensure-user-tenant-enabled-ec2.patch
+CVE-2013-0280_Information-leak-and-Denial-of-Service-using-XML-entities.patch
