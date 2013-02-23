@@ -49,7 +49,7 @@ def read_cached_file(filename, cache_info, reload_func=None):
     :param reload_func: optional function to be called with data when
                         file is reloaded due to a modification.
 
-    :returns: data from file
+    :returns: data from file.
 
     """
     mtime = os.path.getmtime(filename)
@@ -90,8 +90,8 @@ class Ec2Signer(object):
                                           credentials['verb'],
                                           credentials['host'],
                                           credentials['path'])
-        raise Exception(_('Unknown Signature Version: %s' %
-                        credentials['params']['SignatureVersion']))
+        raise Exception(_('Unknown Signature Version: %s') %
+                        credentials['params']['SignatureVersion'])
 
     @staticmethod
     def _get_utf8_value(value):
@@ -311,3 +311,37 @@ def setup_remote_pydev_debug():
         except:
             LOG.exception(_(error_msg))
             raise
+
+
+class LimitingReader(object):
+    """Reader to limit the size of an incoming request."""
+    def __init__(self, data, limit):
+        """
+        :param data: Underlying data object
+        :param limit: maximum number of bytes the reader should allow
+        """
+        self.data = data
+        self.limit = limit
+        self.bytes_read = 0
+
+    def __iter__(self):
+        for chunk in self.data:
+            self.bytes_read += len(chunk)
+            if self.bytes_read > self.limit:
+                raise exception.RequestTooLarge()
+            else:
+                yield chunk
+
+    def read(self, i):
+        result = self.data.read(i)
+        self.bytes_read += len(result)
+        if self.bytes_read > self.limit:
+            raise exception.RequestTooLarge()
+        return result
+
+    def read(self):
+        result = self.data.read()
+        self.bytes_read += len(result)
+        if self.bytes_read > self.limit:
+            raise exception.RequestTooLarge()
+        return result

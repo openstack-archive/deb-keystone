@@ -14,7 +14,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import webob.dec
+
 from keystone.common import serializer
+from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
@@ -26,6 +29,10 @@ CONF = config.CONF
 
 # Header used to transmit the auth token
 AUTH_TOKEN_HEADER = 'X-Auth-Token'
+
+
+# Header used to transmit the subject token
+SUBJECT_TOKEN_HEADER = 'X-Subject-Token'
 
 
 # Environment variable used to pass the request context
@@ -41,6 +48,9 @@ class TokenAuthMiddleware(wsgi.Middleware):
         token = request.headers.get(AUTH_TOKEN_HEADER)
         context = request.environ.get(CONTEXT_ENV, {})
         context['token_id'] = token
+        if SUBJECT_TOKEN_HEADER in request.headers:
+            context['subject_token_id'] = (
+                request.headers.get(SUBJECT_TOKEN_HEADER))
         request.environ[CONTEXT_ENV] = context
 
 
@@ -102,7 +112,7 @@ class JsonBodyMiddleware(wsgi.Middleware):
 
         # Reject unrecognized content types. Empty string indicates
         # the client did not explicitly set the header
-        if not request.content_type in ('application/json', ''):
+        if request.content_type not in ('application/json', ''):
             e = exception.ValidationError(attribute='application/json',
                                           target='Content-Type header')
             return wsgi.render_exception(e)
@@ -164,3 +174,21 @@ class NormalizingFilter(wsgi.Middleware):
         # Rewrites path to root if no path is given.
         elif not request.environ['PATH_INFO']:
             request.environ['PATH_INFO'] = '/'
+
+
+class RequestBodySizeLimiter(wsgi.Middleware):
+    """Limit the size of an incoming request."""
+
+    def __init__(self, *args, **kwargs):
+        super(RequestBodySizeLimiter, self).__init__(*args, **kwargs)
+
+    @webob.dec.wsgify(RequestClass=wsgi.Request)
+    def __call__(self, req):
+
+        if req.content_length > CONF.max_request_body_size:
+            raise exception.RequestTooLarge()
+        if req.content_length is None and req.is_body_readable:
+            limiter = utils.LimitingReader(req.body_file,
+                                           CONF.max_request_body_size)
+            req.body_file = limiter
+        return self.application

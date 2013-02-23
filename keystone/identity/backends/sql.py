@@ -17,6 +17,7 @@
 import functools
 
 from keystone import clean
+from keystone import config
 from keystone.common import sql
 from keystone.common.sql import migration
 from keystone.common import utils
@@ -39,22 +40,31 @@ def handle_conflicts(type='object'):
 
 class User(sql.ModelBase, sql.DictBase):
     __tablename__ = 'user'
-    attributes = ['id', 'name', 'password', 'enabled']
+    attributes = ['id', 'name', 'domain_id', 'password', 'enabled']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True, nullable=False)
+    name = sql.Column(sql.String(64), nullable=False)
+    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
+                           nullable=False)
     password = sql.Column(sql.String(128))
     enabled = sql.Column(sql.Boolean)
     extra = sql.Column(sql.JsonBlob())
+    # Unique constraint across two columns to create the separation
+    # rather than just only 'name' being unique
+    __table_args__ = (sql.UniqueConstraint('domain_id', 'name'), {})
 
 
 class Group(sql.ModelBase, sql.DictBase):
     __tablename__ = 'group'
     attributes = ['id', 'name', 'domain_id']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True, nullable=False)
-    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'))
+    name = sql.Column(sql.String(64), nullable=False)
+    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
+                           nullable=False)
     description = sql.Column(sql.Text())
     extra = sql.Column(sql.JsonBlob())
+    # Unique constraint across two columns to create the separation
+    # rather than just only 'name' being unique
+    __table_args__ = (sql.UniqueConstraint('domain_id', 'name'), {})
 
 
 class Credential(sql.ModelBase, sql.DictBase):
@@ -64,7 +74,7 @@ class Credential(sql.ModelBase, sql.DictBase):
     user_id = sql.Column(sql.String(64),
                          sql.ForeignKey('user.id'),
                          nullable=False)
-    project_id = sql.Column(sql.String(64), sql.ForeignKey('tenant.id'))
+    project_id = sql.Column(sql.String(64), sql.ForeignKey('project.id'))
     blob = sql.Column(sql.JsonBlob(), nullable=False)
     type = sql.Column(sql.String(255), nullable=False)
     extra = sql.Column(sql.JsonBlob())
@@ -72,22 +82,26 @@ class Credential(sql.ModelBase, sql.DictBase):
 
 class Domain(sql.ModelBase, sql.DictBase):
     __tablename__ = 'domain'
-    attributes = ['id', 'name']
+    attributes = ['id', 'name', 'enabled']
     id = sql.Column(sql.String(64), primary_key=True)
     name = sql.Column(sql.String(64), unique=True, nullable=False)
+    enabled = sql.Column(sql.Boolean, default=True)
     extra = sql.Column(sql.JsonBlob())
 
 
-# TODO(dolph): rename to Project
-class Tenant(sql.ModelBase, sql.DictBase):
-    # TODO(dolph): rename to project
-    __tablename__ = 'tenant'
-    attributes = ['id', 'name']
+class Project(sql.ModelBase, sql.DictBase):
+    __tablename__ = 'project'
+    attributes = ['id', 'name', 'domain_id']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True, nullable=False)
+    name = sql.Column(sql.String(64), nullable=False)
+    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
+                           nullable=False)
     description = sql.Column(sql.Text())
     enabled = sql.Column(sql.Boolean)
     extra = sql.Column(sql.JsonBlob())
+    # Unique constraint across two columns to create the separation
+    # rather than just only 'name' being unique
+    __table_args__ = (sql.UniqueConstraint('domain_id', 'name'), {})
 
 
 class Role(sql.ModelBase, sql.DictBase):
@@ -109,11 +123,13 @@ class BaseGrant(sql.DictBase):
 
 
 class UserProjectGrant(sql.ModelBase, BaseGrant):
-    # TODO(dolph): rename to user_project_metadata (needs a migration)
-    __tablename__ = 'metadata'
-    user_id = sql.Column(sql.String(64), primary_key=True)
-    # TODO(dolph): rename to project_id (needs a migration)
-    tenant_id = sql.Column(sql.String(64), primary_key=True)
+    __tablename__ = 'user_project_metadata'
+    user_id = sql.Column(sql.String(64),
+                         sql.ForeignKey('user.id'),
+                         primary_key=True)
+    project_id = sql.Column(sql.String(64),
+                            sql.ForeignKey('project.id'),
+                            primary_key=True)
     data = sql.Column(sql.JsonBlob())
 
 
@@ -136,18 +152,6 @@ class GroupDomainGrant(sql.ModelBase, BaseGrant):
     group_id = sql.Column(sql.String(64), primary_key=True)
     domain_id = sql.Column(sql.String(64), primary_key=True)
     data = sql.Column(sql.JsonBlob())
-
-
-# TODO(dolph): ... do we need this table?
-class UserTenantMembership(sql.ModelBase, sql.DictBase):
-    """Tenant membership join table."""
-    __tablename__ = 'user_tenant_membership'
-    user_id = sql.Column(sql.String(64),
-                         sql.ForeignKey('user.id'),
-                         primary_key=True)
-    tenant_id = sql.Column(sql.String(64),
-                           sql.ForeignKey('tenant.id'),
-                           primary_key=True)
 
 
 class UserGroupMembership(sql.ModelBase, sql.DictBase):
@@ -201,13 +205,25 @@ class Identity(sql.Base, identity.Driver):
             raise AssertionError('Invalid user / password')
 
         if tenant_id is not None:
-            if tenant_id not in self.get_tenants_for_user(user_id):
-                raise AssertionError('Invalid tenant')
+            # FIXME(gyee): this should really be
+            # get_roles_for_user_and_project() after the dusts settle
+            if tenant_id not in self.get_projects_for_user(user_id):
+                # get_roles_for_user_and_project() returns a set
+                roles = []
+                try:
+                    roles = self.get_roles_for_user_and_project(user_id,
+                                                                tenant_id)
+                except:
+                    # FIXME(gyee): we should never get into this situation
+                    # after user project role migration is completed
+                    pass
+                if not roles:
+                    raise AssertionError('Invalid tenant')
 
             try:
-                tenant_ref = self.get_tenant(tenant_id)
+                tenant_ref = self.get_project(tenant_id)
                 metadata_ref = self.get_metadata(user_id, tenant_id)
-            except exception.TenantNotFound:
+            except exception.ProjectNotFound:
                 tenant_ref = None
                 metadata_ref = {}
             except exception.MetadataNotFound:
@@ -215,26 +231,30 @@ class Identity(sql.Base, identity.Driver):
 
         return (identity.filter_user(user_ref), tenant_ref, metadata_ref)
 
-    def get_tenant(self, tenant_id):
+    def get_project(self, tenant_id):
         session = self.get_session()
-        tenant_ref = session.query(Tenant).filter_by(id=tenant_id).first()
+        tenant_ref = session.query(Project).filter_by(id=tenant_id).first()
         if tenant_ref is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+            raise exception.ProjectNotFound(project_id=tenant_id)
         return tenant_ref.to_dict()
 
-    def get_tenant_by_name(self, tenant_name):
+    def get_project_by_name(self, tenant_name, domain_id):
         session = self.get_session()
-        tenant_ref = session.query(Tenant).filter_by(name=tenant_name).first()
-        if not tenant_ref:
-            raise exception.TenantNotFound(tenant_id=tenant_name)
-        return tenant_ref.to_dict()
+        query = session.query(Project)
+        query = query.filter_by(name=tenant_name)
+        query = query.filter_by(domain_id=domain_id)
+        try:
+            project_ref = query.one()
+        except sql.NotFound:
+            raise exception.ProjectNotFound(project_id=tenant_name)
+        return project_ref.to_dict()
 
-    def get_tenant_users(self, tenant_id):
+    def get_project_users(self, tenant_id):
         session = self.get_session()
-        self.get_tenant(tenant_id)
+        self.get_project(tenant_id)
         query = session.query(User)
-        query = query.join(UserTenantMembership)
-        query = query.filter(UserTenantMembership.tenant_id == tenant_id)
+        query = query.join(UserProjectGrant)
+        query = query.filter(UserProjectGrant.project_id == tenant_id)
         user_refs = query.all()
         return [identity.filter_user(user_ref.to_dict())
                 for user_ref in user_refs]
@@ -246,7 +266,7 @@ class Identity(sql.Base, identity.Driver):
         if user_id:
             if tenant_id:
                 q = session.query(UserProjectGrant)
-                q = q.filter_by(tenant_id=tenant_id)
+                q = q.filter_by(project_id=tenant_id)
             elif domain_id:
                 q = session.query(UserDomainGrant)
                 q = q.filter_by(domain_id=domain_id)
@@ -275,7 +295,7 @@ class Identity(sql.Base, identity.Driver):
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
-            self.get_tenant(project_id)
+            self.get_project(project_id)
 
         try:
             metadata_ref = self.get_metadata(user_id, project_id,
@@ -303,7 +323,7 @@ class Identity(sql.Base, identity.Driver):
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
-            self.get_tenant(project_id)
+            self.get_project(project_id)
 
         try:
             metadata_ref = self.get_metadata(user_id, project_id,
@@ -322,7 +342,7 @@ class Identity(sql.Base, identity.Driver):
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
-            self.get_tenant(project_id)
+            self.get_project(project_id)
 
         try:
             metadata_ref = self.get_metadata(user_id, project_id,
@@ -344,7 +364,7 @@ class Identity(sql.Base, identity.Driver):
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
-            self.get_tenant(project_id)
+            self.get_project(project_id)
 
         try:
             metadata_ref = self.get_metadata(user_id, project_id,
@@ -366,62 +386,73 @@ class Identity(sql.Base, identity.Driver):
             self.update_metadata(user_id, project_id, metadata_ref,
                                  domain_id, group_id)
 
-    # These should probably be part of the high-level API
-    def add_user_to_tenant(self, tenant_id, user_id):
+    def list_projects(self):
         session = self.get_session()
-        self.get_tenant(tenant_id)
-        self.get_user(user_id)
-        query = session.query(UserTenantMembership)
-        query = query.filter_by(user_id=user_id)
-        query = query.filter_by(tenant_id=tenant_id)
-        rv = query.first()
-        if rv:
-            return
-
-        with session.begin():
-            session.add(UserTenantMembership(user_id=user_id,
-                                             tenant_id=tenant_id))
-            session.flush()
-
-    def remove_user_from_tenant(self, tenant_id, user_id):
-        session = self.get_session()
-        self.get_tenant(tenant_id)
-        self.get_user(user_id)
-        query = session.query(UserTenantMembership)
-        query = query.filter_by(user_id=user_id)
-        query = query.filter_by(tenant_id=tenant_id)
-        membership_ref = query.first()
-        if membership_ref is None:
-            raise exception.NotFound('User not found in tenant')
-        with session.begin():
-            session.delete(membership_ref)
-            session.flush()
-
-    def get_tenants(self):
-        session = self.get_session()
-        tenant_refs = session.query(Tenant).all()
+        tenant_refs = session.query(Project).all()
         return [tenant_ref.to_dict() for tenant_ref in tenant_refs]
 
-    def get_tenants_for_user(self, user_id):
+    def get_projects_for_user(self, user_id):
         session = self.get_session()
         self.get_user(user_id)
-        query = session.query(UserTenantMembership)
+        query = session.query(UserProjectGrant)
         query = query.filter_by(user_id=user_id)
         membership_refs = query.all()
-        return [x.tenant_id for x in membership_refs]
+        return [x.project_id for x in membership_refs]
 
-    def get_roles_for_user_and_tenant(self, user_id, tenant_id):
-        self.get_user(user_id)
-        self.get_tenant(tenant_id)
+    def _get_user_group_project_roles(self, metadata_ref, user_id, project_id):
+        group_refs = self.list_groups_for_user(user_id=user_id)
+        for x in group_refs:
+            try:
+                metadata_ref.update(
+                    self.get_metadata(group_id=x['id'],
+                                      tenant_id=project_id))
+            except exception.MetadataNotFound:
+                # no group grant, skip
+                pass
+
+    def _get_user_project_roles(self, metadata_ref, user_id, project_id):
         try:
-            metadata_ref = self.get_metadata(user_id, tenant_id)
+            metadata_ref.update(self.get_metadata(user_id, project_id))
         except exception.MetadataNotFound:
-            metadata_ref = {}
-        return metadata_ref.get('roles', [])
+            pass
 
-    def add_role_to_user_and_tenant(self, user_id, tenant_id, role_id):
+    def _get_user_group_domain_roles(self, metadata_ref, user_id, domain_id):
+        group_refs = self.list_groups_for_user(user_id=user_id)
+        for x in group_refs:
+            try:
+                metadata_ref.update(
+                    self.get_metadata(group_id=x['id'],
+                                      domain_id=domain_id))
+            except exception.MetadataNotFound:
+                # no group grant, skip
+                pass
+
+    def _get_user_domain_roles(self, metadata_ref, user_id, domain_id):
+        try:
+            metadata_ref.update(self.get_metadata(user_id,
+                                                  domain_id=domain_id))
+        except exception.MetadataNotFound:
+            pass
+
+    def get_roles_for_user_and_project(self, user_id, tenant_id):
         self.get_user(user_id)
-        self.get_tenant(tenant_id)
+        self.get_project(tenant_id)
+        metadata_ref = {}
+        self._get_user_project_roles(metadata_ref, user_id, tenant_id)
+        self._get_user_group_project_roles(metadata_ref, user_id, tenant_id)
+        return list(set(metadata_ref.get('roles', [])))
+
+    def get_roles_for_user_and_domain(self, user_id, domain_id):
+        self.get_user(user_id)
+        self.get_domain(domain_id)
+        metadata_ref = {}
+        self._get_user_domain_roles(metadata_ref, user_id, domain_id)
+        self._get_user_group_domain_roles(metadata_ref, user_id, domain_id)
+        return list(set(metadata_ref.get('roles', [])))
+
+    def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
+        self.get_user(user_id)
+        self.get_project(tenant_id)
         self.get_role(role_id)
         try:
             metadata_ref = self.get_metadata(user_id, tenant_id)
@@ -441,81 +472,86 @@ class Identity(sql.Base, identity.Driver):
         else:
             self.update_metadata(user_id, tenant_id, metadata_ref)
 
-    def remove_role_from_user_and_tenant(self, user_id, tenant_id, role_id):
+    def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
         try:
             metadata_ref = self.get_metadata(user_id, tenant_id)
-            is_new = False
+            roles = set(metadata_ref.get('roles', []))
+            if role_id not in roles:
+                msg = _('Cannot remove role that has not been granted, %s' %
+                        role_id)
+                raise exception.RoleNotFound(message=msg)
+            roles.remove(role_id)
+            metadata_ref['roles'] = list(roles)
+            if len(roles):
+                self.update_metadata(user_id, tenant_id, metadata_ref)
+            else:
+                session = self.get_session()
+                q = session.query(UserProjectGrant)
+                q = q.filter_by(project_id=tenant_id)
+                q.delete()
         except exception.MetadataNotFound:
-            metadata_ref = {}
-            is_new = True
-        roles = set(metadata_ref.get('roles', []))
-        if role_id not in roles:
             msg = 'Cannot remove role that has not been granted, %s' % role_id
             raise exception.RoleNotFound(message=msg)
 
-        roles.remove(role_id)
-        metadata_ref['roles'] = list(roles)
-        if is_new:
-            self.create_metadata(user_id, tenant_id, metadata_ref)
-        else:
-            self.update_metadata(user_id, tenant_id, metadata_ref)
-
     # CRUD
-    @handle_conflicts(type='tenant')
-    def create_tenant(self, tenant_id, tenant):
-        tenant['name'] = clean.tenant_name(tenant['name'])
+    @handle_conflicts(type='project')
+    def create_project(self, tenant_id, tenant):
+        tenant['name'] = clean.project_name(tenant['name'])
         session = self.get_session()
         with session.begin():
-            tenant_ref = Tenant.from_dict(tenant)
+            tenant_ref = Project.from_dict(tenant)
             session.add(tenant_ref)
             session.flush()
         return tenant_ref.to_dict()
 
-    @handle_conflicts(type='tenant')
-    def update_tenant(self, tenant_id, tenant):
+    @handle_conflicts(type='project')
+    def update_project(self, tenant_id, tenant):
         session = self.get_session()
 
         if 'name' in tenant:
-            tenant['name'] = clean.tenant_name(tenant['name'])
-
+            tenant['name'] = clean.project_name(tenant['name'])
         try:
-            tenant_ref = session.query(Tenant).filter_by(id=tenant_id).one()
+            tenant_ref = session.query(Project).filter_by(id=tenant_id).one()
         except sql.NotFound:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+            raise exception.ProjectNotFound(project_id=tenant_id)
 
         with session.begin():
-            old_tenant_dict = tenant_ref.to_dict()
+            old_project_dict = tenant_ref.to_dict()
             for k in tenant:
-                old_tenant_dict[k] = tenant[k]
-            new_tenant = Tenant.from_dict(old_tenant_dict)
-            tenant_ref.name = new_tenant.name
-            tenant_ref.extra = new_tenant.extra
+                old_project_dict[k] = tenant[k]
+            new_project = Project.from_dict(old_project_dict)
+            for attr in Project.attributes:
+                if attr != 'id':
+                    setattr(tenant_ref, attr, getattr(new_project, attr))
+            tenant_ref.extra = new_project.extra
             session.flush()
         return tenant_ref.to_dict(include_extra_dict=True)
 
-    def delete_tenant(self, tenant_id):
+    @handle_conflicts(type='project')
+    def delete_project(self, tenant_id):
         session = self.get_session()
 
         try:
-            tenant_ref = session.query(Tenant).filter_by(id=tenant_id).one()
+            tenant_ref = session.query(Project).filter_by(id=tenant_id).one()
         except sql.NotFound:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+            raise exception.ProjectNotFound(project_id=tenant_id)
 
         with session.begin():
-            q = session.query(UserTenantMembership)
-            q = q.filter_by(tenant_id=tenant_id)
+            q = session.query(UserProjectGrant)
+            q = q.filter_by(project_id=tenant_id)
             q.delete(False)
 
             q = session.query(UserProjectGrant)
-            q = q.filter_by(tenant_id=tenant_id)
+            q = q.filter_by(project_id=tenant_id)
             q.delete(False)
 
             q = session.query(GroupProjectGrant)
             q = q.filter_by(project_id=tenant_id)
             q.delete(False)
 
-            if not session.query(Tenant).filter_by(id=tenant_id).delete(False):
-                raise exception.TenantNotFound(tenant_id=tenant_id)
+            delete_query = session.query(Project).filter_by(id=tenant_id)
+            if not delete_query.delete(False):
+                raise exception.ProjectNotFound(project_id=tenant_id)
 
             session.delete(tenant_ref)
             session.flush()
@@ -528,7 +564,7 @@ class Identity(sql.Base, identity.Driver):
             if user_id:
                 if tenant_id:
                     session.add(UserProjectGrant(user_id=user_id,
-                                                 tenant_id=tenant_id,
+                                                 project_id=tenant_id,
                                                  data=metadata))
                 elif domain_id:
                     session.add(UserDomainGrant(user_id=user_id,
@@ -555,7 +591,7 @@ class Identity(sql.Base, identity.Driver):
                 if tenant_id:
                     q = session.query(UserProjectGrant)
                     q = q.filter_by(user_id=user_id)
-                    q = q.filter_by(tenant_id=tenant_id)
+                    q = q.filter_by(project_id=tenant_id)
                 elif domain_id:
                     q = session.query(UserDomainGrant)
                     q = q.filter_by(user_id=user_id)
@@ -599,6 +635,14 @@ class Identity(sql.Base, identity.Driver):
             raise exception.DomainNotFound(domain_id=domain_id)
         return ref.to_dict()
 
+    def get_domain_by_name(self, domain_name):
+        session = self.get_session()
+        try:
+            ref = session.query(Domain).filter_by(name=domain_name).one()
+        except sql.NotFound:
+            raise exception.DomainNotFound(domain_id=domain_name)
+        return ref.to_dict()
+
     @handle_conflicts(type='domain')
     def update_domain(self, domain_id, domain):
         session = self.get_session()
@@ -626,46 +670,13 @@ class Identity(sql.Base, identity.Driver):
             session.delete(ref)
             session.flush()
 
-    # project crud
-
-    @handle_conflicts(type='project')
-    def create_project(self, project_id, project):
-        return self.create_tenant(project_id, project)
-
-    def get_project(self, project_id):
-        return self.get_tenant(project_id)
-
-    def list_projects(self):
-        return self.get_tenants()
-
-    @handle_conflicts(type='project')
-    def update_project(self, project_id, project):
-        session = self.get_session()
-        with session.begin():
-            ref = session.query(Tenant).filter_by(id=project_id).first()
-            if ref is None:
-                raise exception.TenantNotFound(project_id=project_id)
-            old_dict = ref.to_dict()
-            for k in project:
-                old_dict[k] = project[k]
-            new_project = Tenant.from_dict(old_dict)
-            for attr in Tenant.attributes:
-                if attr != 'id':
-                    setattr(ref, attr, getattr(new_project, attr))
-            ref.extra = new_project.extra
-            session.flush()
-        return ref.to_dict()
-
-    def delete_project(self, project_id):
-        return self.delete_tenant(project_id)
-
     def list_user_projects(self, user_id):
         session = self.get_session()
         user = self.get_user(user_id)
         metadata_refs = session\
             .query(UserProjectGrant)\
             .filter_by(user_id=user_id)
-        project_ids = set([x.tenant_id for x in metadata_refs
+        project_ids = set([x.project_id for x in metadata_refs
                            if x.data.get('roles')])
         if user.get('project_id'):
             project_ids.add(user['project_id'])
@@ -681,7 +692,7 @@ class Identity(sql.Base, identity.Driver):
     @handle_conflicts(type='user')
     def create_user(self, user_id, user):
         user['name'] = clean.user_name(user['name'])
-        if not 'enabled' in user:
+        if 'enabled' not in user:
             user['enabled'] = True
         user = utils.hash_user_password(user)
         session = self.get_session()
@@ -703,18 +714,23 @@ class Identity(sql.Base, identity.Driver):
             raise exception.UserNotFound(user_id=user_id)
         return user_ref.to_dict()
 
-    def _get_user_by_name(self, user_name):
+    def _get_user_by_name(self, user_name, domain_id):
         session = self.get_session()
-        user_ref = session.query(User).filter_by(name=user_name).first()
-        if not user_ref:
+        query = session.query(User)
+        query = query.filter_by(name=user_name)
+        query = query.filter_by(domain_id=domain_id)
+        try:
+            user_ref = query.one()
+        except sql.NotFound:
             raise exception.UserNotFound(user_id=user_name)
         return user_ref.to_dict()
 
     def get_user(self, user_id):
         return identity.filter_user(self._get_user(user_id))
 
-    def get_user_by_name(self, user_name):
-        return identity.filter_user(self._get_user_by_name(user_name))
+    def get_user_by_name(self, user_name, domain_id):
+        return identity.filter_user(
+            self._get_user_by_name(user_name, domain_id))
 
     @handle_conflicts(type='user')
     def update_user(self, user_id, user):
@@ -723,6 +739,7 @@ class Identity(sql.Base, identity.Driver):
         session = self.get_session()
         if 'id' in user and user_id != user['id']:
             raise exception.ValidationError('Cannot change user ID')
+
         with session.begin():
             user_ref = session.query(User).filter_by(id=user_id).first()
             if user_ref is None:
@@ -804,9 +821,6 @@ class Identity(sql.Base, identity.Driver):
             raise exception.UserNotFound(user_id=user_id)
 
         with session.begin():
-            q = session.query(UserTenantMembership)
-            q = q.filter_by(user_id=user_id)
-            q.delete(False)
 
             q = session.query(UserProjectGrant)
             q = q.filter_by(user_id=user_id)
@@ -855,6 +869,7 @@ class Identity(sql.Base, identity.Driver):
     @handle_conflicts(type='group')
     def update_group(self, group_id, group):
         session = self.get_session()
+
         with session.begin():
             ref = session.query(Group).filter_by(id=group_id).first()
             if ref is None:
@@ -1003,8 +1018,8 @@ class Identity(sql.Base, identity.Driver):
             for metadata_ref in session.query(UserProjectGrant):
                 metadata = metadata_ref.to_dict()
                 try:
-                    self.remove_role_from_user_and_tenant(
-                        metadata['user_id'], metadata['tenant_id'], role_id)
+                    self.remove_role_from_user_and_project(
+                        metadata['user_id'], metadata['project_id'], role_id)
                 except exception.RoleNotFound:
                     pass
 

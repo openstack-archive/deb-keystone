@@ -14,9 +14,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 """WSGI Routers for the Identity service."""
+from keystone.common import router
 from keystone.common import wsgi
 from keystone.identity import controllers
-from keystone.common import router
 
 
 class Public(wsgi.ComposableRouter):
@@ -24,7 +24,7 @@ class Public(wsgi.ComposableRouter):
         tenant_controller = controllers.Tenant()
         mapper.connect('/tenants',
                        controller=tenant_controller,
-                       action='get_tenants_for_token',
+                       action='get_projects_for_token',
                        conditions=dict(method=['GET']))
 
 
@@ -34,11 +34,11 @@ class Admin(wsgi.ComposableRouter):
         tenant_controller = controllers.Tenant()
         mapper.connect('/tenants',
                        controller=tenant_controller,
-                       action='get_all_tenants',
+                       action='get_all_projects',
                        conditions=dict(method=['GET']))
         mapper.connect('/tenants/{tenant_id}',
                        controller=tenant_controller,
-                       action='get_tenant',
+                       action='get_project',
                        conditions=dict(method=['GET']))
 
         # User Operations

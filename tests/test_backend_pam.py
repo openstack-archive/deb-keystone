@@ -22,6 +22,7 @@ from keystone import test
 
 
 CONF = config.CONF
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 class PamIdentity(test.TestCase):
@@ -35,13 +36,14 @@ class PamIdentity(test.TestCase):
         self.tenant_in = {'id': id, 'name': id}
         self.user_in = {'id': CONF.pam.userid, 'name': CONF.pam.userid}
 
-    def test_get_tenant(self):
-        tenant_out = self.identity_api.get_tenant(self.tenant_in['id'])
+    def test_get_project(self):
+        tenant_out = self.identity_api.get_project(self.tenant_in['id'])
         self.assertDictEqual(self.tenant_in, tenant_out)
 
-    def test_get_tenant_by_name(self):
+    def test_get_project_by_name(self):
         tenant_in_name = self.tenant_in['name']
-        tenant_out = self.identity_api.get_tenant_by_name(tenant_in_name)
+        tenant_out = self.identity_api.get_project_by_name(
+            tenant_in_name, DEFAULT_DOMAIN_ID)
         self.assertDictEqual(self.tenant_in, tenant_out)
 
     def test_get_user(self):
@@ -49,7 +51,8 @@ class PamIdentity(test.TestCase):
         self.assertDictEqual(self.user_in, user_out)
 
     def test_get_user_by_name(self):
-        user_out = self.identity_api.get_user_by_name(self.user_in['name'])
+        user_out = self.identity_api.get_user_by_name(
+            self.user_in['name'], DEFAULT_DOMAIN_ID)
         self.assertDictEqual(self.user_in, user_out)
 
     def test_get_metadata_for_non_root(self):

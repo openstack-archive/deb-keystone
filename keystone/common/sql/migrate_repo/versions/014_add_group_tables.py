@@ -26,10 +26,12 @@ def upgrade(migrate_engine):
         'group',
         meta,
         sql.Column('id', sql.String(64), primary_key=True),
-        sql.Column('domain_id', sql.String(64), sql.ForeignKey('domain.id')),
-        sql.Column('name', sql.String(64), unique=True, nullable=False),
+        sql.Column('domain_id', sql.String(64), sql.ForeignKey('domain.id'),
+                   nullable=False),
+        sql.Column('name', sql.String(64), nullable=False),
         sql.Column('description', sql.Text()),
-        sql.Column('extra', sql.Text()))
+        sql.Column('extra', sql.Text()),
+        sql.UniqueConstraint('domain_id', 'name'))
     group_table.create(migrate_engine, checkfirst=True)
 
     sql.Table('user', meta, autoload=True)

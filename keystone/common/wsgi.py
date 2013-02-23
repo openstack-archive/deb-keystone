@@ -20,6 +20,7 @@
 
 """Utility methods for working with WSGI servers."""
 
+import socket
 import sys
 
 import eventlet.wsgi
@@ -30,10 +31,12 @@ import webob.exc
 
 from keystone.common import logging
 from keystone.common import utils
+from keystone import config
 from keystone import exception
 from keystone.openstack.common import jsonutils
 
 
+CONF = config.CONF
 LOG = logging.getLogger(__name__)
 
 # Environment variable used to pass the request context
@@ -74,23 +77,35 @@ class Server(object):
                   {'arg0': sys.argv[0],
                    'host': self.host,
                    'port': self.port})
-        socket = eventlet.listen((self.host, self.port), backlog=backlog)
+
+        # TODO(dims): eventlet's green dns/socket module does not actually
+        # support IPv6 in getaddrinfo(). We need to get around this in the
+        # future or monitor upstream for a fix
+        info = socket.getaddrinfo(self.host,
+                                  self.port,
+                                  socket.AF_UNSPEC,
+                                  socket.SOCK_STREAM)[0]
+        _socket = eventlet.listen(info[-1],
+                                  family=info[0],
+                                  backlog=backlog)
         if key:
-            self.socket_info[key] = socket.getsockname()
+            self.socket_info[key] = _socket.getsockname()
         # SSL is enabled
         if self.do_ssl:
             if self.cert_required:
                 cert_reqs = ssl.CERT_REQUIRED
             else:
                 cert_reqs = ssl.CERT_NONE
-            sslsocket = eventlet.wrap_ssl(socket, certfile=self.certfile,
+            sslsocket = eventlet.wrap_ssl(_socket, certfile=self.certfile,
                                           keyfile=self.keyfile,
                                           server_side=True,
                                           cert_reqs=cert_reqs,
                                           ca_certs=self.ca_certs)
-            socket = sslsocket
+            _socket = sslsocket
 
-        self.greenthread = self.pool.spawn(self._run, self.application, socket)
+        self.greenthread = self.pool.spawn(self._run,
+                                           self.application,
+                                           _socket)
 
     def set_ssl(self, certfile, keyfile=None, ca_certs=None,
                 cert_required=True):
@@ -198,6 +213,7 @@ class Application(BaseApplication):
         # allow middleware up the stack to provide context & params
         context = req.environ.get(CONTEXT_ENV, {})
         context['query_string'] = dict(req.params.iteritems())
+        context['path'] = req.environ['PATH_INFO']
         params = req.environ.get(PARAMS_ENV, {})
         if 'REMOTE_USER' in req.environ:
             context['REMOTE_USER'] = req.environ['REMOTE_USER']
@@ -220,6 +236,9 @@ class Application(BaseApplication):
         except exception.Error as e:
             LOG.warning(e)
             return render_exception(e)
+        except TypeError as e:
+            logging.exception(e)
+            return render_exception(exception.ValidationError(e))
         except Exception as e:
             logging.exception(e)
             return render_exception(exception.UnexpectedError(exception=e))
@@ -401,6 +420,11 @@ class Router(object):
           mapper.connect(None, '/v1.0/{path_info:.*}', controller=BlogApp())
 
         """
+        # if we're only running in debug, bump routes' internal logging up a
+        # notch, as it's very spammy
+        if CONF.debug:
+            logging.getLogger('routes.middleware').setLevel(logging.INFO)
+
         self.map = mapper
         self._router = routes.middleware.RoutesMiddleware(self._dispatch,
                                                           self.map)
@@ -523,10 +547,11 @@ def render_response(body=None, status=None, headers=None):
 
 def render_exception(error):
     """Forms a WSGI response based on the current error."""
-    return render_response(status=(error.code, error.title), body={
-        'error': {
-            'code': error.code,
-            'title': error.title,
-            'message': str(error),
-        }
-    })
+    body = {'error': {
+        'code': error.code,
+        'title': error.title,
+        'message': str(error)
+    }}
+    if isinstance(error, exception.AuthPluginException):
+        body['authentication'] = error.authentication
+    return render_response(status=(error.code, error.title), body=body)

@@ -28,6 +28,7 @@ def upgrade(migrate_engine):
         meta,
         sql.Column('id', sql.String(64), primary_key=True),
         sql.Column('name', sql.String(64), unique=True, nullable=False),
+        sql.Column('enabled', sql.Boolean, nullable=False, default=True),
         sql.Column('extra', sql.Text()))
     domain_table.create(migrate_engine, checkfirst=True)
 
@@ -77,7 +78,7 @@ def downgrade(migrate_engine):
     role = sql.Table('role', meta, autoload=True)
     role.drop_column('extra')
 
-    tables = ['domain', 'user_domain_metadata', 'credential']
+    tables = ['user_domain_metadata', 'credential', 'domain']
     for t in tables:
         table = sql.Table(t, meta, autoload=True)
         table.drop(migrate_engine, checkfirst=True)

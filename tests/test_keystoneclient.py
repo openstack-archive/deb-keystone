@@ -20,13 +20,15 @@ import webob
 
 import nose.exc
 
-from keystone import test
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
-
+from keystone import config
+from keystone import test
 
 import default_fixtures
 
+CONF = config.CONF
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 OPENSTACK_REPO = 'https://review.openstack.org/p/openstack'
 KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
@@ -51,7 +53,7 @@ class CompatTestCase(test.TestCase):
         # override the fixtures, for now
         self.metadata_foobar = self.identity_api.update_metadata(
             self.user_foo['id'], self.tenant_bar['id'],
-            dict(roles=['keystone_admin'], is_admin='1'))
+            dict(roles=[self.role_admin['id']], is_admin='1'))
 
     def tearDown(self):
         self.public_server.kill()
@@ -534,8 +536,8 @@ class KeystoneClientTests(object):
 
     def test_role_get(self):
         client = self.get_client(admin=True)
-        role = client.roles.get(role='keystone_admin')
-        self.assertEquals(role.id, 'keystone_admin')
+        role = client.roles.get(role=self.role_admin['id'])
+        self.assertEquals(role.id, self.role_admin['id'])
 
     def test_role_crud(self):
         from keystoneclient import exceptions as client_exceptions
@@ -782,7 +784,7 @@ class KeystoneClientTests(object):
         # ROLE CRUD
         self.assertRaises(exception,
                           two.roles.get,
-                          role='keystone_admin')
+                          role=self.role_admin['id'])
         self.assertRaises(exception,
                           two.roles.list)
         self.assertRaises(exception,
@@ -790,7 +792,7 @@ class KeystoneClientTests(object):
                           name='oops')
         self.assertRaises(exception,
                           two.roles.delete,
-                          role='keystone_admin')
+                          role=self.role_admin['id'])
 
         # TODO(ja): MEMBERSHIP CRUD
         # TODO(ja): determine what else todo
@@ -802,16 +804,19 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
 
     def test_tenant_add_and_remove_user(self):
         client = self.get_client(admin=True)
-        client.roles.add_user_role(tenant=self.tenant_baz['id'],
+        client.roles.add_user_role(tenant=self.tenant_bar['id'],
                                    user=self.user_two['id'],
-                                   role=self.role_member['id'])
-        user_refs = client.tenants.list_users(tenant=self.tenant_baz['id'])
+                                   role=self.role_other['id'])
+        user_refs = client.tenants.list_users(tenant=self.tenant_bar['id'])
         self.assert_(self.user_two['id'] in [x.id for x in user_refs])
-        client.roles.remove_user_role(tenant=self.tenant_baz['id'],
+        client.roles.remove_user_role(tenant=self.tenant_bar['id'],
                                       user=self.user_two['id'],
-                                      role=self.role_member['id'])
-        user_refs = client.tenants.list_users(tenant=self.tenant_baz['id'])
-        self.assert_(self.user_two['id'] not in [x.id for x in user_refs])
+                                      role=self.role_other['id'])
+        roles = client.roles.roles_for_user(user=self.user_foo['id'],
+                                            tenant=self.tenant_bar['id'])
+        self.assertNotIn(self.role_other['id'], roles)
+        user_refs = client.tenants.list_users(tenant=self.tenant_bar['id'])
+        self.assertNotIn(self.user_two['id'], [x.id for x in user_refs])
 
     def test_user_role_add_404(self):
         from keystoneclient import exceptions as client_exceptions
@@ -862,10 +867,11 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         # Add two arbitrary tenants to user for testing purposes
         for i in range(2):
             tenant_id = uuid.uuid4().hex
-            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id}
-            self.identity_api.create_tenant(tenant_id, tenant)
-            self.identity_api.add_user_to_tenant(tenant_id,
-                                                 self.user_foo['id'])
+            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id,
+                      'domain_id': DEFAULT_DOMAIN_ID}
+            self.identity_api.create_project(tenant_id, tenant)
+            self.identity_api.add_user_to_project(tenant_id,
+                                                  self.user_foo['id'])
 
         tenants = client.tenants.list()
         self.assertEqual(len(tenants), 3)
@@ -888,10 +894,11 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         # Add two arbitrary tenants to user for testing purposes
         for i in range(2):
             tenant_id = uuid.uuid4().hex
-            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id}
-            self.identity_api.create_tenant(tenant_id, tenant)
-            self.identity_api.add_user_to_tenant(tenant_id,
-                                                 self.user_foo['id'])
+            tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id,
+                      'domain_id': DEFAULT_DOMAIN_ID}
+            self.identity_api.create_project(tenant_id, tenant)
+            self.identity_api.add_user_to_project(tenant_id,
+                                                  self.user_foo['id'])
 
         tenants = client.tenants.list()
         self.assertEqual(len(tenants), 3)
@@ -941,7 +948,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         self.user_two['password'] = new_password
         self.get_client(self.user_two)
 
-    def test_user_cant_update_other_users_passwd(self):
+    def test_user_cannot_update_other_users_passwd(self):
         from keystoneclient import exceptions as client_exceptions
 
         client = self.get_client(self.user_two)
@@ -995,8 +1002,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         rv = self.public_server.application(
             req.environ,
             responseobject.start_fake_response)
-        responce_json = jsonutils.loads(rv.next())
-        new_token_id = responce_json['access']['token']['id']
+        response_json = jsonutils.loads(rv.pop())
+        new_token_id = response_json['access']['token']['id']
 
         self.assertRaises(client_exceptions.Unauthorized, client.tenants.list)
         client.auth_token = new_token_id
@@ -1009,7 +1016,7 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
 
     def test_tenant_add_and_remove_user(self):
         client = self.get_client(admin=True)
-        client.roles.add_user_to_tenant(tenant_id=self.tenant_baz['id'],
+        client.roles.add_user_to_tenant(tenant_id=self.tenant_bar['id'],
                                         user_id=self.user_two['id'],
                                         role_id=self.role_member['id'])
         role_refs = client.roles.get_user_role_refs(
@@ -1026,7 +1033,7 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
                 # use python's scope fall through to leave roleref_ref set
                 break
 
-        client.roles.remove_user_from_tenant(tenant_id=self.tenant_baz['id'],
+        client.roles.remove_user_from_tenant(tenant_id=self.tenant_bar['id'],
                                              user_id=self.user_two['id'],
                                              role_id=roleref_ref.id)
 

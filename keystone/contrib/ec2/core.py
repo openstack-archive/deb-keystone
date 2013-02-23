@@ -140,7 +140,7 @@ class Ec2Controller(controller.V2Controller):
         if not credentials and ec2Credentials:
             credentials = ec2Credentials
 
-        if not 'access' in credentials:
+        if 'access' not in credentials:
             raise exception.Unauthorized(message='EC2 signature not supplied.')
 
         creds_ref = self._get_credentials(context,
@@ -150,7 +150,7 @@ class Ec2Controller(controller.V2Controller):
         # TODO(termie): don't create new tokens every time
         # TODO(termie): this is copied from TokenController.authenticate
         token_id = uuid.uuid4().hex
-        tenant_ref = self.identity_api.get_tenant(
+        tenant_ref = self.identity_api.get_project(
             context=context,
             tenant_id=creds_ref['tenant_id'])
         user_ref = self.identity_api.get_user(
@@ -160,6 +160,9 @@ class Ec2Controller(controller.V2Controller):
             context=context,
             user_id=user_ref['id'],
             tenant_id=tenant_ref['id'])
+
+        # Validate that the auth info is valid and nothing is disabled
+        token.validate_auth_info(self, context, user_ref, tenant_ref)
 
         # TODO(termie): optimize this call at some point and put it into the
         #               the return for metadata
@@ -203,7 +206,7 @@ class Ec2Controller(controller.V2Controller):
             self._assert_identity(context, user_id)
 
         self._assert_valid_user_id(context, user_id)
-        self._assert_valid_tenant_id(context, tenant_id)
+        self._assert_valid_project_id(context, tenant_id)
 
         cred_ref = {'user_id': user_id,
                     'tenant_id': tenant_id,
@@ -225,7 +228,7 @@ class Ec2Controller(controller.V2Controller):
         return {'credentials': self.ec2_api.list_credentials(context, user_id)}
 
     def get_credential(self, context, user_id, credential_id):
-        """Retreive a user's access/secret pair by the access key.
+        """Retrieve a user's access/secret pair by the access key.
 
         Grab the full access/secret pair for a given access key.
 
@@ -330,16 +333,16 @@ class Ec2Controller(controller.V2Controller):
         if not user_ref:
             raise exception.UserNotFound(user_id=user_id)
 
-    def _assert_valid_tenant_id(self, context, tenant_id):
+    def _assert_valid_project_id(self, context, tenant_id):
         """Ensure a valid tenant id.
 
         :param context: standard context
-        :param user_id: expected credential owner
-        :raises exception.UserNotFound: on failure
+        :param tenant_id: expected tenant
+        :raises exception.ProjectNotFound: on failure
 
         """
-        tenant_ref = self.identity_api.get_tenant(
+        tenant_ref = self.identity_api.get_project(
             context=context,
             tenant_id=tenant_id)
         if not tenant_ref:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+            raise exception.ProjectNotFound(project_id=tenant_id)

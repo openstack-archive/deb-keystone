@@ -1,17 +1,19 @@
-import uuid
 import json
+import uuid
 
-from keystone import config
 from keystone.common import cms
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import logging
+from keystone.common import utils
+from keystone import config
 from keystone import exception
 from keystone.openstack.common import timeutils
 from keystone.token import core
 
-
+CONF = config.CONF
 LOG = logging.getLogger(__name__)
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 class ExternalAuthNotApplicable(Exception):
@@ -22,13 +24,13 @@ class ExternalAuthNotApplicable(Exception):
 @dependency.requires('catalog_api')
 class Auth(controller.V2Controller):
     def ca_cert(self, context, auth=None):
-        ca_file = open(config.CONF.signing.ca_certs, 'r')
+        ca_file = open(CONF.signing.ca_certs, 'r')
         data = ca_file.read()
         ca_file.close()
         return data
 
     def signing_cert(self, context, auth=None):
-        cert_file = open(config.CONF.signing.certfile, 'r')
+        cert_file = open(CONF.signing.certfile, 'r')
         data = cert_file.read()
         cert_file.close()
         return data
@@ -63,31 +65,29 @@ class Auth(controller.V2Controller):
 
         if "token" in auth:
             # Try to authenticate using a token
-            auth_token_data, auth_info = self._authenticate_token(
+            auth_info = self._authenticate_token(
                 context, auth)
         else:
             # Try external authentication
             try:
-                auth_token_data, auth_info = self._authenticate_external(
+                auth_info = self._authenticate_external(
                     context, auth)
             except ExternalAuthNotApplicable:
                 # Try local authentication
-                auth_token_data, auth_info = self._authenticate_local(
+                auth_info = self._authenticate_local(
                     context, auth)
 
-        user_ref, tenant_ref, metadata_ref = auth_info
+        user_ref, tenant_ref, metadata_ref, expiry = auth_info
+        user_ref = self._filter_domain_id(user_ref)
+        if tenant_ref:
+            tenant_ref = self._filter_domain_id(tenant_ref)
+        auth_token_data = self._get_auth_token_data(user_ref,
+                                                    tenant_ref,
+                                                    metadata_ref,
+                                                    expiry)
 
-        # If the user is disabled don't allow them to authenticate
-        if not user_ref.get('enabled', True):
-            msg = 'User is disabled: %s' % user_ref['id']
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
-
-        # If the tenant is disabled don't allow them to authenticate
-        if tenant_ref and not tenant_ref.get('enabled', True):
-            msg = 'Tenant is disabled: %s' % tenant_ref['id']
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
+        # FIXME(dolph): domains will not be validated, as we just removed them
+        core.validate_auth_info(self, context, user_ref, tenant_ref)
 
         if tenant_ref:
             catalog_ref = self.catalog_api.get_catalog(
@@ -110,17 +110,17 @@ class Auth(controller.V2Controller):
         service_catalog = Auth.format_catalog(catalog_ref)
         token_data['access']['serviceCatalog'] = service_catalog
 
-        if config.CONF.signing.token_format == 'UUID':
+        if CONF.signing.token_format == 'UUID':
             token_id = uuid.uuid4().hex
-        elif config.CONF.signing.token_format == 'PKI':
+        elif CONF.signing.token_format == 'PKI':
             token_id = cms.cms_sign_token(json.dumps(token_data),
-                                          config.CONF.signing.certfile,
-                                          config.CONF.signing.keyfile)
+                                          CONF.signing.certfile,
+                                          CONF.signing.keyfile)
         else:
             raise exception.UnexpectedError(
                 'Invalid value for token_format: %s.'
                 '  Allowed values are PKI or UUID.' %
-                config.CONF.signing.token_format)
+                CONF.signing.token_format)
         try:
             self.token_api.create_token(
                 context, token_id, dict(key=token_id,
@@ -156,6 +156,9 @@ class Auth(controller.V2Controller):
                 attribute="id", target="token")
 
         old_token = auth['token']['id']
+        if len(old_token) > CONF.max_token_size:
+            raise exception.ValidationSizeError(attribute='token',
+                                                size=CONF.max_token_size)
 
         try:
             old_token_ref = self.token_api.get_token(context=context,
@@ -169,26 +172,20 @@ class Auth(controller.V2Controller):
         current_user_ref = self.identity_api.get_user(context=context,
                                                       user_id=user_id)
 
-        tenant_id = self._get_tenant_id_from_auth(context, auth)
+        tenant_id = self._get_project_id_from_auth(context, auth)
 
-        tenant_ref = self._get_tenant_ref(context, user_id, tenant_id)
+        tenant_ref = self._get_project_ref(context, user_id, tenant_id)
         metadata_ref = self._get_metadata_ref(context, user_id, tenant_id)
+
+        # TODO (henry-nash) If no tenant was specified, instead check
+        # for a domain and find any related user/group roles
 
         self._append_roles(metadata_ref,
                            self._get_group_metadata_ref(
                                context, user_id, tenant_id))
 
-        self._append_roles(metadata_ref,
-                           self._get_domain_metadata_ref(
-                               context, user_id, tenant_id))
-
         expiry = old_token_ref['expires']
-        auth_token_data = self._get_auth_token_data(current_user_ref,
-                                                    tenant_ref,
-                                                    metadata_ref,
-                                                    expiry)
-
-        return auth_token_data, (current_user_ref, tenant_ref, metadata_ref)
+        return (current_user_ref, tenant_ref, metadata_ref, expiry)
 
     def _authenticate_local(self, context, auth):
         """Try to authenticate against the identity backend.
@@ -204,6 +201,10 @@ class Auth(controller.V2Controller):
                 attribute='password', target='passwordCredentials')
 
         password = auth['passwordCredentials']['password']
+        max_pw_size = utils.MAX_PASSWORD_LENGTH
+        if password and len(password) > max_pw_size:
+            raise exception.ValidationSizeError(attribute='password',
+                                                size=max_pw_size)
 
         if ("userId" not in auth['passwordCredentials'] and
                 "username" not in auth['passwordCredentials']):
@@ -212,17 +213,25 @@ class Auth(controller.V2Controller):
                 target='passwordCredentials')
 
         user_id = auth['passwordCredentials'].get('userId', None)
+        if user_id and len(user_id) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='userId',
+                                                size=CONF.max_param_size)
+
         username = auth['passwordCredentials'].get('username', '')
+        if len(username) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='username',
+                                                size=CONF.max_param_size)
 
         if username:
             try:
                 user_ref = self.identity_api.get_user_by_name(
-                    context=context, user_name=username)
+                    context=context, user_name=username,
+                    domain_id=DEFAULT_DOMAIN_ID)
                 user_id = user_ref['id']
             except exception.UserNotFound as e:
                 raise exception.Unauthorized(e)
 
-        tenant_id = self._get_tenant_id_from_auth(context, auth)
+        tenant_id = self._get_project_id_from_auth(context, auth)
 
         try:
             auth_info = self.identity_api.authenticate(
@@ -234,21 +243,19 @@ class Auth(controller.V2Controller):
             raise exception.Unauthorized(e)
         (user_ref, tenant_ref, metadata_ref) = auth_info
 
+        # By now we will have authorized and if a tenant/project was
+        # specified, we will have obtained its metadata.  In this case
+        # we just need to add in any group roles.
+        #
+        # TODO (henry-nash) If no tenant was specified, instead check
+        # for a domain and find any related user/group roles
+
         self._append_roles(metadata_ref,
                            self._get_group_metadata_ref(
                                context, user_id, tenant_id))
 
-        self._append_roles(metadata_ref,
-                           self._get_domain_metadata_ref(
-                               context, user_id, tenant_id))
-
         expiry = core.default_expire_time()
-        auth_token_data = self._get_auth_token_data(user_ref,
-                                                    tenant_ref,
-                                                    metadata_ref,
-                                                    expiry)
-
-        return auth_token_data, (user_ref, tenant_ref, metadata_ref)
+        return (user_ref, tenant_ref, metadata_ref, expiry)
 
     def _authenticate_external(self, context, auth):
         """Try to authenticate an external user via REMOTE_USER variable.
@@ -261,31 +268,26 @@ class Auth(controller.V2Controller):
         username = context['REMOTE_USER']
         try:
             user_ref = self.identity_api.get_user_by_name(
-                context=context, user_name=username)
+                context=context, user_name=username,
+                domain_id=DEFAULT_DOMAIN_ID)
             user_id = user_ref['id']
         except exception.UserNotFound as e:
             raise exception.Unauthorized(e)
 
-        tenant_id = self._get_tenant_id_from_auth(context, auth)
+        tenant_id = self._get_project_id_from_auth(context, auth)
 
-        tenant_ref = self._get_tenant_ref(context, user_id, tenant_id)
+        tenant_ref = self._get_project_ref(context, user_id, tenant_id)
         metadata_ref = self._get_metadata_ref(context, user_id, tenant_id)
+
+        # TODO (henry-nash) If no tenant was specified, instead check
+        # for a domain and find any related user/group roles
 
         self._append_roles(metadata_ref,
                            self._get_group_metadata_ref(
                                context, user_id, tenant_id))
 
-        self._append_roles(metadata_ref,
-                           self._get_domain_metadata_ref(
-                               context, user_id, tenant_id))
-
         expiry = core.default_expire_time()
-        auth_token_data = self._get_auth_token_data(user_ref,
-                                                    tenant_ref,
-                                                    metadata_ref,
-                                                    expiry)
-
-        return auth_token_data, (user_ref, tenant_ref, metadata_ref)
+        return (user_ref, tenant_ref, metadata_ref, expiry)
 
     def _get_auth_token_data(self, user, tenant, metadata, expiry):
         return dict(dict(user=user,
@@ -293,27 +295,55 @@ class Auth(controller.V2Controller):
                          metadata=metadata,
                          expires=expiry))
 
-    def _get_tenant_id_from_auth(self, context, auth):
+    def _get_project_id_from_auth(self, context, auth):
         """Extract tenant information from auth dict.
 
         Returns a valid tenant_id if it exists, or None if not specified.
         """
         tenant_id = auth.get('tenantId', None)
+        if tenant_id and len(tenant_id) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='tenantId',
+                                                size=CONF.max_param_size)
+
         tenant_name = auth.get('tenantName', None)
+        if tenant_name and len(tenant_name) > CONF.max_param_size:
+            raise exception.ValidationSizeError(attribute='tenantName',
+                                                size=CONF.max_param_size)
+
         if tenant_name:
             try:
-                tenant_ref = self.identity_api.get_tenant_by_name(
-                    context=context, tenant_name=tenant_name)
+                tenant_ref = self.identity_api.get_project_by_name(
+                    context=context, tenant_name=tenant_name,
+                    domain_id=DEFAULT_DOMAIN_ID)
                 tenant_id = tenant_ref['id']
-            except exception.TenantNotFound as e:
+            except exception.ProjectNotFound as e:
                 raise exception.Unauthorized(e)
         return tenant_id
 
-    def _get_tenant_ref(self, context, user_id, tenant_id):
+    def _get_domain_id_from_auth(self, context, auth):
+        """Extract domain information from v3 auth dict.
+
+        Returns a valid domain_id if it exists, or None if not specified.
+        """
+        # FIXME(henry-nash): This is a placeholder that needs to be
+        # only called in the v3 context, and the auth.get calls
+        # converted to the v3 format
+        domain_id = auth.get('domainId', None)
+        domain_name = auth.get('domainName', None)
+        if domain_name:
+            try:
+                domain_ref = self.identity_api._get_domain_by_name(
+                    context=context, domain_name=domain_name)
+                domain_id = domain_ref['id']
+            except exception.DomainNotFound as e:
+                raise exception.Unauthorized(e)
+        return domain_id
+
+    def _get_project_ref(self, context, user_id, tenant_id):
         """Returns the tenant_ref for the user's tenant"""
         tenant_ref = None
         if tenant_id:
-            tenants = self.identity_api.get_tenants_for_user(context, user_id)
+            tenants = self.identity_api.get_projects_for_user(context, user_id)
             if tenant_id not in tenants:
                 msg = 'User %s is unauthorized for tenant %s' % (
                     user_id, tenant_id)
@@ -321,49 +351,38 @@ class Auth(controller.V2Controller):
                 raise exception.Unauthorized(msg)
 
             try:
-                tenant_ref = self.identity_api.get_tenant(context=context,
-                                                          tenant_id=tenant_id)
-            except exception.TenantNotFound as e:
+                tenant_ref = self.identity_api.get_project(context=context,
+                                                           tenant_id=tenant_id)
+            except exception.ProjectNotFound as e:
                 exception.Unauthorized(e)
         return tenant_ref
 
     def _get_metadata_ref(self, context, user_id=None, tenant_id=None,
-                          group_id=None):
-        """Returns the metadata_ref for a user or group in a tenant"""
-        metadata_ref = {}
-        if tenant_id:
-            try:
-                if user_id:
-                    metadata_ref = self.identity_api.get_metadata(
-                        context=context,
-                        user_id=user_id,
-                        tenant_id=tenant_id)
-                elif group_id:
-                    metadata_ref = self.identity_api.get_metadata(
-                        context=context,
-                        group_id=group_id,
-                        tenant_id=tenant_id)
-            except exception.MetadataNotFound:
-                metadata_ref = {}
+                          domain_id=None, group_id=None):
+        """Returns metadata_ref for a user or group in a tenant or domain"""
 
+        metadata_ref = {}
+        if (user_id or group_id) and (tenant_id or domain_id):
+            try:
+                metadata_ref = self.identity_api.get_metadata(
+                    context=context, user_id=user_id, tenant_id=tenant_id,
+                    domain_id=domain_id, group_id=group_id)
+            except exception.MetadataNotFound:
+                pass
         return metadata_ref
 
-    def _get_group_metadata_ref(self, context, user_id, tenant_id):
-        """Return any metadata for this project due to group grants"""
+    def _get_group_metadata_ref(self, context, user_id,
+                                tenant_id=None, domain_id=None):
+        """Return any metadata for this project/domain due to group grants"""
         group_refs = self.identity_api.list_groups_for_user(context=context,
                                                             user_id=user_id)
         metadata_ref = {}
         for x in group_refs:
             metadata_ref.update(self._get_metadata_ref(context,
                                                        group_id=x['id'],
-                                                       tenant_id=tenant_id))
+                                                       tenant_id=tenant_id,
+                                                       domain_id=domain_id))
         return metadata_ref
-
-    def _get_domain_metadata_ref(self, context, user_id, tenant_id):
-        """Return any metadata for this project due to domain grants"""
-        # TODO (henry-nashe) Get the domain for this tenant...and then see if
-        # any domain grants apply.  Bug #1093248
-        return {}
 
     def _append_roles(self, metadata, additional_metadata):
         """
@@ -383,19 +402,8 @@ class Auth(controller.V2Controller):
         """
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
-
-        if cms.is_ans1_token(token_id):
-            data = json.loads(cms.cms_verify(cms.token_to_cms(token_id),
-                                             config.CONF.signing.certfile,
-                                             config.CONF.signing.ca_certs))
-            data['access']['token']['user'] = data['access']['user']
-            data['access']['token']['metadata'] = data['access']['metadata']
-            if belongs_to:
-                assert data['access']['token']['tenant']['id'] == belongs_to
-            token_ref = data['access']['token']
-        else:
-            token_ref = self.token_api.get_token(context=context,
-                                                 token_id=token_id)
+        token_ref = self.token_api.get_token(context=context,
+                                             token_id=token_id)
         return token_ref
 
     # admin only
@@ -458,8 +466,8 @@ class Auth(controller.V2Controller):
         data = {'revoked': tokens}
         json_data = json.dumps(data)
         signed_text = cms.cms_sign_text(json_data,
-                                        config.CONF.signing.certfile,
-                                        config.CONF.signing.keyfile)
+                                        CONF.signing.certfile,
+                                        CONF.signing.keyfile)
 
         return {'signed': signed_text}
 

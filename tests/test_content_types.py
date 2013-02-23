@@ -73,7 +73,7 @@ class RestfulTestCase(test.TestCase):
         self.metadata_foobar = self.identity_api.update_metadata(
             self.user_foo['id'],
             self.tenant_bar['id'],
-            dict(roles=['keystone_admin'], is_admin='1'))
+            dict(roles=[self.role_admin['id']], is_admin='1'))
 
     def tearDown(self):
         """Kill running servers and release references to avoid leaks."""
@@ -180,7 +180,8 @@ class RestfulTestCase(test.TestCase):
             elif self.content_type == 'xml':
                 response.body = etree.fromstring(response.body)
 
-    def restful_request(self, headers=None, body=None, token=None, **kwargs):
+    def restful_request(self, method='GET', headers=None, body=None,
+                        token=None, **kwargs):
         """Serializes/deserializes json/xml as request/response body.
 
         .. WARNING::
@@ -198,12 +199,13 @@ class RestfulTestCase(test.TestCase):
         body = self._to_content_type(body, headers)
 
         # Perform the HTTP request/response
-        response = self.request(headers=headers, body=body, **kwargs)
+        response = self.request(method=method, headers=headers, body=body,
+                                **kwargs)
 
         self._from_content_type(response)
 
         # we can save some code & improve coverage by always doing this
-        if response.status >= 400:
+        if method != 'HEAD' and response.status >= 400:
             self.assertValidErrorResponse(response)
 
         # Contains the decoded response.body
@@ -266,7 +268,7 @@ class CoreApiTests(object):
         """Applicable to XML and JSON.
 
         However, navigating links and media-types differs between content
-        types so they need to be validated seperately.
+        types so they need to be validated separately.
 
         """
         self.assertIsNotNone(version)
@@ -278,7 +280,7 @@ class CoreApiTests(object):
         """Applicable to XML and JSON.
 
         However, navigating extension links differs between content types.
-        They need to be validated seperately with assertValidExtensionLink.
+        They need to be validated separately with assertValidExtensionLink.
 
         """
         self.assertIsNotNone(extension)
@@ -505,6 +507,27 @@ class CoreApiTests(object):
     def test_error_response(self):
         """This triggers assertValidErrorResponse by convention."""
         self.public_request(path='/v2.0/tenants', expected_status=401)
+
+    def test_invalid_parameter_error_response(self):
+        token = self.get_scoped_token()
+        bad_body = {
+            'OS-KSADM:service%s' % uuid.uuid4().hex: {
+                'name': uuid.uuid4().hex,
+                'type': uuid.uuid4().hex,
+            },
+        }
+        res = self.admin_request(method='POST',
+                                 path='/v2.0/OS-KSADM/services',
+                                 body=bad_body,
+                                 token=token,
+                                 expected_status=400)
+        self.assertValidErrorResponse(res)
+        res = self.admin_request(method='POST',
+                                 path='/v2.0/users',
+                                 body=bad_body,
+                                 token=token,
+                                 expected_status=400)
+        self.assertValidErrorResponse(res)
 
 
 class JsonTestCase(RestfulTestCase, CoreApiTests):

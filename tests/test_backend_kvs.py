@@ -14,6 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 import uuid
+import nose.exc
 
 from keystone import catalog
 from keystone.catalog.backends import kvs as catalog_kvs
@@ -31,6 +32,37 @@ class KvsIdentity(test.TestCase, test_backend.IdentityTests):
         super(KvsIdentity, self).setUp()
         self.identity_api = identity_kvs.Identity(db={})
         self.load_fixtures(default_fixtures)
+
+    def test_list_user_projects(self):
+        # NOTE(chungg): not implemented
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_group_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_user_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_project_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_user_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_user_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_group_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_group_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_project_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_project_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
 
 
 class KvsToken(test.TestCase, test_backend.TokenTests):
@@ -54,7 +86,7 @@ class KvsCatalog(test.TestCase, test_backend.CatalogTests):
 
     def test_get_catalog_404(self):
         # FIXME(dolph): this test should be moved up to test_backend
-        # FIXME(dolph): exceptions should be UserNotFound and TenantNotFound
+        # FIXME(dolph): exceptions should be UserNotFound and ProjectNotFound
         self.assertRaises(exception.NotFound,
                           self.catalog_api.get_catalog,
                           uuid.uuid4().hex,

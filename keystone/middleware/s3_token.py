@@ -128,7 +128,7 @@ class S3Token(object):
             return self.app(environ, start_response)
 
         # Read request signature and access id.
-        if not 'Authorization' in req.headers:
+        if 'Authorization' not in req.headers:
             msg = 'No Authorization header. skipping.'
             self.logger.debug(msg)
             return self.app(environ, start_response)
@@ -177,7 +177,7 @@ class S3Token(object):
         # NOTE(chmou): We still have the same problem we would need to
         #              change token_auth to detect if we already
         #              identified and not doing a second query and just
-        #              pass it thru to swiftauth in this case.
+        #              pass it through to swiftauth in this case.
         try:
             resp, output = self._json_request(creds_json)
         except ServiceError as e:

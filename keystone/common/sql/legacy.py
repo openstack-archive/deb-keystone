@@ -22,9 +22,12 @@ from sqlalchemy import exc
 from keystone.common import logging
 from keystone.contrib.ec2.backends import sql as ec2_sql
 from keystone.identity.backends import sql as identity_sql
+from keystone import config
 
 
 LOG = logging.getLogger(__name__)
+CONF = config.CONF
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 def export_db(db):
@@ -59,12 +62,12 @@ class LegacyMigration(object):
         self.ec2_driver = ec2_sql.Ec2()
         self._data = {}
         self._user_map = {}
-        self._tenant_map = {}
+        self._project_map = {}
         self._role_map = {}
 
     def migrate_all(self):
         self._export_legacy_db()
-        self._migrate_tenants()
+        self._migrate_projects()
         self._migrate_users()
         self._migrate_roles()
         self._migrate_user_roles()
@@ -98,18 +101,19 @@ class LegacyMigration(object):
     def _export_legacy_db(self):
         self._data = export_db(self.db)
 
-    def _migrate_tenants(self):
+    def _migrate_projects(self):
         for x in self._data['tenants']:
             # map
             new_dict = {'description': x.get('desc', ''),
                         'id': x.get('uid', x.get('id')),
-                        'enabled': x.get('enabled', True)}
+                        'enabled': x.get('enabled', True),
+                        'domain_id': x.get('domain_id', DEFAULT_DOMAIN_ID)}
             new_dict['name'] = x.get('name', new_dict.get('id'))
             # track internal ids
-            self._tenant_map[x.get('id')] = new_dict['id']
+            self._project_map[x.get('id')] = new_dict['id']
             # create
-            #print 'create_tenant(%s, %s)' % (new_dict['id'], new_dict)
-            self.identity_driver.create_tenant(new_dict['id'], new_dict)
+            #print 'create_project(%s, %s)' % (new_dict['id'], new_dict)
+            self.identity_driver.create_project(new_dict['id'], new_dict)
 
     def _migrate_users(self):
         for x in self._data['users']:
@@ -117,9 +121,10 @@ class LegacyMigration(object):
             new_dict = {'email': x.get('email', ''),
                         'password': x.get('password', None),
                         'id': x.get('uid', x.get('id')),
-                        'enabled': x.get('enabled', True)}
+                        'enabled': x.get('enabled', True),
+                        'domain_id': x.get('domain_id', DEFAULT_DOMAIN_ID)}
             if x.get('tenant_id'):
-                new_dict['tenant_id'] = self._tenant_map.get(x['tenant_id'])
+                new_dict['tenant_id'] = self._project_map.get(x['tenant_id'])
             new_dict['name'] = x.get('name', new_dict.get('id'))
             # track internal ids
             self._user_map[x.get('id')] = new_dict['id']
@@ -127,8 +132,9 @@ class LegacyMigration(object):
             #print 'create_user(%s, %s)' % (new_dict['id'], new_dict)
             self.identity_driver.create_user(new_dict['id'], new_dict)
             if new_dict.get('tenant_id'):
-                self.identity_driver.add_user_to_tenant(new_dict['tenant_id'],
-                                                        new_dict['id'])
+                self.identity_driver.add_user_to_project(
+                    new_dict['tenant_id'],
+                    new_dict['id'])
 
     def _migrate_roles(self):
         for x in self._data['roles']:
@@ -148,15 +154,15 @@ class LegacyMigration(object):
                     or not x.get('role_id')):
                 continue
             user_id = self._user_map[x['user_id']]
-            tenant_id = self._tenant_map[x['tenant_id']]
+            tenant_id = self._project_map[x['tenant_id']]
             role_id = self._role_map[x['role_id']]
 
             try:
-                self.identity_driver.add_user_to_tenant(tenant_id, user_id)
+                self.identity_driver.add_user_to_project(tenant_id, user_id)
             except Exception:
                 pass
 
-            self.identity_driver.add_role_to_user_and_tenant(
+            self.identity_driver.add_role_to_user_and_project(
                 user_id, tenant_id, role_id)
 
     def _migrate_tokens(self):
