@@ -8,6 +8,8 @@ export HOME="$(CURDIR)/debian/tests/"
 
 include /usr/share/openstack-pkg-tools/pkgos.make
 
+export OSLO_PACKAGE_VERSION=$(VERSION)
+
 %:
 	dh $@ --with python2
 
