@@ -1,3 +1,2 @@
-logging.conf.patch
 sql_conn.patch
 fixes-keystone-default-catalog.patch
