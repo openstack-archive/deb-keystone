@@ -67,9 +67,9 @@ if [ "$1" = "configure" ] ; then
 	if [ -z "${AUTH_TOKEN}" ] ; then
 		AUTH_TOKEN=`pkgos_gen_pass`
 	fi
-	pkgos_edit_config admin_token ${AUTH_TOKEN} ${KEY_CONF}
+	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
 	# Configure the SQL connection of keystone.conf according to dbconfig-common
-	pkgos_dbc_postinst ${KEY_CONF} keystone sql connection $@
+	pkgos_dbc_postinst ${KEY_CONF} sql connection keystone $@
 
 	# Upgrade or create the db if directed to do so
 	db_get keystone/configure_db
