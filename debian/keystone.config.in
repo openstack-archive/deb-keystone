@@ -80,9 +80,6 @@ keystone_create_endpoint_config () {
 pkgos_var_user_group keystone
 pkgos_dbc_read_conf -pkg keystone ${KEY_CONF} sql connection keystone $@
 pkgos_read_config ${KEY_CONF} DEFAULT admin_token keystone/auth-token
-if [ -z "$RET" ] ; then
-	db_set keystone/auth-token $(pkgos_gen_pass)
-fi
 db_input high keystone/create-admin-tenant || true
 db_go || true
 db_get keystone/create-admin-tenant
