@@ -59,6 +59,10 @@ if [ "$1" = "configure" ] ; then
 
 	# Create user and group keystone, plus /var/log and /var/lib owned by it
 	pkgos_var_user_group keystone
+	# Make sure we have a folder to create certs, that isn't world readable
+	mkdir -p /etc/keystone/ssl/certs
+	chown keystone:keystone /etc/keystone/ssl/certs
+	chmod 750 /etc/keystone/ssl/certs
 	# Create keystone.conf if it's not there
 	pkgos_write_new_conf keystone keystone.conf
 	# Set the auth_token directive in in keystone.conf
