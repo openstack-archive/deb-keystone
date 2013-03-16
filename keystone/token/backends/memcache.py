@@ -64,8 +64,10 @@ class Token(token.Driver):
     def create_token(self, token_id, data):
         data_copy = copy.deepcopy(data)
         ptk = self._prefix_token_id(token.unique_id(token_id))
-        if 'expires' not in data_copy:
+        if not data_copy.get('expires'):
             data_copy['expires'] = token.default_expire_time()
+        if not data_copy.get('user_id'):
+            data_copy['user_id'] = data_copy['user']['id']
         kwargs = {}
         if data_copy['expires'] is not None:
             expires_ts = utils.unixtime(data_copy['expires'])
@@ -99,7 +101,7 @@ class Token(token.Driver):
         self._add_to_revocation_list(data)
         return result
 
-    def list_tokens(self, user_id, tenant_id=None):
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None):
         tokens = []
         user_key = self._prefix_user_id(user_id)
         user_record = self.client.get(user_key) or ""
@@ -114,6 +116,13 @@ class Token(token.Driver):
                         continue
                     if tenant.get('id') != tenant_id:
                         continue
+                if trust_id is not None:
+                    trust = token_ref.get('trust_id')
+                    if not trust:
+                        continue
+                    if trust != trust_id:
+                        continue
+
                 tokens.append(token_id)
         return tokens
 

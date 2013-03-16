@@ -23,52 +23,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             self.endpoint_id,
             self.endpoint.copy())
 
-    # service validation
-
-    def assertValidServiceListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'services',
-            self.assertValidService,
-            **kwargs)
-
-    def assertValidServiceResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'service',
-            self.assertValidService,
-            ref)
-
-    def assertValidService(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('type'))
-        if ref:
-            self.assertEqual(ref['type'], entity['type'])
-        return entity
-
-    # endpoint validation
-
-    def assertValidEndpointListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'endpoints',
-            self.assertValidEndpoint,
-            **kwargs)
-
-    def assertValidEndpointResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'endpoint',
-            self.assertValidEndpoint,
-            ref)
-
-    def assertValidEndpoint(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('interface'))
-        self.assertIsNotNone(entity.get('service_id'))
-        if ref:
-            self.assertEqual(ref['interface'], entity['interface'])
-            self.assertEqual(ref['service_id'], entity['service_id'])
-        return entity
-
     # service crud tests
 
     def test_create_service(self):
@@ -82,6 +36,11 @@ class CatalogTestCase(test_v3.RestfulTestCase):
     def test_list_services(self):
         """GET /services"""
         r = self.get('/services')
+        self.assertValidServiceListResponse(r, ref=self.service)
+
+    def test_list_services_xml(self):
+        """GET /services (xml data)"""
+        r = self.get('/services', content_type='xml')
         self.assertValidServiceListResponse(r, ref=self.service)
 
     def test_get_service(self):
@@ -109,6 +68,11 @@ class CatalogTestCase(test_v3.RestfulTestCase):
     def test_list_endpoints(self):
         """GET /endpoints"""
         r = self.get('/endpoints')
+        self.assertValidEndpointListResponse(r, ref=self.endpoint)
+
+    def test_list_endpoints_xml(self):
+        """GET /endpoints (xml data)"""
+        r = self.get('/endpoints', content_type='xml')
         self.assertValidEndpointListResponse(r, ref=self.endpoint)
 
     def test_create_endpoint(self):
@@ -150,3 +114,52 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         self.delete(
             '/endpoints/%(endpoint_id)s' % {
                 'endpoint_id': self.endpoint_id})
+
+    def test_create_endpoint_on_v2(self):
+        # clear the v3 endpoint so we only have endpoints created on v2
+        self.delete(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id})
+
+        # create a v3 endpoint ref, and then tweak it back to a v2-style ref
+        ref = self.new_endpoint_ref(service_id=self.service['id'])
+        del ref['id']
+        del ref['interface']
+        ref['publicurl'] = ref.pop('url')
+        ref['internalurl'] = None
+        # don't set adminurl to ensure it's absence is handled like internalurl
+
+        # create the endpoint on v2 (using a v3 token)
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/endpoints',
+            token=self.get_scoped_token(),
+            body={'endpoint': ref})
+        endpoint_v2 = r.body['endpoint']
+
+        # test the endpoint on v3
+        r = self.get('/endpoints')
+        endpoints = self.assertValidEndpointListResponse(r)
+        self.assertEqual(len(endpoints), 1)
+        endpoint_v3 = endpoints.pop()
+
+        # these attributes are identical between both API's
+        self.assertEqual(endpoint_v3['region'], ref['region'])
+        self.assertEqual(endpoint_v3['service_id'], ref['service_id'])
+        self.assertEqual(endpoint_v3['description'], ref['description'])
+
+        # a v2 endpoint is not quite the same concept as a v3 endpoint, so they
+        # receive different identifiers
+        self.assertNotEqual(endpoint_v2['id'], endpoint_v3['id'])
+
+        # v2 has a publicurl; v3 has a url + interface type
+        self.assertEqual(endpoint_v3['url'], ref['publicurl'])
+        self.assertEqual(endpoint_v3['interface'], 'public')
+
+        # tests for bug 1152632 -- these attributes were being returned by v3
+        self.assertNotIn('publicurl', endpoint_v3)
+        self.assertNotIn('adminurl', endpoint_v3)
+        self.assertNotIn('internalurl', endpoint_v3)
+
+        # test for bug 1152635 -- this attribute was being returned by v3
+        self.assertNotIn('legacy_endpoint_id', endpoint_v3)

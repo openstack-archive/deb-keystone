@@ -1,3 +1,4 @@
+import collections
 import functools
 import uuid
 
@@ -27,46 +28,78 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         raise exception.Unauthorized()
 
     creds = {}
-    token_data = token_ref['token_data']
+    if 'token_data' in token_ref:
+        #V3 Tokens
+        token_data = token_ref['token_data']['token']
+        try:
+            creds['user_id'] = token_data['user']['id']
+        except AttributeError:
+            LOG.warning(_('RBAC: Invalid user'))
+            raise exception.Unauthorized()
 
-    try:
-        creds['user_id'] = token_data['user']['id']
-    except AttributeError:
-        LOG.warning(_('RBAC: Invalid user'))
-        raise exception.Unauthorized()
+        if 'project' in token_data:
+            creds['project_id'] = token_data['project']['id']
+        else:
+            LOG.debug(_('RBAC: Proceeding without project'))
 
-    if 'project' in token_data:
-        creds['project_id'] = token_data['project']['id']
+        if 'domain' in token_data:
+            creds['domain_id'] = token_data['domain']['id']
+
+        if 'roles' in token_data:
+            creds['roles'] = []
+            for role in token_data['roles']:
+                creds['roles'].append(role['name'])
     else:
-        LOG.debug(_('RBAC: Proceeding without project'))
-
-    if 'domain' in token_data:
-        creds['domain_id'] = token_data['domain']['id']
-
-    if 'roles' in token_data:
-        creds['roles'] = []
-        for role in token_data['roles']:
-            creds['roles'].append(role['name'])
+        #v2 Tokens
+        creds = token_ref.get('metadata', {}).copy()
+        try:
+            creds['user_id'] = token_ref['user'].get('id')
+        except AttributeError:
+            LOG.warning(_('RBAC: Invalid user'))
+            raise exception.Unauthorized()
+        try:
+            creds['project_id'] = token_ref['tenant'].get('id')
+        except AttributeError:
+            LOG.debug(_('RBAC: Proceeding without tenant'))
+        # NOTE(vish): this is pretty inefficient
+        creds['roles'] = [self.identity_api.get_role(context, role)['name']
+                          for role in creds.get('roles', [])]
 
     return creds
 
 
+def flatten(d, parent_key=''):
+    """Flatten a nested dictionary
+
+    Converts a dictionary with nested values to a single level flat
+    dictionary, with dotted notation for each key.
+
+    """
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + '.' + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten(v, new_key).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
 def protected(f):
     """Wraps API calls with role based access controls (RBAC)."""
-
     @functools.wraps(f)
     def wrapper(self, context, **kwargs):
-        if not context['is_admin']:
+        if 'is_admin' in context and context['is_admin']:
+            LOG.warning(_('RBAC: Bypassing authorization'))
+        else:
             action = 'identity:%s' % f.__name__
             creds = _build_policy_check_credentials(self, action,
                                                     context, kwargs)
             # Simply use the passed kwargs as the target dict, which
             # would typically include the prime key of a get/update/delete
             # call.
-            self.policy_api.enforce(context, creds, action, kwargs)
+            self.policy_api.enforce(context, creds, action, flatten(kwargs))
             LOG.debug(_('RBAC: Authorization granted'))
-        else:
-            LOG.warning(_('RBAC: Bypassing authorization'))
 
         return f(self, context, **kwargs)
     return wrapper
@@ -89,11 +122,6 @@ def filterprotected(*filters):
                 #   parameter) and would typically include the prime key
                 #   of a get/update/delete call
                 #
-                # TODO(henry-nash) do we need to put the whole object
-                # in, which is part of kwargs?  I kept this in as it was part
-                # of the previous implementation, but without a specific key
-                # reference in the target I don't see how it can be used.
-
                 # First  any query filter parameters
                 target = dict()
                 if len(filters) > 0:
@@ -109,7 +137,8 @@ def filterprotected(*filters):
                 for key in kwargs:
                     target[key] = kwargs[key]
 
-                self.policy_api.enforce(context, creds, action, target)
+                self.policy_api.enforce(context, creds, action,
+                                        flatten(target))
 
                 LOG.debug(_('RBAC: Authorization granted'))
             else:
@@ -119,9 +148,36 @@ def filterprotected(*filters):
     return _filterprotected
 
 
-@dependency.requires('identity_api', 'policy_api', 'token_api')
+@dependency.requires('identity_api', 'policy_api', 'token_api',
+                     'trust_api', 'catalog_api')
 class V2Controller(wsgi.Application):
     """Base controller class for Identity API v2."""
+
+    def _delete_tokens_for_trust(self, context, user_id, trust_id):
+        try:
+            token_list = self.token_api.list_tokens(context, user_id,
+                                                    trust_id=trust_id)
+            for token in token_list:
+                self.token_api.delete_token(context, token)
+        except exception.NotFound:
+            pass
+
+    def _delete_tokens_for_user(self, context, user_id, project_id=None):
+        #First delete tokens that could get other tokens.
+        for token_id in self.token_api.list_tokens(context,
+                                                   user_id,
+                                                   tenant_id=project_id):
+            try:
+                self.token_api.delete_token(context, token_id)
+            except exception.NotFound:
+                pass
+        #delete tokens generated from trusts
+        for trust in self.trust_api.list_trusts_for_trustee(context, user_id):
+            self._delete_tokens_for_trust(context, user_id, trust['id'])
+        for trust in self.trust_api.list_trusts_for_trustor(context, user_id):
+            self._delete_tokens_for_trust(context,
+                                          trust['trustee_user_id'],
+                                          trust['id'])
 
     def _require_attribute(self, ref, attr):
         """Ensures the reference contains the specified attribute."""
@@ -157,6 +213,11 @@ class V3Controller(V2Controller):
 
     collection_name = 'entities'
     member_name = 'entity'
+
+    def _delete_tokens_for_group(self, context, group_id):
+        user_refs = self.identity_api.list_users_in_group(context, group_id)
+        for user in user_refs:
+            self._delete_tokens_for_user(context, user['id'])
 
     @classmethod
     def base_url(cls, path=None):
@@ -213,9 +274,28 @@ class V3Controller(V2Controller):
     @classmethod
     def filter_by_attribute(cls, context, refs, attr):
         """Filters a list of references by query string value."""
+
+        def _attr_match(ref_attr, val_attr):
+            """Matches attributes allowing for booleans as strings.
+
+            We test explicitly for a value that defines it as 'False',
+            which also means that the existence of the attribute with
+            no value implies 'True'
+
+            """
+            if type(ref_attr) is bool:
+                if (isinstance(val_attr, basestring) and
+                        val_attr == '0'):
+                    val = False
+                else:
+                    val = True
+                return (ref_attr == val)
+            else:
+                return (ref_attr == val_attr)
+
         if attr in context['query_string']:
             value = context['query_string'][attr]
-            return [r for r in refs if r[attr] == value]
+            return [r for r in refs if _attr_match(r[attr], value)]
         return refs
 
     def _require_matching_id(self, value, ref):

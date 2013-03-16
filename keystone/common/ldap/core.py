@@ -15,6 +15,7 @@
 # under the License.
 
 import ldap
+from ldap import filter as ldap_filter
 
 from keystone.common.ldap import fakeldap
 from keystone.common import logging
@@ -77,6 +78,8 @@ class BaseLdap(object):
     DEFAULT_OBJECTCLASS = None
     DEFAULT_FILTER = None
     DUMB_MEMBER_DN = 'cn=dumb,dc=nonexistent'
+    NotFound = None
+    notfound_arg = None
     options_name = None
     model = None
     attribute_mapping = {}
@@ -88,6 +91,7 @@ class BaseLdap(object):
         self.LDAP_USER = conf.ldap.user
         self.LDAP_PASSWORD = conf.ldap.password
         self.LDAP_SCOPE = ldap_scope(conf.ldap.query_scope)
+        self.page_size = conf.ldap.page_size
 
         if self.options_name is not None:
             self.suffix = conf.ldap.suffix
@@ -117,6 +121,9 @@ class BaseLdap(object):
             self.allow_delete = getattr(conf.ldap, allow_delete)
 
             self.structural_classes = self.DEFAULT_STRUCTURAL_CLASSES
+
+            if self.notfound_arg is None:
+                self.notfound_arg = self.options_name + '_id'
         self.use_dumb_member = getattr(conf.ldap, 'use_dumb_member')
         self.dumb_member = (getattr(conf.ldap, 'dumb_member') or
                             self.DUMB_MEMBER_DN)
@@ -124,11 +131,18 @@ class BaseLdap(object):
         self.subtree_delete_enabled = getattr(conf.ldap,
                                               'allow_subtree_delete')
 
+    def _not_found(self, object_id):
+        if self.NotFound is None:
+            return exception.NotFound(target=object_id)
+        else:
+            return self.NotFound(**{self.notfound_arg: object_id})
+
     def get_connection(self, user=None, password=None):
         if self.LDAP_URL.startswith('fake://'):
             conn = fakeldap.FakeLdap(self.LDAP_URL)
         else:
-            conn = LdapWrapper(self.LDAP_URL)
+            conn = LdapWrapper(self.LDAP_URL,
+                               self.page_size)
 
         if user is None:
             user = self.LDAP_USER
@@ -262,58 +276,22 @@ class BaseLdap(object):
     def get(self, id, filter=None):
         res = self._ldap_get(id, filter)
         if res is None:
-            raise exception.NotFound(target=id)
+            raise self._not_found(id)
         else:
             return self._ldap_res_to_model(res)
+
+    def get_by_name(self, name, filter=None):
+        query = ('(%s=%s)' % (self.attribute_mapping['name'],
+                              ldap_filter.escape_filter_chars(name)))
+        res = self.get_all(query)
+        try:
+            return res[0]
+        except IndexError:
+            raise self._not_found(name)
 
     def get_all(self, filter=None):
         return [self._ldap_res_to_model(x)
                 for x in self._ldap_get_all(filter)]
-
-    def get_page(self, marker, limit):
-        return self._get_page(marker, limit, self.get_all())
-
-    def get_page_markers(self, marker, limit):
-        return self._get_page_markers(marker, limit, self.get_all())
-
-    @staticmethod
-    def _get_page(marker, limit, lst, key=lambda x: x.id):
-        lst.sort(key=key)
-        if not marker:
-            return lst[:limit]
-        else:
-            return [x for x in lst if key(x) > marker][:limit]
-
-    @staticmethod
-    def _get_page_markers(marker, limit, lst, key=lambda x: x.id):
-        if len(lst) < limit:
-            return (None, None)
-
-        lst.sort(key=key)
-        if marker is None:
-            if len(lst) <= limit + 1:
-                nxt = None
-            else:
-                nxt = key(lst[limit])
-            return (None, nxt)
-
-        i = 0
-        for i, item in enumerate(lst):
-            k = key(item)
-            if k >= marker:
-                break
-
-        if i <= limit:
-            prv = None
-        else:
-            prv = key(lst[i - limit])
-
-        if i + limit >= len(lst) - 1:
-            nxt = None
-        else:
-            nxt = key(lst[i + limit])
-
-        return (prv, nxt)
 
     def update(self, id, values, old_obj=None):
         if not self.allow_update:
@@ -341,7 +319,10 @@ class BaseLdap(object):
 
         if modlist:
             conn = self.get_connection()
-            conn.modify_s(self._id_to_dn(id), modlist)
+            try:
+                conn.modify_s(self._id_to_dn(id), modlist)
+            except ldap.NO_SUCH_OBJECT:
+                raise self._not_found(id)
 
     def delete(self, id):
         if not self.allow_delete:
@@ -349,21 +330,28 @@ class BaseLdap(object):
             raise exception.ForbiddenAction(action=action)
 
         conn = self.get_connection()
-        conn.delete_s(self._id_to_dn(id))
+        try:
+            conn.delete_s(self._id_to_dn(id))
+        except ldap.NO_SUCH_OBJECT:
+            raise self._not_found(id)
 
     def deleteTree(self, id):
         conn = self.get_connection()
         tree_delete_control = ldap.controls.LDAPControl(CONTROL_TREEDELETE,
                                                         0,
                                                         None)
-        conn.delete_ext_s(self._id_to_dn(id),
-                          serverctrls=[tree_delete_control])
+        try:
+            conn.delete_ext_s(self._id_to_dn(id),
+                              serverctrls=[tree_delete_control])
+        except ldap.NO_SUCH_OBJECT:
+            raise self._not_found(id)
 
 
 class LdapWrapper(object):
-    def __init__(self, url):
+    def __init__(self, url, page_size):
         LOG.debug(_("LDAP init: url=%s"), url)
         self.conn = ldap.initialize(url)
+        self.page_size = page_size
 
     def simple_bind_s(self, user, password):
         LOG.debug(_("LDAP bind: dn=%s"), user)
@@ -387,14 +375,58 @@ class LdapWrapper(object):
                       scope,
                       query,
                       attrlist)
-        res = self.conn.search_s(dn, scope, query, attrlist)
+        if self.page_size:
+            res = self.paged_search_s(dn, scope, query, attrlist)
+        else:
+            res = self.conn.search_s(dn, scope, query, attrlist)
 
         o = []
         for dn, attrs in res:
             o.append((dn, dict((kind, [ldap2py(x) for x in values])
                                for kind, values in attrs.iteritems())))
-
         return o
+
+    def paged_search_s(self, dn, scope, query, attrlist=None):
+        res = []
+        lc = ldap.controls.SimplePagedResultsControl(
+            controlType=ldap.LDAP_CONTROL_PAGE_OID,
+            criticality=True,
+            controlValue=(self.page_size, ''))
+        msgid = self.conn.search_ext(dn,
+                                     scope,
+                                     query,
+                                     attrlist,
+                                     serverctrls=[lc])
+        # Endless loop request pages on ldap server until it has no data
+        while True:
+            # Request to the ldap server a page with 'page_size' entries
+            rtype, rdata, rmsgid, serverctrls = self.conn.result3(msgid)
+            # Receive the data
+            res.extend(rdata)
+            pctrls = [c for c in serverctrls
+                      if c.controlType == ldap.LDAP_CONTROL_PAGE_OID]
+            if pctrls:
+                # LDAP server supports pagination
+                est, cookie = pctrls[0].controlValue
+                if cookie:
+                    # There is more data still on the server
+                    # so we request another page
+                    lc.controlValue = (self.page_size, cookie)
+                    msgid = self.conn.search_ext(dn,
+                                                 scope,
+                                                 query,
+                                                 attrlist,
+                                                 serverctrls=[lc])
+                else:
+                    # Exit condition no more data on server
+                    break
+            else:
+                LOG.warning(_('LDAP Server does not support paging.'
+                              'Disable paging in keystone.conf to'
+                              'avoid this message'))
+                self._disable_paging()
+                break
+        return res
 
     def modify_s(self, dn, modlist):
         ldap_modlist = [
@@ -417,6 +449,10 @@ class LdapWrapper(object):
     def delete_ext_s(self, dn, serverctrls):
         LOG.debug(_("LDAP delete_ext: dn=%s, serverctrls=%s"), dn, serverctrls)
         return self.conn.delete_ext_s(dn, serverctrls)
+
+    def _disable_paging(self):
+        # Disable the pagination from now on
+        self.page_size = 0
 
 
 class EnabledEmuMixIn(BaseLdap):

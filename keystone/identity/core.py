@@ -61,6 +61,26 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.identity.driver)
 
+    def create_user(self, context, user_id, user_ref):
+        user = user_ref.copy()
+        if 'enabled' not in user:
+            user['enabled'] = True
+        return self.driver.create_user(user_id, user)
+
+    def create_group(self, context, group_id, group_ref):
+        group = group_ref.copy()
+        if 'description' not in group:
+            group['description'] = ''
+        return self.driver.create_group(group_id, group)
+
+    def create_project(self, context, tenant_id, tenant_ref):
+        tenant = tenant_ref.copy()
+        if 'enabled' not in tenant:
+            tenant['enabled'] = True
+        if 'description' not in tenant:
+            tenant['description'] = ''
+        return self.driver.create_project(tenant_id, tenant)
+
 
 class Driver(object):
     """Interface description for an Identity driver."""
@@ -102,15 +122,15 @@ class Driver(object):
         raise exception.NotImplemented()
 
     def add_user_to_project(self, tenant_id, user_id):
-            """Add user to a tenant by creating a default role relationship.
+        """Add user to a tenant by creating a default role relationship.
 
-            :raises: keystone.exception.ProjectNotFound,
-                     keystone.exception.UserNotFound
+        :raises: keystone.exception.ProjectNotFound,
+                 keystone.exception.UserNotFound
 
-            """
-            self.add_role_to_user_and_project(user_id,
-                                              tenant_id,
-                                              config.CONF.member_role_id)
+        """
+        self.add_role_to_user_and_project(user_id,
+                                          tenant_id,
+                                          config.CONF.member_role_id)
 
     def remove_user_from_project(self, tenant_id, user_id):
         """Remove user from a tenant
@@ -161,7 +181,35 @@ class Driver(object):
                  keystone.exception.ProjectNotFound
 
         """
-        raise exception.NotImplemented()
+
+        def update_metadata_for_group_domain_roles(self, metadata_ref,
+                                                   user_id, domain_id):
+            group_refs = self.list_groups_for_user(user_id=user_id)
+            for x in group_refs:
+                try:
+                    metadata_ref.update(
+                        self.get_metadata(group_id=x['id'],
+                                          domain_id=domain_id))
+                except exception.MetadataNotFound:
+                    # no group grant, skip
+                    pass
+
+        def update_metadata_for_user_domain_roles(self, metadata_ref,
+                                                  user_id, domain_id):
+            try:
+                metadata_ref.update(self.get_metadata(user_id=user_id,
+                                                      domain_id=domain_id))
+            except exception.MetadataNotFound:
+                pass
+
+        self.get_user(user_id)
+        self.get_domain(domain_id)
+        metadata_ref = {}
+        update_metadata_for_user_domain_roles(self, metadata_ref,
+                                              user_id, domain_id)
+        update_metadata_for_group_domain_roles(self, metadata_ref,
+                                               user_id, domain_id)
+        return list(set(metadata_ref.get('roles', [])))
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
         """Add a role to a user within given tenant.

@@ -14,8 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import functools
-
 from keystone import clean
 from keystone import config
 from keystone.common import sql
@@ -23,19 +21,6 @@ from keystone.common.sql import migration
 from keystone.common import utils
 from keystone import exception
 from keystone import identity
-
-
-def handle_conflicts(type='object'):
-    """Converts IntegrityError into HTTP 409 Conflict."""
-    def decorator(method):
-        @functools.wraps(method)
-        def wrapper(*args, **kwargs):
-            try:
-                return method(*args, **kwargs)
-            except sql.IntegrityError as e:
-                raise exception.Conflict(type=type, details=str(e.orig))
-        return wrapper
-    return decorator
 
 
 class User(sql.ModelBase, sql.DictBase):
@@ -55,7 +40,7 @@ class User(sql.ModelBase, sql.DictBase):
 
 class Group(sql.ModelBase, sql.DictBase):
     __tablename__ = 'group'
-    attributes = ['id', 'name', 'domain_id']
+    attributes = ['id', 'name', 'domain_id', 'description']
     id = sql.Column(sql.String(64), primary_key=True)
     name = sql.Column(sql.String(64), nullable=False)
     domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
@@ -91,7 +76,7 @@ class Domain(sql.ModelBase, sql.DictBase):
 
 class Project(sql.ModelBase, sql.DictBase):
     __tablename__ = 'project'
-    attributes = ['id', 'name', 'domain_id']
+    attributes = ['id', 'name', 'domain_id', 'description', 'enabled']
     id = sql.Column(sql.String(64), primary_key=True)
     name = sql.Column(sql.String(64), nullable=False)
     domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
@@ -208,18 +193,7 @@ class Identity(sql.Base, identity.Driver):
             # FIXME(gyee): this should really be
             # get_roles_for_user_and_project() after the dusts settle
             if tenant_id not in self.get_projects_for_user(user_id):
-                # get_roles_for_user_and_project() returns a set
-                roles = []
-                try:
-                    roles = self.get_roles_for_user_and_project(user_id,
-                                                                tenant_id)
-                except:
-                    # FIXME(gyee): we should never get into this situation
-                    # after user project role migration is completed
-                    pass
-                if not roles:
-                    raise AssertionError('Invalid tenant')
-
+                raise AssertionError('Invalid project')
             try:
                 tenant_ref = self.get_project(tenant_id)
                 metadata_ref = self.get_metadata(user_id, tenant_id)
@@ -228,7 +202,6 @@ class Identity(sql.Base, identity.Driver):
                 metadata_ref = {}
             except exception.MetadataNotFound:
                 metadata_ref = {}
-
         return (identity.filter_user(user_ref), tenant_ref, metadata_ref)
 
     def get_project(self, tenant_id):
@@ -494,7 +467,7 @@ class Identity(sql.Base, identity.Driver):
             raise exception.RoleNotFound(message=msg)
 
     # CRUD
-    @handle_conflicts(type='project')
+    @sql.handle_conflicts(type='project')
     def create_project(self, tenant_id, tenant):
         tenant['name'] = clean.project_name(tenant['name'])
         session = self.get_session()
@@ -504,7 +477,7 @@ class Identity(sql.Base, identity.Driver):
             session.flush()
         return tenant_ref.to_dict()
 
-    @handle_conflicts(type='project')
+    @sql.handle_conflicts(type='project')
     def update_project(self, tenant_id, tenant):
         session = self.get_session()
 
@@ -527,7 +500,7 @@ class Identity(sql.Base, identity.Driver):
             session.flush()
         return tenant_ref.to_dict(include_extra_dict=True)
 
-    @handle_conflicts(type='project')
+    @sql.handle_conflicts(type='project')
     def delete_project(self, tenant_id):
         session = self.get_session()
 
@@ -556,7 +529,7 @@ class Identity(sql.Base, identity.Driver):
             session.delete(tenant_ref)
             session.flush()
 
-    @handle_conflicts(type='metadata')
+    @sql.handle_conflicts(type='metadata')
     def create_metadata(self, user_id, tenant_id, metadata,
                         domain_id=None, group_id=None):
         session = self.get_session()
@@ -582,7 +555,7 @@ class Identity(sql.Base, identity.Driver):
             session.flush()
         return metadata
 
-    @handle_conflicts(type='metadata')
+    @sql.handle_conflicts(type='metadata')
     def update_metadata(self, user_id, tenant_id, metadata,
                         domain_id=None, group_id=None):
         session = self.get_session()
@@ -614,7 +587,7 @@ class Identity(sql.Base, identity.Driver):
 
     # domain crud
 
-    @handle_conflicts(type='domain')
+    @sql.handle_conflicts(type='domain')
     def create_domain(self, domain_id, domain):
         session = self.get_session()
         with session.begin():
@@ -635,6 +608,7 @@ class Identity(sql.Base, identity.Driver):
             raise exception.DomainNotFound(domain_id=domain_id)
         return ref.to_dict()
 
+    @sql.handle_conflicts(type='domain')
     def get_domain_by_name(self, domain_name):
         session = self.get_session()
         try:
@@ -643,7 +617,7 @@ class Identity(sql.Base, identity.Driver):
             raise exception.DomainNotFound(domain_id=domain_name)
         return ref.to_dict()
 
-    @handle_conflicts(type='domain')
+    @sql.handle_conflicts(type='domain')
     def update_domain(self, domain_id, domain):
         session = self.get_session()
         with session.begin():
@@ -689,11 +663,9 @@ class Identity(sql.Base, identity.Driver):
 
     # user crud
 
-    @handle_conflicts(type='user')
+    @sql.handle_conflicts(type='user')
     def create_user(self, user_id, user):
         user['name'] = clean.user_name(user['name'])
-        if 'enabled' not in user:
-            user['enabled'] = True
         user = utils.hash_user_password(user)
         session = self.get_session()
         with session.begin():
@@ -732,7 +704,7 @@ class Identity(sql.Base, identity.Driver):
         return identity.filter_user(
             self._get_user_by_name(user_name, domain_id))
 
-    @handle_conflicts(type='user')
+    @sql.handle_conflicts(type='user')
     def update_user(self, user_id, user):
         if 'name' in user:
             user['name'] = clean.user_name(user['name'])
@@ -842,7 +814,7 @@ class Identity(sql.Base, identity.Driver):
 
     # group crud
 
-    @handle_conflicts(type='group')
+    @sql.handle_conflicts(type='group')
     def create_group(self, group_id, group):
         session = self.get_session()
         with session.begin():
@@ -866,7 +838,7 @@ class Identity(sql.Base, identity.Driver):
     def get_group(self, group_id):
         return self._get_group(group_id)
 
-    @handle_conflicts(type='group')
+    @sql.handle_conflicts(type='group')
     def update_group(self, group_id, group):
         session = self.get_session()
 
@@ -914,7 +886,7 @@ class Identity(sql.Base, identity.Driver):
 
     # credential crud
 
-    @handle_conflicts(type='credential')
+    @sql.handle_conflicts(type='credential')
     def create_credential(self, credential_id, credential):
         session = self.get_session()
         with session.begin():
@@ -935,7 +907,7 @@ class Identity(sql.Base, identity.Driver):
             raise exception.CredentialNotFound(credential_id=credential_id)
         return ref.to_dict()
 
-    @handle_conflicts(type='credential')
+    @sql.handle_conflicts(type='credential')
     def update_credential(self, credential_id, credential):
         session = self.get_session()
         with session.begin():
@@ -967,7 +939,7 @@ class Identity(sql.Base, identity.Driver):
 
     # role crud
 
-    @handle_conflicts(type='role')
+    @sql.handle_conflicts(type='role')
     def create_role(self, role_id, role):
         session = self.get_session()
         with session.begin():
@@ -988,7 +960,7 @@ class Identity(sql.Base, identity.Driver):
             raise exception.RoleNotFound(role_id=role_id)
         return ref.to_dict()
 
-    @handle_conflicts(type='role')
+    @sql.handle_conflicts(type='role')
     def update_role(self, role_id, role):
         session = self.get_session()
         with session.begin():

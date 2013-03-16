@@ -39,6 +39,7 @@ from keystone import exception
 from keystone import identity
 from keystone import policy
 from keystone import token
+from keystone import trust
 
 
 do_monkeypatch = not os.getenv('STANDARD_THREADS')
@@ -55,6 +56,9 @@ DRIVERS = {}
 
 
 cd = os.chdir
+
+
+logging.getLogger('routes.middleware').level = logging.WARN
 
 
 def rootdir(*p):
@@ -74,6 +78,7 @@ def initialize_drivers():
     DRIVERS['identity_api'] = identity.Manager()
     DRIVERS['policy_api'] = policy.Manager()
     DRIVERS['token_api'] = token.Manager()
+    DRIVERS['trust_api'] = trust.Manager()
     return DRIVERS
 
 
@@ -310,6 +315,15 @@ class TestCase(NoModule, unittest.TestCase):
         :param delta: Maximum allowable time delta, defined in seconds.
         """
         self.assertAlmostEqual(a, b, delta=datetime.timedelta(seconds=delta))
+
+    def assertDictContainsSubset(self, dict1, dict2):
+        if len(dict1) < len(dict2):
+            (subset, fullset) = dict1, dict2
+        else:
+            (subset, fullset) = dict2, dict1
+        for x in subset:
+            self.assertIn(x, fullset)
+            self.assertEquals(subset.get(x), fullset.get(x))
 
     @staticmethod
     def skip_if_no_ipv6():

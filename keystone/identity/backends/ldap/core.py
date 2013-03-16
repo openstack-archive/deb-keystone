@@ -98,10 +98,7 @@ class Identity(identity.Driver):
         return (identity.filter_user(user_ref), tenant_ref, metadata_ref)
 
     def get_project(self, tenant_id):
-        try:
-            return self.project.get(tenant_id)
-        except exception.NotFound:
-            raise exception.ProjectNotFound(project_id=tenant_id)
+        return self.project.get(tenant_id)
 
     def list_projects(self):
         return self.project.get_all()
@@ -109,16 +106,10 @@ class Identity(identity.Driver):
     def get_project_by_name(self, tenant_name, domain_id):
         # TODO(henry-nash): Use domain_id once domains are implemented
         # in LDAP backend
-        try:
-            return self.project.get_by_name(tenant_name)
-        except exception.NotFound:
-            raise exception.ProjectNotFound(project_id=tenant_name)
+        return self.project.get_by_name(tenant_name)
 
     def _get_user(self, user_id):
-        try:
-            return self.user.get(user_id)
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=user_id)
+        return self.user.get(user_id)
 
     def get_user(self, user_id):
         return identity.filter_user(self._get_user(user_id))
@@ -129,12 +120,13 @@ class Identity(identity.Driver):
     def get_user_by_name(self, user_name, domain_id):
         # TODO(henry-nash): Use domain_id once domains are implemented
         # in LDAP backend
-        try:
-            return identity.filter_user(self.user.get_by_name(user_name))
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=user_name)
+        return identity.filter_user(self.user.get_by_name(user_name))
 
-    def get_metadata(self, user_id, tenant_id):
+    def get_metadata(self, user_id=None, tenant_id=None,
+                     domain_id=None, group_id=None):
+        # FIXME(henry-nash): Use domain_id and group_id once domains
+        # and groups are implemented in LDAP backend
+
         if not self.get_project(tenant_id) or not self.get_user(user_id):
             return {}
 
@@ -144,10 +136,7 @@ class Identity(identity.Driver):
         return {'roles': metadata_ref}
 
     def get_role(self, role_id):
-        try:
-            return self.role.get(role_id)
-        except exception.NotFound:
-            raise exception.RoleNotFound(role_id=role_id)
+        return self.role.get(role_id)
 
     def list_roles(self):
         return self.role.get_all()
@@ -217,22 +206,13 @@ class Identity(identity.Driver):
         return self.role.create(role)
 
     def delete_role(self, role_id):
-        try:
-            return self.role.delete(role_id)
-        except ldap.NO_SUCH_OBJECT:
-            raise exception.RoleNotFound(role_id=role_id)
+        return self.role.delete(role_id)
 
     def delete_project(self, tenant_id):
-        try:
-            return self.project.delete(tenant_id)
-        except ldap.NO_SUCH_OBJECT:
-            raise exception.ProjectNotFound(project_id=tenant_id)
+        return self.project.delete(tenant_id)
 
     def delete_user(self, user_id):
-        try:
-            return self.user.delete(user_id)
-        except ldap.NO_SUCH_OBJECT:
-            raise exception.UserNotFound(user_id=user_id)
+        return self.user.delete(user_id)
 
     def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
         return self.role.delete_user(role_id, user_id, tenant_id)
@@ -246,10 +226,7 @@ class Identity(identity.Driver):
         return self.group.create(group)
 
     def get_group(self, group_id):
-        try:
-            return self.group.get(group_id)
-        except exception.NotFound:
-            raise exception.GroupNotFound(group_id=group_id)
+        return self.group.get(group_id)
 
     def update_group(self, group_id, group):
         if 'name' in group:
@@ -257,10 +234,7 @@ class Identity(identity.Driver):
         return self.group.update(group_id, group)
 
     def delete_group(self, group_id):
-        try:
-            return self.group.delete(group_id)
-        except ldap.NO_SUCH_OBJECT:
-            raise exception.GroupNotFound(group_id=group_id)
+        return self.group.delete(group_id)
 
 
 # TODO(termie): remove this and move cross-api calls into driver
@@ -332,6 +306,7 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_OBJECTCLASS = 'inetOrgPerson'
     DEFAULT_ATTRIBUTE_IGNORE = ['tenant_id', 'tenants']
+    NotFound = exception.UserNotFound
     options_name = 'user'
     attribute_mapping = {'password': 'userPassword',
                          'email': 'mail',
@@ -372,22 +347,6 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap, ApiShimMixin):
         values['enabled'] = values['enabled_nomask']
         del values['enabled_nomask']
 
-    def get(self, id, filter=None):
-        """Replaces exception.NotFound with exception.UserNotFound."""
-        try:
-            return super(UserApi, self).get(id, filter)
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=id)
-
-    def get_by_name(self, name, filter=None):
-        query = ('(%s=%s)' % (self.attribute_mapping['name'],
-                              ldap_filter.escape_filter_chars(name)))
-        users = self.get_all(query)
-        try:
-            return users[0]
-        except IndexError:
-            raise exception.UserNotFound(user_id=name)
-
     def create(self, values):
         self.affirm_unique(values)
         values = utils.hash_ldap_user_password(values)
@@ -402,10 +361,7 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap, ApiShimMixin):
     def update(self, id, values):
         if 'id' in values and values['id'] != id:
             raise exception.ValidationError('Cannot change user ID')
-        try:
-            old_obj = self.get(id)
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=id)
+        old_obj = self.get(id)
         if 'name' in values and old_obj.get('name') != values['name']:
             raise exception.Conflict('Cannot change user name')
 
@@ -436,50 +392,6 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap, ApiShimMixin):
         for ref in self.role_api.list_project_roles_for_user(id):
             self.role_api.delete_user(ref.role_id, ref.user_id, ref.project_id)
 
-    def get_by_email(self, email):
-        query = ('(%s=%s)' % (self.attribute_mapping['mail'],
-                              ldap_filter.escape_filter_chars(email)))
-        users = self.get_all(query)
-        try:
-            return users[0]
-        except IndexError:
-            return None
-
-    def user_roles_by_project(self, user_id, tenant_id):
-        return self.role_api.list_project_roles_for_user(user_id, tenant_id)
-
-    def get_by_project(self, user_id, tenant_id):
-        user_dn = self._id_to_dn(user_id)
-        user = self.get(user_id)
-        tenant = self.project_api._ldap_get(tenant_id,
-                                            '(member=%s)' % (user_dn,))
-        if tenant is not None:
-            return user
-        else:
-            if self.role_api.list_project_roles_for_user(user_id, tenant_id):
-                return user
-        return None
-
-    def user_role_add(self, values):
-        return self.role_api.add_user(values.role_id, values.user_id,
-                                      values.tenant_id)
-
-    def users_get_page(self, marker, limit):
-        return self.get_page(marker, limit)
-
-    def users_get_page_markers(self, marker, limit):
-        return self.get_page_markers(marker, limit)
-
-    def users_get_by_project_get_page(self, tenant_id, role_id, marker, limit):
-        return self._get_page(marker,
-                              limit,
-                              self.project_api.get_users(tenant_id, role_id))
-
-    def users_get_by_project_get_page_markers(self, tenant_id, role_id,
-                                              marker, limit):
-        return self._get_page_markers(
-            marker, limit, self.project_api.get_users(tenant_id, role_id))
-
     def check_password(self, user_id, password):
         user = self.get(user_id)
         return utils.check_password(password, user.password)
@@ -494,9 +406,11 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap,
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
     DEFAULT_ATTRIBUTE_IGNORE = []
+    NotFound = exception.ProjectNotFound
+    notfound_arg = 'project_id'  # NOTE(yorik-sar): while options_name = tenant
     options_name = 'tenant'
     attribute_mapping = {'name': 'ou',
-                         'description': 'desc',
+                         'description': 'description',
                          'tenantId': 'cn',
                          'enabled': 'enabled',
                          'domain_id': 'domain_id'}
@@ -514,23 +428,6 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap,
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
         self.attribute_ignore = (getattr(conf.ldap, 'tenant_attribute_ignore')
                                  or self.DEFAULT_ATTRIBUTE_IGNORE)
-
-    def get(self, id, filter=None):
-        """Replaces exception.NotFound with exception.ProjectNotFound."""
-        try:
-            return super(ProjectApi, self).get(id, filter)
-        except exception.NotFound:
-            raise exception.ProjectNotFound(project_id=id)
-
-    def get_by_name(self, name, filter=None):  # pylint: disable=W0221,W0613
-        search_filter = ('(%s=%s)'
-                         % (self.attribute_mapping['name'],
-                            ldap_filter.escape_filter_chars(name)))
-        tenants = self.get_all(search_filter)
-        try:
-            return tenants[0]
-        except IndexError:
-            raise exception.ProjectNotFound(project_id=name)
 
     def create(self, values):
         self.affirm_unique(values)
@@ -552,24 +449,6 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap,
             #the connection.  This is the safer way
             projects.append(self.get(project_id))
         return projects
-
-    def list_for_user_get_page(self, user, marker, limit):
-        return self._get_page(marker,
-                              limit,
-                              self.get_user_projects(user['id']))
-
-    def list_for_user_get_page_markers(self, user, marker, limit):
-        return self._get_page_markers(
-            marker, limit, self.get_user_projects(user['id']))
-
-    def is_empty(self, id):
-        tenant = self._ldap_get(id)
-        members = tenant[1].get(self.member_attribute, [])
-        if self.use_dumb_member:
-            empty = members == [self.dumb_member]
-        else:
-            empty = len(members) == 0
-        return empty and len(self.role_api.get_role_assignments(id)) == 0
 
     def get_role_assignments(self, tenant_id):
         return self.role_api.get_role_assignments(tenant_id)
@@ -623,10 +502,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap,
             super(ProjectApi, self).delete(id)
 
     def update(self, id, values):
-        try:
-            old_obj = self.get(id)
-        except exception.NotFound:
-            raise exception.ProjectNotFound(project_id=id)
+        old_obj = self.get(id)
         if old_obj['name'] != values['name']:
             msg = 'Changing Name not supported by LDAP'
             raise exception.NotImplemented(message=msg)
@@ -653,25 +529,15 @@ class GroupRoleAssociation(object):
         self.project_id = str(tenant_id)
 
 
-def create_role_ref(role_id, tenant_id, user_id):
-    role_id = '' if role_id is None else str(role_id)
-    tenant_id = '' if tenant_id is None else str(tenant_id)
-    user_id = '' if user_id is None else str(user_id)
-    return '%d-%d-%s%s%s' % (len(role_id),
-                             len(tenant_id),
-                             role_id,
-                             tenant_id,
-                             user_id)
-
-
 # TODO(termie): turn this into a data object and move logic to driver
 class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_OU = 'ou=Roles'
     DEFAULT_STRUCTURAL_CLASSES = []
-    options_name = 'role'
     DEFAULT_OBJECTCLASS = 'organizationalRole'
     DEFAULT_MEMBER_ATTRIBUTE = 'roleOccupant'
     DEFAULT_ATTRIBUTE_IGNORE = []
+    NotFound = exception.RoleNotFound
+    options_name = 'role'
     attribute_mapping = {'name': 'cn',
                          #'serviceId': 'service_id',
                          }
@@ -703,16 +569,6 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
         #delattr(values, 'name')
 
         return super(RoleApi, self).create(values)
-
-    # pylint: disable=W0221
-    def get_by_name(self, name, filter=None):
-        roles = self.get_all('(%s=%s)' %
-                             (self.attribute_mapping['name'],
-                              ldap_filter.escape_filter_chars(name)))
-        try:
-            return roles[0]
-        except IndexError:
-            raise exception.RoleNotFound(role_id=name)
 
     def add_user(self, role_id, user_id, tenant_id=None):
         role_dn = self._subrole_id_to_dn(role_id, tenant_id)
@@ -766,17 +622,6 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
 
         except ldap.NO_SUCH_ATTRIBUTE:
             raise exception.UserNotFound(user_id=user_id)
-
-    def get_by_service(self, service_id):
-        roles = self.get_all('(service_id=%s)' %
-                             ldap_filter.escape_filter_chars(service_id))
-        try:
-            res = []
-            for role in roles:
-                res.append(role)
-            return res
-        except IndexError:
-            return None
 
     def get_role_assignments(self, tenant_id):
         conn = self.get_connection()
@@ -851,14 +696,6 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
                     tenant_id=tenant_id))
         return res
 
-    def get_by_service_get_page(self, service_id, marker, limit):
-        all_roles = self.get_by_service(service_id)
-        return self._get_page(marker, limit, all_roles)
-
-    def get_by_service_get_page_markers(self, service_id, marker, limit):
-        all_roles = self.get_by_service(service_id)
-        return self._get_page_markers(marker, limit, all_roles)
-
     def roles_delete_subtree_by_project(self, tenant_id):
         conn = self.get_connection()
         query = '(objectClass=%s)' % self.object_class
@@ -881,10 +718,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
             raise exception.Conflict('Cannot duplicate name %s' % old_name)
         except exception.NotFound:
             pass
-        try:
-            super(RoleApi, self).update(role_id, role)
-        except exception.NotFound:
-            raise exception.RoleNotFound(role_id=role_id)
+        super(RoleApi, self).update(role_id, role)
 
     def delete(self, id):
         conn = self.get_connection()
@@ -910,9 +744,10 @@ class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
     DEFAULT_ATTRIBUTE_IGNORE = []
+    NotFound = exception.GroupNotFound
     options_name = 'group'
     attribute_mapping = {'name': 'ou',
-                         'description': 'desc',
+                         'description': 'description',
                          'groupId': 'cn',
                          'domain_id': 'domain_id'}
     model = models.Group
@@ -929,22 +764,6 @@ class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
         self.attribute_ignore = (getattr(conf.ldap, 'group_attribute_ignore')
                                  or self.DEFAULT_ATTRIBUTE_IGNORE)
 
-    def get(self, id, filter=None):
-        """Replaces exception.NotFound with exception.GroupNotFound."""
-        try:
-            return super(GroupApi, self).get(id, filter)
-        except exception.NotFound:
-            raise exception.GroupNotFound(group_id=id)
-
-    def get_by_name(self, name, filter=None):
-        query = ('(%s=%s)' % (self.attribute_mapping['name'],
-                              ldap_filter.escape_filter_chars(name)))
-        groups = self.get_all(query)
-        try:
-            return groups[0]
-        except IndexError:
-            raise exception.GroupNotFound(group_id=name)
-
     def create(self, values):
         self.affirm_unique(values)
         data = values.copy()
@@ -960,10 +779,7 @@ class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
             super(GroupApi, self).delete(id)
 
     def update(self, id, values):
-        try:
-            old_obj = self.get(id)
-        except exception.NotFound:
-            raise exception.GroupNotFound(group_id=id)
+        old_obj = self.get(id)
         if old_obj['name'] != values['name']:
             msg = _('Changing Name not supported by LDAP')
             raise exception.NotImplemented(message=msg)

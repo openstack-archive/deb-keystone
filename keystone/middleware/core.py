@@ -16,6 +16,7 @@
 
 import webob.dec
 
+from keystone.common import logging
 from keystone.common import serializer
 from keystone.common import utils
 from keystone.common import wsgi
@@ -25,6 +26,7 @@ from keystone.openstack.common import jsonutils
 
 
 CONF = config.CONF
+LOG = logging.getLogger(__name__)
 
 
 # Header used to transmit the auth token
@@ -147,7 +149,14 @@ class XmlBodyMiddleware(wsgi.Middleware):
         incoming_xml = 'application/xml' in str(request.content_type)
         if incoming_xml and request.body:
             request.content_type = 'application/json'
-            request.body = jsonutils.dumps(serializer.from_xml(request.body))
+            try:
+                request.body = jsonutils.dumps(
+                    serializer.from_xml(request.body))
+            except Exception:
+                LOG.exception('Serializer failed')
+                e = exception.ValidationError(attribute='valid XML',
+                                              target='request body')
+                return wsgi.render_exception(e)
 
     def process_response(self, request, response):
         """Transform the response from JSON to XML."""
@@ -158,6 +167,7 @@ class XmlBodyMiddleware(wsgi.Middleware):
                 body_obj = jsonutils.loads(response.body)
                 response.body = serializer.to_xml(body_obj)
             except Exception:
+                LOG.exception('Serializer failed')
                 raise exception.Error(message=response.body)
         return response
 

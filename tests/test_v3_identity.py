@@ -40,145 +40,6 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             self.credential_id,
             self.credential)
 
-    # domain validation
-
-    def assertValidDomainListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'domains',
-            self.assertValidDomain,
-            **kwargs)
-
-    def assertValidDomainResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'domain',
-            self.assertValidDomain,
-            ref)
-
-    def assertValidDomain(self, entity, ref=None):
-        if ref:
-            pass
-        return entity
-
-    # project validation
-
-    def assertValidProjectListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'projects',
-            self.assertValidProject,
-            **kwargs)
-
-    def assertValidProjectResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'project',
-            self.assertValidProject,
-            ref)
-
-    def assertValidProject(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('domain_id'))
-        if ref:
-            self.assertEqual(ref['domain_id'], entity['domain_id'])
-        return entity
-
-    # user validation
-
-    def assertValidUserListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'users',
-            self.assertValidUser,
-            **kwargs)
-
-    def assertValidUserResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'user',
-            self.assertValidUser,
-            ref)
-
-    def assertValidUser(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('domain_id'))
-        self.assertIsNotNone(entity.get('email'))
-        self.assertIsNone(entity.get('password'))
-        if ref:
-            self.assertEqual(ref['domain_id'], entity['domain_id'])
-            self.assertEqual(ref['email'], entity['email'])
-        return entity
-
-    # group validation
-
-    def assertValidGroupListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'groups',
-            self.assertValidGroup,
-            **kwargs)
-
-    def assertValidGroupResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'group',
-            self.assertValidGroup,
-            ref)
-
-    def assertValidGroup(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('name'))
-        if ref:
-            self.assertEqual(ref['name'], entity['name'])
-        return entity
-
-    # credential validation
-
-    def assertValidCredentialListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'credentials',
-            self.assertValidCredential,
-            **kwargs)
-
-    def assertValidCredentialResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'credential',
-            self.assertValidCredential,
-            ref)
-
-    def assertValidCredential(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('user_id'))
-        self.assertIsNotNone(entity.get('blob'))
-        self.assertIsNotNone(entity.get('type'))
-        if ref:
-            self.assertEqual(ref['user_id'], entity['user_id'])
-            self.assertEqual(ref['blob'], entity['blob'])
-            self.assertEqual(ref['type'], entity['type'])
-            self.assertEqual(ref.get('project_id'), entity.get('project_id'))
-        return entity
-
-    # role validation
-
-    def assertValidRoleListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'roles',
-            self.assertValidRole,
-            **kwargs)
-
-    def assertValidRoleResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'role',
-            self.assertValidRole,
-            ref)
-
-    def assertValidRole(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('name'))
-        if ref:
-            self.assertEqual(ref['name'], entity['name'])
-        return entity
-
     # domain crud tests
 
     def test_create_domain(self):
@@ -192,6 +53,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_list_domains(self):
         """GET /domains"""
         r = self.get('/domains')
+        self.assertValidDomainListResponse(r, ref=self.domain)
+
+    def test_list_domains_xml(self):
+        """GET /domains (xml data)"""
+        r = self.get('/domains', content_type='xml')
         self.assertValidDomainListResponse(r, ref=self.domain)
 
     def test_get_domain(self):
@@ -244,6 +110,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get('/projects')
         self.assertValidProjectListResponse(r, ref=self.project)
 
+    def test_list_projects_xml(self):
+        """GET /projects (xml data)"""
+        r = self.get('/projects', content_type='xml')
+        self.assertValidProjectListResponse(r, ref=self.project)
+
     def test_create_project(self):
         """POST /projects"""
         ref = self.new_project_ref(domain_id=self.domain_id)
@@ -288,6 +159,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_list_users(self):
         """GET /users"""
         r = self.get('/users')
+        self.assertValidUserListResponse(r, ref=self.user)
+
+    def test_list_users_xml(self):
+        """GET /users (xml data)"""
+        r = self.get('/users', content_type='xml')
         self.assertValidUserListResponse(r, ref=self.user)
 
     def test_get_user(self):
@@ -354,6 +230,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get('/groups')
         self.assertValidGroupListResponse(r, ref=self.group)
 
+    def test_list_groups_xml(self):
+        """GET /groups (xml data)"""
+        r = self.get('/groups', content_type='xml')
+        self.assertValidGroupListResponse(r, ref=self.group)
+
     def test_get_group(self):
         """GET /groups/{group_id}"""
         r = self.get('/groups/%(group_id)s' % {
@@ -379,6 +260,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_list_credentials(self):
         """GET /credentials"""
         r = self.get('/credentials')
+        self.assertValidCredentialListResponse(r, ref=self.credential)
+
+    def test_list_credentials_xml(self):
+        """GET /credentials (xml data)"""
+        r = self.get('/credentials', content_type='xml')
         self.assertValidCredentialListResponse(r, ref=self.credential)
 
     def test_create_credential(self):
@@ -427,6 +313,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_list_roles(self):
         """GET /roles"""
         r = self.get('/roles')
+        self.assertValidRoleListResponse(r, ref=self.role)
+
+    def test_list_roles_xml(self):
+        """GET /roles (xml data)"""
+        r = self.get('/roles', content_type='xml')
         self.assertValidRoleListResponse(r, ref=self.role)
 
     def test_get_role(self):

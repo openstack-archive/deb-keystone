@@ -15,30 +15,6 @@ class PolicyTestCase(test_v3.RestfulTestCase):
             self.policy_id,
             self.policy.copy())
 
-    # policy validation
-
-    def assertValidPolicyListResponse(self, resp, **kwargs):
-        return self.assertValidListResponse(
-            resp,
-            'policies',
-            self.assertValidPolicy,
-            **kwargs)
-
-    def assertValidPolicyResponse(self, resp, ref):
-        return self.assertValidResponse(
-            resp,
-            'policy',
-            self.assertValidPolicy,
-            ref)
-
-    def assertValidPolicy(self, entity, ref=None):
-        self.assertIsNotNone(entity.get('blob'))
-        self.assertIsNotNone(entity.get('type'))
-        if ref:
-            self.assertEqual(ref['blob'], entity['blob'])
-            self.assertEqual(ref['type'], entity['type'])
-        return entity
-
     # policy crud tests
 
     def test_create_policy(self):
@@ -52,6 +28,11 @@ class PolicyTestCase(test_v3.RestfulTestCase):
     def test_list_policies(self):
         """GET /policies"""
         r = self.get('/policies')
+        self.assertValidPolicyListResponse(r, ref=self.policy)
+
+    def test_list_policies_xml(self):
+        """GET /policies (xml data)"""
+        r = self.get('/policies', content_type='xml')
         self.assertValidPolicyListResponse(r, ref=self.policy)
 
     def test_get_policy(self):

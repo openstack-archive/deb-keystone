@@ -26,6 +26,7 @@ gettext.install('keystone', unicode=1)
 
 _DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)8s [%(name)s] %(message)s"
 _DEFAULT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+_DEFAULT_AUTH_METHODS = ['password', 'token']
 
 common_cli_opts = [
     cfg.BoolOpt('debug',
@@ -179,9 +180,9 @@ register_cli_int('pydev-debug-port', default=None)
 
 register_str('admin_token', default='ADMIN')
 register_str('bind_host', default='0.0.0.0')
-register_str('compute_port', default=8774)
-register_str('admin_port', default=35357)
-register_str('public_port', default=5000)
+register_int('compute_port', default=8774)
+register_int('admin_port', default=35357)
+register_int('public_port', default=5000)
 register_str('public_endpoint', default='http://localhost:%(public_port)d/')
 register_str('admin_endpoint', default='http://localhost:%(admin_port)d/')
 register_str('onready')
@@ -235,6 +236,8 @@ register_str('driver', group='policy',
              default='keystone.policy.backends.sql.Policy')
 register_str('driver', group='token',
              default='keystone.token.backends.kvs.Token')
+register_str('driver', group='trust',
+             default='keystone.trust.backends.sql.Trust')
 register_str('driver', group='ec2',
              default='keystone.contrib.ec2.backends.kvs.Ec2')
 register_str('driver', group='stats',
@@ -250,6 +253,7 @@ register_bool('use_dumb_member', group='ldap', default=False)
 register_str('dumb_member', group='ldap', default='cn=dumb,dc=nonexistent')
 register_bool('allow_subtree_delete', group='ldap', default=False)
 register_str('query_scope', group='ldap', default='one')
+register_int('page_size', group='ldap', default=0)
 
 register_str('user_tree_dn', group='ldap', default=None)
 register_str('user_filter', group='ldap', default=None)
@@ -259,7 +263,8 @@ register_str('user_name_attribute', group='ldap', default='sn')
 register_str('user_mail_attribute', group='ldap', default='email')
 register_str('user_pass_attribute', group='ldap', default='userPassword')
 register_str('user_enabled_attribute', group='ldap', default='enabled')
-register_str('user_domain_id_attribute', group='ldap', default='domain_id')
+register_str('user_domain_id_attribute', group='ldap',
+             default='businessCategory')
 register_int('user_enabled_mask', group='ldap', default=0)
 register_str('user_enabled_default', group='ldap', default='True')
 register_list('user_attribute_ignore', group='ldap',
@@ -276,9 +281,10 @@ register_str('tenant_objectclass', group='ldap', default='groupOfNames')
 register_str('tenant_id_attribute', group='ldap', default='cn')
 register_str('tenant_member_attribute', group='ldap', default='member')
 register_str('tenant_name_attribute', group='ldap', default='ou')
-register_str('tenant_desc_attribute', group='ldap', default='desc')
+register_str('tenant_desc_attribute', group='ldap', default='description')
 register_str('tenant_enabled_attribute', group='ldap', default='enabled')
-register_str('tenant_domain_id_attribute', group='ldap', default='domain_id')
+register_str('tenant_domain_id_attribute', group='ldap',
+             default='businessCategory')
 register_list('tenant_attribute_ignore', group='ldap', default='')
 register_bool('tenant_allow_create', group='ldap', default=True)
 register_bool('tenant_allow_update', group='ldap', default=True)
@@ -303,7 +309,7 @@ register_str('group_objectclass', group='ldap', default='groupOfNames')
 register_str('group_id_attribute', group='ldap', default='cn')
 register_str('group_name_attribute', group='ldap', default='ou')
 register_str('group_member_attribute', group='ldap', default='member')
-register_str('group_desc_attribute', group='ldap', default='desc')
+register_str('group_desc_attribute', group='ldap', default='description')
 register_str('group_domain_id_attribute', group='ldap', default='domain_id')
 register_list('group_attribute_ignore', group='ldap', default='')
 register_bool('group_allow_create', group='ldap', default=True)
@@ -317,8 +323,13 @@ register_str('password', group='pam', default=None)
 
 # default authentication methods
 register_list('methods', group='auth',
-              default=['password', 'token'])
+              default=_DEFAULT_AUTH_METHODS)
 register_str('password', group='auth',
              default='keystone.auth.methods.token.Token')
 register_str('token', group='auth',
              default='keystone.auth.methods.password.Password')
+
+# register any non-default auth methods here (used by extensions, etc)
+for method_name in CONF.auth.methods:
+    if method_name not in _DEFAULT_AUTH_METHODS:
+        config.register_str(method_name, group='auth')

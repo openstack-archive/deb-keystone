@@ -58,7 +58,7 @@ class Endpoint(controller.V2Controller):
         self.assert_admin(context)
         legacy_endpoints = {}
         for endpoint in self.catalog_api.list_endpoints(context):
-            if not endpoint['legacy_endpoint_id']:
+            if not endpoint.get('legacy_endpoint_id'):
                 # endpoints created in v3 should not appear on the v2 API
                 continue
 
@@ -86,9 +86,15 @@ class Endpoint(controller.V2Controller):
 
         legacy_endpoint_ref = endpoint.copy()
 
-        # pop all urls off the endpoint so we don't persist them more than once
-        urls = dict((i, endpoint.pop('%surl' % i)) for i in INTERFACES
-                    if endpoint.get('%surl' % i) is not None)
+        urls = {}
+        for i in INTERFACES:
+            # remove all urls so they aren't persisted them more than once
+            if endpoint.get('%surl' % i) is not None:
+                # valid urls need to be persisted
+                urls[i] = endpoint.pop('%surl' % i)
+            elif '%surl' % i in endpoint:
+                # null urls can be discarded
+                endpoint.pop('%surl' % i)
 
         legacy_endpoint_id = uuid.uuid4().hex
         for interface, url in urls.iteritems():
@@ -157,6 +163,17 @@ class ServiceV3(controller.V3Controller):
 class EndpointV3(controller.V3Controller):
     collection_name = 'endpoints'
     member_name = 'endpoint'
+
+    @classmethod
+    def filter_endpoint(cls, ref):
+        if 'legacy_endpoint_id' in ref:
+            ref.pop('legacy_endpoint_id')
+        return ref
+
+    @classmethod
+    def wrap_member(cls, context, ref):
+        ref = cls.filter_endpoint(ref)
+        return super(EndpointV3, cls).wrap_member(context, ref)
 
     @controller.protected
     def create_endpoint(self, context, endpoint):

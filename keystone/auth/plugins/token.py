@@ -38,12 +38,18 @@ class Token(auth.AuthMethodHandler):
                                                 target=METHOD_NAME)
             token_id = auth_payload['id']
             token_ref = self.token_api.get_token(context, token_id)
-            user_context.setdefault('user_id',
-                                    token_ref['token_data']['user']['id'])
-            user_context.setdefault('expires',
-                                    token_ref['expires'])
-            user_context['extras'].update(token_ref['token_data']['extras'])
-            user_context['method_names'] += token_ref['token_data']['methods']
+            user_context.setdefault(
+                'user_id', token_ref['token_data']['token']['user']['id'])
+            # to support Grizzly-3 to Grizzly-RC1 transition
+            expires_at = token_ref['token_data']['token'].get(
+                'expires_at', token_ref['token_data']['token'].get('expires'))
+            user_context.setdefault('expires_at', expires_at)
+            user_context['extras'].update(
+                token_ref['token_data']['token']['extras'])
+            user_context['method_names'].extend(
+                token_ref['token_data']['token']['methods'])
+            if 'trust' in token_ref['token_data']:
+                raise exception.Forbidden()
         except AssertionError as e:
             LOG.error(e)
             raise exception.Unauthorized(e)
