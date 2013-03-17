@@ -87,6 +87,9 @@ if [ "$1" = "configure" ] ; then
 	# isn't a problem.
 	su keystone -c "keystone-manage pki_setup"
 
+	# Make sure /var/log/keystone/keystone.log is owned by keystone
+	chown -R keystone:keystone /var/log/keystone
+
 	# Setup init script and start keystone
 	pkgos_init keystone
 
