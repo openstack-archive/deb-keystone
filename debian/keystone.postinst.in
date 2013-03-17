@@ -84,7 +84,7 @@ if [ "$1" = "configure" ] ; then
 	# Generate the ssl keys for keystone.
 	# It seems that starting it each time this script is launch
 	# isn't a problem.
-	keystone-manage pki_setup
+	su keystone -c "keystone-manage pki_setup"
 
 	# Setup init script and start keystone
 	pkgos_init keystone
