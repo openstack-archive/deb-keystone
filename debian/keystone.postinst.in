@@ -27,6 +27,7 @@ keystone_create_admin_tenant () {
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
 	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone tenant-update --enabled true $ADMIN_TENANT
 }
 
 keystone_create_endpoint_postinst () {
