@@ -64,6 +64,9 @@ if [ "$1" = "configure" ] ; then
 	mkdir -p /etc/keystone/ssl/certs
 	chown keystone:keystone /etc/keystone/ssl/certs
 	chmod 750 /etc/keystone/ssl/certs
+	chown keystone:keystone /etc/keystone/ssl
+	chmod 750 /etc/keystone/ssl
+
 	# Create keystone.conf if it's not there
 	pkgos_write_new_conf keystone keystone.conf
 	# Set the auth_token directive in in keystone.conf
