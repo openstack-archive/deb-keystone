@@ -83,7 +83,7 @@ if [ "$1" = "configure" ] ; then
 	# Upgrade or create the db if directed to do so
 	db_get keystone/configure_db
 	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
-		keystone-manage db_sync
+		su keystone -c "keystone-manage db_sync"
 	fi
 
 	# Generate the ssl keys for keystone.
