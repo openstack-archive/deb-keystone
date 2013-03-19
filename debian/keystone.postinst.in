@@ -76,6 +76,10 @@ if [ "$1" = "configure" ] ; then
 	# Configure the SQL connection of keystone.conf according to dbconfig-common
 	pkgos_dbc_postinst ${KEY_CONF} sql connection keystone $@
 
+	# Make sure /var/log/keystone/keystone.log is owned by keystone
+	# BEFORE any keystone-manage calls.
+	chown -R keystone:keystone /var/log/keystone
+
 	# Upgrade or create the db if directed to do so
 	db_get keystone/configure_db
 	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
@@ -86,9 +90,6 @@ if [ "$1" = "configure" ] ; then
 	# It seems that starting it each time this script is launch
 	# isn't a problem.
 	su keystone -c "keystone-manage pki_setup"
-
-	# Make sure /var/log/keystone/keystone.log is owned by keystone
-	chown -R keystone:keystone /var/log/keystone
 
 	# Setup init script and start keystone
 	pkgos_init keystone
