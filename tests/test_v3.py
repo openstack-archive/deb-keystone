@@ -15,6 +15,7 @@ import test_content_types
 
 
 CONF = config.CONF
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
@@ -56,6 +57,21 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             self.user['id'] = self.user_id
             self.identity_api.create_user(self.user_id, self.user)
 
+            self.default_domain_project_id = uuid.uuid4().hex
+            self.default_domain_project = self.new_project_ref(
+                domain_id=DEFAULT_DOMAIN_ID)
+            self.default_domain_project['id'] = self.default_domain_project_id
+            self.identity_api.create_project(self.default_domain_project_id,
+                                             self.default_domain_project)
+
+            self.default_domain_user_id = uuid.uuid4().hex
+            self.default_domain_user = self.new_user_ref(
+                domain_id=DEFAULT_DOMAIN_ID,
+                project_id=self.default_domain_project_id)
+            self.default_domain_user['id'] = self.default_domain_user_id
+            self.identity_api.create_user(self.default_domain_user_id,
+                                          self.default_domain_user)
+
             # create & grant policy.json's default role for admin_required
             self.role_id = uuid.uuid4().hex
             self.role = self.new_role_ref()
@@ -64,6 +80,12 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             self.identity_api.create_role(self.role_id, self.role)
             self.identity_api.add_role_to_user_and_project(
                 self.user_id, self.project_id, self.role_id)
+            self.identity_api.add_role_to_user_and_project(
+                self.default_domain_user_id, self.default_domain_project_id,
+                self.role_id)
+            self.identity_api.add_role_to_user_and_project(
+                self.default_domain_user_id, self.project_id,
+                self.role_id)
 
         self.public_server = self.serveapp('keystone', name='main')
         self.admin_server = self.serveapp('keystone', name='admin')
@@ -175,6 +197,17 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
 
         return ref
 
+    def admin_request(self, *args, **kwargs):
+        """Translates XML responses to dicts.
+
+        This implies that we only have to write assertions for JSON.
+
+        """
+        r = super(RestfulTestCase, self).admin_request(*args, **kwargs)
+        if r.getheader('Content-Type') == 'application/xml':
+            r.body = serializer.from_xml(etree.tostring(r.body))
+        return r
+
     def get_scoped_token(self):
         """Convenience method so that we can test authenticated requests."""
         r = self.admin_request(
@@ -223,10 +256,8 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             if not token:
                 token = self.get_scoped_token()
         path = '/v3' + path
-        return self.admin_request(
-            path=path,
-            token=token,
-            **kwargs)
+
+        return self.admin_request(path=path, token=token, **kwargs)
 
     def get(self, path, **kwargs):
         r = self.v3_request(method='GET', path=path, **kwargs)
@@ -300,10 +331,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         response, and asserted to be equal.
 
         """
-        resp_body = resp.body
-        if resp.getheader('Content-Type') == 'application/xml':
-            resp_body = serializer.from_xml(etree.tostring(resp_body))
-        entities = resp_body.get(key)
+        entities = resp.body.get(key)
         self.assertIsNotNone(entities)
 
         if expected_length is not None:
@@ -313,7 +341,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             self.assertTrue(len(entities))
 
         # collections should have relational links
-        self.assertValidListLinks(resp_body.get('links'))
+        self.assertValidListLinks(resp.body.get('links'))
 
         for entity in entities:
             self.assertIsNotNone(entity)
@@ -370,11 +398,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
 
     def assertValidTokenResponse(self, r, user=None):
         self.assertTrue(r.getheader('X-Subject-Token'))
-        token = r.body
-        if r.getheader('Content-Type') == 'application/xml':
-            token = serializer.from_xml(etree.tostring(r.body))['token']
-        else:
-            token = r.body['token']
+        token = r.body['token']
 
         self.assertIsNotNone(token.get('expires_at'))
         expires_at = self.assertValidISO8601ExtendedFormatDatetime(
@@ -436,13 +460,14 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
     def assertValidProjectTrustScopedTokenResponse(self, r, *args, **kwargs):
         token = self.assertValidProjectScopedTokenResponse(r, *args, **kwargs)
 
-        self.assertIsNotNone(token.get('trust'))
-        self.assertIsNotNone(token['trust'].get('id'))
-        self.assertTrue(isinstance(token['trust'].get('impersonation'), bool))
-        self.assertIsNotNone(token['trust'].get('trustor_user'))
-        self.assertIsNotNone(token['trust'].get('trustee_user'))
-        self.assertIsNotNone(token['trust']['trustor_user'].get('id'))
-        self.assertIsNotNone(token['trust']['trustee_user'].get('id'))
+        trust = token.get('RH-TRUST:trust')
+        self.assertIsNotNone(trust)
+        self.assertIsNotNone(trust.get('id'))
+        self.assertTrue(isinstance(trust.get('impersonation'), bool))
+        self.assertIsNotNone(trust.get('trustor_user'))
+        self.assertIsNotNone(trust.get('trustee_user'))
+        self.assertIsNotNone(trust['trustor_user'].get('id'))
+        self.assertIsNotNone(trust['trustee_user'].get('id'))
 
     def assertValidDomainScopedTokenResponse(self, r, *args, **kwargs):
         token = self.assertValidScopedTokenResponse(r, *args, **kwargs)
@@ -791,8 +816,8 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             else:
                 scope_data['domain']['name'] = domain_name
         if trust_id:
-            scope_data['trust'] = {}
-            scope_data['trust']['id'] = trust_id
+            scope_data['RH-TRUST:trust'] = {}
+            scope_data['RH-TRUST:trust']['id'] = trust_id
         return scope_data
 
     def build_password_auth(self, user_id=None, username=None,

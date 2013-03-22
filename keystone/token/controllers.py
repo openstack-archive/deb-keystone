@@ -79,6 +79,7 @@ class Auth(controller.V2Controller):
                     context, auth)
 
         user_ref, tenant_ref, metadata_ref, expiry = auth_info
+        core.validate_auth_info(self, context, user_ref, tenant_ref)
         trust_id = metadata_ref.get('trust_id')
         user_ref = self._filter_domain_id(user_ref)
         if tenant_ref:
@@ -87,9 +88,6 @@ class Auth(controller.V2Controller):
                                                     tenant_ref,
                                                     metadata_ref,
                                                     expiry)
-
-        # FIXME(dolph): domains will not be validated, as we just removed them
-        core.validate_auth_info(self, context, user_ref, tenant_ref)
 
         if tenant_ref:
             catalog_ref = self.catalog_api.get_catalog(
@@ -181,7 +179,9 @@ class Auth(controller.V2Controller):
 
         user_ref = old_token_ref['user']
         user_id = user_ref['id']
-        if 'trust_id' in auth:
+        if not CONF.trust.enabled and 'trust_id' in auth:
+            raise exception.Forbidden('Trusts are disabled.')
+        elif CONF.trust.enabled and 'trust_id' in auth:
             trust_ref = self.trust_api.get_trust(context, auth['trust_id'])
             if trust_ref is None:
                 raise exception.Forbidden()
@@ -223,7 +223,7 @@ class Auth(controller.V2Controller):
                                context, user_id, tenant_id))
 
         expiry = old_token_ref['expires']
-        if 'trust_id' in auth:
+        if CONF.trust.enabled and 'trust_id' in auth:
             trust_id = auth['trust_id']
             trust_roles = []
             for role in trust_ref['roles']:
@@ -473,6 +473,46 @@ class Auth(controller.V2Controller):
                     _('Token does not belong to specified tenant.'))
         return data
 
+    def _assert_default_domain(self, context, token_ref):
+        """ Make sure we are operating on default domain only. """
+        if token_ref.get('token_data'):
+            # this is a V3 token
+            msg = _('Non-default domain is not supported')
+            # user in a non-default is prohibited
+            if (token_ref['token_data']['token']['user']['domain']['id'] !=
+                    DEFAULT_DOMAIN_ID):
+                raise exception.Unauthorized(msg)
+            # domain scoping is prohibited
+            if token_ref['token_data']['token'].get('domain'):
+                raise exception.Unauthorized(
+                    _('Domain scoped token is not supported'))
+            # project in non-default domain is prohibited
+            if token_ref['token_data']['token'].get('project'):
+                project = token_ref['token_data']['token']['project']
+                project_domain_id = project['domain']['id']
+                # scoped to project in non-default domain is prohibited
+                if project_domain_id != DEFAULT_DOMAIN_ID:
+                    raise exception.Unauthorized(msg)
+            # if token is scoped to trust, both trustor and trustee must
+            # be in the default domain. Furthermore, the delegated project
+            # must also be in the default domain
+            metadata_ref = token_ref['metadata']
+            if CONF.trust.enabled and 'trust_id' in metadata_ref:
+                trust_ref = self.trust_api.get_trust(context,
+                                                     metadata_ref['trust_id'])
+                trustee_user_ref = self.identity_api.get_user(
+                    context, trust_ref['trustee_user_id'])
+                if trustee_user_ref['domain_id'] != DEFAULT_DOMAIN_ID:
+                    raise exception.Unauthorized(msg)
+                trustor_user_ref = self.identity_api.get_user(
+                    context, trust_ref['trustor_user_id'])
+                if trustor_user_ref['domain_id'] != DEFAULT_DOMAIN_ID:
+                    raise exception.Unauthorized(msg)
+                project_ref = self.identity_api.get_project(
+                    context, trust_ref['project_id'])
+                if project_ref['domain_id'] != DEFAULT_DOMAIN_ID:
+                    raise exception.Unauthorized(msg)
+
     # admin only
     def validate_token_head(self, context, token_id):
         """Check that a token is valid.
@@ -483,7 +523,9 @@ class Auth(controller.V2Controller):
 
         """
         belongs_to = context['query_string'].get('belongsTo')
-        assert self._get_token_ref(context, token_id, belongs_to)
+        token_ref = self._get_token_ref(context, token_id, belongs_to)
+        assert token_ref
+        self._assert_default_domain(context, token_ref)
 
     # admin only
     def validate_token(self, context, token_id):
@@ -496,6 +538,7 @@ class Auth(controller.V2Controller):
         """
         belongs_to = context['query_string'].get('belongsTo')
         token_ref = self._get_token_ref(context, token_id, belongs_to)
+        self._assert_default_domain(context, token_ref)
 
         # TODO(termie): optimize this call at some point and put it into the
         #               the return for metadata
@@ -594,7 +637,7 @@ class Auth(controller.V2Controller):
                 o['access']['metadata'] = {'is_admin': 0}
         if 'roles' in metadata_ref:
             o['access']['metadata']['roles'] = metadata_ref['roles']
-        if 'trust_id' in metadata_ref:
+        if CONF.trust.enabled and 'trust_id' in metadata_ref:
             o['access']['trust'] = {'trustee_user_id':
                                     metadata_ref['trustee_user_id'],
                                     'id': metadata_ref['trust_id']

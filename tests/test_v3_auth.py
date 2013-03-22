@@ -13,15 +13,14 @@
 # under the License.
 
 import json
-import nose.exc
 import uuid
 
+import nose.exc
 
 from keystone.common import cms
 from keystone import auth
 from keystone import config
 from keystone import exception
-from keystone import test
 
 import test_v3
 
@@ -114,14 +113,111 @@ class TestTokenAPIs(test_v3.RestfulTestCase):
                                           CONF.signing.keyfile)
         self.assertEqual(token_signed, token_id)
 
+    def test_v3_v2_intermix_non_default_domain_failed(self):
+        self.opt_in_group('signing', token_format='UUID')
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'])
+        resp = self.post('/auth/tokens', body=auth_data)
+        token_data = resp.body
+        token = resp.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_intermix_domain_scoped_token_failed(self):
+        self.opt_in_group('signing', token_format='UUID')
+        # grant the domain role to user
+        path = '/domains/%s/users/%s/roles/%s' % (
+            self.domain['id'], self.user['id'], self.role['id'])
+        self.put(path=path)
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            domain_id=self.domain['id'])
+        resp = self.post('/auth/tokens', body=auth_data)
+        token_data = resp.body
+        token = resp.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_intermix_non_default_project_failed(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.project['id'])
+        resp = self.post('/auth/tokens', body=auth_data)
+        token_data = resp.body
+        token = resp.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_unscoped_uuid_token_intermix(self):
+        self.opt_in_group('signing', token_format='UUID')
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'])
+        resp = self.post('/auth/tokens', body=auth_data)
+        token_data = resp.body
+        token = resp.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET')
+        v2_token = resp.body
+        self.assertEqual(v2_token['access']['user']['id'],
+                         token_data['token']['user']['id'])
+        # v2 token time has not fraction of second precision so
+        # just need to make sure the non fraction part agrees
+        self.assertIn(v2_token['access']['token']['expires'][:-1],
+                      token_data['token']['expires_at'])
+
+    def test_v3_v2_unscoped_pki_token_intermix(self):
+        self.opt_in_group('signing', token_format='PKI')
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'])
+        resp = self.post('/auth/tokens', body=auth_data)
+        token_data = resp.body
+        token = resp.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET')
+        v2_token = resp.body
+        self.assertEqual(v2_token['access']['user']['id'],
+                         token_data['token']['user']['id'])
+        # v2 token time has not fraction of second precision so
+        # just need to make sure the non fraction part agrees
+        self.assertIn(v2_token['access']['token']['expires'][:-1],
+                      token_data['token']['expires_at'])
+
     def test_v3_v2_uuid_token_intermix(self):
         # FIXME(gyee): PKI tokens are not interchangeable because token
         # data is baked into the token itself.
         self.opt_in_group('signing', token_format='UUID')
         auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'],
-            project_id=self.project['id'])
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project['id'])
         resp = self.post('/auth/tokens', body=auth_data)
         token_data = resp.body
         token = resp.getheader('X-Subject-Token')
@@ -146,9 +242,9 @@ class TestTokenAPIs(test_v3.RestfulTestCase):
         # data is baked into the token itself.
         self.opt_in_group('signing', token_format='PKI')
         auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'],
-            project_id=self.project['id'])
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project['id'])
         resp = self.post('/auth/tokens', body=auth_data)
         token_data = resp.body
         token = resp.getheader('X-Subject-Token')
@@ -167,6 +263,54 @@ class TestTokenAPIs(test_v3.RestfulTestCase):
                       token_data['token']['expires_at'])
         self.assertEqual(v2_token['access']['user']['roles'][0]['id'],
                          token_data['token']['roles'][0]['id'])
+
+    def test_v2_v3_unscoped_uuid_token_intermix(self):
+        self.opt_in_group('signing', token_format='UUID')
+        body = {
+            'auth': {
+                'passwordCredentials': {
+                    'userId': self.user['id'],
+                    'password': self.user['password']
+                }
+            }}
+        resp = self.admin_request(path='/v2.0/tokens',
+                                  method='POST',
+                                  body=body)
+        v2_token_data = resp.body
+        v2_token = v2_token_data['access']['token']['id']
+        headers = {'X-Subject-Token': v2_token}
+        resp = self.get('/auth/tokens', headers=headers)
+        token_data = resp.body
+        self.assertEqual(v2_token_data['access']['user']['id'],
+                         token_data['token']['user']['id'])
+        # v2 token time has not fraction of second precision so
+        # just need to make sure the non fraction part agrees
+        self.assertIn(v2_token_data['access']['token']['expires'][-1],
+                      token_data['token']['expires_at'])
+
+    def test_v2_v3_unscoped_pki_token_intermix(self):
+        self.opt_in_group('signing', token_format='PKI')
+        body = {
+            'auth': {
+                'passwordCredentials': {
+                    'userId': self.user['id'],
+                    'password': self.user['password']
+                }
+            }}
+        resp = self.admin_request(path='/v2.0/tokens',
+                                  method='POST',
+                                  body=body)
+        v2_token_data = resp.body
+        v2_token = v2_token_data['access']['token']['id']
+        headers = {'X-Subject-Token': v2_token}
+        resp = self.get('/auth/tokens', headers=headers)
+        token_data = resp.body
+        self.assertEqual(v2_token_data['access']['user']['id'],
+                         token_data['token']['user']['id'])
+        # v2 token time has not fraction of second precision so
+        # just need to make sure the non fraction part agrees
+        self.assertIn(v2_token_data['access']['token']['expires'][-1],
+                      token_data['token']['expires_at'])
 
     def test_v2_v3_uuid_token_intermix(self):
         self.opt_in_group('signing', token_format='UUID')
@@ -249,7 +393,7 @@ class TestTokenAPIs(test_v3.RestfulTestCase):
         self.assertIn('signed', r.body)
 
 
-class ATestTokenRevoking(test_v3.RestfulTestCase):
+class TestTokenRevoking(test_v3.RestfulTestCase):
     """Test token revoking for relevant v3 identity apis"""
 
     def setUp(self):
@@ -269,7 +413,7 @@ class ATestTokenRevoking(test_v3.RestfulTestCase):
         - User3 is a member of group2
 
         """
-        super(ATestTokenRevoking, self).setUp()
+        super(TestTokenRevoking, self).setUp()
 
         # Start by creating a couple of domains and projects
         self.domainA = self.new_domain_ref()
@@ -589,6 +733,56 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         r = self.post('/auth/tokens', body=auth_data)
         self.assertValidProjectScopedTokenResponse(r)
 
+    def test_default_project_id_scoped_token_with_user_id(self):
+        # create a second project to work with
+        ref = self.new_project_ref(domain_id=self.domain_id)
+        r = self.post('/projects', body={'project': ref})
+        project = self.assertValidProjectResponse(r, ref)
+
+        # grant the user a role on the project
+        self.put(
+            '/projects/%(project_id)s/users/%(user_id)s/roles/%(role_id)s' % {
+                'user_id': self.user['id'],
+                'project_id': project['id'],
+                'role_id': self.role['id']})
+
+        # set the user's preferred project
+        body = {'user': {'default_project_id': project['id']}}
+        r = self.patch('/users/%(user_id)s' % {
+            'user_id': self.user['id']},
+            body=body)
+        self.assertValidUserResponse(r)
+
+        # attempt to authenticate without requesting a project
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectScopedTokenResponse(r)
+        self.assertEqual(r.body['token']['project']['id'], project['id'])
+
+    def test_default_project_id_scoped_token_with_user_id_401(self):
+        # create a second project to work with
+        ref = self.new_project_ref(domain_id=self.domain['id'])
+        del ref['id']
+        r = self.post('/projects', body={'project': ref})
+        project = self.assertValidProjectResponse(r, ref)
+
+        # set the user's preferred project without having authz on that project
+        body = {'user': {'default_project_id': project['id']}}
+        r = self.patch('/users/%(user_id)s' % {
+            'user_id': self.user['id']},
+            body=body)
+        self.assertValidUserResponse(r)
+
+        # attempt to authenticate without requesting a project
+        # the default_project_id should be the assumed scope of the request,
+        # and fail because the user doesn't have explicit authz on that scope
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'])
+        self.post('/auth/tokens', body=auth_data, expected_status=401)
+
     def test_project_id_scoped_token_with_user_id_401(self):
         project_id = uuid.uuid4().hex
         project = self.new_project_ref(domain_id=self.domain_id)
@@ -815,8 +1009,26 @@ class TestAuthXML(TestAuthJSON):
     content_type = 'xml'
 
 
+class TestTrustOptional(test_v3.RestfulTestCase):
+    def setUp(self, *args, **kwargs):
+        self.opt_in_group('trust', enabled=False)
+        super(TestTrustOptional, self).setUp(*args, **kwargs)
+
+    def test_trusts_404(self):
+        self.get('/RH-TRUST/trusts', body={'trust': {}}, expected_status=404)
+        self.post('/RH-TRUST/trusts', body={'trust': {}}, expected_status=404)
+
+    def test_auth_with_scope_in_trust_403(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            trust_id=uuid.uuid4().hex)
+        self.post('/auth/tokens', body=auth_data, expected_status=403)
+
+
 class TestTrustAuth(TestAuthInfo):
     def setUp(self):
+        self.opt_in_group('trust', enabled=True)
         super(TestTrustAuth, self).setUp(load_sample_data=True)
 
         # create a trustee to delegate stuff to
@@ -827,14 +1039,14 @@ class TestTrustAuth(TestAuthInfo):
 
     def test_create_trust_400(self):
         raise nose.exc.SkipTest('Blocked by bug 1133435')
-        self.post('/trusts', body={'trust': {}}, expected_status=400)
+        self.post('/RH-TRUST/trusts', body={'trust': {}}, expected_status=400)
 
     def test_create_unscoped_trust(self):
         ref = self.new_trust_ref(
             trustor_user_id=self.user_id,
             trustee_user_id=self.trustee_user_id)
         del ref['id']
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         self.assertValidTrustResponse(r, ref)
 
     def test_trust_crud(self):
@@ -844,48 +1056,48 @@ class TestTrustAuth(TestAuthInfo):
             project_id=self.project_id,
             role_ids=[self.role_id])
         del ref['id']
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         trust = self.assertValidTrustResponse(r, ref)
 
         r = self.get(
-            '/trusts/%(trust_id)s' % {'trust_id': trust['id']},
+            '/RH-TRUST/trusts/%(trust_id)s' % {'trust_id': trust['id']},
             expected_status=200)
         self.assertValidTrustResponse(r, ref)
 
         # validate roles on the trust
         r = self.get(
-            '/trusts/%(trust_id)s/roles' % {
+            '/RH-TRUST/trusts/%(trust_id)s/roles' % {
                 'trust_id': trust['id']},
             expected_status=200)
         roles = self.assertValidRoleListResponse(r, self.role)
         self.assertIn(self.role['id'], [x['id'] for x in roles])
         self.head(
-            '/trusts/%(trust_id)s/roles/%(role_id)s' % {
+            '/RH-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
                 'trust_id': trust['id'],
                 'role_id': self.role['id']},
             expected_status=204)
         r = self.get(
-            '/trusts/%(trust_id)s/roles/%(role_id)s' % {
+            '/RH-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
                 'trust_id': trust['id'],
                 'role_id': self.role['id']},
             expected_status=200)
         self.assertValidRoleResponse(r, self.role)
 
-        r = self.get('/trusts', expected_status=200)
+        r = self.get('/RH-TRUST/trusts', expected_status=200)
         self.assertValidTrustListResponse(r, trust)
 
         # trusts are immutable
         self.patch(
-            '/trusts/%(trust_id)s' % {'trust_id': trust['id']},
+            '/RH-TRUST/trusts/%(trust_id)s' % {'trust_id': trust['id']},
             body={'trust': ref},
             expected_status=404)
 
         self.delete(
-            '/trusts/%(trust_id)s' % {'trust_id': trust['id']},
+            '/RH-TRUST/trusts/%(trust_id)s' % {'trust_id': trust['id']},
             expected_status=204)
 
         self.get(
-            '/trusts/%(trust_id)s' % {'trust_id': trust['id']},
+            '/RH-TRUST/trusts/%(trust_id)s' % {'trust_id': trust['id']},
             expected_status=404)
 
     def test_create_trust_trustee_404(self):
@@ -893,14 +1105,14 @@ class TestTrustAuth(TestAuthInfo):
             trustor_user_id=self.user_id,
             trustee_user_id=uuid.uuid4().hex)
         del ref['id']
-        self.post('/trusts', body={'trust': ref}, expected_status=404)
+        self.post('/RH-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
     def test_create_trust_trustor_trustee_backwards(self):
         ref = self.new_trust_ref(
             trustor_user_id=self.trustee_user_id,
             trustee_user_id=self.user_id)
         del ref['id']
-        self.post('/trusts', body={'trust': ref}, expected_status=403)
+        self.post('/RH-TRUST/trusts', body={'trust': ref}, expected_status=403)
 
     def test_create_trust_project_404(self):
         ref = self.new_trust_ref(
@@ -909,7 +1121,7 @@ class TestTrustAuth(TestAuthInfo):
             project_id=uuid.uuid4().hex,
             role_ids=[self.role_id])
         del ref['id']
-        self.post('/trusts', body={'trust': ref}, expected_status=404)
+        self.post('/RH-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
     def test_create_trust_role_id_404(self):
         ref = self.new_trust_ref(
@@ -918,7 +1130,7 @@ class TestTrustAuth(TestAuthInfo):
             project_id=self.project_id,
             role_ids=[uuid.uuid4().hex])
         del ref['id']
-        self.post('/trusts', body={'trust': ref}, expected_status=404)
+        self.post('/RH-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
     def test_create_trust_role_name_404(self):
         ref = self.new_trust_ref(
@@ -927,7 +1139,7 @@ class TestTrustAuth(TestAuthInfo):
             project_id=self.project_id,
             role_names=[uuid.uuid4().hex])
         del ref['id']
-        self.post('/trusts', body={'trust': ref}, expected_status=404)
+        self.post('/RH-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
     def test_create_expired_trust(self):
         ref = self.new_trust_ref(
@@ -937,10 +1149,10 @@ class TestTrustAuth(TestAuthInfo):
             expires=dict(seconds=-1),
             role_ids=[self.role_id])
         del ref['id']
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         trust = self.assertValidTrustResponse(r, ref)
 
-        self.get('/trusts/%(trust_id)s' % {
+        self.get('/RH-TRUST/trusts/%(trust_id)s' % {
             'trust_id': trust['id']},
             expected_status=404)
 
@@ -949,6 +1161,155 @@ class TestTrustAuth(TestAuthInfo):
             password=self.trustee_user['password'],
             trust_id=trust['id'])
         self.post('/auth/tokens', body=auth_data, expected_status=401)
+
+    def test_v3_v2_intermix_trustor_not_in_default_domain_failed(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.default_domain_user_id,
+            project_id=self.project_id,
+            impersonation=False,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectTrustScopedTokenResponse(
+            r, self.default_domain_user)
+
+        token = r.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_intermix_trustor_not_in_default_domaini_failed(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.default_domain_user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.default_domain_project_id,
+            impersonation=False,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project_id)
+        r = self.post('/auth/tokens', body=auth_data)
+        token = r.getheader('X-Subject-Token')
+
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref}, token=token)
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectTrustScopedTokenResponse(
+            r, self.trustee_user)
+        token = r.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_intermix_project_not_in_default_domaini_failed(self):
+        # create a trustee in default domain to delegate stuff to
+        trustee_user_id = uuid.uuid4().hex
+        trustee_user = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
+        trustee_user['id'] = trustee_user_id
+        self.identity_api.create_user(trustee_user_id, trustee_user)
+
+        ref = self.new_trust_ref(
+            trustor_user_id=self.default_domain_user_id,
+            trustee_user_id=trustee_user_id,
+            project_id=self.project_id,
+            impersonation=False,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project_id)
+        r = self.post('/auth/tokens', body=auth_data)
+        token = r.getheader('X-Subject-Token')
+
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref}, token=token)
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=trustee_user['id'],
+            password=trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectTrustScopedTokenResponse(
+            r, trustee_user)
+        token = r.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=401)
+
+    def test_v3_v2_intermix(self):
+        # create a trustee in default domain to delegate stuff to
+        trustee_user_id = uuid.uuid4().hex
+        trustee_user = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
+        trustee_user['id'] = trustee_user_id
+        self.identity_api.create_user(trustee_user_id, trustee_user)
+
+        ref = self.new_trust_ref(
+            trustor_user_id=self.default_domain_user_id,
+            trustee_user_id=trustee_user_id,
+            project_id=self.default_domain_project_id,
+            impersonation=False,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project_id)
+        r = self.post('/auth/tokens', body=auth_data)
+        token = r.getheader('X-Subject-Token')
+
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref}, token=token)
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=trustee_user['id'],
+            password=trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectTrustScopedTokenResponse(
+            r, trustee_user)
+        token = r.getheader('X-Subject-Token')
+
+        # now validate the v3 token with v2 API
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET',
+                                  expected_status=200)
 
     def test_exercise_trust_scoped_token_without_impersonation(self):
         ref = self.new_trust_ref(
@@ -960,7 +1321,7 @@ class TestTrustAuth(TestAuthInfo):
             role_ids=[self.role_id])
         del ref['id']
 
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         trust = self.assertValidTrustResponse(r)
 
         auth_data = self.build_authentication_request(
@@ -991,7 +1352,7 @@ class TestTrustAuth(TestAuthInfo):
             role_ids=[self.role_id])
         del ref['id']
 
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         trust = self.assertValidTrustResponse(r)
 
         auth_data = self.build_authentication_request(
@@ -1020,19 +1381,19 @@ class TestTrustAuth(TestAuthInfo):
             role_ids=[self.role_id])
         del ref['id']
 
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
 
         trust = self.assertValidTrustResponse(r, ref)
 
-        self.delete('/trusts/%(trust_id)s' % {
+        self.delete('/RH-TRUST/trusts/%(trust_id)s' % {
             'trust_id': trust['id']},
             expected_status=204)
 
-        self.get('/trusts/%(trust_id)s' % {
+        self.get('/RH-TRUST/trusts/%(trust_id)s' % {
             'trust_id': trust['id']},
             expected_status=404)
 
-        self.get('/trusts/%(trust_id)s' % {
+        self.get('/RH-TRUST/trusts/%(trust_id)s' % {
             'trust_id': trust['id']},
             expected_status=404)
 
@@ -1053,15 +1414,15 @@ class TestTrustAuth(TestAuthInfo):
         del ref['id']
 
         for i in range(0, 3):
-            r = self.post('/trusts', body={'trust': ref})
+            r = self.post('/RH-TRUST/trusts', body={'trust': ref})
             trust = self.assertValidTrustResponse(r, ref)
 
-        r = self.get('/trusts?trustor_user_id=%s' %
+        r = self.get('/RH-TRUST/trusts?trustor_user_id=%s' %
                      self.user_id, expected_status=200)
         trusts = r.body['trusts']
         self.assertEqual(len(trusts), 3)
 
-        r = self.get('/trusts?trustee_user_id=%s' %
+        r = self.get('/RH-TRUST/trusts?trustee_user_id=%s' %
                      self.user_id, expected_status=200)
         trusts = r.body['trusts']
         self.assertEqual(len(trusts), 0)
@@ -1076,7 +1437,7 @@ class TestTrustAuth(TestAuthInfo):
             role_ids=[self.role_id])
         del ref['id']
 
-        r = self.post('/trusts', body={'trust': ref})
+        r = self.post('/RH-TRUST/trusts', body={'trust': ref})
         trust = self.assertValidTrustResponse(r)
 
         auth_data = self.build_authentication_request(
@@ -1088,7 +1449,7 @@ class TestTrustAuth(TestAuthInfo):
         self.assertValidProjectTrustScopedTokenResponse(r, self.user)
         trust_token = r.getheader('X-Subject-Token')
 
-        self.get('/trusts?trustor_user_id=%s' %
+        self.get('/RH-TRUST/trusts?trustor_user_id=%s' %
                  self.user_id, expected_status=200,
                  token=trust_token)
 
@@ -1102,6 +1463,6 @@ class TestTrustAuth(TestAuthInfo):
                        auth=auth_data,
                        expected_status=200))
 
-        self.get('/trusts?trustor_user_id=%s' %
+        self.get('/RH-TRUST/trusts?trustor_user_id=%s' %
                  self.user_id, expected_status=401,
                  token=trust_token)

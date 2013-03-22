@@ -501,6 +501,7 @@ class AuthWithRemoteUser(AuthTest):
 class AuthWithTrust(AuthTest):
     def setUp(self):
         super(AuthWithTrust, self).setUp()
+        self.opt_in_group('trust', enabled=True)
 
         trust.Manager()
         self.trust_controller = trust.controllers.TrustV3()
@@ -612,9 +613,6 @@ class AuthWithTrust(AuthTest):
         return auth_response
 
     def fetch_v3_token_from_trust(self):
-        self.identity_api.create_domain("default",
-                                        {"name": "default",
-                                         "id": "default"})
         v3_password_data = {
             'identity': {
                 "methods": ["password"],
@@ -635,7 +633,7 @@ class AuthWithTrust(AuthTest):
                 "methods": ["token"],
                 "token": {"id": token}},
             "scope": {
-                "trust": {"id": self.new_trust['id']}}}
+                "RH-TRUST:trust": {"id": self.new_trust['id']}}}
         token_auth_response = (self.auth_v3_controller.authenticate_for_token
                                ({}, v3_req_with_trust))
         return token_auth_response
@@ -646,7 +644,7 @@ class AuthWithTrust(AuthTest):
         trust_token_user = auth_response.json['token']['user']
         self.assertEquals(trust_token_user['id'], self.trustor['id'])
 
-        trust_token_trust = auth_response.json['token']['trust']
+        trust_token_trust = auth_response.json['token']['RH-TRUST:trust']
         self.assertEquals(trust_token_trust['id'], self.new_trust['id'])
         self.assertEquals(trust_token_trust['trustor_user']['id'],
                           self.trustor['id'])

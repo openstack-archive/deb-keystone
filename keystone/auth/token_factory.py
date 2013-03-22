@@ -107,14 +107,14 @@ class TokenDataHelper(object):
                        trust):
         user_ref = self.identity_api.get_user(self.context,
                                               user_id)
-        if trust:
+        if CONF.trust.enabled and trust:
             trustor_user_ref = (self.identity_api.get_user(self.context,
                                 trust['trustor_user_id']))
             if not trustor_user_ref['enabled']:
                 raise exception.Forbidden()
             if trust['impersonation']:
                 user_ref = trustor_user_ref
-            token_data['trust'] = (
+            token_data['RH-TRUST:trust'] = (
                 {
                     'id': trust['id'],
                     'trustor_user': {'id': trust['trustor_user_id']},
@@ -129,7 +129,7 @@ class TokenDataHelper(object):
 
     def _populate_roles(self, token_data, user_id, domain_id, project_id,
                         trust):
-        if trust:
+        if CONF.trust.enabled and trust:
             token_user_id = trust['trustor_user_id']
             token_project_id = trust['project_id']
             #trusts do not support domains yet
@@ -144,7 +144,7 @@ class TokenDataHelper(object):
                                              token_domain_id,
                                              token_project_id)
             filtered_roles = []
-            if trust:
+            if CONF.trust.enabled and trust:
                 for trust_role in trust['roles']:
                     match_roles = [x for x in roles
                                    if x['id'] == trust_role['id']]
@@ -160,7 +160,7 @@ class TokenDataHelper(object):
 
     def _populate_service_catalog(self, token_data, user_id,
                                   domain_id, project_id, trust):
-        if trust:
+        if CONF.trust.enabled and trust:
             user_id = trust['trustor_user_id']
         if project_id or domain_id:
             try:
@@ -186,7 +186,7 @@ class TokenDataHelper(object):
                        trust=None):
         token_data = {'methods': method_names,
                       'extras': extras}
-        if trust:
+        if CONF.trust.enabled and trust:
             if user_id != trust['trustee_user_id']:
                 raise exception.Forbidden()
 
@@ -228,7 +228,7 @@ def recreate_token_data(context, token_data=None, expires=None,
         methods = token_data['methods']
         extras = token_data['extras']
     else:
-        project_id = project_ref['id']
+        project_id = project_ref['id'] if project_ref else None
         user_id = user_ref['id']
     token_data_helper = TokenDataHelper(context)
     return token_data_helper.get_token_data(user_id,
