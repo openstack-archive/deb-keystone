@@ -1,3 +1,11 @@
+keystone (2012.1.1-13+wheezy1) wheezy-proposed-updates; urgency=low
+
+  * CVE-2013-2059: Keystone tokens not immediately invalidated when user is
+    deleted [OSSA 2013-011]. Added backported to Essex patch which I picked-up
+    from Launchpad. Thanks to the Canonical security team (Closes: #707598).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 10 May 2013 10:09:14 +0800
+
 keystone (2012.1.1-13) unstable; urgency=high
 
   * CVE-2013-0282: Ensure EC2 users and tenant are enabled (Closes: #700947).
