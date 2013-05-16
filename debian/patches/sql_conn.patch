@@ -2,9 +2,11 @@ Description: Uncomments the default connection directive of etc/keystone.conf.sa
 Author: Ghe Rivero <ghe@debian.org>
 Forwarded: not-needed
 
---- a/etc/keystone.conf.sample
-+++ b/etc/keystone.conf.sample
-@@ -55,7 +55,7 @@
+Index: keystone/etc/keystone.conf.sample
+===================================================================
+--- keystone.orig/etc/keystone.conf.sample	2013-05-10 10:24:02.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2013-05-10 10:24:07.000000000 +0800
+@@ -75,7 +75,7 @@
  
  [sql]
  # The SQLAlchemy connection string used to connect to the database
