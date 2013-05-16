@@ -1,6 +1,7 @@
-keystone (2013.1-2) unstable; urgency=low
+keystone (2013.1.1-2) unstable; urgency=low
 
   * Uploading to unstable.
+  * New upstream release.
   * CVE-2013-2059: Keystone tokens not immediately invalidated when user is
     deleted [OSSA 2013-011] (Closes: #707598).
   * Also installs httpd/keystone.py.
