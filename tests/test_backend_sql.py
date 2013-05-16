@@ -174,134 +174,62 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
 
         This behavior is specific to the SQL driver.
 
-        """
-        tenant_id = uuid.uuid4().hex
-        arbitrary_key = uuid.uuid4().hex
-        arbitrary_value = uuid.uuid4().hex
-        tenant = {
-            'id': tenant_id,
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID,
-            arbitrary_key: arbitrary_value}
-        ref = self.identity_man.create_project({}, tenant_id, tenant)
-        self.assertEqual(arbitrary_value, ref[arbitrary_key])
-        self.assertIsNone(ref.get('extra'))
+class SqlCatalog(test.TestCase, test_backend.CatalogTests):
+    def setUp(self):
+        super(SqlCatalog, self).setUp()
+        self.config([test.etcdir('keystone.conf.sample'),
+                     test.testsdir('test_overrides.conf'),
+                     test.testsdir('backend_sql.conf')])
+        sql_util.setup_test_database()
+        self.catalog_api = catalog_sql.Catalog()
+        self.catalog_man = catalog.Manager()
+        self.load_fixtures(default_fixtures)
 
-        tenant['name'] = uuid.uuid4().hex
-        ref = self.identity_api.update_project(tenant_id, tenant)
-        self.assertEqual(arbitrary_value, ref[arbitrary_key])
-        self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
-
-    def test_update_user_returns_extra(self):
-        """This tests for backwards-compatibility with an essex/folsom bug.
-
-        Non-indexed attributes were returned in an 'extra' attribute, instead
-        of on the entity itself; for consistency and backwards compatibility,
-        those attributes should be included twice.
-
-        This behavior is specific to the SQL driver.
-
-        """
-        user_id = uuid.uuid4().hex
-        arbitrary_key = uuid.uuid4().hex
-        arbitrary_value = uuid.uuid4().hex
-        user = {
-            'id': user_id,
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID,
-            'password': uuid.uuid4().hex,
-            arbitrary_key: arbitrary_value}
-        ref = self.identity_man.create_user({}, user_id, user)
-        self.assertEqual(arbitrary_value, ref[arbitrary_key])
-        self.assertIsNone(ref.get('password'))
-        self.assertIsNone(ref.get('extra'))
-
-        user['name'] = uuid.uuid4().hex
-        user['password'] = uuid.uuid4().hex
-        ref = self.identity_api.update_user(user_id, user)
-        self.assertIsNone(ref.get('password'))
-        self.assertIsNone(ref['extra'].get('password'))
-        self.assertEqual(arbitrary_value, ref[arbitrary_key])
-        self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
-
-
-class SqlTrust(SqlTests, test_backend.TrustTests):
-    pass
-
-
-class SqlToken(SqlTests, test_backend.TokenTests):
-    pass
-
-
-class SqlCatalog(SqlTests, test_backend.CatalogTests):
     def test_malformed_catalog_throws_error(self):
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
-        self.catalog_api.create_service(service['id'], service.copy())
-
-        malformed_url = "http://192.168.1.104:$(compute_port)s/v2/$(tenant)s"
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region': uuid.uuid4().hex,
-            'service_id': service['id'],
-            'interface': 'public',
-            'url': malformed_url,
-        }
-        self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
-
+        self.catalog_api.create_service('a', {"id": "a", "desc": "a1",
+                                        "name": "b"})
+        badurl = "http://192.168.1.104:$(compute_port)s/v2/$(tenant)s"
+        self.catalog_api.create_endpoint('b', {"id": "b", "region": "b1",
+                                         "service_id": "a", "adminurl": badurl,
+                                         "internalurl": badurl,
+                                         "publicurl": badurl})
         with self.assertRaises(exception.MalformedEndpoint):
             self.catalog_api.get_catalog('fake-user', 'fake-tenant')
 
-    def test_get_catalog_with_empty_public_url(self):
-        service = {
+    def test_get_catalog_without_endpoint(self):
+        new_service = {
             'id': uuid.uuid4().hex,
             'type': uuid.uuid4().hex,
             'name': uuid.uuid4().hex,
             'description': uuid.uuid4().hex,
         }
-        self.catalog_api.create_service(service['id'], service.copy())
+        self.catalog_api.create_service(
+            new_service['id'],
+            new_service.copy())
+        service_id = new_service['id']
 
-        endpoint = {
+        new_endpoint = {
             'id': uuid.uuid4().hex,
             'region': uuid.uuid4().hex,
-            'interface': 'public',
-            'url': '',
-            'service_id': service['id'],
+            'service_id': service_id,
         }
-        self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
+
+        self.catalog_api.create_endpoint(
+            new_endpoint['id'],
+            new_endpoint.copy())
 
         catalog = self.catalog_api.get_catalog('user', 'tenant')
-        catalog_endpoint = catalog[endpoint['region']][service['type']]
-        self.assertEqual(catalog_endpoint['name'], service['name'])
-        self.assertEqual(catalog_endpoint['id'], endpoint['id'])
-        self.assertEqual(catalog_endpoint['publicURL'], '')
-        self.assertIsNone(catalog_endpoint.get('adminURL'))
-        self.assertIsNone(catalog_endpoint.get('internalURL'))
 
-    def test_create_endpoint_400(self):
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
-        self.catalog_api.create_service(service['id'], service.copy())
+        service_type = new_service['type']
+        region = new_endpoint['region']
 
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region': "0" * 256,
-            'service_id': service['id'],
-            'interface': 'public',
-            'url': uuid.uuid4().hex,
-        }
-
-        with self.assertRaises(exception.StringLengthExceeded):
-            self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
-
-
-class SqlPolicy(SqlTests, test_backend.PolicyTests):
-    pass
+        self.assertEqual(catalog[region][service_type]['name'],
+                         new_service['name'])
+        self.assertEqual(catalog[region][service_type]['id'],
+                         new_endpoint['id'])
+        self.assertEqual(catalog[region][service_type]['publicURL'],
+                         "")
+        self.assertEqual(catalog[region][service_type]['adminURL'],
+                         None)
+        self.assertEqual(catalog[region][service_type]['internalURL'],
+                         None)

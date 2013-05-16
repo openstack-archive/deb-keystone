@@ -1,8 +1,20 @@
-keystone (2013.1-1) experimental; urgency=low
+keystone (2012.2.3-2) experimental; urgency=low
+
+  * CVE-2013-1865: Online validation of Keystone PKI tokens bypasses
+    revocation check.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 21 Mar 2013 00:52:02 +0800
+
+keystone (2012.2.3-1) experimental; urgency=low
 
   * New upstream release.
+  * CVE-2013-0247: Keystone denial of service through invalid token requests.
+  * CVE-2013-0282 Keystone EC2-style authentication accepts disabled
+    user/tenants (Closes: #700947).
+  * CVE-2013-1664 & CVE-2013-1665: Information leak and Denial of Service using XML entities
+    (Closes: #700948)
 
- -- Thomas Goirand <zigo@debian.org>  Wed, 30 Jan 2013 20:12:55 +0800
+ -- Thomas Goirand <zigo@debian.org>  Sun, 03 Feb 2013 11:05:36 +0800
 
 keystone (2012.2.1-1) experimental; urgency=low
 

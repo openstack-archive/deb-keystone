@@ -17,7 +17,8 @@
 
 """Main entry point into the Catalog service."""
 
-from keystone.common import dependency
+import uuid
+
 from keystone.common import logging
 from keystone.common import manager
 from keystone import config
@@ -35,24 +36,21 @@ def format_url(url, data):
     except AttributeError:
         return None
     except KeyError as e:
-        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s") %
-                  {"url": url,
-                   "keyerror": str(e)})
+        LOG.error("Malformed endpoint %s - unknown key %s" %
+                  (url, str(e)))
         raise exception.MalformedEndpoint(endpoint=url)
     except TypeError as e:
-        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"
-                    "(are you missing brackets ?)") %
-                  {"url": url,
-                   "keyerror": str(e)})
+        LOG.error("Malformed endpoint %s - type mismatch %s \
+                  (are you missing brackets ?)" %
+                  (url, str(e)))
         raise exception.MalformedEndpoint(endpoint=url)
     except ValueError as e:
-        LOG.error(_("Malformed endpoint %s - incomplete format \
-                  (are you missing a type notifier ?)") % url)
+        LOG.error("Malformed endpoint %s - incomplete format \
+                  (are you missing a type notifier ?)" % url)
         raise exception.MalformedEndpoint(endpoint=url)
     return result
 
 
-@dependency.provider('catalog_api')
 class Manager(manager.Manager):
     """Default pivot point for the Catalog backend.
 
