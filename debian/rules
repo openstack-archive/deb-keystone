@@ -1,35 +1,45 @@
 #!/usr/bin/make -f
 
-# Verbose mode
 #export DH_VERBOSE=1
+
+# auth_token middleware now requires access to HOME, otherwise
+# test suite cause FTBFS.  See (LP: #1031022)
+export HOME="$(CURDIR)/debian/tests/"
+
+include /usr/share/openstack-pkg-tools/pkgos.make
+
+export OSLO_PACKAGE_VERSION=$(VERSION)
 
 %:
 	dh $@ --with python2
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-        # create a dummy db for testing
+	# create a dummy db for testing
 	rm -rf $(CURDIR)/debian/tests/testing.db
-        migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
-                $(CURDIR)/keystone/common/sql/migrate_repo
-        # run migrations
+	migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
+		$(CURDIR)/keystone/common/sql/migrate_repo
+	# run migrations
 	PYTHONPATH=$(CURDIR)  migrate upgrade \
-                sqlite:////$(CURDIR)/debian/tests/testing.db \
-                $(CURDIR)/keystone/common/sql/migrate_repo
+		sqlite:////$(CURDIR)/debian/tests/testing.db \
+		$(CURDIR)/keystone/common/sql/migrate_repo
 
-        # tests/test_overrides.conf can be used to setup the environment
-        # for unit testing.
+	# tests/test_overrides.conf can be used to setup the environment
+	# for unit testing.
 	cp tests/test_overrides.conf tests/test_overrides.conf.orig
 	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/tests/test_overrides.conf
 	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/tests/test_overrides.conf
-	# TEMP: ignore failures until bug 961871 is resolved
-	bash run_tests.sh -N
+	PYTHONPATH=$(CURDIR) bash run_tests.sh -N || true
 	mv $(CURDIR)/tests/test_overrides.conf.orig $(CURDIR)/tests/test_overrides.conf
-	rm -rf $(CURDIR)/debian/tests/testing.db
+	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
 endif
 
 override_dh_auto_build:
 	dh_auto_build
+
+	/usr/share/openstack-pkg-tools/pkgos_insert_include pkgos_func keystone.config
+	/usr/share/openstack-pkg-tools/pkgos_insert_include pkgos_func keystone.postinst
+
 ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
 	python setup.py build_sphinx
 else
@@ -38,42 +48,26 @@ else
 endif
 
 override_dh_install:
-	dh_install
+	dh_install --fail-missing
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
-	install -D etc/keystone.conf debian/keystone/usr/share/keystone/keystone.conf
+	install -D -m 0600 $(CURDIR)/debian/logging.conf $(CURDIR)/debian/keystone/etc/keystone/logging.conf
+	install -D -m 0640 etc/keystone.conf.sample $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	sed -i -e "s|^[ \t#]*template_file[ \t#]*=.*|template_file = /etc/keystone/default_catalog.templates|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	sed -i -e "s|^[ \t#]*log_dir[ \t#]*=.*|log_dir = /var/log/keystone|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	sed -i -e "s|^[ \t#]*log_file[ \t#]*=.*|log_file = keystone.log|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
+	cp -f etc/keystone.conf.sample debian/keystone/usr/share/doc/keystone/keystone.conf.sample
 
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
 	rm -rf $(CURDIR)/keystone/test/keystone.sql.log $(CURDIR)/keystone/test/keystone.ldap.log
 	rm -rf $(CURDIR)/doc/build
-        # NOTE(adam_g) The following stuff is built in /doc/source.  Safe for now, but
-        # should be fixed upstream or updated here post-essex
+	# NOTE(adam_g) The following stuff is built in /doc/source.  Safe for now, but
+	# should be fixed upstream or updated here post-essex
 	rm -rf $(CURDIR)/doc/source/keystone*.rst
 	rm -rf $(CURDIR)/doc/source/modules.rst
 	rm -rf $(CURDIR)/doc/source/sourcecode
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
+	rm -f $(CURDIR)/debian/keystone.config $(CURDIR)/debian/keystone.postinst
 	dh_clean
-
-get-orig-source:
-	uscan --verbose --force-download --rename --destdir=../build-area
-
-get-vcs-source:
-	git remote add upstream git://github.com/openstack/keystone.git || true
-	git fetch upstream
-	git archive --prefix=keystone-2012.1.1/ 2012.1.1 | xz >../keystone_2012.1.1.orig.tar.xz
-	if ! git checkout master ; then \
-		echo "No upstream branch: checking out" ; \
-		git checkout -b master upstream/master ; \
-	fi
-	git checkout debian/unstable
-
-display-po-stats:
-	cd $(CURDIR)/debian/po ; for i in *.po ; do \
-		echo -n $$i": " ; \
-		msgfmt -o /dev/null --statistic $$i ; \
-	done
-
-call-for-po-trans:
-	podebconf-report-po --call --withtranslators --languageteam

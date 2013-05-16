@@ -11,3 +11,5 @@ if [ "$RET" = "true" ]; then
 fi
 
 #DEBHELPER#
+
+exit 0

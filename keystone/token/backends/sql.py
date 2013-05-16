@@ -17,53 +17,52 @@
 import copy
 import datetime
 
+
 from keystone.common import sql
 from keystone import exception
+from keystone.openstack.common import timeutils
 from keystone import token
 
 
 class TokenModel(sql.ModelBase, sql.DictBase):
     __tablename__ = 'token'
+    attributes = ['id', 'expires', 'user_id', 'trust_id']
     id = sql.Column(sql.String(64), primary_key=True)
     expires = sql.Column(sql.DateTime(), default=None)
     extra = sql.Column(sql.JsonBlob())
-
-    @classmethod
-    def from_dict(cls, token_dict):
-        # shove any non-indexed properties into extra
-        extra = copy.deepcopy(token_dict)
-        data = {}
-        for k in ('id', 'expires'):
-            data[k] = extra.pop(k, None)
-        data['extra'] = extra
-        return cls(**data)
-
-    def to_dict(self):
-        out = copy.deepcopy(self.extra)
-        out['id'] = self.id
-        out['expires'] = self.expires
-        return out
+    valid = sql.Column(sql.Boolean(), default=True)
+    user_id = sql.Column(sql.String(64))
+    trust_id = sql.Column(sql.String(64), nullable=True)
 
 
 class Token(sql.Base, token.Driver):
     # Public interface
     def get_token(self, token_id):
-        session = self.get_session()
-        token_ref = session.query(TokenModel).filter_by(id=token_id).first()
-        now = datetime.datetime.utcnow()
-        if token_ref and (not token_ref.expires or now < token_ref.expires):
-            return token_ref.to_dict()
-        else:
+        if token_id is None:
             raise exception.TokenNotFound(token_id=token_id)
+        session = self.get_session()
+        query = session.query(TokenModel)
+        query = query.filter_by(id=token.unique_id(token_id), valid=True)
+        token_ref = query.first()
+        now = datetime.datetime.utcnow()
+        if not token_ref:
+            raise exception.TokenNotFound(token_id=token_id)
+        if not token_ref.expires:
+            raise exception.TokenNotFound(token_id=token_id)
+        if now >= token_ref.expires:
+            raise exception.TokenNotFound(token_id=token_id)
+        return token_ref.to_dict()
 
     def create_token(self, token_id, data):
         data_copy = copy.deepcopy(data)
-        if 'expires' not in data_copy:
-            data_copy['expires'] = self._get_default_expire_time()
+        if not data_copy.get('expires'):
+            data_copy['expires'] = token.default_expire_time()
+        if not data_copy.get('user_id'):
+            data_copy['user_id'] = data_copy['user']['id']
 
         token_ref = TokenModel.from_dict(data_copy)
-        token_ref.id = token_id
-
+        token_ref.id = token.unique_id(token_id)
+        token_ref.valid = True
         session = self.get_session()
         with session.begin():
             session.add(token_ref)
@@ -72,26 +71,66 @@ class Token(sql.Base, token.Driver):
 
     def delete_token(self, token_id):
         session = self.get_session()
-        token_ref = session.query(TokenModel)\
-                                .filter_by(id=token_id)\
-                                .first()
-        if not token_ref:
-            raise exception.TokenNotFound(token_id=token_id)
-
+        key = token.unique_id(token_id)
         with session.begin():
-            session.delete(token_ref)
+            token_ref = session.query(TokenModel).filter_by(id=key,
+                                                            valid=True).first()
+            if not token_ref:
+                raise exception.TokenNotFound(token_id=token_id)
+            token_ref.valid = False
             session.flush()
 
-    def list_tokens(self, user_id):
+    def _list_tokens_for_trust(self, trust_id):
         session = self.get_session()
         tokens = []
-        now = datetime.datetime.utcnow()
-        for token_ref in session.query(TokenModel)\
-                                      .filter(TokenModel.expires > now):
+        now = timeutils.utcnow()
+        query = session.query(TokenModel)
+        query = query.filter(TokenModel.expires > now)
+        query = query.filter(TokenModel.trust_id == trust_id)
+
+        token_references = query.filter_by(valid=True)
+        for token_ref in token_references:
             token_ref_dict = token_ref.to_dict()
-            if 'user' not in token_ref_dict:
-                continue
-            if token_ref_dict['user'].get('id') != user_id:
-                continue
             tokens.append(token_ref['id'])
+        return tokens
+
+    def _list_tokens_for_user(self, user_id, tenant_id=None):
+        def tenant_matches(tenant_id, token_ref_dict):
+            return ((tenant_id is None) or
+                    (token_ref_dict.get('tenant') and
+                     token_ref_dict['tenant'].get('id') == tenant_id))
+
+        session = self.get_session()
+        tokens = []
+        now = timeutils.utcnow()
+        query = session.query(TokenModel)
+        query = query.filter(TokenModel.expires > now)
+        query = query.filter(TokenModel.user_id == user_id)
+
+        token_references = query.filter_by(valid=True)
+        for token_ref in token_references:
+            token_ref_dict = token_ref.to_dict()
+            if tenant_matches(tenant_id, token_ref_dict):
+                tokens.append(token_ref['id'])
+        return tokens
+
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None):
+        if trust_id:
+            return self._list_tokens_for_trust(trust_id)
+        else:
+            return self._list_tokens_for_user(user_id, tenant_id)
+
+    def list_revoked_tokens(self):
+        session = self.get_session()
+        tokens = []
+        now = timeutils.utcnow()
+        query = session.query(TokenModel)
+        query = query.filter(TokenModel.expires > now)
+        token_references = query.filter_by(valid=False)
+        for token_ref in token_references:
+            record = {
+                'id': token_ref['id'],
+                'expires': token_ref['expires'],
+            }
+            tokens.append(record)
         return tokens

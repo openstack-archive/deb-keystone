@@ -14,12 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
-
 import webob
 
-from keystone import test
 from keystone.common import wsgi
+from keystone.openstack.common import jsonutils
+from keystone import test
 
 
 class ApplicationTest(test.TestCase):
@@ -47,4 +46,33 @@ class ApplicationTest(test.TestCase):
         app = FakeApp()
         req = self._make_request(url='/?1=2')
         resp = req.get_response(app)
-        self.assertEqual(json.loads(resp.body), {'1': '2'})
+        self.assertEqual(jsonutils.loads(resp.body), {'1': '2'})
+
+    def test_render_response(self):
+        data = {'attribute': 'value'}
+        body = '{"attribute": "value"}'
+
+        resp = wsgi.render_response(body=data)
+        self.assertEqual(resp.status, '200 OK')
+        self.assertEqual(resp.status_int, 200)
+        self.assertEqual(resp.body, body)
+        self.assertEqual(resp.headers.get('Vary'), 'X-Auth-Token')
+        self.assertEqual(resp.headers.get('Content-Length'), str(len(body)))
+
+    def test_render_response_custom_status(self):
+        resp = wsgi.render_response(status=(501, 'Not Implemented'))
+        self.assertEqual(resp.status, '501 Not Implemented')
+        self.assertEqual(resp.status_int, 501)
+
+    def test_render_response_custom_headers(self):
+        resp = wsgi.render_response(headers=[('Custom-Header', 'Some-Value')])
+        self.assertEqual(resp.headers.get('Custom-Header'), 'Some-Value')
+        self.assertEqual(resp.headers.get('Vary'), 'X-Auth-Token')
+
+    def test_render_response_no_body(self):
+        resp = wsgi.render_response()
+        self.assertEqual(resp.status, '204 No Content')
+        self.assertEqual(resp.status_int, 204)
+        self.assertEqual(resp.body, '')
+        self.assertEqual(resp.headers.get('Content-Length'), '0')
+        self.assertEqual(resp.headers.get('Content-Type'), None)

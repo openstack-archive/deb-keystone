@@ -1,3 +1,40 @@
+keystone (2013.1-1) experimental; urgency=low
+
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 30 Jan 2013 20:12:55 +0800
+
+keystone (2012.2.1-1) experimental; urgency=low
+
+  * New upstream version. 
+  * Rewrite of the maintainer scripts using the pkgos scripts.
+  * Fixes etc/default_catalog.templates to include Quantum config and
+  to use regionOne and not RegionOne by default.
+  * Increased compat level to 9 (and debhelper build-dep).
+  * Fixes build-dep git-core -> git.
+
+ -- Thomas Goirand <zigo@debian.org>  Sun, 02 Dec 2012 13:08:38 +0000
+
+keystone (2012.2~rc1-1) experimental; urgency=low
+
+  * New snapshot release
+  * Refresh patches
+  * Remove CVE-2012-3542 incorporated upstream
+
+ -- Mehdi Abaakouk <sileht@sileht.net>  Mon, 24 Sep 2012 10:37:31 +0200
+
+keystone (2012.2~e3-1) experimental; urgency=low
+
+  [ Mehdi Abaakouk ]
+  * New upstream version.
+
+  [ Thomas Goirand ]
+  * Fixed build-dependencies correctly.
+  * Made the package compatible with Ubuntu.
+  * Now using xz level 9 compression.
+
+ -- Mehdi Abaakouk <sileht@sileht.net>  Mon, 10 Sep 2012 17:56:09 +0200
+
 keystone (2012.1.1-13+wheezy1) wheezy-proposed-updates; urgency=low
 
   * CVE-2013-2059: Keystone tokens not immediately invalidated when user is

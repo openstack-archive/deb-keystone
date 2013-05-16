@@ -20,7 +20,6 @@
 import os
 import sys
 
-import sqlalchemy
 from migrate.versioning import api as versioning_api
 
 from keystone import config
@@ -45,31 +44,28 @@ def db_sync(version=None):
         try:
             version = int(version)
         except ValueError:
-            raise Exception('version should be an integer')
+            raise Exception(_('version should be an integer'))
 
     current_version = db_version()
     repo_path = _find_migrate_repo()
     if version is None or version > current_version:
-        return versioning_api.upgrade(
-                CONF.sql.connection, repo_path, version)
+        return versioning_api.upgrade(CONF.sql.connection, repo_path, version)
     else:
         return versioning_api.downgrade(
-                CONF.sql.connection, repo_path, version)
+            CONF.sql.connection, repo_path, version)
 
 
 def db_version():
     repo_path = _find_migrate_repo()
     try:
-        return versioning_api.db_version(
-                CONF.sql.connection, repo_path)
+        return versioning_api.db_version(CONF.sql.connection, repo_path)
     except versioning_exceptions.DatabaseNotControlledError:
         return db_version_control(0)
 
 
 def db_version_control(version=None):
     repo_path = _find_migrate_repo()
-    versioning_api.version_control(
-            CONF.sql.connection, repo_path, version)
+    versioning_api.version_control(CONF.sql.connection, repo_path, version)
     return version
 
 

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-27 19:39+0200\n"
+"POT-Creation-Date: 2013-01-14 16:21+0000\n"
 "PO-Revision-Date: 2012-08-27 16:22+0800\n"
 "Last-Translator: ben <duyujie.dyj@gmail.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,19 +18,21 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../keystone.templates:1001
+#: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
 msgstr "为Keystone设置数据库"
 
 #. Type: boolean
 #. Description
-#: ../keystone.templates:1001
-msgid "No database has been set up for Keystone to use. If you want to set one up now, please make sure you have all needed information:"
+#: ../keystone.templates:2001
+msgid ""
+"No database has been set up for Keystone to use. If you want to set one up "
+"now, please make sure you have all needed information:"
 msgstr "未曾为Keystone设置数据库。如果你想现在设置，请确定你有以下信息："
 
 #. Type: boolean
 #. Description
-#: ../keystone.templates:1001
+#: ../keystone.templates:2001
 msgid ""
 " * the host name of the database server (which must allow TCP\n"
 "   connections from this machine);\n"
@@ -43,13 +45,156 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../keystone.templates:1001
-msgid "If you don't choose this option, no database will be set up and Keystone will use regular SQLite support."
+#: ../keystone.templates:2001
+msgid ""
+"If you don't choose this option, no database will be set up and Keystone "
+"will use regular SQLite support."
 msgstr "如果你没有选择该项，不会设置数据库并且Keystone将会使用SQLite。"
 
 #. Type: boolean
 #. Description
-#: ../keystone.templates:1001
-msgid "You can change this setting later on by running \"dpkg-reconfigure -plow keystone\"."
+#: ../keystone.templates:2001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"keystone\"."
 msgstr "您可以通过运行\"dpkg-reconfigure-plow keystone\" 命令来修改配置。"
 
+#. Type: password
+#. Description
+#: ../keystone.templates:3001
+msgid "Authentication server administration token:"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:3001
+msgid "Please enter the token to use with the authentication server."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:4001
+msgid "Register admin tenants?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:4001
+msgid ""
+"For Openstack to work, you need a basic tenant configuration. The keystone "
+"package can create these admin tenants automatically for you."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:5001
+msgid "User name of the admin user:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:5001
+msgid "Please enter an user name for the administrative user."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:6001
+msgid "Email address of the admin user:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:6001
+msgid "Please enter the email address of the administrative user."
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:7001
+msgid "Password of the admin user:"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:7001
+msgid "Please enter a password for the administrative user."
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:8001
+msgid "Password of the admin user (confirm):"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:8001
+msgid "Please confirm the password for the administrative user."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:10001
+msgid "Name of the admin role:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:10001
+msgid "Please enter the name of the administrative role."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:11001
+msgid "Name of the admin tenant:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:11001
+msgid "Please enter the name of the administrative tenant (project)."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:12001
+msgid "Register keystone endpoint?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:12001
+msgid ""
+"Each Openstack services (each API) should be registered in order to be "
+"accessible. This is done using \"keystone service-create\" and \"keystone "
+"endpoint-create\". Select if you want to run these commands now."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:13001
+msgid "Keystone endpoint IP address:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:13001
+msgid "Enter the IP address that will be used to contact keystone."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:14001
+msgid "Name of the region to register:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:14001
+msgid ""
+"Openstack can be used using availability zones, with each region "
+"representing a location. Please enter the zone that you wish to use when "
+"registering the endpoint."
+msgstr ""

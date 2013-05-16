@@ -14,32 +14,51 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import datetime
+import errno
 import os
-import unittest
+import socket
 import subprocess
 import sys
 import time
 
+import eventlet
 import mox
+import nose.exc
 from paste import deploy
 import stubout
+import unittest2 as unittest
 
-from keystone import config
+from keystone import catalog
 from keystone.common import kvs
 from keystone.common import logging
 from keystone.common import utils
 from keystone.common import wsgi
+from keystone import config
+from keystone import exception
+from keystone import identity
+from keystone import policy
+from keystone import token
+from keystone import trust
 
+
+do_monkeypatch = not os.getenv('STANDARD_THREADS')
+eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
+                              thread=do_monkeypatch)
 
 LOG = logging.getLogger(__name__)
-ROOTDIR = os.path.dirname(os.path.dirname(__file__))
+ROOTDIR = os.path.dirname(os.path.abspath(os.curdir))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
 TESTSDIR = os.path.join(ROOTDIR, 'tests')
 ETCDIR = os.path.join(ROOTDIR, 'etc')
 CONF = config.CONF
+DRIVERS = {}
 
 
 cd = os.chdir
+
+
+logging.getLogger('routes.middleware').level = logging.WARN
 
 
 def rootdir(*p):
@@ -52,6 +71,15 @@ def etcdir(*p):
 
 def testsdir(*p):
     return os.path.join(TESTSDIR, *p)
+
+
+def initialize_drivers():
+    DRIVERS['catalog_api'] = catalog.Manager()
+    DRIVERS['identity_api'] = identity.Manager()
+    DRIVERS['policy_api'] = policy.Manager()
+    DRIVERS['token_api'] = token.Manager()
+    DRIVERS['trust_api'] = trust.Manager()
+    return DRIVERS
 
 
 def checkout_vendor(repo, rev):
@@ -80,8 +108,8 @@ def checkout_vendor(repo, rev):
         # write out a modified time
         with open(modcheck, 'w') as fd:
             fd.write('1')
-    except subprocess.CalledProcessError as e:
-        LOG.warning('Failed to checkout %s', repo)
+    except subprocess.CalledProcessError:
+        LOG.warning(_('Failed to checkout %s'), repo)
     cd(working_dir)
     return revdir
 
@@ -116,7 +144,45 @@ class TestClient(object):
         return self.request('PUT', path=path, headers=headers, body=body)
 
 
-class TestCase(unittest.TestCase):
+class NoModule(object):
+    """A mixin class to provide support for unloading/disabling modules."""
+
+    def __init__(self, *args, **kw):
+        super(NoModule, self).__init__(*args, **kw)
+        self._finders = []
+        self._cleared_modules = {}
+
+    def tearDown(self):
+        super(NoModule, self).tearDown()
+        for finder in self._finders:
+            sys.meta_path.remove(finder)
+        sys.modules.update(self._cleared_modules)
+
+    def clear_module(self, module):
+        cleared_modules = {}
+        for fullname in sys.modules.keys():
+            if fullname == module or fullname.startswith(module + '.'):
+                cleared_modules[fullname] = sys.modules.pop(fullname)
+        return cleared_modules
+
+    def disable_module(self, module):
+        """Ensure ImportError for the specified module."""
+
+        # Clear 'module' references in sys.modules
+        self._cleared_modules.update(self.clear_module(module))
+
+        # Disallow further imports of 'module'
+        class NoModule(object):
+            def find_module(self, fullname, path):
+                if fullname == module or fullname.startswith(module + '.'):
+                    raise ImportError
+
+        finder = NoModule()
+        self._finders.append(finder)
+        sys.meta_path.insert(0, finder)
+
+
+class TestCase(NoModule, unittest.TestCase):
     def __init__(self, *args, **kw):
         super(TestCase, self).__init__(*args, **kw)
         self._paths = []
@@ -124,15 +190,20 @@ class TestCase(unittest.TestCase):
         self._overrides = []
         self._group_overrides = {}
 
+        # show complete diffs on failure
+        self.maxDiff = None
+
     def setUp(self):
         super(TestCase, self).setUp()
-        self.config()
+        self.config([etcdir('keystone.conf.sample'),
+                     testsdir('test_overrides.conf')])
         self.mox = mox.Mox()
+        self.opt(policy_file=etcdir('policy.json'))
         self.stubs = stubout.StubOutForTesting()
+        self.stubs.Set(exception, '_FATAL_EXCEPTION_FORMAT_ERRORS', True)
 
-    def config(self):
-        CONF(config_files=[etcdir('keystone.conf'),
-                           testsdir('test_overrides.conf')])
+    def config(self, config_files):
+        CONF(args=[], project='keystone', default_config_files=config_files)
 
     def tearDown(self):
         try:
@@ -146,35 +217,20 @@ class TestCase(unittest.TestCase):
                 if path in sys.path:
                     sys.path.remove(path)
             kvs.INMEMDB.clear()
-            self.reset_opts()
+            CONF.reset()
 
     def opt_in_group(self, group, **kw):
         for k, v in kw.iteritems():
             CONF.set_override(k, v, group)
-        if group not in self._group_overrides:
-            self._group_overrides[group] = []
-        self._group_overrides[group].append(k)
 
     def opt(self, **kw):
         for k, v in kw.iteritems():
             CONF.set_override(k, v)
-        self._overrides.append(k)
-
-    def reset_opts(self):
-        for group, opt_list in self._group_overrides.iteritems():
-            for k in opt_list:
-                CONF.set_override(k, None, group)
-        for k in self._overrides:
-            CONF.set_override(k, None)
-        self._overrides = []
-        self._group_overrides = {}
-        CONF.reset()
 
     def load_backends(self):
-        """Hacky shortcut to load the backends for data manipulation."""
-        self.identity_api = utils.import_object(CONF.identity.driver)
-        self.token_api = utils.import_object(CONF.token.driver)
-        self.catalog_api = utils.import_object(CONF.catalog.driver)
+        """Create shortcut references to each driver for data manipulation."""
+        for name, manager in initialize_drivers().iteritems():
+            setattr(self, name, manager.driver)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -185,28 +241,45 @@ class TestCase(unittest.TestCase):
         """
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
-        if hasattr(self, 'catalog_api'):
-            for service in fixtures.SERVICES:
-                rv = self.catalog_api.create_service(service['id'], service)
-                setattr(self, 'service_%s' % service['id'], rv)
-
         if hasattr(self, 'identity_api'):
+            for domain in fixtures.DOMAINS:
+                try:
+                    rv = self.identity_api.create_domain(domain['id'], domain)
+                except (exception.Conflict, exception.NotImplemented):
+                    pass
+                setattr(self, 'domain_%s' % domain['id'], domain)
+
             for tenant in fixtures.TENANTS:
-                rv = self.identity_api.create_tenant(tenant['id'], tenant)
+                try:
+                    rv = self.identity_api.create_project(tenant['id'], tenant)
+                except exception.Conflict:
+                    rv = self.identity_api.get_project(tenant['id'])
+                    pass
                 setattr(self, 'tenant_%s' % tenant['id'], rv)
+
+            for role in fixtures.ROLES:
+                try:
+                    rv = self.identity_api.create_role(role['id'], role)
+                except exception.Conflict:
+                    rv = self.identity_api.get_role(role['id'])
+                    pass
+                setattr(self, 'role_%s' % role['id'], rv)
 
             for user in fixtures.USERS:
                 user_copy = user.copy()
                 tenants = user_copy.pop('tenants')
-                rv = self.identity_api.create_user(user['id'],
-                        user_copy.copy())
+                try:
+                    rv = self.identity_api.create_user(user['id'],
+                                                       user_copy.copy())
+                except exception.Conflict:
+                    pass
                 for tenant_id in tenants:
-                    self.identity_api.add_user_to_tenant(tenant_id, user['id'])
+                    try:
+                        self.identity_api.add_user_to_project(tenant_id,
+                                                              user['id'])
+                    except exception.Conflict:
+                        pass
                 setattr(self, 'user_%s' % user['id'], user_copy)
-
-            for role in fixtures.ROLES:
-                rv = self.identity_api.create_role(role['id'], role)
-                setattr(self, 'role_%s' % role['id'], rv)
 
             for metadata in fixtures.METADATA:
                 metadata_ref = metadata.copy()
@@ -226,8 +299,8 @@ class TestCase(unittest.TestCase):
             test_path = os.path.join(TESTSDIR, config)
             etc_path = os.path.join(ROOTDIR, 'etc', config)
             for path in [test_path, etc_path]:
-                if os.path.exists('%s.conf' % path):
-                    return 'config:%s.conf' % path
+                if os.path.exists('%s.conf.sample' % path):
+                    return 'config:%s.conf.sample' % path
         return config
 
     def loadapp(self, config, name='main'):
@@ -236,9 +309,13 @@ class TestCase(unittest.TestCase):
     def appconfig(self, config):
         return deploy.appconfig(self._paste_config(config))
 
-    def serveapp(self, config, name=None):
+    def serveapp(self, config, name=None, cert=None, key=None, ca=None,
+                 cert_required=None, host="127.0.0.1", port=0):
         app = self.loadapp(config, name=name)
-        server = wsgi.Server(app, 0)
+        server = wsgi.Server(app, host, port)
+        if cert is not None and ca is not None and key is not None:
+            server.set_ssl(certfile=cert, keyfile=key, ca_certs=ca,
+                           cert_required=cert_required)
         server.start(key='socket')
 
         # Service catalog tests need to know the port we ran on.
@@ -253,71 +330,30 @@ class TestCase(unittest.TestCase):
         sys.path.insert(0, path)
         self._paths.append(path)
 
-    def clear_module(self, module):
-        for x in sys.modules.keys():
-            if x.startswith(module):
-                del sys.modules[x]
+    def assertCloseEnoughForGovernmentWork(self, a, b, delta=3):
+        """Asserts that two datetimes are nearly equal within a small delta.
 
-    def assertIsNotNone(self, actual):
-        if hasattr(super(TestCase, self), 'assertIsNotNone'):
-            return super(TestCase, self).assertIsNotNone(actual)
-        self.assert_(actual is not None)
+        :param delta: Maximum allowable time delta, defined in seconds.
+        """
+        self.assertAlmostEqual(a, b, delta=datetime.timedelta(seconds=delta))
 
-    def assertIsNone(self, actual):
-        if hasattr(super(TestCase, self), 'assertIsNone'):
-            return super(TestCase, self).assertIsNone(actual)
-        self.assert_(actual is None)
+    def assertDictContainsSubset(self, dict1, dict2):
+        if len(dict1) < len(dict2):
+            (subset, fullset) = dict1, dict2
+        else:
+            (subset, fullset) = dict2, dict1
+        for x in subset:
+            self.assertIn(x, fullset)
+            self.assertEquals(subset.get(x), fullset.get(x))
 
-    def assertNotIn(self, needle, haystack):
-        if hasattr(super(TestCase, self), 'assertNotIn'):
-            return super(TestCase, self).assertNotIn(needle, haystack)
-        self.assert_(needle not in haystack)
-
-    def assertIn(self, needle, haystack):
-        if hasattr(super(TestCase, self), 'assertIn'):
-            return super(TestCase, self).assertIn(needle, haystack)
-        self.assert_(needle in haystack)
-
-    def assertListEquals(self, actual, expected):
-        copy = expected[:]
-        #print expected, actual
-        self.assertEquals(len(actual), len(expected))
-        while copy:
-            item = copy.pop()
-            matched = False
-            for x in actual:
-                #print 'COMPARE', item, x,
-                try:
-                    self.assertDeepEquals(x, item)
-                    matched = True
-                    #print 'MATCHED'
-                    break
-                except AssertionError as e:
-                    #print e
-                    pass
-            if not matched:
-                raise AssertionError('Expected: %s\n Got: %s' % (expected,
-                                                                 actual))
-
-    def assertDictEquals(self, actual, expected):
-        for k in expected:
-            self.assertTrue(k in actual,
-                            'Expected key %s not in %s.' % (k, actual))
-            self.assertDeepEquals(expected[k], actual[k])
-
-        for k in actual:
-            self.assertTrue(k in expected,
-                            'Unexpected key %s in %s.' % (k, actual))
-
-    def assertDeepEquals(self, actual, expected):
+    @staticmethod
+    def skip_if_no_ipv6():
         try:
-            if type(expected) is type([]) or type(expected) is type(tuple()):
-                # assert items equal, ignore order
-                self.assertListEquals(actual, expected)
-            elif type(expected) is type({}):
-                self.assertDictEquals(actual, expected)
+            s = socket.socket(socket.AF_INET6)
+        except socket.error as e:
+            if e.errno == errno.EAFNOSUPPORT:
+                raise nose.exc.SkipTest("IPv6 is not enabled in the system")
             else:
-                self.assertEquals(actual, expected)
-        except AssertionError as e:
-            raise
-            raise AssertionError('Expected: %s\n Got: %s' % (expected, actual))
+                raise
+        else:
+            s.close()

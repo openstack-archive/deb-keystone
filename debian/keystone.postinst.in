@@ -1,0 +1,130 @@
+#!/bin/sh
+
+set -e
+
+#PKGOS-INCLUDE#
+
+KEY_CONF=/etc/keystone/keystone.conf
+
+keystone_create_admin_tenant () {
+	db_get keystone/admin-user
+	ADMIN_USER_NAME=${RET:-admin}
+	db_get keystone/admin-password
+	ADMIN_USER_PW=${RET:-$(gen_password)}
+	db_get keystone/admin-email
+	ADMIN_USER_EMAIL=${RET:-root@localhost}
+	db_get keystone/admin-tenant-name
+	ADMIN_TENANT_NAME=${RET:-admin}
+	db_get keystone/admin-role-name
+	ADMIN_ROLE_NAME=${RET:-admin}
+
+	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
+	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
+
+	ADMIN_ROLE=$(pkgos_get_id keystone role-create --name $ADMIN_ROLE_NAME)
+	KEYSTONEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneAdmin)
+	KEYSTONESERVICEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneServiceAdmin)
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone tenant-update --enabled true $ADMIN_TENANT
+}
+
+keystone_create_endpoint_postinst () {
+	local PKG_NAME
+	PKG_NAME=${1}
+	db_get keystone/register-endpoint
+	if [ "${RET}" = "true" ] ; then
+		db_get keystone/endpoint-ip
+		# Make sure a valid IP has been entered in Debconf.
+		KEYSTONE_ENDPOINT_IP=`echo ${RET} | egrep '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'`
+		if [ -n ${KEYSTONE_ENDPOINT_IP} ] ; then
+			db_get keystone/region-name
+			REGION_NAME=${RET}
+			if [ -n "${REGION_NAME}" ] ; then
+				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
+					--name=keystone --type=identity --description="Keystone Identity Service")
+				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
+					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
+					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
+					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
+					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0)
+			fi
+		fi
+	fi
+}
+
+if [ "$1" = "configure" ] ; then
+	. /usr/share/debconf/confmodule
+	. /usr/share/dbconfig-common/dpkg/postinst
+
+	# Create user and group keystone, plus /var/log and /var/lib owned by it
+	pkgos_var_user_group keystone
+	# Make sure we have a folder to create certs, that isn't world readable
+	mkdir -p /etc/keystone/ssl/certs
+	chown keystone:keystone /etc/keystone/ssl/certs
+	chmod 750 /etc/keystone/ssl/certs
+	chown keystone:keystone /etc/keystone/ssl
+	chmod 750 /etc/keystone/ssl
+
+	# Create keystone.conf if it's not there
+	pkgos_write_new_conf keystone keystone.conf
+	# Set the auth_token directive in in keystone.conf
+	db_get keystone/auth-token
+	AUTH_TOKEN=${RET}
+	if [ -z "${AUTH_TOKEN}" ] ; then
+		AUTH_TOKEN=`pkgos_gen_pass`
+	fi
+	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
+	# Configure the SQL connection of keystone.conf according to dbconfig-common
+	pkgos_dbc_postinst ${KEY_CONF} sql connection keystone $@
+
+	# Make sure /var/log/keystone/keystone.log is owned by keystone
+	# BEFORE any keystone-manage calls.
+	chown -R keystone:keystone /var/log/keystone
+
+	# Upgrade or create the db if directed to do so
+	db_get keystone/configure_db
+	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
+		su keystone -c "keystone-manage db_sync"
+	fi
+
+	# Generate the ssl keys for keystone.
+	# It seems that starting it each time this script is launch
+	# isn't a problem.
+	su keystone -c "keystone-manage pki_setup"
+
+	# Setup init script and start keystone
+	pkgos_init keystone
+
+	# On first install, create basics configuration and add roles
+	if [ -z "$2" ] ; then
+		echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
+		sleep 1
+		echo -n "4..."
+		sleep 1
+		echo -n "3..."
+		sleep 1
+		echo -n "2..."
+		sleep 1
+		echo -n "1..."
+		sleep 1
+		echo "0"
+		echo -n "Upgrading db... "
+		keystone-manage db_sync
+		db_get keystone/create-admin-tenant
+		if [ "$RET" = "true" ] ; then
+			echo -n "Creating tenants... "
+			keystone_create_admin_tenant
+		fi
+		db_get keystone/register-endpoint
+		if [ "$RET" = "true" ] ; then
+			echo -n "Registering keystone endpoint..."
+			keystone_create_endpoint_postinst
+		fi
+		echo "done!"
+	fi
+	db_stop
+fi
+
+exit 0

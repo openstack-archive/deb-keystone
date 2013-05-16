@@ -14,15 +14,20 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from keystone import config
-from keystone.common import logging
+import os.path
+
 from keystone.catalog.backends import kvs
+from keystone.catalog import core
+from keystone.common import logging
+from keystone import config
 
 
 LOG = logging.getLogger(__name__)
 
 CONF = config.CONF
-config.register_str('template_file', group='catalog')
+config.register_str('template_file',
+                    default='default_catalog.templates',
+                    group='catalog')
 
 
 def parse_templates(template_lines):
@@ -91,14 +96,17 @@ class TemplatedCatalog(kvs.Catalog):
         if templates:
             self.templates = templates
         else:
-            self._load_templates(CONF.catalog.template_file)
+            template_file = CONF.catalog.template_file
+            if not os.path.exists(template_file):
+                template_file = CONF.find_file(template_file)
+            self._load_templates(template_file)
         super(TemplatedCatalog, self).__init__()
 
     def _load_templates(self, template_file):
         try:
             self.templates = parse_templates(open(template_file))
         except IOError:
-            LOG.critical('Unable to open template file %s' % template_file)
+            LOG.critical(_('Unable to open template file %s') % template_file)
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
@@ -112,7 +120,6 @@ class TemplatedCatalog(kvs.Catalog):
             for service, service_ref in region_ref.iteritems():
                 o[region][service] = {}
                 for k, v in service_ref.iteritems():
-                    v = v.replace('$(', '%(')
-                    o[region][service][k] = v % d
+                    o[region][service][k] = core.format_url(v, d)
 
         return o

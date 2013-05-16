@@ -17,20 +17,42 @@
 
 """Main entry point into the Catalog service."""
 
-import uuid
-
+from keystone.common import dependency
+from keystone.common import logging
+from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone import identity
-from keystone import policy
-from keystone import token
-from keystone.common import manager
-from keystone.common import wsgi
 
 
 CONF = config.CONF
+LOG = logging.getLogger(__name__)
 
 
+def format_url(url, data):
+    """Helper Method for all Backend Catalog's to Deal with URLS"""
+    try:
+        result = url.replace('$(', '%(') % data
+    except AttributeError:
+        return None
+    except KeyError as e:
+        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s") %
+                  {"url": url,
+                   "keyerror": str(e)})
+        raise exception.MalformedEndpoint(endpoint=url)
+    except TypeError as e:
+        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"
+                    "(are you missing brackets ?)") %
+                  {"url": url,
+                   "keyerror": str(e)})
+        raise exception.MalformedEndpoint(endpoint=url)
+    except ValueError as e:
+        LOG.error(_("Malformed endpoint %s - incomplete format \
+                  (are you missing a type notifier ?)") % url)
+        raise exception.MalformedEndpoint(endpoint=url)
+    return result
+
+
+@dependency.provider('catalog_api')
 class Manager(manager.Manager):
     """Default pivot point for the Catalog backend.
 
@@ -42,13 +64,58 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.catalog.driver)
 
+    def get_service(self, context, service_id):
+        try:
+            return self.driver.get_service(service_id)
+        except exception.NotFound:
+            raise exception.ServiceNotFound(service_id=service_id)
+
+    def delete_service(self, context, service_id):
+        try:
+            return self.driver.delete_service(service_id)
+        except exception.NotFound:
+            raise exception.ServiceNotFound(service_id=service_id)
+
+    def create_endpoint(self, context, endpoint_id, endpoint_ref):
+        try:
+            return self.driver.create_endpoint(endpoint_id, endpoint_ref)
+        except exception.NotFound:
+            service_id = endpoint_ref.get('service_id')
+            raise exception.ServiceNotFound(service_id=service_id)
+
+    def delete_endpoint(self, context, endpoint_id):
+        try:
+            return self.driver.delete_endpoint(endpoint_id)
+        except exception.NotFound:
+            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
+
+    def get_endpoint(self, context, endpoint_id):
+        try:
+            return self.driver.get_endpoint(endpoint_id)
+        except exception.NotFound:
+            raise exception.EndpointNotFound(endpoint_id=endpoint_id)
+
+    def get_catalog(self, context, user_id, tenant_id, metadata=None):
+        try:
+            return self.driver.get_catalog(user_id, tenant_id, metadata)
+        except exception.NotFound:
+            raise exception.NotFound('Catalog not found for user and tenant')
+
 
 class Driver(object):
     """Interface description for an Catalog driver."""
-    def list_services(self):
-        """List all service ids in catalog.
+    def create_service(self, service_id, service_ref):
+        """Creates a new service.
 
-        Returns: list of service_ids or an empty list.
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def list_services(self):
+        """List all services.
+
+        :returns: list of service_refs or an empty list.
 
         """
         raise exception.NotImplemented()
@@ -56,46 +123,77 @@ class Driver(object):
     def get_service(self, service_id):
         """Get service by id.
 
-        Returns: service_ref dict or None.
+        :returns: service_ref dict
+        :raises: keystone.exception.ServiceNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def update_service(self, service_id):
+        """Update service by id.
+
+        :returns: service_ref dict
+        :raises: keystone.exception.ServiceNotFound
 
         """
         raise exception.NotImplemented()
 
     def delete_service(self, service_id):
-        raise exception.NotImplemented()
+        """Deletes an existing service.
 
-    def create_service(self, service_id, service_ref):
+        :raises: keystone.exception.ServiceNotFound
+
+        """
         raise exception.NotImplemented()
 
     def create_endpoint(self, endpoint_id, endpoint_ref):
-        raise exception.NotImplemented()
+        """Creates a new endpoint for a service.
 
-    def delete_endpoint(self, endpoint_id):
+        :raises: keystone.exception.Conflict,
+                 keystone.exception.ServiceNotFound
+
+        """
         raise exception.NotImplemented()
 
     def get_endpoint(self, endpoint_id):
         """Get endpoint by id.
 
-        Returns: endpoint_ref dict or None.
+        :returns: endpoint_ref dict
+        :raises: keystone.exception.EndpointNotFound
 
         """
         raise exception.NotImplemented()
 
     def list_endpoints(self):
-        """List all endpoint ids in catalog.
+        """List all endpoints.
 
-        Returns: list of endpoint_ids or an empty list.
+        :returns: list of endpoint_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def update_endpoint(self, endpoint_id, endpoint_ref):
+        """Get endpoint by id.
+
+        :returns: endpoint_ref dict
+        :raises: keystone.exception.EndpointNotFound
+                 keystone.exception.ServiceNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_endpoint(self, endpoint_id):
+        """Deletes an endpoint for a service.
+
+        :raises: keystone.exception.EndpointNotFound
 
         """
         raise exception.NotImplemented()
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        """Retreive and format the current service catalog.
+        """Retrieve and format the current service catalog.
 
-        Returns: A nested dict representing the service catalog or an
-                 empty dict.
-
-        Example:
+        Example::
 
             { 'RegionOne':
                 {'compute': {
@@ -109,73 +207,39 @@ class Driver(object):
                     'name': 'EC2 Service',
                     'publicURL': 'http://host:8773/services/Cloud'}}
 
+        :returns: A nested dict representing the service catalog or an
+                  empty dict.
+        :raises: keystone.exception.NotFound
+
         """
         raise exception.NotImplemented()
 
+    def get_v3_catalog(self, user_id, tenant_id, metadata=None):
+        """Retrieve and format the current V3 service catalog.
 
-class ServiceController(wsgi.Application):
-    def __init__(self):
-        self.catalog_api = Manager()
-        super(ServiceController, self).__init__()
+        Example::
 
-    # CRUD extensions
-    # NOTE(termie): this OS-KSADM stuff is not very consistent
-    def get_services(self, context):
-        service_list = self.catalog_api.list_services(context)
-        service_refs = [self.catalog_api.get_service(context, x)
-                        for x in service_list]
-        return {'OS-KSADM:services': service_refs}
+            [
+                {
+                    "endpoints": [
+                    {
+                        "interface": "public",
+                        "id": "--endpoint-id--",
+                        "region": "RegionOne",
+                        "url": "http://external:8776/v1/--project-id--"
+                    },
+                    {
+                        "interface": "internal",
+                        "id": "--endpoint-id--",
+                        "region": "RegionOne",
+                        "url": "http://internal:8776/v1/--project-id--"
+                    }],
+                "id": "--service-id--",
+                "type": "volume"
+            }]
 
-    def get_service(self, context, service_id):
-        service_ref = self.catalog_api.get_service(context, service_id)
-        if not service_ref:
-            raise exception.ServiceNotFound(service_id=service_id)
-        return {'OS-KSADM:service': service_ref}
+        :returns: A list representing the service catalog or an empty list
+        :raises: keystone.exception.NotFound
 
-    def delete_service(self, context, service_id):
-        service_ref = self.catalog_api.get_service(context, service_id)
-        if not service_ref:
-            raise exception.ServiceNotFound(service_id=service_id)
-        self.catalog_api.delete_service(context, service_id)
-
-    def create_service(self, context, OS_KSADM_service):
-        service_id = uuid.uuid4().hex
-        service_ref = OS_KSADM_service.copy()
-        service_ref['id'] = service_id
-        new_service_ref = self.catalog_api.create_service(
-                context, service_id, service_ref)
-        return {'OS-KSADM:service': new_service_ref}
-
-
-class EndpointController(wsgi.Application):
-    def __init__(self):
-        self.catalog_api = Manager()
-        self.identity_api = identity.Manager()
-        self.policy_api = policy.Manager()
-        self.token_api = token.Manager()
-        super(EndpointController, self).__init__()
-
-    def get_endpoints(self, context):
-        self.assert_admin(context)
-        endpoint_list = self.catalog_api.list_endpoints(context)
-        endpoint_refs = [self.catalog_api.get_endpoint(context, e)
-                         for e in endpoint_list]
-        return {'endpoints': endpoint_refs}
-
-    def create_endpoint(self, context, endpoint):
-        self.assert_admin(context)
-        endpoint_id = uuid.uuid4().hex
-        endpoint_ref = endpoint.copy()
-        endpoint_ref['id'] = endpoint_id
-
-        service_id = endpoint_ref['service_id']
-        if not self.catalog_api.get_service(context, service_id):
-            raise exception.ServiceNotFound(service_id=service_id)
-
-        new_endpoint_ref = self.catalog_api.create_endpoint(
-                                context, endpoint_id, endpoint_ref)
-        return {'endpoint': new_endpoint_ref}
-
-    def delete_endpoint(self, context, endpoint_id):
-        self.assert_admin(context)
-        endpoint_ref = self.catalog_api.delete_endpoint(context, endpoint_id)
+        """
+        raise exception.NotImplemented()

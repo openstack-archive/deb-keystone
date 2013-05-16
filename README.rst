@@ -15,6 +15,7 @@ for most deployments will actually be shims in front of existing user systems.
 Development
 -----------
 
+
 Setting up a development environment
 ------------------------------------
 
@@ -22,19 +23,21 @@ Please see the documentation under ``doc/source/`` for development setup
 (``doc/source/setup.rst``) and configuration
 (``doc/source/configuration.rst``).
 
+
 Building the Documentation
 --------------------------
 
-The documentation is all generated with Sphinx from within the docs directory.
-To generate the full set of HTML documentation:
+The documentation is all generated with Sphinx from within the doc directory.
+To generate the full set of HTML documentation::
 
-    cd docs
+    cd doc
     make autodoc
     make html
     make man
 
-the results are in the docs/build/html and docs/build/man directories
+the results are in the ``doc/build/html`` and ``doc/build/man`` directories
 respectively.
+
 
 ------------
 The Services
@@ -79,7 +82,6 @@ Policy
 
 The Policy service provides a rule-based authorization engine and the
 associated rule management interface.
-
 
 
 ----------
@@ -170,14 +172,8 @@ of checks and will possibly write completely custom backends. Backends included
 in Keystone are:
 
 
-Trivial True
-------------
-
-Allows all actions.
-
-
-Simple Match
-------------
+Rules
+-----
 
 Given a list of matches to check for, simply verify that the credentials
 contain the matches. For example::
@@ -185,16 +181,13 @@ contain the matches. For example::
   credentials = {'user_id': 'foo', 'is_admin': 1, 'roles': ['nova:netadmin']}
 
   # An admin only call:
-  policy_api.can_haz(('is_admin:1',), credentials)
+  policy_api.enforce(('is_admin:1',), credentials)
 
   # An admin or owner call:
-  policy_api.can_haz(('is_admin:1', 'user_id:foo'),
-                     credentials)
+  policy_api.enforce(('is_admin:1', 'user_id:foo'), credentials)
 
   # A netadmin call:
-  policy_api.can_haz(('roles:nova:netadmin',),
-                     credentials)
-
+  policy_api.enforce(('roles:nova:netadmin',), credentials)
 
 Credentials are generally built from the user metadata in the 'extras' part
 of the Identity API. So, adding a 'role' to the user just means adding the role
@@ -214,16 +207,15 @@ to which capabilities are allowed for that role. For example::
   # add a policy
   policy_api.add_policy('action:nova:add_network', ('roles:nova:netadmin',))
 
-  policy_api.can_haz(('action:nova:add_network',), credentials)
+  policy_api.enforce(('action:nova:add_network',), credentials)
 
 
 In the backend this would look up the policy for 'action:nova:add_network' and
 then do what is effectively a 'Simple Match' style match against the creds.
 
 
------------
-Still To Do
------------
+----------------------------------
+Dependencies
+----------------------------------
 
- * LDAP backend.
- * Diablo migration.
+Ensure an OpenSSL version of 1.0+ is installed.

@@ -41,24 +41,22 @@ SCOPE_NAMES = {
 
 
 LOG = logging.getLogger(__name__)
+#Only enable a lower level than WARN if you are actively debugging
+LOG.level = logging.WARN
 
 
 def _match_query(query, attrs):
     """Match an ldap query to an attribute dictionary.
 
     The characters &, |, and ! are supported in the query. No syntax checking
-    is performed, so malformed querys will not work correctly.
+    is performed, so malformed queries will not work correctly.
     """
     # cut off the parentheses
     inner = query[1:-1]
-    if inner.startswith('&'):
-        # cut off the &
-        l, r = _paren_groups(inner[1:])
-        return _match_query(l, attrs) and _match_query(r, attrs)
-    if inner.startswith('|'):
-        # cut off the |
-        l, r = _paren_groups(inner[1:])
-        return _match_query(l, attrs) or _match_query(r, attrs)
+    if inner.startswith(('&', '|')):
+        # cut off the & or |
+        groups = _paren_groups(inner[1:])
+        return all(_match_query(group, attrs) for group in groups)
     if inner.startswith('!'):
         # cut off the ! and the nested parentheses
         return not _match_query(query[2:-1], attrs)
@@ -145,7 +143,7 @@ class FakeLdap(object):
     __prefix = 'ldap:'
 
     def __init__(self, url):
-        LOG.debug('FakeLdap initialize url=%s', url)
+        LOG.debug(_('FakeLdap initialize url=%s'), url)
         if url == 'fake://memory':
             self.db = FakeShelve.get_instance()
         else:
@@ -155,26 +153,27 @@ class FakeLdap(object):
         """This method is ignored, but provided for compatibility."""
         if server_fail:
             raise ldap.SERVER_DOWN
-        LOG.debug('FakeLdap bind dn=%s', dn)
+        LOG.debug(_('FakeLdap bind dn=%s'), dn)
         if dn == 'cn=Admin' and password == 'password':
             return
 
         try:
             attrs = self.db['%s%s' % (self.__prefix, dn)]
         except KeyError:
-            LOG.error('FakeLdap bind fail: dn=%s not found', dn)
+            LOG.debug(_('FakeLdap bind fail: dn=%s not found'), dn)
             raise ldap.NO_SUCH_OBJECT
 
         db_password = None
         try:
             db_password = attrs['userPassword'][0]
         except (KeyError, IndexError):
-            LOG.error('FakeLdap bind fail: password for dn=%s not found', dn)
+            LOG.debug(_('FakeLdap bind fail: password for dn=%s not found'),
+                      dn)
             raise ldap.INAPPROPRIATE_AUTH
 
         if not utils.ldap_check_password(password, db_password):
-            LOG.error('FakeLdap bind fail: password for dn=%s does'
-                      ' not match' % dn)
+            LOG.debug(_('FakeLdap bind fail: password for dn=%s does'
+                      ' not match') % dn)
             raise ldap.INVALID_CREDENTIALS
 
     def unbind_s(self):
@@ -188,10 +187,10 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug('FakeLdap add item: dn=%s, attrs=%s', dn, attrs)
+        LOG.debug(_('FakeLdap add item: dn=%s, attrs=%s'), dn, attrs)
         if key in self.db:
-            LOG.error('FakeLdap add item failed: dn=%s is'
-                      ' already in store.', dn)
+            LOG.debug(_('FakeLdap add item failed: dn=%s is'
+                      ' already in store.'), dn)
             raise ldap.ALREADY_EXISTS(dn)
 
         self.db[key] = dict([(k, v if isinstance(v, list) else [v])
@@ -204,11 +203,25 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug('FakeLdap delete item: dn=%s', dn)
+        LOG.debug(_('FakeLdap delete item: dn=%s'), dn)
         try:
             del self.db[key]
         except KeyError:
-            LOG.error('FakeLdap delete item failed: dn=%s not found.', dn)
+            LOG.debug(_('FakeLdap delete item failed: dn=%s not found.'), dn)
+            raise ldap.NO_SUCH_OBJECT
+        self.db.sync()
+
+    def delete_ext_s(self, dn, serverctrls):
+        """Remove the ldap object at specified dn."""
+        if server_fail:
+            raise ldap.SERVER_DOWN
+
+        key = '%s%s' % (self.__prefix, dn)
+        LOG.debug(_('FakeLdap delete item: dn=%s'), dn)
+        try:
+            del self.db[key]
+        except KeyError:
+            LOG.debug(_('FakeLdap delete item failed: dn=%s not found.'), dn)
             raise ldap.NO_SUCH_OBJECT
         self.db.sync()
 
@@ -223,16 +236,18 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug('FakeLdap modify item: dn=%s attrs=%s', dn, attrs)
+        LOG.debug(_('FakeLdap modify item: dn=%s attrs=%s'), dn, attrs)
         try:
             entry = self.db[key]
         except KeyError:
-            LOG.error('FakeLdap modify item failed: dn=%s not found.', dn)
+            LOG.debug(_('FakeLdap modify item failed: dn=%s not found.'), dn)
             raise ldap.NO_SUCH_OBJECT
 
         for cmd, k, v in attrs:
             values = entry.setdefault(k, [])
             if cmd == ldap.MOD_ADD:
+                if v in values:
+                    raise ldap.TYPE_OR_VALUE_EXISTS
                 if isinstance(v, list):
                     values += v
                 else:
@@ -242,8 +257,8 @@ class FakeLdap(object):
             elif cmd == ldap.MOD_DELETE:
                 if v is None:
                     if len(values) == 0:
-                        LOG.error('FakeLdap modify item failed: '
-                                  'item has no attribute "%s" to delete', k)
+                        LOG.debug(_('FakeLdap modify item failed: '
+                                  'item has no attribute "%s" to delete'), k)
                         raise ldap.NO_SUCH_ATTRIBUTE
                     values[:] = []
                 else:
@@ -253,15 +268,15 @@ class FakeLdap(object):
                         try:
                             values.remove(val)
                         except ValueError:
-                            LOG.error('FakeLdap modify item failed:'
+                            LOG.debug(_('FakeLdap modify item failed:'
                                       ' item has no attribute "%s" with'
-                                      ' value "%s" to delete', k, val)
+                                      ' value "%s" to delete'), k, val)
                             raise ldap.NO_SUCH_ATTRIBUTE
             else:
-                LOG.error('FakeLdap modify item failed: unknown'
-                          ' command %s', cmd)
-                raise NotImplementedError('modify_s action %s not implemented'
-                                          % cmd)
+                LOG.debug(_('FakeLdap modify item failed: unknown'
+                          ' command %s'), cmd)
+                raise NotImplementedError(_('modify_s action %s not'
+                                            ' implemented') % cmd)
         self.db[key] = entry
         self.db.sync()
 
@@ -278,13 +293,14 @@ class FakeLdap(object):
         if server_fail:
             raise ldap.SERVER_DOWN
 
-        LOG.debug('FakeLdap search at dn=%s scope=%s query=%s',
+        LOG.debug(_('FakeLdap search at dn=%s scope=%s query=%s'),
                   dn, SCOPE_NAMES.get(scope, scope), query)
         if scope == ldap.SCOPE_BASE:
             try:
                 item_dict = self.db['%s%s' % (self.__prefix, dn)]
             except KeyError:
-                LOG.debug('FakeLdap search fail: dn not found for SCOPE_BASE')
+                LOG.debug(_('FakeLdap search fail: dn not found for'
+                            ' SCOPE_BASE'))
                 raise ldap.NO_SUCH_OBJECT
             results = [(dn, item_dict)]
         elif scope == ldap.SCOPE_SUBTREE:
@@ -296,14 +312,17 @@ class FakeLdap(object):
                        for k, v in self.db.iteritems()
                        if re.match('%s\w+=[^,]+,%s' % (self.__prefix, dn), k)]
         else:
-            LOG.error('FakeLdap search fail: unknown scope %s', scope)
-            raise NotImplementedError('Search scope %s not implemented.'
+            LOG.debug('FakeLdap search fail: unknown scope %s', scope)
+            raise NotImplementedError(_('Search scope %s not implemented.')
                                       % scope)
 
         objects = []
         for dn, attrs in results:
             # filter the objects by query
-            if not query or _match_query(query, attrs):
+            id_attr, id_val = dn.partition(',')[0].split('=', 1)
+            match_attrs = attrs.copy()
+            match_attrs[id_attr] = [id_val]
+            if not query or _match_query(query, match_attrs):
                 # filter the attributes by fields
                 attrs = dict([(k, v) for k, v in attrs.iteritems()
                               if not fields or k in fields])

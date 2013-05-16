@@ -7,6 +7,8 @@ vendor
 keystone.egg-info/
 *.log
 .coverage
+coverage.xml
+cover/*
 covhtml
 pep8.txt
 nosetests.xml
@@ -15,3 +17,13 @@ doc/build
 .DS_Store
 doc/source/modules.rst
 doc/source/keystone.*
+ChangeLog
+requirements.txt
+AUTHORS
+build/
+dist/
+etc/keystone.conf
+etc/logging.conf
+tests/test.db.pristine
+.project
+.pydevproject

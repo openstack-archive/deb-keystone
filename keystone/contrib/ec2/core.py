@@ -36,21 +36,22 @@ glance to list images needed to perform the requested task.
 
 import uuid
 
-from keystone import catalog
-from keystone import config
-from keystone import exception
-from keystone import identity
-from keystone import policy
-from keystone import service
-from keystone import token
+from keystoneclient.contrib.ec2 import utils as ec2_utils
+
+from keystone.common import controller
+from keystone.common import dependency
 from keystone.common import manager
 from keystone.common import utils
 from keystone.common import wsgi
+from keystone import config
+from keystone import exception
+from keystone import token
 
 
 CONF = config.CONF
 
 
+@dependency.provider('ec2_api')
 class Manager(manager.Manager):
     """Default pivot point for the EC2 Credentials backend.
 
@@ -67,41 +68,39 @@ class Ec2Extension(wsgi.ExtensionRouter):
     def add_routes(self, mapper):
         ec2_controller = Ec2Controller()
         # validation
-        mapper.connect('/ec2tokens',
-                       controller=ec2_controller,
-                       action='authenticate',
-                       conditions=dict(method=['POST']))
+        mapper.connect(
+            '/ec2tokens',
+            controller=ec2_controller,
+            action='authenticate',
+            conditions=dict(method=['POST']))
 
         # crud
-        mapper.connect('/users/{user_id}/credentials/OS-EC2',
-                       controller=ec2_controller,
-                       action='create_credential',
-                       conditions=dict(method=['POST']))
-        mapper.connect('/users/{user_id}/credentials/OS-EC2',
-                       controller=ec2_controller,
-                       action='get_credentials',
-                       conditions=dict(method=['GET']))
-        mapper.connect('/users/{user_id}/credentials/OS-EC2/{credential_id}',
-                       controller=ec2_controller,
-                       action='get_credential',
-                       conditions=dict(method=['GET']))
-        mapper.connect('/users/{user_id}/credentials/OS-EC2/{credential_id}',
-                       controller=ec2_controller,
-                       action='delete_credential',
-                       conditions=dict(method=['DELETE']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2',
+            controller=ec2_controller,
+            action='create_credential',
+            conditions=dict(method=['POST']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2',
+            controller=ec2_controller,
+            action='get_credentials',
+            conditions=dict(method=['GET']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2/{credential_id}',
+            controller=ec2_controller,
+            action='get_credential',
+            conditions=dict(method=['GET']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2/{credential_id}',
+            controller=ec2_controller,
+            action='delete_credential',
+            conditions=dict(method=['DELETE']))
 
 
-class Ec2Controller(wsgi.Application):
-    def __init__(self):
-        self.catalog_api = catalog.Manager()
-        self.identity_api = identity.Manager()
-        self.token_api = token.Manager()
-        self.policy_api = policy.Manager()
-        self.ec2_api = Manager()
-        super(Ec2Controller, self).__init__()
-
+@dependency.requires('catalog_api', 'ec2_api')
+class Ec2Controller(controller.V2Controller):
     def check_signature(self, creds_ref, credentials):
-        signer = utils.Ec2Signer(creds_ref['secret'])
+        signer = ec2_utils.Ec2Signer(creds_ref['secret'])
         signature = signer.generate(credentials)
         if utils.auth_str_equal(credentials['signature'], signature):
             return
@@ -116,8 +115,7 @@ class Ec2Controller(wsgi.Application):
         else:
             raise exception.Unauthorized(message='EC2 signature not supplied.')
 
-    def authenticate(self, context, credentials=None,
-                         ec2Credentials=None):
+    def authenticate(self, context, credentials=None, ec2Credentials=None):
         """Validate a signed EC2 request and provide a token.
 
         Other services (such as Nova) use this **admin** call to determine
@@ -144,7 +142,7 @@ class Ec2Controller(wsgi.Application):
         if not credentials and ec2Credentials:
             credentials = ec2Credentials
 
-        if not 'access' in credentials:
+        if 'access' not in credentials:
             raise exception.Unauthorized(message='EC2 signature not supplied.')
 
         creds_ref = self._get_credentials(context,
@@ -154,42 +152,46 @@ class Ec2Controller(wsgi.Application):
         # TODO(termie): don't create new tokens every time
         # TODO(termie): this is copied from TokenController.authenticate
         token_id = uuid.uuid4().hex
-        tenant_ref = self.identity_api.get_tenant(
-                context=context,
-                tenant_id=creds_ref['tenant_id'])
+        tenant_ref = self.identity_api.get_project(
+            context=context,
+            tenant_id=creds_ref['tenant_id'])
         user_ref = self.identity_api.get_user(
-                context=context,
-                user_id=creds_ref['user_id'])
+            context=context,
+            user_id=creds_ref['user_id'])
         metadata_ref = self.identity_api.get_metadata(
-                context=context,
-                user_id=user_ref['id'],
-                tenant_id=tenant_ref['id'])
-        catalog_ref = self.catalog_api.get_catalog(
-                context=context,
-                user_id=user_ref['id'],
-                tenant_id=tenant_ref['id'],
-                    metadata=metadata_ref)
+            context=context,
+            user_id=user_ref['id'],
+            tenant_id=tenant_ref['id'])
 
-        token_ref = self.token_api.create_token(
-                context, token_id, dict(id=token_id,
-                                        user=user_ref,
-                                        tenant=tenant_ref,
-                                        metadata=metadata_ref))
+        # Validate that the auth info is valid and nothing is disabled
+        token.validate_auth_info(self, context, user_ref, tenant_ref)
 
         # TODO(termie): optimize this call at some point and put it into the
         #               the return for metadata
         # fill out the roles in the metadata
-        roles_ref = []
-        for role_id in metadata_ref.get('roles', []):
-            roles_ref.append(self.identity_api.get_role(context, role_id))
+        roles = metadata_ref.get('roles', [])
+        if not roles:
+            raise exception.Unauthorized(message='User not valid for tenant.')
+        roles_ref = [self.identity_api.get_role(context, role_id)
+                     for role_id in roles]
 
-        # TODO(termie): make this a util function or something
+        catalog_ref = self.catalog_api.get_catalog(
+            context=context,
+            user_id=user_ref['id'],
+            tenant_id=tenant_ref['id'],
+            metadata=metadata_ref)
+
+        token_ref = self.token_api.create_token(
+            context, token_id, dict(id=token_id,
+                                    user=user_ref,
+                                    tenant=tenant_ref,
+                                    metadata=metadata_ref))
+
         # TODO(termie): i don't think the ec2 middleware currently expects a
         #               full return, but it contains a note saying that it
         #               would be better to expect a full return
-        token_controller = service.TokenController()
-        return token_controller._format_authenticate(
-                token_ref, roles_ref, catalog_ref)
+        return token.controllers.Auth.format_authenticate(
+            token_ref, roles_ref, catalog_ref)
 
     def create_credential(self, context, user_id, tenant_id):
         """Create a secret/access pair for use with ec2 style auth.
@@ -206,7 +208,7 @@ class Ec2Controller(wsgi.Application):
             self._assert_identity(context, user_id)
 
         self._assert_valid_user_id(context, user_id)
-        self._assert_valid_tenant_id(context, tenant_id)
+        self._assert_valid_project_id(context, tenant_id)
 
         cred_ref = {'user_id': user_id,
                     'tenant_id': tenant_id,
@@ -228,7 +230,7 @@ class Ec2Controller(wsgi.Application):
         return {'credentials': self.ec2_api.list_credentials(context, user_id)}
 
     def get_credential(self, context, user_id, credential_id):
-        """Retreive a user's access/secret pair by the access key.
+        """Retrieve a user's access/secret pair by the access key.
 
         Grab the full access/secret pair for a given access key.
 
@@ -284,13 +286,14 @@ class Ec2Controller(wsgi.Application):
 
         """
         try:
-            token_ref = self.token_api.get_token(context=context,
-                    token_id=context['token_id'])
-        except exception.TokenNotFound:
-            raise exception.Unauthorized()
-        token_user_id = token_ref['user'].get('id')
-        if not token_user_id == user_id:
-            raise exception.Forbidden()
+            token_ref = self.token_api.get_token(
+                context=context,
+                token_id=context['token_id'])
+        except exception.TokenNotFound as e:
+            raise exception.Unauthorized(e)
+
+        if token_ref['user'].get('id') != user_id:
+            raise exception.Forbidden('Token belongs to another user')
 
     def _is_admin(self, context):
         """Wrap admin assertion error return statement.
@@ -316,7 +319,7 @@ class Ec2Controller(wsgi.Application):
         """
         cred_ref = self.ec2_api.get_credential(context, credential_id)
         if not user_id == cred_ref['user_id']:
-            raise exception.Forbidden()
+            raise exception.Forbidden('Credential belongs to another user')
 
     def _assert_valid_user_id(self, context, user_id):
         """Ensure a valid user id.
@@ -332,16 +335,16 @@ class Ec2Controller(wsgi.Application):
         if not user_ref:
             raise exception.UserNotFound(user_id=user_id)
 
-    def _assert_valid_tenant_id(self, context, tenant_id):
+    def _assert_valid_project_id(self, context, tenant_id):
         """Ensure a valid tenant id.
 
         :param context: standard context
-        :param user_id: expected credential owner
-        :raises exception.UserNotFound: on failure
+        :param tenant_id: expected tenant
+        :raises exception.ProjectNotFound: on failure
 
         """
-        tenant_ref = self.identity_api.get_tenant(
+        tenant_ref = self.identity_api.get_project(
             context=context,
             tenant_id=tenant_id)
         if not tenant_ref:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+            raise exception.ProjectNotFound(project_id=tenant_id)

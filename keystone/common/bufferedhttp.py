@@ -28,8 +28,8 @@ BufferedHTTPResponse.
     make all calls through httplib.
 """
 
-from urllib import quote
 import time
+from urllib import quote
 
 from eventlet.green.httplib import (CONTINUE, HTTPConnection, HTTPMessage,
                                     HTTPResponse, HTTPSConnection, _UNKNOWN)
@@ -93,21 +93,25 @@ class BufferedHTTPConnection(HTTPConnection):
 
     def getexpect(self):
         response = BufferedHTTPResponse(self.sock, strict=self.strict,
-                                       method=self._method)
+                                        method=self._method)
         response.expect_response()
         return response
 
     def getresponse(self):
         response = HTTPConnection.getresponse(self)
-        LOG.debug(('HTTP PERF: %(time).5f seconds to %(method)s '
-                        '%(host)s:%(port)s %(path)s)'),
-           {'time': time.time() - self._connected_time, 'method': self._method,
-            'host': self.host, 'port': self.port, 'path': self._path})
+        LOG.debug(_('HTTP PERF: %(time).5f seconds to %(method)s '
+                  '%(host)s:%(port)s %(path)s)'),
+                  {'time': time.time() - self._connected_time,
+                   'method': self._method,
+                   'host': self.host,
+                   'port': self.port,
+                   'path': self._path})
         return response
 
 
 def http_connect(ipaddr, port, device, partition, method, path,
-                 headers=None, query_string=None, ssl=False):
+                 headers=None, query_string=None, ssl=False, key_file=None,
+                 cert_file=None):
     """
     Helper function to create an HTTPConnection object. If ssl is set True,
     HTTPSConnection will be used. However, if ssl=False, BufferedHTTPConnection
@@ -122,26 +126,19 @@ def http_connect(ipaddr, port, device, partition, method, path,
     :param headers: dictionary of headers
     :param query_string: request query string
     :param ssl: set True if SSL should be used (default: False)
+    :param key_file Private key file (not needed if cert_file has private key)
+    :param cert_file Certificate file (Keystore)
     :returns: HTTPConnection object
+
     """
-    if ssl:
-        conn = HTTPSConnection('%s:%s' % (ipaddr, port))
-    else:
-        conn = BufferedHTTPConnection('%s:%s' % (ipaddr, port))
     path = quote('/' + device + '/' + str(partition) + path)
-    if query_string:
-        path += '?' + query_string
-    conn.path = path
-    conn.putrequest(method, path)
-    if headers:
-        for header, value in headers.iteritems():
-            conn.putheader(header, value)
-    conn.endheaders()
-    return conn
+    return http_connect_raw(ipaddr, port, device, partition, method, path,
+                            headers, query_string, ssl, key_file, cert_file)
 
 
 def http_connect_raw(ipaddr, port, method, path, headers=None,
-                     query_string=None, ssl=False):
+                     query_string=None, ssl=False, key_file=None,
+                     cert_file=None):
     """
     Helper function to create an HTTPConnection object. If ssl is set True,
     HTTPSConnection will be used. However, if ssl=False, BufferedHTTPConnection
@@ -154,10 +151,14 @@ def http_connect_raw(ipaddr, port, method, path, headers=None,
     :param headers: dictionary of headers
     :param query_string: request query string
     :param ssl: set True if SSL should be used (default: False)
+    :param key_file Private key file (not needed if cert_file has private key)
+    :param cert_file Certificate file (Keystore)
     :returns: HTTPConnection object
+
     """
     if ssl:
-        conn = HTTPSConnection('%s:%s' % (ipaddr, port))
+        conn = HTTPSConnection('%s:%s' % (ipaddr, port), key_file=key_file,
+                               cert_file=cert_file)
     else:
         conn = BufferedHTTPConnection('%s:%s' % (ipaddr, port))
     if query_string:

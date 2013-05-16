@@ -16,17 +16,11 @@
 
 """Main entry point into the Identity service."""
 
-import uuid
-import urllib
-import urlparse
-
-from keystone import config
-from keystone import exception
-from keystone import policy
-from keystone import token
+from keystone.common import dependency
 from keystone.common import logging
 from keystone.common import manager
-from keystone.common import wsgi
+from keystone import config
+from keystone import exception
 
 
 CONF = config.CONF
@@ -34,6 +28,29 @@ CONF = config.CONF
 LOG = logging.getLogger(__name__)
 
 
+def filter_user(user_ref):
+    """Filter out private items in a user dict.
+
+    'password', 'tenants' and 'groups' are never returned.
+
+    :returns: user_ref
+
+    """
+    if user_ref:
+        user_ref = user_ref.copy()
+        user_ref.pop('password', None)
+        user_ref.pop('tenants', None)
+        user_ref.pop('groups', None)
+        user_ref.pop('domains', None)
+        try:
+            user_ref['extra'].pop('password', None)
+            user_ref['extra'].pop('tenants', None)
+        except KeyError:
+            pass
+    return user_ref
+
+
+@dependency.provider('identity_api')
 class Manager(manager.Manager):
     """Default pivot point for the Identity backend.
 
@@ -45,6 +62,26 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.identity.driver)
 
+    def create_user(self, context, user_id, user_ref):
+        user = user_ref.copy()
+        if 'enabled' not in user:
+            user['enabled'] = True
+        return self.driver.create_user(user_id, user)
+
+    def create_group(self, context, group_id, group_ref):
+        group = group_ref.copy()
+        if 'description' not in group:
+            group['description'] = ''
+        return self.driver.create_group(group_id, group)
+
+    def create_project(self, context, tenant_id, tenant_ref):
+        tenant = tenant_ref.copy()
+        if 'enabled' not in tenant:
+            tenant['enabled'] = True
+        if 'description' not in tenant:
+            tenant['description'] = ''
+        return self.driver.create_project(tenant_id, tenant)
+
 
 class Driver(object):
     """Interface description for an Identity driver."""
@@ -52,47 +89,312 @@ class Driver(object):
     def authenticate(self, user_id=None, tenant_id=None, password=None):
         """Authenticate a given user, tenant and password.
 
-        Returns: (user, tenant, metadata).
+        :returns: (user_ref, tenant_ref, metadata_ref)
+        :raises: AssertionError
 
         """
         raise exception.NotImplemented()
 
-    def get_tenant(self, tenant_id):
+    def get_project(self, tenant_id):
         """Get a tenant by id.
 
-        Returns: tenant_ref or None.
+        :returns: tenant_ref
+        :raises: keystone.exception.ProjectNotFound
 
         """
         raise exception.NotImplemented()
 
-    def get_tenant_by_name(self, tenant_name):
+    def get_project_by_name(self, tenant_name, domain_id):
         """Get a tenant by name.
 
-        Returns: tenant_ref or None.
+        :returns: tenant_ref
+        :raises: keystone.exception.ProjectNotFound
 
         """
         raise exception.NotImplemented()
 
-    def get_user(self, user_id):
-        """Get a user by id.
-
-        Returns: user_ref or None.
-
-        """
-        raise exception.NotImplemented()
-
-    def get_user_by_name(self, user_name):
+    def get_user_by_name(self, user_name, domain_id):
         """Get a user by name.
 
-        Returns: user_ref or None.
+        :returns: user_ref
+        :raises: keystone.exception.UserNotFound
 
         """
         raise exception.NotImplemented()
 
-    def get_role(self, role_id):
-        """Get a role by id.
+    def add_user_to_project(self, tenant_id, user_id):
+        """Add user to a tenant by creating a default role relationship.
 
-        Returns: role_ref or None.
+        :raises: keystone.exception.ProjectNotFound,
+                 keystone.exception.UserNotFound
+
+        """
+        self.add_role_to_user_and_project(user_id,
+                                          tenant_id,
+                                          config.CONF.member_role_id)
+
+    def remove_user_from_project(self, tenant_id, user_id):
+        """Remove user from a tenant
+
+        :raises: keystone.exception.ProjectNotFound,
+                 keystone.exception.UserNotFound
+
+        """
+        roles = self.get_roles_for_user_and_project(user_id, tenant_id)
+        if not roles:
+            raise exception.NotFound(tenant_id)
+        for role_id in roles:
+            self.remove_role_from_user_and_project(user_id, tenant_id, role_id)
+
+    def get_project_users(self, tenant_id):
+        """Lists all users with a relationship to the specified project.
+
+        :returns: a list of user_refs or an empty set.
+        :raises: keystone.exception.ProjectNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def get_projects_for_user(self, user_id):
+        """Get the tenants associated with a given user.
+
+        :returns: a list of tenant_id's.
+        :raises: keystone.exception.UserNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def get_roles_for_user_and_project(self, user_id, tenant_id):
+        """Get the roles associated with a user within given tenant.
+
+        :returns: a list of role ids.
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.ProjectNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def get_roles_for_user_and_domain(self, user_id, domain_id):
+        """Get the roles associated with a user within given domain.
+
+        :returns: a list of role ids.
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.ProjectNotFound
+
+        """
+
+        def update_metadata_for_group_domain_roles(self, metadata_ref,
+                                                   user_id, domain_id):
+            group_refs = self.list_groups_for_user(user_id=user_id)
+            for x in group_refs:
+                try:
+                    metadata_ref.update(
+                        self.get_metadata(group_id=x['id'],
+                                          domain_id=domain_id))
+                except exception.MetadataNotFound:
+                    # no group grant, skip
+                    pass
+
+        def update_metadata_for_user_domain_roles(self, metadata_ref,
+                                                  user_id, domain_id):
+            try:
+                metadata_ref.update(self.get_metadata(user_id=user_id,
+                                                      domain_id=domain_id))
+            except exception.MetadataNotFound:
+                pass
+
+        self.get_user(user_id)
+        self.get_domain(domain_id)
+        metadata_ref = {}
+        update_metadata_for_user_domain_roles(self, metadata_ref,
+                                              user_id, domain_id)
+        update_metadata_for_group_domain_roles(self, metadata_ref,
+                                               user_id, domain_id)
+        return list(set(metadata_ref.get('roles', [])))
+
+    def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
+        """Add a role to a user within given tenant.
+
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.ProjectNotFound,
+                 keystone.exception.RoleNotFound
+        """
+        raise exception.NotImplemented()
+
+    def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
+        """Remove a role from a user within given tenant.
+
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.ProjectNotFound,
+                 keystone.exception.RoleNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # tenant crud
+    def create_project(self, tenant_id, tenant):
+        """Creates a new tenant.
+
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def update_project(self, tenant_id, tenant):
+        """Updates an existing tenant.
+
+        :raises: keystone.exception.ProjectNotFound,
+                 keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_project(self, tenant_id):
+        """Deletes an existing tenant.
+
+        :raises: keystone.exception.ProjectNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # metadata crud
+    def get_metadata(self, user_id=None, tenant_id=None,
+                     domain_id=None, group_id=None):
+        """Gets the metadata for the specified user/group on project/domain.
+
+        :raises: keystone.exception.MetadataNotFound
+        :returns: metadata
+
+        """
+        raise exception.NotImplemented()
+
+    def create_metadata(self, user_id, tenant_id, metadata,
+                        domain_id=None, group_id=None):
+        """Creates the metadata for the specified user/group on project/domain.
+
+        :returns: metadata created
+
+        """
+        raise exception.NotImplemented()
+
+    def update_metadata(self, user_id, tenant_id, metadata,
+                        domain_id=None, group_id=None):
+        """Updates the metadata for the specified user/group on project/domain.
+
+        :returns: metadata updated
+
+        """
+        raise exception.NotImplemented()
+
+    # domain crud
+    def create_domain(self, domain_id, domain):
+        """Creates a new domain.
+
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def list_domains(self):
+        """List all domains in the system.
+
+        :returns: a list of domain_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def get_domain(self, domain_id):
+        """Get a domain by ID.
+
+        :returns: domain_ref
+        :raises: keystone.exception.DomainNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def get_domain_by_name(self, domain_name):
+        """Get a domain by name.
+
+        :returns: domain_ref
+        :raises: keystone.exception.DomainNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def update_domain(self, domain_id, domain):
+        """Updates an existing domain.
+
+        :raises: keystone.exception.DomainNotFound,
+                 keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_domain(self, domain_id):
+        """Deletes an existing domain.
+
+        :raises: keystone.exception.DomainNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # project crud
+    def create_project(self, project_id, project):
+        """Creates a new project.
+
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def list_projects(self):
+        """List all projects in the system.
+
+        :returns: a list of project_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def list_user_projects(self, user_id):
+        """List all projects associated with a given user.
+
+        :returns: a list of project_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def get_project(self):
+        """Get a project by ID.
+
+        :returns: user_ref
+        :raises: keystone.exception.ProjectNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def update_project(self, project_id, project):
+        """Updates an existing project.
+
+        :raises: keystone.exception.ProjectNotFound,
+                 keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_project(self, project_id):
+        """Deletes an existing project.
+
+        :raises: keystone.exception.ProjectNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # user crud
+
+    def create_user(self, user_id, user):
+        """Creates a new user.
+
+        :raises: keystone.exception.Conflict
 
         """
         raise exception.NotImplemented()
@@ -100,10 +402,121 @@ class Driver(object):
     def list_users(self):
         """List all users in the system.
 
-        NOTE(termie): I'd prefer if this listed only the users for a given
-                      tenant.
+        :returns: a list of user_refs or an empty list.
 
-        Returns: a list of user_refs or an empty list.
+        """
+        raise exception.NotImplemented()
+
+    def list_users_in_group(self, group_id):
+        """List all users in a group.
+
+        :returns: a list of user_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def get_user(self, user_id):
+        """Get a user by ID.
+
+        :returns: user_ref
+        :raises: keystone.exception.UserNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def update_user(self, user_id, user):
+        """Updates an existing user.
+
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def add_user_to_group(self, user_id, group_id):
+        """Adds a user to a group.
+
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.GroupNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def check_user_in_group(self, user_id, group_id):
+        """Checks if a user is a member of a group.
+
+        :raises: keystone.exception.UserNotFound,
+                 keystone.exception.GroupNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def remove_user_from_group(self, user_id, group_id):
+        """Removes a user from a group.
+
+        :raises: keystone.exception.NotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_user(self, user_id):
+        """Deletes an existing user.
+
+        :raises: keystone.exception.UserNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # credential crud
+
+    def create_credential(self, credential_id, credential):
+        """Creates a new credential.
+
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def list_credentials(self):
+        """List all credentials in the system.
+
+        :returns: a list of credential_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()
+
+    def get_credential(self, credential_id):
+        """Get a credential by ID.
+
+        :returns: credential_ref
+        :raises: keystone.exception.CredentialNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    def update_credential(self, credential_id, credential):
+        """Updates an existing credential.
+
+        :raises: keystone.exception.CredentialNotFound,
+                 keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()
+
+    def delete_credential(self, credential_id):
+        """Deletes an existing credential.
+
+        :raises: keystone.exception.CredentialNotFound
+
+        """
+        raise exception.NotImplemented()
+
+    # role crud
+
+    def create_role(self, role_id, role):
+        """Creates a new role.
+
+        :raises: keystone.exception.Conflict
 
         """
         raise exception.NotImplemented()
@@ -111,514 +524,85 @@ class Driver(object):
     def list_roles(self):
         """List all roles in the system.
 
-        Returns: a list of role_refs or an empty list.
+        :returns: a list of role_refs or an empty list.
 
         """
         raise exception.NotImplemented()
 
-    # NOTE(termie): seven calls below should probably be exposed by the api
-    #               more clearly when the api redesign happens
-    def add_user_to_tenant(self, tenant_id, user_id):
-        raise exception.NotImplemented()
+    def get_role(self, role_id):
+        """Get a role by ID.
 
-    def remove_user_from_tenant(self, tenant_id, user_id):
-        raise exception.NotImplemented()
-
-    def get_all_tenants(self):
-        raise exception.NotImplemented()
-
-    def get_tenants_for_user(self, user_id):
-        """Get the tenants associated with a given user.
-
-        Returns: a list of tenant ids.
+        :returns: role_ref
+        :raises: keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
-
-    def get_roles_for_user_and_tenant(self, user_id, tenant_id):
-        """Get the roles associated with a user within given tenant.
-
-        Returns: a list of role ids.
-
-        """
-        raise exception.NotImplemented()
-
-    def add_role_to_user_and_tenant(self, user_id, tenant_id, role_id):
-        """Add a role to a user within given tenant."""
-        raise exception.NotImplemented()
-
-    def remove_role_from_user_and_tenant(self, user_id, tenant_id, role_id):
-        """Remove a role from a user within given tenant."""
-        raise exception.NotImplemented()
-
-    # user crud
-    def create_user(self, user_id, user):
-        raise exception.NotImplemented()
-
-    def update_user(self, user_id, user):
-        raise exception.NotImplemented()
-
-    def delete_user(self, user_id):
-        raise exception.NotImplemented()
-
-    # tenant crud
-    def create_tenant(self, tenant_id, tenant):
-        raise exception.NotImplemented()
-
-    def update_tenant(self, tenant_id, tenant):
-        raise exception.NotImplemented()
-
-    def delete_tenant(self, tenant_id, tenant):
-        raise exception.NotImplemented()
-
-    # metadata crud
-
-    def get_metadata(self, user_id, tenant_id):
-        raise exception.NotImplemented()
-
-    def create_metadata(self, user_id, tenant_id, metadata):
-        raise exception.NotImplemented()
-
-    def update_metadata(self, user_id, tenant_id, metadata):
-        raise exception.NotImplemented()
-
-    def delete_metadata(self, user_id, tenant_id, metadata):
-        raise exception.NotImplemented()
-
-    # role crud
-    def create_role(self, role_id, role):
         raise exception.NotImplemented()
 
     def update_role(self, role_id, role):
+        """Updates an existing role.
+
+        :raises: keystone.exception.RoleNotFound,
+                 keystone.exception.Conflict
+
+        """
         raise exception.NotImplemented()
 
     def delete_role(self, role_id):
+        """Deletes an existing role.
+
+        :raises: keystone.exception.RoleNotFound
+
+        """
         raise exception.NotImplemented()
 
+    # group crud
 
-class PublicRouter(wsgi.ComposableRouter):
-    def add_routes(self, mapper):
-        tenant_controller = TenantController()
-        mapper.connect('/tenants',
-                       controller=tenant_controller,
-                       action='get_tenants_for_token',
-                       conditions=dict(methods=['GET']))
+    def create_group(self, group_id, group):
+        """Creates a new group.
 
-
-class AdminRouter(wsgi.ComposableRouter):
-    def add_routes(self, mapper):
-        # Tenant Operations
-        tenant_controller = TenantController()
-        mapper.connect('/tenants',
-                       controller=tenant_controller,
-                       action='get_all_tenants',
-                       conditions=dict(method=['GET']))
-        mapper.connect('/tenants/{tenant_id}',
-                       controller=tenant_controller,
-                       action='get_tenant',
-                       conditions=dict(method=['GET']))
-
-        # User Operations
-        user_controller = UserController()
-        mapper.connect('/users/{user_id}',
-                       controller=user_controller,
-                       action='get_user',
-                       conditions=dict(method=['GET']))
-
-        # Role Operations
-        roles_controller = RoleController()
-        mapper.connect('/tenants/{tenant_id}/users/{user_id}/roles',
-                       controller=roles_controller,
-                       action='get_user_roles',
-                       conditions=dict(method=['GET']))
-        mapper.connect('/users/{user_id}/roles',
-                       controller=user_controller,
-                       action='get_user_roles',
-                       conditions=dict(method=['GET']))
-
-
-class TenantController(wsgi.Application):
-    def __init__(self):
-        self.identity_api = Manager()
-        self.policy_api = policy.Manager()
-        self.token_api = token.Manager()
-        super(TenantController, self).__init__()
-
-    def get_all_tenants(self, context, **kw):
-        """Gets a list of all tenants for an admin user."""
-        self.assert_admin(context)
-        tenant_refs = self.identity_api.get_tenants(context)
-        params = {
-            'limit': context['query_string'].get('limit'),
-            'marker': context['query_string'].get('marker'),
-        }
-        return self._format_tenant_list(tenant_refs, **params)
-
-    def get_tenants_for_token(self, context, **kw):
-        """Get valid tenants for token based on token used to authenticate.
-
-        Pulls the token from the context, validates it and gets the valid
-        tenants for the user in the token.
-
-        Doesn't care about token scopedness.
+        :raises: keystone.exception.Conflict
 
         """
-        try:
-            token_ref = self.token_api.get_token(context=context,
-                                                 token_id=context['token_id'])
-        except exception.NotFound:
-            raise exception.Unauthorized()
+        raise exception.NotImplemented()
 
-        user_ref = token_ref['user']
-        tenant_ids = self.identity_api.get_tenants_for_user(
-                context, user_ref['id'])
-        tenant_refs = []
-        for tenant_id in tenant_ids:
-            tenant_refs.append(self.identity_api.get_tenant(
-                    context=context,
-                    tenant_id=tenant_id))
-        params = {
-            'limit': context['query_string'].get('limit'),
-            'marker': context['query_string'].get('marker'),
-        }
-        return self._format_tenant_list(tenant_refs, **params)
+    def list_groups(self):
+        """List all groups in the system.
 
-    def get_tenant(self, context, tenant_id):
-        # TODO(termie): this stuff should probably be moved to middleware
-        self.assert_admin(context)
-        tenant = self.identity_api.get_tenant(context, tenant_id)
-        if tenant is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-
-        return {'tenant': tenant}
-
-    # CRUD Extension
-    def create_tenant(self, context, tenant):
-        tenant_ref = self._normalize_dict(tenant)
-        self.assert_admin(context)
-        tenant_id = (tenant_ref.get('id')
-                     and tenant_ref.get('id')
-                     or uuid.uuid4().hex)
-        tenant_ref['id'] = tenant_id
-
-        tenant = self.identity_api.create_tenant(
-                context, tenant_id, tenant_ref)
-        return {'tenant': tenant}
-
-    def update_tenant(self, context, tenant_id, tenant):
-        self.assert_admin(context)
-        if self.identity_api.get_tenant(context, tenant_id) is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-
-        tenant_ref = self.identity_api.update_tenant(
-                context, tenant_id, tenant)
-        return {'tenant': tenant_ref}
-
-    def delete_tenant(self, context, tenant_id, **kw):
-        self.assert_admin(context)
-        if self.identity_api.get_tenant(context, tenant_id) is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-
-        self.identity_api.delete_tenant(context, tenant_id)
-
-    def get_tenant_users(self, context, tenant_id, **kw):
-        self.assert_admin(context)
-        if self.identity_api.get_tenant(context, tenant_id) is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-
-        user_refs = self.identity_api.get_tenant_users(context, tenant_id)
-        return {'users': user_refs}
-
-    def _format_tenant_list(self, tenant_refs, **kwargs):
-        marker = kwargs.get('marker')
-        page_idx = 0
-        if marker is not None:
-            for (marker_idx, tenant) in enumerate(tenant_refs):
-                if tenant['id'] == marker:
-                    # we start pagination after the marker
-                    page_idx = marker_idx + 1
-                    break
-            else:
-                msg = 'Marker could not be found'
-                raise exception.ValidationError(message=msg)
-
-        limit = kwargs.get('limit')
-        if limit is not None:
-            try:
-                limit = int(limit)
-                if limit < 0:
-                    raise AssertionError()
-            except (ValueError, AssertionError):
-                msg = 'Invalid limit value'
-                raise exception.ValidationError(message=msg)
-
-        tenant_refs = tenant_refs[page_idx:limit]
-
-        for x in tenant_refs:
-            if 'enabled' not in x:
-                x['enabled'] = True
-        o = {'tenants': tenant_refs,
-             'tenants_links': []}
-        return o
-
-
-class UserController(wsgi.Application):
-    def __init__(self):
-        self.identity_api = Manager()
-        self.policy_api = policy.Manager()
-        self.token_api = token.Manager()
-        super(UserController, self).__init__()
-
-    def get_user(self, context, user_id):
-        self.assert_admin(context)
-        user_ref = self.identity_api.get_user(context, user_id)
-        if not user_ref:
-            raise exception.UserNotFound(user_id=user_id)
-
-        return {'user': user_ref}
-
-    def get_users(self, context):
-        # NOTE(termie): i can't imagine that this really wants all the data
-        #               about every single user in the system...
-        self.assert_admin(context)
-        user_refs = self.identity_api.list_users(context)
-        return {'users': user_refs}
-
-    # CRUD extension
-    def create_user(self, context, user):
-        user = self._normalize_dict(user)
-        self.assert_admin(context)
-        tenant_id = user.get('tenantId', None)
-        if (tenant_id is not None
-                and self.identity_api.get_tenant(context, tenant_id) is None):
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-        user_id = uuid.uuid4().hex
-        user_ref = user.copy()
-        user_ref['id'] = user_id
-        new_user_ref = self.identity_api.create_user(
-                context, user_id, user_ref)
-        if tenant_id:
-            self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
-        return {'user': new_user_ref}
-
-    def update_user(self, context, user_id, user):
-        # NOTE(termie): this is really more of a patch than a put
-        self.assert_admin(context)
-        if self.identity_api.get_user(context, user_id) is None:
-            raise exception.UserNotFound(user_id=user_id)
-
-        user_ref = self.identity_api.update_user(context, user_id, user)
-
-        # If the password was changed or the user was disabled we clear tokens
-        if user.get('password') or user.get('enabled', True) == False:
-            try:
-                for token_id in self.token_api.list_tokens(context, user_id):
-                    self.token_api.delete_token(context, token_id)
-            except exception.NotImplemented:
-                # The users status has been changed but tokens remain valid for
-                # backends that can't list tokens for users
-                LOG.warning('User %s status has changed, but existing tokens '
-                            'remain valid' % user_id)
-        return {'user': user_ref}
-
-    def delete_user(self, context, user_id):
-        self.assert_admin(context)
-        if self.identity_api.get_user(context, user_id) is None:
-            raise exception.UserNotFound(user_id=user_id)
-
-        self.identity_api.delete_user(context, user_id)
-
-    def set_user_enabled(self, context, user_id, user):
-        return self.update_user(context, user_id, user)
-
-    def set_user_password(self, context, user_id, user):
-        return self.update_user(context, user_id, user)
-
-    def update_user_tenant(self, context, user_id, user):
-        """Update the default tenant."""
-        # ensure that we're a member of that tenant
-        tenant_id = user.get('tenantId')
-        self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
-        return self.update_user(context, user_id, user)
-
-
-class RoleController(wsgi.Application):
-    def __init__(self):
-        self.identity_api = Manager()
-        self.token_api = token.Manager()
-        self.policy_api = policy.Manager()
-        super(RoleController, self).__init__()
-
-    # COMPAT(essex-3)
-    def get_user_roles(self, context, user_id, tenant_id=None):
-        """Get the roles for a user and tenant pair.
-
-        Since we're trying to ignore the idea of user-only roles we're
-        not implementing them in hopes that the idea will die off.
+        :returns: a list of group_refs or an empty list.
 
         """
-        if tenant_id is None:
-            raise exception.NotImplemented(message='User roles not supported: '
-                                                   'tenant ID required')
+        raise exception.NotImplemented()
 
-        user = self.identity_api.get_user(context, user_id)
-        if user is None:
-            raise exception.UserNotFound(user_id=user_id)
-        tenant = self.identity_api.get_tenant(context, tenant_id)
-        if tenant is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
+    def list_groups_for_user(self, user_id):
+        """List all groups a user is in
 
-        roles = self.identity_api.get_roles_for_user_and_tenant(
-                context, user_id, tenant_id)
-        return {'roles': [self.identity_api.get_role(context, x)
-                          for x in roles]}
-
-    # CRUD extension
-    def get_role(self, context, role_id):
-        self.assert_admin(context)
-        role_ref = self.identity_api.get_role(context, role_id)
-        if not role_ref:
-            raise exception.RoleNotFound(role_id=role_id)
-        return {'role': role_ref}
-
-    def create_role(self, context, role):
-        role = self._normalize_dict(role)
-        self.assert_admin(context)
-        role_id = uuid.uuid4().hex
-        role['id'] = role_id
-        role_ref = self.identity_api.create_role(context, role_id, role)
-        return {'role': role_ref}
-
-    def delete_role(self, context, role_id):
-        self.assert_admin(context)
-        self.get_role(context, role_id)
-        self.identity_api.delete_role(context, role_id)
-
-    def get_roles(self, context):
-        self.assert_admin(context)
-        roles = self.identity_api.list_roles(context)
-        # TODO(termie): probably inefficient at some point
-        return {'roles': roles}
-
-    def add_role_to_user(self, context, user_id, role_id, tenant_id=None):
-        """Add a role to a user and tenant pair.
-
-        Since we're trying to ignore the idea of user-only roles we're
-        not implementing them in hopes that the idea will die off.
+        :returns: a list of group_refs or an empty list.
 
         """
-        self.assert_admin(context)
-        if tenant_id is None:
-            raise exception.NotImplemented(message='User roles not supported: '
-                                                   'tenant_id required')
-        if self.identity_api.get_user(context, user_id) is None:
-            raise exception.UserNotFound(user_id=user_id)
-        if self.identity_api.get_tenant(context, tenant_id) is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-        if self.identity_api.get_role(context, role_id) is None:
-            raise exception.RoleNotFound(role_id=role_id)
+        raise exception.NotImplemented()
 
-        # This still has the weird legacy semantics that adding a role to
-        # a user also adds them to a tenant
-        self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
-        self.identity_api.add_role_to_user_and_tenant(
-                context, user_id, tenant_id, role_id)
-        role_ref = self.identity_api.get_role(context, role_id)
-        return {'role': role_ref}
+    def get_group(self, group_id):
+        """Get a group by ID.
 
-    def remove_role_from_user(self, context, user_id, role_id, tenant_id=None):
-        """Remove a role from a user and tenant pair.
-
-        Since we're trying to ignore the idea of user-only roles we're
-        not implementing them in hopes that the idea will die off.
+        :returns: group_ref
+        :raises: keystone.exception.GroupNotFound
 
         """
-        self.assert_admin(context)
-        if tenant_id is None:
-            raise exception.NotImplemented(message='User roles not supported: '
-                                                   'tenant_id required')
-        if self.identity_api.get_user(context, user_id) is None:
-            raise exception.UserNotFound(user_id=user_id)
-        if self.identity_api.get_tenant(context, tenant_id) is None:
-            raise exception.TenantNotFound(tenant_id=tenant_id)
-        if self.identity_api.get_role(context, role_id) is None:
-            raise exception.RoleNotFound(role_id=role_id)
+        raise exception.NotImplemented()
 
-        # This still has the weird legacy semantics that adding a role to
-        # a user also adds them to a tenant, so we must follow up on that
-        self.identity_api.remove_role_from_user_and_tenant(
-                context, user_id, tenant_id, role_id)
-        roles = self.identity_api.get_roles_for_user_and_tenant(
-                context, user_id, tenant_id)
-        if not roles:
-            self.identity_api.remove_user_from_tenant(
-                    context, tenant_id, user_id)
-        return
+    def update_group(self, group_id, group):
+        """Updates an existing group.
 
-    # COMPAT(diablo): CRUD extension
-    def get_role_refs(self, context, user_id):
-        """Ultimate hack to get around having to make role_refs first-class.
-
-        This will basically iterate over the various roles the user has in
-        all tenants the user is a member of and create fake role_refs where
-        the id encodes the user-tenant-role information so we can look
-        up the appropriate data when we need to delete them.
+        :raises: keystone.exceptionGroupNotFound,
+                 keystone.exception.Conflict
 
         """
-        self.assert_admin(context)
-        user_ref = self.identity_api.get_user(context, user_id)
-        tenant_ids = self.identity_api.get_tenants_for_user(context, user_id)
-        o = []
-        for tenant_id in tenant_ids:
-            role_ids = self.identity_api.get_roles_for_user_and_tenant(
-                    context, user_id, tenant_id)
-            for role_id in role_ids:
-                ref = {'roleId': role_id,
-                       'tenantId': tenant_id,
-                       'userId': user_id}
-                ref['id'] = urllib.urlencode(ref)
-                o.append(ref)
-        return {'roles': o}
+        raise exception.NotImplemented()
 
-    # COMPAT(diablo): CRUD extension
-    def create_role_ref(self, context, user_id, role):
-        """This is actually used for adding a user to a tenant.
+    def delete_group(self, group_id):
+        """Deletes an existing group.
 
-        In the legacy data model adding a user to a tenant required setting
-        a role.
+        :raises: keystone.exception.GroupNotFound
 
         """
-        self.assert_admin(context)
-        # TODO(termie): for now we're ignoring the actual role
-        tenant_id = role.get('tenantId')
-        role_id = role.get('roleId')
-        self.identity_api.add_user_to_tenant(context, tenant_id, user_id)
-        self.identity_api.add_role_to_user_and_tenant(
-                context, user_id, tenant_id, role_id)
-        role_ref = self.identity_api.get_role(context, role_id)
-        return {'role': role_ref}
-
-    # COMPAT(diablo): CRUD extension
-    def delete_role_ref(self, context, user_id, role_ref_id):
-        """This is actually used for deleting a user from a tenant.
-
-        In the legacy data model removing a user from a tenant required
-        deleting a role.
-
-        To emulate this, we encode the tenant and role in the role_ref_id,
-        and if this happens to be the last role for the user-tenant pair,
-        we remove the user from the tenant.
-
-        """
-        self.assert_admin(context)
-        # TODO(termie): for now we're ignoring the actual role
-        role_ref_ref = urlparse.parse_qs(role_ref_id)
-        tenant_id = role_ref_ref.get('tenantId')[0]
-        role_id = role_ref_ref.get('roleId')[0]
-        self.identity_api.remove_role_from_user_and_tenant(
-                context, user_id, tenant_id, role_id)
-        roles = self.identity_api.get_roles_for_user_and_tenant(
-                context, user_id, tenant_id)
-        if not roles:
-            self.identity_api.remove_user_from_tenant(
-                    context, tenant_id, user_id)
+        raise exception.NotImplemented()

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2012-08-11 08:37+0200\n"
+"POT-Creation-Date: 2013-01-14 16:21+0000\n"
 "PO-Revision-Date: 2012-08-12 18:22+0100\n"
 "Last-Translator: Julien Patriarca <patriarcaj@gmail.com>\n"
 "Language-Team: FRENCH <debian-l10n-french@lists.debian.org>\n"
@@ -69,15 +69,155 @@ msgstr ""
 "Vous pouvez changer ce réglage plus tard en exécutant « dpkg-reconfigure -"
 "plow keystone »."
 
-#. Type: string
+#. Type: password
 #. Description
 #: ../keystone.templates:3001
 msgid "Authentication server administration token:"
 msgstr "Jeton d'authentification pour le serveur d'administration :"
 
-#. Type: string
+#. Type: password
 #. Description
 #: ../keystone.templates:3001
 msgid "Please enter the token to use with the authentication server."
 msgstr ""
 "Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:4001
+msgid "Register admin tenants?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:4001
+msgid ""
+"For Openstack to work, you need a basic tenant configuration. The keystone "
+"package can create these admin tenants automatically for you."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:5001
+msgid "User name of the admin user:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:5001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter an user name for the administrative user."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:6001
+msgid "Email address of the admin user:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:6001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter the email address of the administrative user."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: password
+#. Description
+#: ../keystone.templates:7001
+msgid "Password of the admin user:"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:7001
+msgid "Please enter a password for the administrative user."
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:8001
+msgid "Password of the admin user (confirm):"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../keystone.templates:8001
+msgid "Please confirm the password for the administrative user."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:10001
+msgid "Name of the admin role:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:10001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter the name of the administrative role."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:11001
+msgid "Name of the admin tenant:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:11001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter the name of the administrative tenant (project)."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:12001
+msgid "Register keystone endpoint?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../keystone.templates:12001
+msgid ""
+"Each Openstack services (each API) should be registered in order to be "
+"accessible. This is done using \"keystone service-create\" and \"keystone "
+"endpoint-create\". Select if you want to run these commands now."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:13001
+msgid "Keystone endpoint IP address:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:13001
+msgid "Enter the IP address that will be used to contact keystone."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:14001
+msgid "Name of the region to register:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../keystone.templates:14001
+msgid ""
+"Openstack can be used using availability zones, with each region "
+"representing a location. Please enter the zone that you wish to use when "
+"registering the endpoint."
+msgstr ""

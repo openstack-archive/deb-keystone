@@ -14,49 +14,117 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+# NOTE(dolph): please try to avoid additional fixtures if possible; test suite
+#              performance may be negatively affected.
+
+from keystone import config
+
+
+CONF = config.CONF
+
+
+DEFAULT_DOMAIN_ID = config.CONF.identity.default_domain_id
+
+
 TENANTS = [
-    {'id': 'bar', 'name': 'BAR'},
-    {'id': 'baz', 'name': 'BAZ'},
-    {'id': 'tenent4add', 'name': 'tenant4add'},
-    ]
+    {
+        'id': 'bar',
+        'name': 'BAR',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'description': 'description',
+        'enabled': True,
+    }, {
+        'id': 'baz',
+        'name': 'BAZ',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'description': 'description',
+        'enabled': True,
+    }, {
+        'id': 'mtu',
+        'name': 'MTU',
+        'description': 'description',
+        'enabled': True,
+        'domain_id': DEFAULT_DOMAIN_ID
+    }
+]
 
 # NOTE(ja): a role of keystone_admin and attribute "is_admin" is done in setUp
 USERS = [
-    {'id': 'foo', 'name': 'FOO', 'password': 'foo2', 'tenants': ['bar']},
-    {'id': 'two', 'name': 'TWO', 'password': 'two2', 'tenants': ['baz']},
-    {'id': 'no_meta',
-     'name': 'NO_META',
-     'password': 'no_meta2',
-     'tenants': ['baz']},
-    ]
+    {
+        'id': 'foo',
+        'name': 'FOO',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'password': 'foo2',
+        'tenants': ['bar'],
+        'enabled': True,
+        'email': 'foo@bar.com',
+    }, {
+        'id': 'two',
+        'name': 'TWO',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'password': 'two2',
+        'email': 'two@example.com',
+        'enabled': True,
+        'tenant_id': 'baz',
+        'tenants': ['baz'],
+        'email': 'two@three.com',
+    }, {
+        'id': 'badguy',
+        'name': 'BadGuy',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'password': 'bad',
+        'email': 'bad@guy.com',
+        'enabled': False,
+        'tenant_id': 'baz',
+        'tenants': ['baz'],
+        'email': 'badguy@goodguy.com',
+    }, {
+        'id': 'sna',
+        'name': 'SNA',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'password': 'snafu',
+        'enabled': True,
+        'tenants': ['bar'],
+        'email': 'sna@snl.coom',
+    }
+]
 
 METADATA = [
-    {'user_id': 'foo', 'tenant_id': 'bar', 'extra': 'extra'},
-    {'user_id': 'two', 'tenant_id': 'baz', 'extra': 'extra'},
-    ]
+    {
+        'user_id': 'sna',
+        'tenant_id': 'mtu',
+    }
+]
 
 ROLES = [
-    {'id': 'keystone_admin', 'name': 'Keystone Admin'},
-    {'id': 'useless', 'name': 'Useless'},
-    ]
+    {
+        'id': 'admin',
+        'name': 'admin',
+    }, {
+        'id': 'member',
+        'name': 'Member',
+    }, {
+        'id': CONF.member_role_id,
+        'name': CONF.member_role_name,
+    }, {
+        'id': 'other',
+        'name': 'Other',
+    }, {
+        'id': 'browser',
+        'name': 'Browser',
+    }, {
+        'id': 'writer',
+        'name': 'Writer',
+    }
 
-SERVICES = [
+]
+
+DOMAINS = [
     {
-        'id': 'COMPUTE_ID',
-        'type': 'compute',
-        'name': 'Nova',
-        'description': 'OpenStack Compute service'
-    },
-    {
-        'id': 'IDENTITY_ID',
-        'type': 'identity',
-        'name': 'Keystone',
-        'description': 'OpenStack Identity service'
-    },
-    {
-        'id': 'IMAGE_ID',
-        'type': 'image',
-        'name': 'Glance',
-        'description': 'OpenStack Image service'
-    },
+        'id': DEFAULT_DOMAIN_ID,
+        'name': 'Default',
+        'enabled': True,
+        'description': 'Owns users and tenants (i.e. projects) available '
+                       'on Identity API v2.'
+    }
 ]

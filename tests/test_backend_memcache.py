@@ -14,13 +14,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import datetime
-import time
 import uuid
 
 import memcache
 
-from keystone import exception
+from keystone.common import utils
+from keystone.openstack.common import timeutils
 from keystone import test
 from keystone.token.backends import memcache as token_memcache
 
@@ -34,6 +33,18 @@ class MemcacheClient(object):
         """Ignores the passed in args."""
         self.cache = {}
 
+    def add(self, key, value):
+        if self.get(key):
+            return False
+        return self.set(key, value)
+
+    def append(self, key, value):
+        existing_value = self.get(key)
+        if existing_value:
+            self.set(key, existing_value + value)
+            return True
+        return False
+
     def check_key(self, key):
         if not isinstance(key, str):
             raise memcache.Client.MemcachedStringEncodingError()
@@ -42,11 +53,9 @@ class MemcacheClient(object):
         """Retrieves the value for a key or None."""
         self.check_key(key)
         obj = self.cache.get(key)
-        now = time.mktime(datetime.datetime.utcnow().utctimetuple())
+        now = utils.unixtime(timeutils.utcnow())
         if obj and (obj[1] == 0 or obj[1] > now):
             return obj[0]
-        else:
-            raise exception.TokenNotFound(token_id=key)
 
     def set(self, key, value, time=0):
         """Sets the value for a key."""
@@ -69,8 +78,21 @@ class MemcacheToken(test.TestCase, test_backend.TokenTests):
         fake_client = MemcacheClient()
         self.token_api = token_memcache.Token(client=fake_client)
 
-    def test_get_unicode(self):
+    def test_create_unicode_token_id(self):
         token_id = unicode(uuid.uuid4().hex)
-        data = {'id': token_id, 'a': 'b'}
+        data = {'id': token_id, 'a': 'b',
+                'user': {'id': 'testuserid'}}
         self.token_api.create_token(token_id, data)
         self.token_api.get_token(token_id)
+
+    def test_create_unicode_user_id(self):
+        token_id = uuid.uuid4().hex
+        user_id = unicode(uuid.uuid4().hex)
+        data = {'id': token_id, 'a': 'b',
+                'user': {'id': user_id}}
+        self.token_api.create_token(token_id, data)
+        self.token_api.get_token(token_id)
+
+    def test_list_tokens_unicode_user_id(self):
+        user_id = unicode(uuid.uuid4().hex)
+        self.token_api.list_tokens(user_id)

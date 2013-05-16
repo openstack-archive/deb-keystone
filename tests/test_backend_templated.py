@@ -16,15 +16,17 @@
 
 import os
 
-from keystone import test
+from keystone import catalog
 from keystone.catalog.backends import templated as catalog_templated
+from keystone import exception
+from keystone import test
 
-import test_backend
 import default_fixtures
+import test_backend
 
 DEFAULT_CATALOG_TEMPLATES = os.path.abspath(os.path.join(
-                                os.path.dirname(__file__),
-                                    'default_catalog.templates'))
+    os.path.dirname(__file__),
+    'default_catalog.templates'))
 
 
 class TestTemplatedCatalog(test.TestCase, test_backend.CatalogTests):
@@ -35,13 +37,15 @@ class TestTemplatedCatalog(test.TestCase, test_backend.CatalogTests):
                 'adminURL': 'http://localhost:8774/v1.1/bar',
                 'publicURL': 'http://localhost:8774/v1.1/bar',
                 'internalURL': 'http://localhost:8774/v1.1/bar',
-                'name': "'Compute Service'"
+                'name': "'Compute Service'",
+                'id': '2'
             },
             'identity': {
                 'adminURL': 'http://localhost:35357/v2.0',
                 'publicURL': 'http://localhost:5000/v2.0',
                 'internalURL': 'http://localhost:35357/v2.0',
-                'name': "'Identity Service'"
+                'name': "'Identity Service'",
+                'id': '1'
             }
         }
     }
@@ -50,8 +54,15 @@ class TestTemplatedCatalog(test.TestCase, test_backend.CatalogTests):
         super(TestTemplatedCatalog, self).setUp()
         self.opt_in_group('catalog', template_file=DEFAULT_CATALOG_TEMPLATES)
         self.catalog_api = catalog_templated.TemplatedCatalog()
+        self.catalog_man = catalog.Manager()
         self.load_fixtures(default_fixtures)
 
     def test_get_catalog(self):
         catalog_ref = self.catalog_api.get_catalog('foo', 'bar')
-        self.assertDictEquals(catalog_ref, self.DEFAULT_FIXTURE)
+        self.assertDictEqual(catalog_ref, self.DEFAULT_FIXTURE)
+
+    def test_malformed_catalog_throws_error(self):
+        self.catalog_api.templates['RegionOne']['compute']['adminURL'] = \
+            'http://localhost:$(compute_port)s/v1.1/$(tenant)s'
+        with self.assertRaises(exception.MalformedEndpoint):
+            self.catalog_api.get_catalog('fake-user', 'fake-tenant')

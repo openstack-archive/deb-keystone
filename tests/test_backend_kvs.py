@@ -13,20 +13,60 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-from keystone import test
-from keystone.identity.backends import kvs as identity_kvs
-from keystone.token.backends import kvs as token_kvs
-from keystone.catalog.backends import kvs as catalog_kvs
+import uuid
+import nose.exc
 
-import test_backend
+from keystone import catalog
+from keystone.catalog.backends import kvs as catalog_kvs
+from keystone import exception
+from keystone import identity
+from keystone import test
+from keystone.token.backends import kvs as token_kvs
+from keystone.trust.backends import kvs as trust_kvs
+
 import default_fixtures
+import test_backend
 
 
 class KvsIdentity(test.TestCase, test_backend.IdentityTests):
     def setUp(self):
         super(KvsIdentity, self).setUp()
-        self.identity_api = identity_kvs.Identity(db={})
+        identity.CONF.identity.driver = \
+            'keystone.identity.backends.kvs.Identity'
+        self.identity_man = identity.Manager()
+        self.identity_api = self.identity_man.driver
         self.load_fixtures(default_fixtures)
+
+    def test_list_user_projects(self):
+        # NOTE(chungg): not implemented
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_group_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_user_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_create_duplicate_project_name_in_different_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_user_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_user_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_group_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_group_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_project_between_domains(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
+
+    def test_move_project_between_domains_with_clashing_names_fails(self):
+        raise nose.exc.SkipTest('Blocked by bug 1119770')
 
 
 class KvsToken(test.TestCase, test_backend.TokenTests):
@@ -35,10 +75,23 @@ class KvsToken(test.TestCase, test_backend.TokenTests):
         self.token_api = token_kvs.Token(db={})
 
 
+class KvsTrust(test.TestCase, test_backend.TrustTests):
+    def setUp(self):
+        super(KvsTrust, self).setUp()
+        identity.CONF.identity.driver = \
+            'keystone.identity.backends.kvs.Identity'
+        self.identity_man = identity.Manager()
+        self.identity_api = self.identity_man.driver
+        self.trust_api = trust_kvs.Trust(db={})
+        self.catalog_api = catalog_kvs.Catalog(db={})
+        self.load_fixtures(default_fixtures)
+
+
 class KvsCatalog(test.TestCase, test_backend.CatalogTests):
     def setUp(self):
         super(KvsCatalog, self).setUp()
         self.catalog_api = catalog_kvs.Catalog(db={})
+        self.catalog_man = catalog.Manager()
         self.load_fixtures(default_fixtures)
         self._load_fake_catalog()
 
@@ -47,14 +100,19 @@ class KvsCatalog(test.TestCase, test_backend.CatalogTests):
             'foo', 'bar',
             {'RegionFoo': {'service_bar': {'foo': 'bar'}}})
 
-    def test_get_catalog_bad_user(self):
-        catalog_ref = self.catalog_api.get_catalog('foo' + 'WRONG', 'bar')
-        self.assert_(catalog_ref is None)
+    def test_get_catalog_404(self):
+        # FIXME(dolph): this test should be moved up to test_backend
+        # FIXME(dolph): exceptions should be UserNotFound and ProjectNotFound
+        self.assertRaises(exception.NotFound,
+                          self.catalog_api.get_catalog,
+                          uuid.uuid4().hex,
+                          'bar')
 
-    def test_get_catalog_bad_tenant(self):
-        catalog_ref = self.catalog_api.get_catalog('foo', 'bar' + 'WRONG')
-        self.assert_(catalog_ref is None)
+        self.assertRaises(exception.NotFound,
+                          self.catalog_api.get_catalog,
+                          'foo',
+                          uuid.uuid4().hex)
 
     def test_get_catalog(self):
         catalog_ref = self.catalog_api.get_catalog('foo', 'bar')
-        self.assertDictEquals(catalog_ref, self.catalog_foobar)
+        self.assertDictEqual(catalog_ref, self.catalog_foobar)

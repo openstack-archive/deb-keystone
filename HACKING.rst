@@ -11,10 +11,31 @@ General
 
 - Put two newlines between top-level code (funcs, classes, etc)
 - Put one newline between methods in classes and anywhere else
+- Long lines should be wrapped in parentheses
+  in preference to using a backslash for line continuation.
 - Do not write "except:", use "except Exception:" at the very least
 - Include your name with TODOs as in "#TODO(termie)"
 - Do not name anything the same name as a built-in or reserved word
 - When defining global constants, define them before functions and classes
+- Avoid using "double quotes" where you can reasonably use 'single quotes'
+- Use the "is not" operator when testing for unequal identities. Example::
+
+    if not X is Y:  # BAD, intended behavior is ambiguous
+        pass
+
+    if X is not Y:  # OKAY, intuitive
+        pass
+
+- Use the "not in" operator for evaluating membership in a collection. Example::
+
+    if not X in Y:  # BAD, intended behavior is ambiguous
+        pass
+
+    if X not in Y:  # OKAY, intuitive
+        pass
+
+    if not (X in Y or X in Z):  # OKAY, still better than all those 'not's
+        pass
 
 
 TODO vs FIXME
@@ -24,6 +45,7 @@ TODO vs FIXME
   etc), but is expected to be functional.
 - FIXME(name): implies that the method/function/etc shouldn't be used until
   that code is resolved and bug fixed.
+
 
 Logging
 -------
@@ -36,10 +58,11 @@ Use the built-in logging module, and ensure you ``getLogger``::
 
     LOG.debug('Foobar')
 
+
 Imports
 -------
 
-- Do not import objects, only modules
+- Import modules, not module attributes
 - Do not import more than one module per line
 - Do not make relative imports
 - Order your imports by the full module path
@@ -48,18 +71,18 @@ Imports
 Example::
 
   # vim: tabstop=4 shiftwidth=4 softtabstop=4
-  {{stdlib imports in human alphabetical order}}
+  {{stdlib imports ordered by full module path}}
   \n
-  {{third-party lib imports in human alphabetical order}}
+  {{third-party lib imports ordered by full module path}}
   \n
-  {{nova imports in human alphabetical order}}
+  {{nova imports ordered by full module path}}
   \n
   \n
   {{begin your code}}
 
 
-Human Alphabetical Order Examples
----------------------------------
+Import by Full Module Path Examples
+-----------------------------------
 
 Example::
 
@@ -73,14 +96,14 @@ Example::
   import eventlet
   import webob.exc
 
-  from nova import test
-  from nova import utils
+  import nova.api.ec2
   from nova.api import openstack
   from nova.auth import ldap
   from nova.auth import users
   from nova.endpoint import cloud
   import nova.flags
-  import nova.api.ec2
+  from nova import test
+  from nova import utils
 
 
 Docstrings

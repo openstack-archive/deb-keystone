@@ -18,20 +18,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import base64
 import hashlib
-import hmac
 import json
 import os
 import subprocess
-import sys
 import time
-import urllib
 
 import passlib.hash
 
-from keystone import config
+from keystone.common import config
 from keystone.common import logging
+from keystone import exception
 
 
 CONF = config.CONF
@@ -39,51 +36,7 @@ config.register_int('crypt_strength', default=40000)
 
 LOG = logging.getLogger(__name__)
 
-ISO_TIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 MAX_PASSWORD_LENGTH = 4096
-
-
-def import_class(import_str):
-    """Returns a class from a string including module and class."""
-    mod_str, _sep, class_str = import_str.rpartition('.')
-    try:
-        __import__(mod_str)
-        return getattr(sys.modules[mod_str], class_str)
-    except (ImportError, ValueError, AttributeError), exc:
-        LOG.debug('Inner Exception: %s', exc)
-        raise
-
-
-def import_object(import_str, *args, **kw):
-    """Returns an object including a module or module and class."""
-    try:
-        __import__(import_str)
-        return sys.modules[import_str]
-    except ImportError:
-        cls = import_class(import_str)
-        return cls(*args, **kw)
-
-
-def find_config(config_path):
-    """Find a configuration file using the given hint.
-
-    :param config_path: Full or relative path to the config.
-    :returns: Full path of the config, if it exists.
-
-    """
-    possible_locations = [
-        config_path,
-        os.path.join('etc', 'keystone', config_path),
-        os.path.join('etc', config_path),
-        os.path.join(config_path),
-        '/etc/keystone/%s' % config_path,
-    ]
-
-    for path in possible_locations:
-        if os.path.exists(path):
-            return os.path.abspath(path)
-
-    raise Exception('Config not found: %s', os.path.abspath(config_path))
 
 
 def read_cached_file(filename, cache_info, reload_func=None):
@@ -93,7 +46,7 @@ def read_cached_file(filename, cache_info, reload_func=None):
     :param reload_func: optional function to be called with data when
                         file is reloaded due to a modification.
 
-    :returns: data from file
+    :returns: data from file.
 
     """
     mtime = os.path.getmtime(filename)
@@ -114,89 +67,35 @@ class SmarterEncoder(json.JSONEncoder):
         return super(SmarterEncoder, self).default(obj)
 
 
-class Ec2Signer(object):
-    """Hacked up code from boto/connection.py"""
-
-    def __init__(self, secret_key):
-        secret_key = secret_key.encode()
-        self.hmac = hmac.new(secret_key, digestmod=hashlib.sha1)
-        if hashlib.sha256:
-            self.hmac_256 = hmac.new(secret_key, digestmod=hashlib.sha256)
-
-    def generate(self, credentials):
-        """Generate auth string according to what SignatureVersion is given."""
-        if credentials['params']['SignatureVersion'] == '0':
-            return self._calc_signature_0(credentials['params'])
-        if credentials['params']['SignatureVersion'] == '1':
-            return self._calc_signature_1(credentials['params'])
-        if credentials['params']['SignatureVersion'] == '2':
-            return self._calc_signature_2(credentials['params'],
-                                          credentials['verb'],
-                                          credentials['host'],
-                                          credentials['path'])
-        raise Exception('Unknown Signature Version: %s' %
-                        credentials['params']['SignatureVersion'])
-
-    @staticmethod
-    def _get_utf8_value(value):
-        """Get the UTF8-encoded version of a value."""
-        if not isinstance(value, str) and not isinstance(value, unicode):
-            value = str(value)
-        if isinstance(value, unicode):
-            return value.encode('utf-8')
-        else:
-            return value
-
-    def _calc_signature_0(self, params):
-        """Generate AWS signature version 0 string."""
-        s = params['Action'] + params['Timestamp']
-        self.hmac.update(s)
-        return base64.b64encode(self.hmac.digest())
-
-    def _calc_signature_1(self, params):
-        """Generate AWS signature version 1 string."""
-        keys = params.keys()
-        keys.sort(cmp=lambda x, y: cmp(x.lower(), y.lower()))
-        for key in keys:
-            self.hmac.update(key)
-            val = self._get_utf8_value(params[key])
-            self.hmac.update(val)
-        return base64.b64encode(self.hmac.digest())
-
-    def _calc_signature_2(self, params, verb, server_string, path):
-        """Generate AWS signature version 2 string."""
-        LOG.debug('using _calc_signature_2')
-        string_to_sign = '%s\n%s\n%s\n' % (verb, server_string, path)
-        if self.hmac_256:
-            current_hmac = self.hmac_256
-            params['SignatureMethod'] = 'HmacSHA256'
-        else:
-            current_hmac = self.hmac
-            params['SignatureMethod'] = 'HmacSHA1'
-        keys = params.keys()
-        keys.sort()
-        pairs = []
-        for key in keys:
-            val = self._get_utf8_value(params[key])
-            val = urllib.quote(val, safe='-_~')
-            pairs.append(urllib.quote(key, safe='') + '=' + val)
-        qs = '&'.join(pairs)
-        LOG.debug('query string: %s', qs)
-        string_to_sign += qs
-        LOG.debug('string_to_sign: %s', string_to_sign)
-        current_hmac.update(string_to_sign)
-        b64 = base64.b64encode(current_hmac.digest())
-        LOG.debug('len(b64)=%d', len(b64))
-        LOG.debug('base64 encoded digest: %s', b64)
-        return b64
-
-
 def trunc_password(password):
     """Truncate passwords to the MAX_PASSWORD_LENGTH."""
-    if len(password) > MAX_PASSWORD_LENGTH:
-        return password[:MAX_PASSWORD_LENGTH]
+    try:
+        if len(password) > MAX_PASSWORD_LENGTH:
+            return password[:MAX_PASSWORD_LENGTH]
+        else:
+            return password
+    except TypeError:
+        raise exception.ValidationError(attribute='string', target='password')
+
+
+def hash_user_password(user):
+    """Hash a user dict's password without modifying the passed-in dict"""
+    try:
+        password = user['password']
+    except KeyError:
+        return user
     else:
-        return password
+        return dict(user, password=hash_password(password))
+
+
+def hash_ldap_user_password(user):
+    """Hash a user dict's password without modifying the passed-in dict"""
+    try:
+        password = user['password']
+    except KeyError:
+        return user
+    else:
+        return dict(user, password=ldap_hash_password(password))
 
 
 def hash_password(password):
@@ -220,7 +119,6 @@ def ldap_check_password(password, hashed):
     if password is None:
         return False
     password_utf8 = trunc_password(password).encode('utf-8')
-    h = passlib.hash.ldap_salted_sha1.encrypt(password_utf8)
     return passlib.hash.ldap_salted_sha1.verify(password_utf8, hashed)
 
 
@@ -276,16 +174,6 @@ def git(*args):
     return check_output(['git'] + list(args))
 
 
-def isotime(dt_obj):
-    """Format datetime object as ISO compliant string.
-
-    :param dt_obj: datetime.datetime object
-    :returns: string representation of datetime object
-
-    """
-    return dt_obj.strftime(ISO_TIME_FORMAT)
-
-
 def unixtime(dt_obj):
     """Format datetime object as unix timestamp
 
@@ -318,3 +206,65 @@ def auth_str_equal(provided, known):
         b = ord(known[i]) if i < k_len else 0
         result |= a ^ b
     return (p_len == k_len) & (result == 0)
+
+
+def hash_signed_token(signed_text):
+    hash_ = hashlib.md5()
+    hash_.update(signed_text)
+    return hash_.hexdigest()
+
+
+def setup_remote_pydev_debug():
+    if CONF.pydev_debug_host and CONF.pydev_debug_port:
+        error_msg = ('Error setting up the debug environment.  Verify that the'
+                     ' option --debug-url has the format <host>:<port> and '
+                     'that a debugger processes is listening on that port.')
+
+        try:
+            try:
+                from pydevd import pydevd
+            except ImportError:
+                import pydevd
+
+            pydevd.settrace(CONF.pydev_debug_host,
+                            port=CONF.pydev_debug_port,
+                            stdoutToServer=True,
+                            stderrToServer=True)
+            return True
+        except:
+            LOG.exception(_(error_msg))
+            raise
+
+
+class LimitingReader(object):
+    """Reader to limit the size of an incoming request."""
+    def __init__(self, data, limit):
+        """
+        :param data: Underlying data object
+        :param limit: maximum number of bytes the reader should allow
+        """
+        self.data = data
+        self.limit = limit
+        self.bytes_read = 0
+
+    def __iter__(self):
+        for chunk in self.data:
+            self.bytes_read += len(chunk)
+            if self.bytes_read > self.limit:
+                raise exception.RequestTooLarge()
+            else:
+                yield chunk
+
+    def read(self, i):
+        result = self.data.read(i)
+        self.bytes_read += len(result)
+        if self.bytes_read > self.limit:
+            raise exception.RequestTooLarge()
+        return result
+
+    def read(self):
+        result = self.data.read()
+        self.bytes_read += len(result)
+        if self.bytes_read > self.limit:
+            raise exception.RequestTooLarge()
+        return result
