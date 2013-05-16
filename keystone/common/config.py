@@ -124,6 +124,13 @@ def setup_logging(conf):
     root_logger.addHandler(handler)
 
 
+def setup_authentication():
+    # register any non-default auth methods here (used by extensions, etc)
+    for method_name in CONF.auth.methods:
+        if method_name not in _DEFAULT_AUTH_METHODS:
+            register_str(method_name, group="auth")
+
+
 def register_str(*args, **kw):
     conf = kw.pop('conf', CONF)
     group = kw.pop('group', None)
@@ -181,7 +188,7 @@ def configure():
     register_cli_str('pydev-debug-host', default=None)
     register_cli_int('pydev-debug-port', default=None)
 
-    register_str('admin_token', default='ADMIN')
+    register_str('admin_token', secret=True, default='ADMIN')
     register_str('bind_host', default='0.0.0.0')
     register_int('compute_port', default=8774)
     register_int('admin_port', default=35357)
@@ -264,7 +271,7 @@ def configure():
     # ldap
     register_str('url', group='ldap', default='ldap://localhost')
     register_str('user', group='ldap', default=None)
-    register_str('password', group='ldap', default=None)
+    register_str('password', group='ldap', secret=True, default=None)
     register_str('suffix', group='ldap', default='cn=example,cn=com')
     register_bool('use_dumb_member', group='ldap', default=False)
     register_str('dumb_member', group='ldap', default='cn=dumb,dc=nonexistent')

@@ -1136,7 +1136,6 @@ class IdentityTests(object):
         self.assertIn(role_list[7], roles_ref)
 
     def test_delete_role_with_user_and_group_grants(self):
-        raise nose.exc.SkipTest('Blocked by bug 1097472')
         role1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.identity_api.create_role(role1['id'], role1)
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -1180,22 +1179,22 @@ class IdentityTests(object):
             domain_id=domain1['id'])
         self.assertEquals(len(roles_ref), 1)
         self.identity_api.delete_role(role1['id'])
-        self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.list_grants,
-                          user_id=user1['id'],
-                          project_id=project1['id'])
-        self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.list_grants,
-                          group_id=group1['id'],
-                          project_id=project1['id'])
-        self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.list_grants,
-                          user_id=user1['id'],
-                          domain_id=domain1['id'])
-        self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.list_grants,
-                          group_id=group1['id'],
-                          domain_id=domain1['id'])
+        roles_ref = self.identity_api.list_grants(
+            user_id=user1['id'],
+            project_id=project1['id'])
+        self.assertEquals(len(roles_ref), 0)
+        roles_ref = self.identity_api.list_grants(
+            group_id=group1['id'],
+            project_id=project1['id'])
+        self.assertEquals(len(roles_ref), 0)
+        roles_ref = self.identity_api.list_grants(
+            user_id=user1['id'],
+            domain_id=domain1['id'])
+        self.assertEquals(len(roles_ref), 0)
+        roles_ref = self.identity_api.list_grants(
+            group_id=group1['id'],
+            domain_id=domain1['id'])
+        self.assertEquals(len(roles_ref), 0)
 
     def test_delete_user_with_group_project_domain_links(self):
         role1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -1950,8 +1949,14 @@ class IdentityTests(object):
 
 
 class TokenTests(object):
+    def _create_token_id(self):
+        token_id = ""
+        for i in range(1, 20):
+            token_id += uuid.uuid4().hex
+        return token_id
+
     def test_token_crud(self):
-        token_id = uuid.uuid4().hex
+        token_id = self._create_token_id()
         data = {'id': token_id, 'a': 'b',
                 'trust_id': None,
                 'user': {'id': 'testuserid'}}
@@ -1975,7 +1980,7 @@ class TokenTests(object):
                           self.token_api.delete_token, token_id)
 
     def create_token_sample_data(self, tenant_id=None, trust_id=None):
-        token_id = uuid.uuid4().hex
+        token_id = self._create_token_id()
         data = {'id': token_id, 'a': 'b',
                 'user': {'id': 'testuserid'}}
         if tenant_id is not None:
