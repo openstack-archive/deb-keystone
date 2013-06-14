@@ -1,0 +1,374 @@
+Description: Add TLS Support for LDAP
+ Added several test cases, also provides a full ldap regression suite. Also
+ added supplemental (simple) verification for CACERTFILE and CACERTDIR
+ added a TLS disable option when ldaps URLs are used and did full regression
+ tests using ldaps URLs and with TLS addresses ayoung's comments addresses
+ dolphm's and Mouad's comments addresses gyee's doc request and bknudson's
+ comments
+Author: Brad Topol <btopol@us.ibm.com>
+Origin: upstream, https://review.openstack.org/#/c/25327/
+Bug-Ubuntu: https://launchpad.net/bugs/1040115
+Date: Mon, 25 Mar 2013 15:23:15 -0500
+
+diff --git a/doc/source/configuration.rst b/doc/source/configuration.rst
+index 377dfbe..c390a7f 100644
+--- a/doc/source/configuration.rst
++++ b/doc/source/configuration.rst
+@@ -1082,3 +1082,25 @@ specified classes in the LDAP module so you can configure them like::
+   role_name_attribute      = ou
+   role_member_attribute    = roleOccupant
+   role_attribute_ignore    =
++
++If you are using a directory server to provide the Identity service,
++it is strongly recommended that you utilize a secure connection from
++Keystone to the directory server.  In addition to supporting ldaps,  Keystone
++also provides Transport Layer Security (TLS) support. There are some
++basic configuration options for enabling TLS, identifying a single
++file or directory that contains certificates for all the Certificate
++Authorities that the Keystone LDAP client will recognize, and declaring
++what checks the client should perform on server certificates.  This
++functionality can easily be configured as follows::
++
++  [ldap]
++  use_tls = True
++  tls_cacertfile = /etc/keystone/ssl/certs/cacert.pem
++  tls_cacertdir = /etc/keystone/ssl/certs/
++  tls_req_cert = demand
++
++A few points worth mentioning regarding the above options.  If both
++tls_cacertfile and tls_cacertdir are set then tls_cacertfile will be
++used and tls_cacertdir is ignored.  Furthermore, valid options for
++tls_req_cert are demand, never, and allow.  These correspond to the
++standard options permitted by the TLS_REQCERT TLS option.
+\ No newline at end of file
+diff --git a/etc/keystone.conf.sample b/etc/keystone.conf.sample
+index 9e66eb6..ee2a562 100644
+--- a/etc/keystone.conf.sample
++++ b/etc/keystone.conf.sample
+@@ -212,6 +212,15 @@
+ # group_allow_update = True
+ # group_allow_delete = True
+ 
++# ldap TLS options
++# if both tls_cacertfile and tls_cacertdir are set then
++# tls_cacertfile will be used and tls_cacertdir is ignored
++# valid options for tls_req_cert are demand, never, and allow
++# use_tls = False
++# tls_cacertfile =
++# tls_cacertdir =
++# tls_req_cert = demand
++
+ [auth]
+ methods = password,token
+ password = keystone.auth.plugins.password.Password
+diff --git a/keystone/common/config.py b/keystone/common/config.py
+index a96c814..fce333d 100644
+--- a/keystone/common/config.py
++++ b/keystone/common/config.py
+@@ -351,6 +351,10 @@ def configure():
+     register_bool('domain_allow_delete', group='ldap', default=True)
+     register_bool('domain_enabled_emulation', group='ldap', default=False)
+     register_str('domain_enabled_emulation_dn', group='ldap', default=None)
++    register_str('tls_cacertfile', group='ldap', default=None)
++    register_str('tls_cacertdir',  group='ldap', default=None)
++    register_bool('use_tls', group='ldap', default=False)
++    register_str('tls_req_cert', group='ldap', default='demand')
+ 
+     # pam
+     register_str('url', group='pam', default=None)
+diff --git a/keystone/common/ldap/core.py b/keystone/common/ldap/core.py
+index b06f227..80189b1 100644
+--- a/keystone/common/ldap/core.py
++++ b/keystone/common/ldap/core.py
+@@ -14,6 +14,8 @@
+ # License for the specific language governing permissions and limitations
+ # under the License.
+ 
++import os.path
++
+ import ldap
+ from ldap import filter as ldap_filter
+ 
+@@ -34,6 +36,9 @@ LDAP_DEREF = {'always': ldap.DEREF_ALWAYS,
+               'finding': ldap.DEREF_FINDING,
+               'never': ldap.DEREF_NEVER,
+               'searching': ldap.DEREF_SEARCHING}
++LDAP_TLS_CERTS = {'never': ldap.OPT_X_TLS_NEVER,
++                  'demand': ldap.OPT_X_TLS_DEMAND,
++                  'allow': ldap.OPT_X_TLS_ALLOW}
+ 
+ 
+ def py2ldap(val):
+@@ -75,6 +80,15 @@ def parse_deref(opt):
+                          opt) + ', '.join(LDAP_DEREF.keys()))
+ 
+ 
++def parse_tls_cert(opt):
++    try:
++        return LDAP_TLS_CERTS[opt]
++    except KeyError:
++        raise ValueError((_('Invalid LDAP tls certs option: %s. '
++                            'Choose one of: ') %
++                         opt) + ', '.join(LDAP_TLS_CERTS.keys()))
++
++
+ def ldap_scope(scope):
+     try:
+         return LDAP_SCOPES[scope]
+@@ -106,6 +120,10 @@ class BaseLdap(object):
+         self.LDAP_SCOPE = ldap_scope(conf.ldap.query_scope)
+         self.alias_dereferencing = parse_deref(conf.ldap.alias_dereferencing)
+         self.page_size = conf.ldap.page_size
++        self.use_tls = conf.ldap.use_tls
++        self.tls_cacertfile = conf.ldap.tls_cacertfile
++        self.tls_cacertdir = conf.ldap.tls_cacertdir
++        self.tls_req_cert = parse_tls_cert(conf.ldap.tls_req_cert)
+ 
+         if self.options_name is not None:
+             self.suffix = conf.ldap.suffix
+@@ -157,7 +175,11 @@ class BaseLdap(object):
+         else:
+             conn = LdapWrapper(self.LDAP_URL,
+                                self.page_size,
+-                               alias_dereferencing=self.alias_dereferencing)
++                               alias_dereferencing=self.alias_dereferencing,
++                               use_tls=self.use_tls,
++                               tls_cacertfile=self.tls_cacertfile,
++                               tls_cacertdir=self.tls_cacertdir,
++                               tls_req_cert=self.tls_req_cert)
+ 
+         if user is None:
+             user = self.LDAP_USER
+@@ -363,13 +385,75 @@ class BaseLdap(object):
+ 
+ 
+ class LdapWrapper(object):
+-    def __init__(self, url, page_size, alias_dereferencing=None):
++    def __init__(self, url, page_size, alias_dereferencing=None,
++                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
++                 tls_req_cert='demand'):
+         LOG.debug(_("LDAP init: url=%s"), url)
++        LOG.debug(_('LDAP init: use_tls=%(use_tls)s\n'
++                  'tls_cacertfile=%(tls_cacertfile)s\n'
++                  'tls_cacertdir=%(tls_cacertdir)s\n'
++                  'tls_req_cert=%(tls_req_cert)s\n'
++                  'tls_avail=%(tls_avail)s\n') %
++                  {'use_tls': use_tls,
++                   'tls_cacertfile': tls_cacertfile,
++                   'tls_cacertdir': tls_cacertdir,
++                   'tls_req_cert': tls_req_cert,
++                   'tls_avail': ldap.TLS_AVAIL
++                   })
++
++        #NOTE(topol)
++        #for extra debugging uncomment the following line
++        #ldap.set_option(ldap.OPT_DEBUG_LEVEL, 4095)
++
++        using_ldaps = url.lower().startswith("ldaps")
++
++        if use_tls and using_ldaps:
++            raise AssertionError(_('Invalid TLS / LDAPS combination'))
++
++        if use_tls:
++            if not ldap.TLS_AVAIL:
++                raise ValueError(_('Invalid LDAP TLS_AVAIL option: %s. TLS'
++                                   'not available') % ldap.TLS_AVAIL)
++            if tls_cacertfile:
++                #NOTE(topol)
++                #python ldap TLS does not verify CACERTFILE or CACERTDIR
++                #so we add some extra simple sanity check verification
++                #Also, setting these values globally (i.e. on the ldap object)
++                #works but these values are ignored when setting them on the
++                #connection
++                if not os.path.isfile(tls_cacertfile):
++                    raise IOError(_("tls_cacertfile %s not found "
++                                    "or is not a file") %
++                                  tls_cacertfile)
++                ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, tls_cacertfile)
++            elif tls_cacertdir:
++                #NOTE(topol)
++                #python ldap TLS does not verify CACERTFILE or CACERTDIR
++                #so we add some extra simple sanity check verification
++                #Also, setting these values globally (i.e. on the ldap object)
++                #works but these values are ignored when setting them on the
++                #connection
++                if not os.path.isdir(tls_cacertdir):
++                    raise IOError(_("tls_cacertdir %s not found "
++                                    "or is not a directory") %
++                                  tls_cacertdir)
++                ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, tls_cacertdir)
++            if tls_req_cert in LDAP_TLS_CERTS.values():
++                ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, tls_req_cert)
++            else:
++                LOG.debug(_("LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s"),
++                          tls_req_cert)
++
+         self.conn = ldap.initialize(url)
++        self.conn.protocol_version = ldap.VERSION3
++
+         if alias_dereferencing is not None:
+             self.conn.set_option(ldap.OPT_DEREF, alias_dereferencing)
+         self.page_size = page_size
+ 
++        if use_tls:
++            self.conn.start_tls_s()
++
+     def simple_bind_s(self, user, password):
+         LOG.debug(_("LDAP bind: dn=%s"), user)
+         return self.conn.simple_bind_s(user, password)
+diff --git a/tests/_ldap_tls_livetest.py b/tests/_ldap_tls_livetest.py
+new file mode 100644
+index 0000000..8503e51
+--- /dev/null
++++ b/tests/_ldap_tls_livetest.py
+@@ -0,0 +1,118 @@
++# vim: tabstop=4 shiftwidth=4 softtabstop=4
++
++# Copyright 2013 OpenStack LLC
++# Copyright 2013 IBM Corp.
++#
++# Licensed under the Apache License, Version 2.0 (the "License"); you may
++# not use this file except in compliance with the License. You may obtain
++# a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++# License for the specific language governing permissions and limitations
++# under the License.
++
++import ldap
++import ldap.modlist
++import nose.exc
++import subprocess
++
++from keystone.common import ldap as ldap_common
++from keystone import config
++from keystone import exception
++from keystone.identity.backends import ldap as identity_ldap
++from keystone import identity
++from keystone import test
++
++import default_fixtures
++import _ldap_livetest
++
++
++CONF = config.CONF
++
++
++def create_object(dn, attrs):
++    conn = ldap.initialize(CONF.ldap.url)
++    conn.simple_bind_s(CONF.ldap.user, CONF.ldap.password)
++    ldif = ldap.modlist.addModlist(attrs)
++    conn.add_s(dn, ldif)
++    conn.unbind_s()
++
++
++class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
++
++    def _set_config(self):
++        self.config([test.etcdir('keystone.conf.sample'),
++                     test.testsdir('test_overrides.conf'),
++                     test.testsdir('backend_tls_liveldap.conf')])
++
++    def test_tls_certfile_demand_option(self):
++        CONF.ldap.use_tls = True
++        CONF.ldap.tls_cacertdir = None
++        CONF.ldap.tls_req_cert = 'demand'
++        self.identity_api = identity.backends.ldap.Identity()
++
++        user = {'id': 'fake1',
++                'name': 'fake1',
++                'password': 'fakepass1',
++                'tenants': ['bar']}
++        self.identity_api.create_user('fake1', user)
++        user_ref = self.identity_api.get_user('fake1')
++        self.assertEqual(user_ref['id'], 'fake1')
++
++        user['password'] = 'fakepass2'
++        self.identity_api.update_user('fake1', user)
++
++        self.identity_api.delete_user('fake1')
++        self.assertRaises(exception.UserNotFound, self.identity_api.get_user,
++                          'fake1')
++
++    def test_tls_certdir_demand_option(self):
++        CONF.ldap.use_tls = True
++        CONF.ldap.tls_cacertfile = None
++        CONF.ldap.tls_req_cert = 'demand'
++        self.identity_api = identity.backends.ldap.Identity()
++
++        user = {'id': 'fake1',
++                'name': 'fake1',
++                'password': 'fakepass1',
++                'tenants': ['bar']}
++        self.identity_api.create_user('fake1', user)
++        user_ref = self.identity_api.get_user('fake1')
++        self.assertEqual(user_ref['id'], 'fake1')
++
++        user['password'] = 'fakepass2'
++        self.identity_api.update_user('fake1', user)
++
++        self.identity_api.delete_user('fake1')
++        self.assertRaises(exception.UserNotFound, self.identity_api.get_user,
++                          'fake1')
++
++    def test_tls_bad_certfile(self):
++        CONF.ldap.use_tls = True
++        CONF.ldap.tls_req_cert = 'demand'
++        CONF.ldap.tls_cacertfile = '/etc/keystone/ssl/certs/mythicalcert.pem'
++        CONF.ldap.tls_cacertdir = None
++        self.identity_api = identity.backends.ldap.Identity()
++
++        user = {'id': 'fake1',
++                'name': 'fake1',
++                'password': 'fakepass1',
++                'tenants': ['bar']}
++        self.assertRaises(IOError, self.identity_api.create_user, 'fake', user)
++
++    def test_tls_bad_certdir(self):
++        CONF.ldap.use_tls = True
++        CONF.ldap.tls_cacertfile = None
++        CONF.ldap.tls_req_cert = 'demand'
++        CONF.ldap.tls_cacertdir = '/etc/keystone/ssl/mythicalcertdir'
++        self.identity_api = identity.backends.ldap.Identity()
++
++        user = {'id': 'fake1',
++                'name': 'fake1',
++                'password': 'fakepass1',
++                'tenants': ['bar']}
++        self.assertRaises(IOError, self.identity_api.create_user, 'fake', user)
+diff --git a/tests/backend_tls_liveldap.conf b/tests/backend_tls_liveldap.conf
+new file mode 100644
+index 0000000..0c9d7f2
+--- /dev/null
++++ b/tests/backend_tls_liveldap.conf
+@@ -0,0 +1,23 @@
++[ldap]
++url = ldap://
++user = dc=Manager,dc=openstack,dc=org
++password = test
++suffix = dc=openstack,dc=org
++group_tree_dn = ou=UserGroups,dc=openstack,dc=org
++role_tree_dn = ou=Roles,dc=openstack,dc=org
++tenant_tree_dn = ou=Projects,dc=openstack,dc=org
++domain_tree_dn = ou=Domains,dc=openstack,dc=org
++user_tree_dn = ou=Users,dc=openstack,dc=org
++tenant_enabled_emulation = True
++user_enabled_emulation = True
++domain_enabled_emulation = True
++user_mail_attribute = mail
++use_dumb_member = True
++use_tls = True
++tls_cacertfile = /etc/keystone/ssl/certs/cacert.pem
++tls_cacertdir = /etc/keystone/ssl/certs/
++tls_req_cert = demand
++
++[identity]
++driver = keystone.identity.backends.ldap.Identity
++
+-- 
+1.7.10.4
+

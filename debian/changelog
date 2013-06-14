@@ -1,7 +1,13 @@
 keystone (2013.1.2-1) unstable; urgency=low
 
+  [ Thomas Goirand ]
   * Ran wrap-and-sort.
   * New upstream release.
+
+  [ gustavo panizzo <gfa@zumbi.com.ar> ]
+  * Add support for TLS when using LDAP.
+  * CVE-2013-2157: Authentication bypass when using LDAP backend. 
+    [OSSA 2013-015]
 
  -- Thomas Goirand <zigo@debian.org>  Thu, 30 May 2013 11:25:11 +0800
 

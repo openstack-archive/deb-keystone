@@ -1,2 +1,4 @@
 sql_conn.patch
 fixes-keystone-default-catalog.patch
+Add_TLS_Support_for_LDAP.patch
+CVE-2013-2157_Force_simple_Bind_for_authentication.patch
