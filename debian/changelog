@@ -1,3 +1,9 @@
+keystone (2013.1.2-2) UNRELEASED; urgency=low
+
+  * Keystone starts after rabbitmq-server and ntp.
+
+ -- Thomas Goirand <zigo@debian.org>  Sat, 22 Jun 2013 16:19:34 +0800
+
 keystone (2013.1.2-1) unstable; urgency=low
 
   [ Thomas Goirand ]

@@ -3,8 +3,8 @@
 # Provides:          keystone
 # Required-Start:    $network $local_fs $remote_fs
 # Required-Stop:     $remote_fs
-# Should-Start:      mysql postgresql slapd
-# Should-Stop:       mysql postgresql slapd
+# Should-Start:      mysql postgresql slapd rabbitmq-server ntp
+# Should-Stop:       mysql postgresql slapd rabbitmq-server ntp
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: OpenStack cloud identity service
