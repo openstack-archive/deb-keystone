@@ -17,7 +17,6 @@
 
 from sqlalchemy import Column, MetaData, String, Table, Text, types
 from sqlalchemy.orm import sessionmaker
-from keystone import config
 
 
 #sqlite doesn't support dropping columns. Copy to a new table instead
@@ -42,6 +41,7 @@ def downgrade_user_table_with_copy(meta, migrate_engine):
                          'name': user.name,
                          'extra': user.extra})
     session.execute("drop table orig_user;")
+    session.close()
 
 
 def downgrade_tenant_table_with_copy(meta, migrate_engine):
@@ -65,6 +65,7 @@ def downgrade_tenant_table_with_copy(meta, migrate_engine):
                          'name': tenant.name,
                          'extra': tenant.extra})
     session.execute("drop table orig_tenant;")
+    session.close()
 
 
 def downgrade_user_table_with_column_drop(meta, migrate_engine):

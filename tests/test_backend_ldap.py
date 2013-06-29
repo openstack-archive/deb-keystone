@@ -15,11 +15,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import ldap
 import uuid
+
 import nose.exc
 
-from keystone.common import ldap as ldap_common
 from keystone.common.ldap import fakeldap
 from keystone import config
 from keystone import exception
@@ -339,7 +338,7 @@ class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
         self.assertEqual(user_ref['enabled'], True)
 
     def test_user_api_get_connection_no_user_password(self):
-        """Don't bind in case the user and password are blank"""
+        """Don't bind in case the user and password are blank."""
         self.config([test.etcdir('keystone.conf.sample'),
                      test.testsdir('test_overrides.conf')])
         CONF.ldap.url = "fake://memory"
@@ -368,7 +367,27 @@ class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
             'Invalid LDAP deref option: %s\.' % CONF.ldap.alias_dereferencing,
             identity.backends.ldap.Identity)
 
-# TODO (henry-nash) These need to be removed when the full LDAP implementation
+    def test_user_extra_attribute_mapping(self):
+        CONF.ldap.user_additional_attribute_mapping = ['description:name']
+        self.identity_api = identity.backends.ldap.Identity()
+        user = {
+            'id': 'extra_attributes',
+            'name': 'EXTRA_ATTRIBUTES',
+            'password': 'extra',
+        }
+        self.identity_api.create_user(user['id'], user)
+        dn, attrs = self.identity_api.user._ldap_get(user['id'])
+        self.assertTrue(user['name'] in attrs['description'])
+
+    def test_parse_extra_attribute_mapping(self):
+        option_list = ['description:name', 'gecos:password',
+                       'fake:invalid', 'invalid1', 'invalid2:',
+                       'description:name:something']
+        mapping = self.identity_api.user._parse_extra_attrs(option_list)
+        expected_dict = {'description': 'name', 'gecos': 'password'}
+        self.assertDictEqual(expected_dict, mapping)
+
+# TODO(henry-nash): These need to be removed when the full LDAP implementation
 # is submitted - see Bugs 1092187, 1101287, 1101276, 1101289
 
     # (spzala)The group and domain crud tests below override the standard ones
@@ -404,7 +423,7 @@ class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
             self.identity_api.create_domain(
                 CONF.identity.default_domain_id, domain)
         with self.assertRaises(exception.DomainNotFound):
-            domain_ref = self.identity_api.get_domain(domain['id'])
+            self.identity_api.get_domain(domain['id'])
         with self.assertRaises(exception.DomainNotFound):
             domain['description'] = uuid.uuid4().hex
             self.identity_api.update_domain(domain['id'], domain)

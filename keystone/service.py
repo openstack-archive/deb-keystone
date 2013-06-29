@@ -18,10 +18,12 @@ import routes
 
 from keystone import auth
 from keystone import catalog
-from keystone import config
 from keystone.common import logging
 from keystone.common import wsgi
+from keystone import config
 from keystone.contrib import ec2
+from keystone import controllers
+from keystone import credential
 from keystone import identity
 from keystone import policy
 from keystone import routers
@@ -34,6 +36,7 @@ LOG = logging.getLogger(__name__)
 
 DRIVERS = dict(
     catalog_api=catalog.Manager(),
+    credentials_api=credential.Manager(),
     ec2_api=ec2.Manager(),
     identity_api=identity.Manager(),
     policy_api=policy.Manager(),
@@ -43,6 +46,7 @@ DRIVERS = dict(
 
 @logging.fail_gracefully
 def public_app_factory(global_conf, **local_conf):
+    controllers.register_version('v2.0')
     conf = global_conf.copy()
     conf.update(local_conf)
     return wsgi.ComposingRouter(routes.Mapper(),
@@ -81,11 +85,12 @@ def admin_version_app_factory(global_conf, **local_conf):
 
 @logging.fail_gracefully
 def v3_app_factory(global_conf, **local_conf):
+    controllers.register_version('v3')
     conf = global_conf.copy()
     conf.update(local_conf)
     mapper = routes.Mapper()
     v3routers = []
-    for module in [auth, catalog, identity, policy]:
+    for module in [auth, catalog, credential, identity, policy]:
         module.routers.append_v3_routers(mapper, v3routers)
 
     if CONF.trust.enabled:

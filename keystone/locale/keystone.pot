@@ -7,9 +7,9 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: keystone "
-"jenkins.keystone.propose.translation.update.130\n"
+"jenkins.keystone.propose.translation.update.209\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2013-03-04 00:02+0000\n"
+"POT-Creation-Date: 2013-05-22 17:05+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -35,57 +35,65 @@ msgstr ""
 
 #: keystone/clean.py:36
 #, python-format
-msgid "%(property_name)s is not a%(display_expected_type)s"
+msgid "%(property_name)s is not a %(display_expected_type)s"
 msgstr ""
 
-#: keystone/config.py:93
-#, python-format
-msgid "Unable to locate specified logging config file: %s"
-msgstr ""
-
-#: keystone/config.py:111
-msgid "Invalid syslog facility"
-msgstr ""
-
-#: keystone/test.py:107
+#: keystone/test.py:115
 #, python-format
 msgid "Failed to checkout %s"
 msgstr ""
 
-#: keystone/auth/controllers.py:78
+#: keystone/auth/controllers.py:72
 #, python-format
 msgid "Project is disabled: %s"
 msgstr ""
 
-#: keystone/auth/controllers.py:84 keystone/auth/methods/password.py:40
+#: keystone/auth/controllers.py:78 keystone/auth/plugins/password.py:40
 #, python-format
 msgid "Domain is disabled: %s"
 msgstr ""
 
-#: keystone/auth/controllers.py:90 keystone/auth/methods/password.py:46
+#: keystone/auth/controllers.py:84 keystone/auth/plugins/password.py:46
 #, python-format
 msgid "User is disabled: %s"
 msgstr ""
 
-#: keystone/auth/controllers.py:250
+#: keystone/auth/controllers.py:265
 msgid "Scoping to both domain and project is not allowed"
 msgstr ""
 
-#: keystone/auth/controllers.py:311
+#: keystone/auth/controllers.py:268
+msgid "Scoping to both domain and trust is not allowed"
+msgstr ""
+
+#: keystone/auth/controllers.py:271
+msgid "Scoping to both project and trust is not allowed"
+msgstr ""
+
+#: keystone/auth/controllers.py:333
 #, python-format
 msgid "Unable to lookup user %s"
 msgstr ""
 
-#: keystone/auth/controllers.py:341
+#: keystone/auth/controllers.py:363
 msgid "User not found"
 msgstr ""
 
-#: keystone/auth/token_factory.py:75
+#: keystone/auth/token_factory.py:81
 msgid "User have no access to project"
 msgstr ""
 
-#: keystone/auth/token_factory.py:90
+#: keystone/auth/token_factory.py:96
 msgid "User have no access to domain"
+msgstr ""
+
+#: keystone/auth/token_factory.py:314 keystone/token/controllers.py:121
+msgid "Unable to sign token."
+msgstr ""
+
+#: keystone/auth/token_factory.py:317 keystone/token/controllers.py:124
+#, python-format
+msgid "Invalid value for token_format: %s.  Allowed values are PKI or UUID."
 msgstr ""
 
 #: keystone/catalog/core.py:38
@@ -122,9 +130,24 @@ msgstr ""
 msgid "Verify error: %s"
 msgstr ""
 
-#: keystone/common/cms.py:134
+#: keystone/common/cms.py:135
+msgid ""
+"Signing error: Unable to load certificate - ensure you've configured PKI "
+"with 'keystone-manage pki_setup'"
+msgstr ""
+
+#: keystone/common/cms.py:139
 #, python-format
 msgid "Signing error: %s"
+msgstr ""
+
+#: keystone/common/config.py:93
+#, python-format
+msgid "Unable to locate specified logging config file: %s"
+msgstr ""
+
+#: keystone/common/config.py:111
+msgid "Invalid syslog facility"
 msgstr ""
 
 #: keystone/common/controller.py:19
@@ -161,120 +184,159 @@ msgstr ""
 msgid "RBAC: Adding query filter params (%s)"
 msgstr ""
 
-#: keystone/common/controller.py:280
+#: keystone/common/controller.py:332
 msgid "Invalid token in normalize_domain_id"
 msgstr ""
 
-#: keystone/common/utils.py:93
-#, python-format
-msgid "Unknown Signature Version: %s"
-msgstr ""
-
-#: keystone/common/utils.py:124
-msgid "using _calc_signature_2"
-msgstr ""
-
-#: keystone/common/utils.py:140
-#, python-format
-msgid "query string: %s"
-msgstr ""
-
-#: keystone/common/utils.py:142
-#, python-format
-msgid "string_to_sign: %s"
-msgstr ""
-
-#: keystone/common/utils.py:145
-#, python-format
-msgid "len(b64)=%d"
-msgstr ""
-
-#: keystone/common/utils.py:146
-#, python-format
-msgid "base64 encoded digest: %s"
-msgstr ""
-
-#: keystone/common/wsgi.py:76
+#: keystone/common/wsgi.py:106
 #, python-format
 msgid "Starting %(arg0)s on %(host)s:%(port)s"
 msgstr ""
 
-#: keystone/common/wsgi.py:211
+#: keystone/common/wsgi.py:166
+msgid "Server error"
+msgstr ""
+
+#: keystone/common/wsgi.py:245
 #, python-format
 msgid "arg_dict: %s"
 msgstr ""
 
-#: keystone/common/wsgi.py:233
+#: keystone/common/wsgi.py:267
 #, python-format
 msgid "Authorization failed. %s from %s"
 msgstr ""
 
-#: keystone/common/wsgi.py:454
+#: keystone/common/wsgi.py:510
 msgid "The resource could not be found."
 msgstr ""
 
-#: keystone/common/ldap/core.py:68
+#: keystone/common/ldap/core.py:79
+#, python-format
+msgid "Invalid LDAP deref option: %s. Choose one of: "
+msgstr ""
+
+#: keystone/common/ldap/core.py:87
+#, python-format
+msgid "Invalid LDAP tls certs option: %s. Choose one of: "
+msgstr ""
+
+#: keystone/common/ldap/core.py:96
 #, python-format
 msgid "Invalid LDAP scope: %s. Choose one of: "
 msgstr ""
 
-#: keystone/common/ldap/core.py:197 keystone/identity/backends/kvs.py:588
-#: keystone/identity/backends/kvs.py:616
+#: keystone/common/ldap/core.py:185
+#, python-format
+msgid ""
+"Invalid additional attribute mapping: \"%s\". Format must be "
+"<ldap_attribute>:<keystone_attribute>"
+msgstr ""
+
+#: keystone/common/ldap/core.py:190
+#, python-format
+msgid ""
+"Invalid additional attribute mapping: \"%(item)s\". Value "
+"\"%(attr_map)s\" must use one of %(keys)s."
+msgstr ""
+
+#: keystone/common/ldap/core.py:274 keystone/identity/backends/kvs.py:603
+#: keystone/identity/backends/kvs.py:631
 #, python-format
 msgid "Duplicate name, %s."
 msgstr ""
 
-#: keystone/common/ldap/core.py:207 keystone/identity/backends/kvs.py:581
+#: keystone/common/ldap/core.py:284 keystone/identity/backends/kvs.py:596
 #, python-format
 msgid "Duplicate ID, %s."
 msgstr ""
 
-#: keystone/common/ldap/core.py:212
+#: keystone/common/ldap/core.py:289
 #, python-format
 msgid "LDAP %s create"
 msgstr ""
 
-#: keystone/common/ldap/core.py:320
+#: keystone/common/ldap/core.py:367
 #, python-format
 msgid "LDAP %s update"
 msgstr ""
 
-#: keystone/common/ldap/core.py:348
+#: keystone/common/ldap/core.py:400
 #, python-format
 msgid "LDAP %s delete"
 msgstr ""
 
-#: keystone/common/ldap/core.py:365
+#: keystone/common/ldap/core.py:425
 #, python-format
 msgid "LDAP init: url=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:369
+#: keystone/common/ldap/core.py:426
+#, python-format
+msgid ""
+"LDAP init: use_tls=%(use_tls)s\n"
+"tls_cacertfile=%(tls_cacertfile)s\n"
+"tls_cacertdir=%(tls_cacertdir)s\n"
+"tls_req_cert=%(tls_req_cert)s\n"
+"tls_avail=%(tls_avail)s\n"
+msgstr ""
+
+#: keystone/common/ldap/core.py:445
+msgid "Invalid TLS / LDAPS combination"
+msgstr ""
+
+#: keystone/common/ldap/core.py:449
+#, python-format
+msgid "Invalid LDAP TLS_AVAIL option: %s. TLSnot available"
+msgstr ""
+
+#: keystone/common/ldap/core.py:459
+#, python-format
+msgid "tls_cacertfile %s not found or is not a file"
+msgstr ""
+
+#: keystone/common/ldap/core.py:471
+#, python-format
+msgid "tls_cacertdir %s not found or is not a directory"
+msgstr ""
+
+#: keystone/common/ldap/core.py:478
+#, python-format
+msgid "LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s"
+msgstr ""
+
+#: keystone/common/ldap/core.py:492
 #, python-format
 msgid "LDAP bind: dn=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:380
+#: keystone/common/ldap/core.py:503
 #, python-format
 msgid "LDAP add: dn=%s, attrs=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:385
+#: keystone/common/ldap/core.py:508
 #, python-format
 msgid "LDAP search: dn=%s, scope=%s, query=%s, attrs=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:409
+#: keystone/common/ldap/core.py:559
+msgid ""
+"LDAP Server does not support paging. Disable paging in keystone.conf to "
+"avoid this message."
+msgstr ""
+
+#: keystone/common/ldap/core.py:576
 #, python-format
 msgid "LDAP modify: dn=%s, modlist=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:414
+#: keystone/common/ldap/core.py:581
 #, python-format
 msgid "LDAP delete: dn=%s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:418
+#: keystone/common/ldap/core.py:585
 #, python-format
 msgid "LDAP delete_ext: dn=%s, serverctrls=%s"
 msgstr ""
@@ -370,7 +432,7 @@ msgstr ""
 msgid "Search scope %s not implemented."
 msgstr ""
 
-#: keystone/common/sql/core.py:206
+#: keystone/common/sql/core.py:207
 #, python-format
 msgid "Got mysql server has gone away: %s"
 msgstr ""
@@ -419,22 +481,39 @@ msgstr ""
 msgid "Creating ec2 cred for user %s and tenant %s"
 msgstr ""
 
-#: keystone/identity/backends/kvs.py:254 keystone/identity/backends/kvs.py:263
+#: keystone/identity/backends/kvs.py:257 keystone/identity/backends/kvs.py:266
 msgid "User not found in group"
 msgstr ""
 
-#: keystone/identity/backends/sql.py:467
+#: keystone/identity/backends/sql.py:424
 #, python-format
 msgid "Cannot remove role that has not been granted, %s"
 msgstr ""
 
-#: keystone/identity/backends/ldap/core.py:730
+#: keystone/identity/backends/ldap/core.py:95
+#, python-format
+msgid "Expected dict or list: %s"
+msgstr ""
+
+#: keystone/identity/backends/ldap/core.py:692
 #, python-format
 msgid "Role %s not found"
 msgstr ""
 
-#: keystone/identity/backends/ldap/core.py:968
+#: keystone/identity/backends/ldap/core.py:912
 msgid "Changing Name not supported by LDAP"
+msgstr ""
+
+#: keystone/identity/backends/ldap/core.py:926
+#, python-format
+msgid "User %s is already a member of group %s"
+msgstr ""
+
+#: keystone/identity/backends/ldap/core.py:968
+#, python-format
+msgid ""
+"Group member '%(user_dn)s' not found in '%(group_dn)s'. The user should "
+"be removed from the group. The user will be ignored."
 msgstr ""
 
 #: keystone/openstack/common/policy.py:394
@@ -457,11 +536,23 @@ msgstr ""
 msgid "enforce %s: %s"
 msgstr ""
 
-#: keystone/token/backends/memcache.py:81
+#: keystone/token/controllers.py:466 keystone/token/controllers.py:469
+msgid "Token does not belong to specified tenant."
+msgstr ""
+
+#: keystone/token/controllers.py:476
+msgid "Non-default domain is not supported"
+msgstr ""
+
+#: keystone/token/controllers.py:484
+msgid "Domain scoped token is not supported"
+msgstr ""
+
+#: keystone/token/backends/memcache.py:83
 msgid "Unable to add token user list."
 msgstr ""
 
-#: keystone/token/backends/memcache.py:91
+#: keystone/token/backends/memcache.py:93
 msgid "Unable to add token to revocation list."
 msgstr ""
 

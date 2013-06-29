@@ -43,6 +43,7 @@ class Token(kvs.Base, token.Driver):
     def create_token(self, token_id, data):
         token_id = token.unique_id(token_id)
         data_copy = copy.deepcopy(data)
+        data_copy['id'] = token_id
         if not data_copy.get('expires'):
             data_copy['expires'] = token.default_expire_time()
         if not data_copy.get('user_id'):
@@ -74,7 +75,6 @@ class Token(kvs.Base, token.Driver):
         for token, ref in self.db.items():
             if not token.startswith('token-') or self.is_expired(now, ref):
                 continue
-            ref_trust_id = ref.get('trust_id')
             if self.trust_matches(trust_id, ref):
                 tokens.append(token.split('-', 1)[1])
         return tokens
@@ -115,3 +115,9 @@ class Token(kvs.Base, token.Driver):
             record['expires'] = token_ref['expires']
             tokens.append(record)
         return tokens
+
+    def flush_expired_tokens(self):
+        now = timeutils.utcnow()
+        for token, token_ref in self.db.items():
+            if self.is_expired(now, token_ref):
+                self.db.delete(token)

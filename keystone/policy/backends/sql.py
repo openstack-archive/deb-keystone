@@ -14,8 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import functools
-
 from keystone.common import sql
 from keystone.common.sql import migration
 from keystone import exception
@@ -55,10 +53,10 @@ class Policy(sql.Base, rules.Policy):
 
     def _get_policy(self, session, policy_id):
         """Private method to get a policy model object (NOT a dictionary)."""
-        try:
-            return session.query(PolicyModel).filter_by(id=policy_id).one()
-        except sql.NotFound:
+        ref = session.query(PolicyModel).get(policy_id)
+        if not ref:
             raise exception.PolicyNotFound(policy_id=policy_id)
+        return ref
 
     def get_policy(self, policy_id):
         session = self.get_session()

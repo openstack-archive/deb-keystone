@@ -21,17 +21,17 @@ import subprocess
 import uuid
 import webob
 
+from keystone import catalog
 from keystone.common import cms
 from keystone.common import logging
 from keystone.common import utils
-from keystone import catalog
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone import token as token_module
-from keystone import trust
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
+from keystone import token as token_module
+from keystone import trust
 
 
 CONF = config.CONF
@@ -178,11 +178,11 @@ class TokenDataHelper(object):
             try:
                 service_catalog = self.catalog_api.get_v3_catalog(
                     self.context, user_id, project_id)
-            #TODO KVS backend needs a sample implementation
+            # TODO(ayoung): KVS backend needs a sample implementation
             except exception.NotImplemented:
                 service_catalog = {}
             # TODO(gyee): v3 service catalog is not quite completed yet
-            #TODO Enforce Endpoints for trust
+            # TODO(ayoung): Enforce Endpoints for trust
             token_data['catalog'] = service_catalog
 
     def _populate_token(self, token_data, expires=None, trust=None):
@@ -219,7 +219,7 @@ class TokenDataHelper(object):
 
 def recreate_token_data(context, token_data=None, expires=None,
                         user_ref=None, project_ref=None):
-    """ Recreate token from an existing token.
+    """Recreate token from an existing token.
 
     Repopulate the ephemeral data and return the new token data.
 
@@ -351,7 +351,7 @@ def create_token(context, auth_context, auth_info):
 
 
 def render_token_data_response(token_id, token_data, created=False):
-    """ Render token data HTTP response.
+    """Render token data HTTP response.
 
     Stash token ID into the X-Auth-Token header.
 

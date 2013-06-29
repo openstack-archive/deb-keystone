@@ -17,7 +17,6 @@
 import datetime
 import default_fixtures
 import uuid
-import nose.exc
 
 from keystone.catalog import core
 from keystone import config
@@ -29,6 +28,7 @@ from keystone import test
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+NULL_OBJECT = object()
 
 
 class IdentityTests(object):
@@ -134,12 +134,21 @@ class IdentityTests(object):
         user.pop('password')
         self.assertEquals(metadata_ref, {"roles":
                                          [CONF.member_role_id]})
-        self.assertDictContainsSubset(user_ref, user)
+        self.assertDictContainsSubset(user, user_ref)
         self.assertDictEqual(tenant_ref, self.tenant_baz)
 
     def test_password_hashed(self):
         user_ref = self.identity_api._get_user(self.user_foo['id'])
         self.assertNotEqual(user_ref['password'], self.user_foo['password'])
+
+    def test_create_unicode_user_name(self):
+        unicode_name = u'name \u540d\u5b57'
+        user = {'id': uuid.uuid4().hex,
+                'name': unicode_name,
+                'domain_id': DEFAULT_DOMAIN_ID,
+                'password': uuid.uuid4().hex}
+        ref = self.identity_api.create_user(user['id'], user)
+        self.assertEqual(unicode_name, ref['name'])
 
     def test_get_project(self):
         tenant_ref = self.identity_api.get_project(
@@ -502,7 +511,7 @@ class IdentityTests(object):
         self.assertIn('member', roles_ref)
 
     def test_get_roles_for_user_and_domain(self):
-        """ Test for getting roles for user on a domain.
+        """Test for getting roles for user on a domain.
 
         Test Plan:
         - Create a domain, with 2 users
@@ -558,7 +567,7 @@ class IdentityTests(object):
         self.assertEquals(len(roles_ref), 0)
 
     def test_get_roles_for_user_and_domain_404(self):
-        """ Test errors raised when getting roles for user on a domain.
+        """Test errors raised when getting roles for user on a domain.
 
         Test Plan:
         - Check non-existing user gives UserNotFound
@@ -707,7 +716,7 @@ class IdentityTests(object):
     def test_get_and_remove_role_grant_by_group_and_project(self):
         new_domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.identity_api.create_domain(new_domain['id'], new_domain)
-        new_group = {'id': uuid.uuid4().hex, 'domain_id': uuid.uuid4().hex,
+        new_group = {'id': uuid.uuid4().hex, 'domain_id': new_domain['id'],
                      'name': uuid.uuid4().hex}
         self.identity_man.create_group({}, new_group['id'], new_group)
         new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
@@ -1521,6 +1530,18 @@ class IdentityTests(object):
                           'fake1',
                           user)
 
+    def test_create_user_invalid_enabled_type(self):
+        user = {'id': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex,
+                'domain_id': DEFAULT_DOMAIN_ID,
+                'password': uuid.uuid4().hex,
+                # invalid string value
+                'enabled': "true"}
+        self.assertRaises(exception.ValidationError,
+                          self.identity_man.create_user, {},
+                          user['id'],
+                          user)
+
     def test_update_user_long_name_fails(self):
         user = {'id': 'fake1', 'name': 'fake1',
                 'domain_id': DEFAULT_DOMAIN_ID}
@@ -1663,10 +1684,45 @@ class IdentityTests(object):
         user_ref = self.identity_api.get_user('fake1')
         self.assertEqual(user_ref['enabled'], user['enabled'])
 
+        # If not present, enabled field should not be updated
+        del user['enabled']
+        self.identity_api.update_user('fake1', user)
+        user_ref = self.identity_api.get_user('fake1')
+        self.assertEqual(user_ref['enabled'], False)
+
         user['enabled'] = True
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
         self.assertEqual(user_ref['enabled'], user['enabled'])
+
+        del user['enabled']
+        self.identity_api.update_user('fake1', user)
+        user_ref = self.identity_api.get_user('fake1')
+        self.assertEqual(user_ref['enabled'], True)
+
+        # Integers are valid Python's booleans. Explicitly test it.
+        user['enabled'] = 0
+        self.identity_api.update_user('fake1', user)
+        user_ref = self.identity_api.get_user('fake1')
+        self.assertEqual(user_ref['enabled'], False)
+
+        # Any integers other than 0 are interpreted as True
+        user['enabled'] = -42
+        self.identity_api.update_user('fake1', user)
+        user_ref = self.identity_api.get_user('fake1')
+        self.assertEqual(user_ref['enabled'], True)
+
+    def test_update_user_enable_fails(self):
+        user = {'id': 'fake1', 'name': 'fake1', 'enabled': True,
+                'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_user('fake1', user)
+        user_ref = self.identity_api.get_user('fake1')
+        self.assertEqual(user_ref['enabled'], True)
+
+        # Strings are not valid boolean values
+        user['enabled'] = "false"
+        self.assertRaises(exception.ValidationError,
+                          self.identity_api.update_user, 'fake1', user)
 
     def test_update_project_enable(self):
         tenant = {'id': 'fake1', 'name': 'fake1', 'enabled': True,
@@ -1776,12 +1832,12 @@ class IdentityTests(object):
         self.identity_man.create_user({}, new_user['id'], new_user)
         self.identity_api.add_user_to_group(new_user['id'],
                                             new_group['id'])
-        agroups = self.identity_api.list_groups_for_user(new_user['id'])
+        groups = self.identity_api.list_groups_for_user(new_user['id'])
+        self.assertIn(new_group['id'], [x['id'] for x in groups])
         self.identity_api.remove_user_from_group(new_user['id'],
                                                  new_group['id'])
         groups = self.identity_api.list_groups_for_user(new_user['id'])
-        for x in groups:
-            self.assertFalse(x['id'] == new_group['id'])
+        self.assertNotIn(new_group['id'], [x['id'] for x in groups])
 
     def test_remove_user_from_group_404(self):
         domain = self._get_domain_fixture()
@@ -1808,16 +1864,18 @@ class IdentityTests(object):
                           uuid.uuid4().hex)
 
     def test_group_crud(self):
-        group = {'id': uuid.uuid4().hex, 'domain_id': uuid.uuid4().hex,
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.identity_api.create_domain(domain['id'], domain)
+        group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
                  'name': uuid.uuid4().hex}
         self.identity_man.create_group({}, group['id'], group)
         group_ref = self.identity_api.get_group(group['id'])
-        self.assertDictContainsSubset(group_ref, group)
+        self.assertDictContainsSubset(group, group_ref)
 
         group['name'] = uuid.uuid4().hex
         self.identity_api.update_group(group['id'], group)
         group_ref = self.identity_api.get_group(group['id'])
-        self.assertDictContainsSubset(group_ref, group)
+        self.assertDictContainsSubset(group, group_ref)
 
         self.identity_api.delete_group(group['id'])
         self.assertRaises(exception.GroupNotFound,
@@ -1881,16 +1939,19 @@ class IdentityTests(object):
                           group1)
 
     def test_project_crud(self):
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                  'enabled': True}
+        self.identity_api.create_domain(domain['id'], domain)
         project = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                   'domain_id': uuid.uuid4().hex}
+                   'domain_id': domain['id']}
         self.identity_man.create_project({}, project['id'], project)
         project_ref = self.identity_api.get_project(project['id'])
-        self.assertDictContainsSubset(project_ref, project)
+        self.assertDictContainsSubset(project, project_ref)
 
         project['name'] = uuid.uuid4().hex
         self.identity_api.update_project(project['id'], project)
         project_ref = self.identity_api.get_project(project['id'])
-        self.assertDictContainsSubset(project_ref, project)
+        self.assertDictContainsSubset(project, project_ref)
 
         self.identity_api.delete_project(project['id'])
         self.assertRaises(exception.ProjectNotFound,
@@ -1922,14 +1983,14 @@ class IdentityTests(object):
         user_ref = self.identity_api.get_user(user['id'])
         del user['password']
         user_ref_dict = dict((x, user_ref[x]) for x in user_ref)
-        self.assertDictContainsSubset(user_ref_dict, user)
+        self.assertDictContainsSubset(user, user_ref_dict)
 
         user['password'] = uuid.uuid4().hex
         self.identity_api.update_user(user['id'], user)
         user_ref = self.identity_api.get_user(user['id'])
         del user['password']
         user_ref_dict = dict((x, user_ref[x]) for x in user_ref)
-        self.assertDictContainsSubset(user_ref_dict, user)
+        self.assertDictContainsSubset(user, user_ref_dict)
 
         self.identity_api.delete_user(user['id'])
         self.assertRaises(exception.UserNotFound,
@@ -1937,8 +1998,10 @@ class IdentityTests(object):
                           user['id'])
 
     def test_list_user_projects(self):
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.identity_api.create_domain(domain['id'], domain)
         user1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                 'password': uuid.uuid4().hex, 'domain_id': uuid.uuid4().hex,
+                 'password': uuid.uuid4().hex, 'domain_id': domain['id'],
                  'enabled': True}
         self.identity_man.create_user({}, user1['id'], user1)
         user_projects = self.identity_api.list_user_projects(user1['id'])
@@ -1955,7 +2018,9 @@ class IdentityTests(object):
 
 class TokenTests(object):
     def _create_token_id(self):
-        token_id = ""
+        # Token must start with MII here otherwise it fails the asn1 test
+        # and is not hashed in a SQL backend.
+        token_id = "MII"
         for i in range(1, 20):
             token_id += uuid.uuid4().hex
         return token_id
@@ -1969,13 +2034,16 @@ class TokenTests(object):
         expires = data_ref.pop('expires')
         data_ref.pop('user_id')
         self.assertTrue(isinstance(expires, datetime.datetime))
+        data_ref.pop('id')
+        data.pop('id')
         self.assertDictEqual(data_ref, data)
 
         new_data_ref = self.token_api.get_token(token_id)
         expires = new_data_ref.pop('expires')
-        new_data_ref.pop('user_id')
-
         self.assertTrue(isinstance(expires, datetime.datetime))
+        new_data_ref.pop('user_id')
+        new_data_ref.pop('id')
+
         self.assertEquals(new_data_ref, data)
 
         self.token_api.delete_token(token_id)
@@ -1990,10 +2058,12 @@ class TokenTests(object):
                 'user': {'id': 'testuserid'}}
         if tenant_id is not None:
             data['tenant'] = {'id': tenant_id, 'name': tenant_id}
+        if tenant_id is NULL_OBJECT:
+            data['tenant'] = None
         if trust_id is not None:
             data['trust_id'] = trust_id
-        self.token_api.create_token(token_id, data)
-        return token_id
+        new_token = self.token_api.create_token(token_id, data)
+        return new_token['id']
 
     def test_token_list(self):
         tokens = self.token_api.list_tokens('testuserid')
@@ -2021,12 +2091,15 @@ class TokenTests(object):
         tenant2 = uuid.uuid4().hex
         token_id3 = self.create_token_sample_data(tenant_id=tenant1)
         token_id4 = self.create_token_sample_data(tenant_id=tenant2)
+        # test for existing but empty tenant (LP:1078497)
+        token_id5 = self.create_token_sample_data(tenant_id=NULL_OBJECT)
         tokens = self.token_api.list_tokens('testuserid')
-        self.assertEquals(len(tokens), 2)
+        self.assertEquals(len(tokens), 3)
         self.assertNotIn(token_id1, tokens)
         self.assertNotIn(token_id2, tokens)
         self.assertIn(token_id3, tokens)
         self.assertIn(token_id4, tokens)
+        self.assertIn(token_id5, tokens)
         tokens = self.token_api.list_tokens('testuserid', tenant2)
         self.assertEquals(len(tokens), 1)
         self.assertNotIn(token_id1, tokens)
@@ -2074,6 +2147,12 @@ class TokenTests(object):
         data_ref = self.token_api.create_token(token_id, data)
         self.assertIsNotNone(data_ref['expires'])
         new_data_ref = self.token_api.get_token(token_id)
+
+        # MySQL doesn't store microseconds, so discard them before testing
+        data_ref['expires'] = data_ref['expires'].replace(microsecond=0)
+        new_data_ref['expires'] = new_data_ref['expires'].replace(
+            microsecond=0)
+
         self.assertEqual(data_ref, new_data_ref)
 
     def check_list_revoked_tokens(self, token_ids):
@@ -2108,6 +2187,32 @@ class TokenTests(object):
         self.check_list_revoked_tokens([self.delete_token()
                                         for x in xrange(2)])
 
+    def test_flush_expired_token(self):
+        token_id = uuid.uuid4().hex
+        expire_time = timeutils.utcnow() - datetime.timedelta(minutes=1)
+        data = {'id_hash': token_id, 'id': token_id, 'a': 'b',
+                'expires': expire_time,
+                'trust_id': None,
+                'user': {'id': 'testuserid'}}
+        data_ref = self.token_api.create_token(token_id, data)
+        data_ref.pop('user_id')
+        self.assertDictEqual(data_ref, data)
+
+        token_id = uuid.uuid4().hex
+        expire_time = timeutils.utcnow() + datetime.timedelta(minutes=1)
+        data = {'id_hash': token_id, 'id': token_id, 'a': 'b',
+                'expires': expire_time,
+                'trust_id': None,
+                'user': {'id': 'testuserid'}}
+        data_ref = self.token_api.create_token(token_id, data)
+        data_ref.pop('user_id')
+        self.assertDictEqual(data_ref, data)
+
+        self.token_api.flush_expired_tokens()
+        tokens = self.token_api.list_tokens('testuserid')
+        self.assertEqual(len(tokens), 1)
+        self.assertIn(token_id, tokens)
+
 
 class TrustTests(object):
     def create_sample_trust(self, new_id):
@@ -2136,6 +2241,12 @@ class TrustTests(object):
         self.trust_api.delete_trust(trust_id)
         self.assertIsNone(self.trust_api.get_trust(trust_id))
 
+    def test_delete_trust_not_found(self):
+        trust_id = uuid.uuid4().hex
+        self.assertRaises(exception.TrustNotFound,
+                          self.trust_api.delete_trust,
+                          trust_id)
+
     def test_get_trust(self):
         new_id = uuid.uuid4().hex
         trust_data = self.create_sample_trust(new_id)
@@ -2154,22 +2265,22 @@ class TrustTests(object):
         self.assertTrue(timeutils.normalize_time(trust_data['expires_at']) >
                         timeutils.utcnow())
 
-        self.assertEquals([{'id':'member'},
+        self.assertEquals([{'id': 'member'},
                            {'id': 'other'},
                            {'id': 'browser'}], trust_data['roles'])
 
     def test_list_trust_by_trustee(self):
         for i in range(0, 3):
-            trust_data = self.create_sample_trust(uuid.uuid4().hex)
-        trusts = self.trust_api.list_trusts_for_trustee(self.trustee)
+            self.create_sample_trust(uuid.uuid4().hex)
+        trusts = self.trust_api.list_trusts_for_trustee(self.trustee['id'])
         self.assertEqual(len(trusts), 3)
         self.assertEqual(trusts[0]["trustee_user_id"], self.trustee['id'])
-        trusts = self.trust_api.list_trusts_for_trustee(self.trustor)
+        trusts = self.trust_api.list_trusts_for_trustee(self.trustor['id'])
         self.assertEqual(len(trusts), 0)
 
-    def test_list_trust_by_trustee(self):
+    def test_list_trust_by_trustor(self):
         for i in range(0, 3):
-            trust_data = self.create_sample_trust(uuid.uuid4().hex)
+            self.create_sample_trust(uuid.uuid4().hex)
         trusts = self.trust_api.list_trusts_for_trustor(self.trustor['id'])
         self.assertEqual(len(trusts), 3)
         self.assertEqual(trusts[0]["trustor_user_id"], self.trustor['id'])
@@ -2178,7 +2289,7 @@ class TrustTests(object):
 
     def test_list_trusts(self):
         for i in range(0, 3):
-            trust_data = self.create_sample_trust(uuid.uuid4().hex)
+            self.create_sample_trust(uuid.uuid4().hex)
         trusts = self.trust_api.list_trusts()
         self.assertEqual(len(trusts), 3)
 

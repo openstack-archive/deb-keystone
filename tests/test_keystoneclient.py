@@ -14,15 +14,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import time
 import uuid
 import webob
 
 import nose.exc
 
+from keystone import config
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
-from keystone import config
 from keystone import test
 
 import default_fixtures
@@ -421,10 +420,11 @@ class KeystoneClientTests(object):
                           token=token_id)
 
     def test_token_expiry_maintained(self):
+        timeutils.set_time_override()
         foo_client = self.get_client(self.user_foo)
 
         orig_token = foo_client.service_catalog.catalog['token']
-        time.sleep(.5)
+        timeutils.advance_time_seconds(1)
         reauthenticated_token = foo_client.tokens.authenticate(
             token=foo_client.auth_token)
 
@@ -953,7 +953,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         token_id = client.auth_token
         new_password = uuid.uuid4().hex
 
-        # TODO(derekh) : Update to use keystoneclient when available
+        # TODO(derekh): Update to use keystoneclient when available
         class FakeResponse(object):
             def start_fake_response(self, status, headers):
                 self.response_status = int(status.split(' ', 1)[0])
@@ -980,7 +980,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         token_id = client.auth_token
         new_password = uuid.uuid4().hex
 
-        # TODO(derekh) : Update to use keystoneclient when available
+        # TODO(derekh): Update to use keystoneclient when available
         class FakeResponse(object):
             def start_fake_response(self, status, headers):
                 self.response_status = int(status.split(' ', 1)[0])
@@ -1009,7 +1009,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         token_id = client.auth_token
         new_password = uuid.uuid4().hex
 
-        # TODO(derekh) : Update to use keystoneclient when available
+        # TODO(derekh): Update to use keystoneclient when available
         class FakeResponse(object):
             def start_fake_response(self, status, headers):
                 self.response_status = int(status.split(' ', 1)[0])
@@ -1128,8 +1128,7 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         raise nose.exc.SkipTest('N/A')
 
     def test_policy_crud(self):
-        """Due to lack of endpoint CRUD"""
-        raise nose.exc.SkipTest('N/A')
+        raise nose.exc.SkipTest('N/A due to lack of endpoint CRUD')
 
 
 class Kc11TestCase(CompatTestCase, KeystoneClientTests):

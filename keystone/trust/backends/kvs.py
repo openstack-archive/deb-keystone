@@ -18,12 +18,10 @@ An in memory implementation of the trusts API.
 only to be used for testing purposes
 """
 import copy
-import datetime
-
 
 from keystone.common import kvs
-from keystone.openstack.common import timeutils
 from keystone import exception
+from keystone.openstack.common import timeutils
 from keystone import trust
 
 
@@ -69,7 +67,7 @@ class Trust(kvs.Base, trust.Driver):
         try:
             ref = self.db.get('trust-%s' % trust_id)
         except exception.NotFound:
-            raise exception.TrustNotFound(token_id=token_id)
+            raise exception.TrustNotFound(trust_id=trust_id)
         ref['deleted'] = True
         self.db.set('trust-%s' % trust_id, ref)
 

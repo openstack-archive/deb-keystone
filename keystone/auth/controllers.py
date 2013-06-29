@@ -17,15 +17,15 @@
 import json
 
 from keystone.auth import token_factory
-from keystone.common import controller
 from keystone.common import cms
+from keystone.common import controller
 from keystone.common import logging
 from keystone import config
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common import importutils
 from keystone import token
 from keystone import trust
-from keystone.openstack.common import importutils
 
 
 LOG = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ def get_auth_method(method_name):
 
 
 class AuthInfo(object):
-    """ Encapsulation of "auth" request. """
+    """Encapsulation of "auth" request."""
 
     def __init__(self, context, auth=None):
         self.identity_api = identity.Manager()
@@ -166,7 +166,7 @@ class AuthInfo(object):
         return user_ref
 
     def _validate_and_normalize_scope_data(self):
-        """ Validate and normalize scope data """
+        """Validate and normalize scope data."""
         if 'scope' not in self.auth:
             return
         if sum(['project' in self.auth['scope'],
@@ -187,7 +187,7 @@ class AuthInfo(object):
                 raise exception.Forbidden('Trusts are disabled.')
             trust_ref = self._lookup_trust(
                 self.auth['scope']['OS-TRUST:trust'])
-            #TODO ayoung when trusts support domain, Fill in domain data here
+            # TODO(ayoung): when trusts support domains, fill in domain data
             if 'project_id' in trust_ref:
                 project_ref = self._lookup_project(
                     {'id': trust_ref['project_id']})
@@ -213,7 +213,7 @@ class AuthInfo(object):
                 raise exception.AuthMethodNotSupported()
 
     def _validate_and_normalize_auth_data(self):
-        """ Make sure "auth" is valid. """
+        """Make sure "auth" is valid."""
         # make sure "auth" exist
         if not self.auth:
             raise exception.ValidationError(attribute='auth',
@@ -223,7 +223,7 @@ class AuthInfo(object):
         self._validate_and_normalize_scope_data()
 
     def get_method_names(self):
-        """ Returns the identity method names.
+        """Returns the identity method names.
 
         :returns: list of auth method names
 
@@ -231,18 +231,18 @@ class AuthInfo(object):
         return self.auth['identity']['methods']
 
     def get_method_data(self, method):
-        """ Get the auth method payload.
+        """Get the auth method payload.
 
         :returns: auth method payload
 
         """
         if method not in self.auth['identity']['methods']:
-            raise exception.ValidationError(attribute=method_name,
+            raise exception.ValidationError(attribute=method,
                                             target='identity')
         return self.auth['identity'][method]
 
     def get_scope(self):
-        """ Get scope information.
+        """Get scope information.
 
         Verify and return the scoping information.
 
@@ -260,7 +260,7 @@ class AuthInfo(object):
         return self._scope_data
 
     def set_scope(self, domain_id=None, project_id=None, trust=None):
-        """ Set scope information. """
+        """Set scope information."""
         if domain_id and project_id:
             msg = _('Scoping to both domain and project is not allowed')
             raise ValueError(msg)
@@ -280,7 +280,7 @@ class Auth(controller.V3Controller):
         config.setup_authentication()
 
     def authenticate_for_token(self, context, auth=None):
-        """ Authenticate user and issue a token. """
+        """Authenticate user and issue a token."""
         try:
             auth_info = AuthInfo(context, auth=auth)
             auth_context = {'extras': {}, 'method_names': []}
@@ -334,7 +334,7 @@ class Auth(controller.V3Controller):
             raise exception.Unauthorized(msg)
 
     def authenticate(self, context, auth_info, auth_context):
-        """ Authenticate user. """
+        """Authenticate user."""
 
         # user have been authenticated externally
         if 'REMOTE_USER' in context:

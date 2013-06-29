@@ -1,7 +1,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2012 OpenStack LLC
-# Copyright 2013 IBM
+# Copyright 2013 IBM Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -39,6 +39,7 @@ of integrity constraints.
 
 import sqlalchemy as sql
 from sqlalchemy.orm import sessionmaker
+
 from keystone import config
 
 
@@ -94,7 +95,7 @@ def upgrade_user_table_with_copy(meta, migrate_engine, session):
     # different version of the user table
     meta2 = sql.MetaData()
     meta2.bind = migrate_engine
-    domain_table = sql.Table('domain', meta2, autoload=True)
+    sql.Table('domain', meta2, autoload=True)
     user_table = sql.Table(
         'user',
         meta2,
@@ -163,7 +164,7 @@ def upgrade_project_table_with_copy(meta, migrate_engine, session):
     # different version of the project table
     meta2 = sql.MetaData()
     meta2.bind = migrate_engine
-    domain_table = sql.Table('domain', meta2, autoload=True)
+    sql.Table('domain', meta2, autoload=True)
     project_table = sql.Table(
         'project',
         meta2,
@@ -326,7 +327,7 @@ def upgrade_user_table_with_col_create(meta, migrate_engine, session):
     # bat since any existing rows would cause an Integrity Error.
     # We therefore create it nullable, fill the column with the
     # default data and then set it to non nullable.
-    domain_table = sql.Table('domain', meta, autoload=True)
+    sql.Table('domain', meta, autoload=True)
     user_table = sql.Table('user', meta, autoload=True)
     user_table.create_column(
         sql.Column('domain_id', sql.String(64),
@@ -353,7 +354,7 @@ def upgrade_project_table_with_col_create(meta, migrate_engine, session):
     # bat since any existing rows would cause an Integrity Error.
     # We therefore create it nullable, fill the column with the
     # default data and then set it to non nullable.
-    domain_table = sql.Table('domain', meta, autoload=True)
+    sql.Table('domain', meta, autoload=True)
     project_table = sql.Table('project', meta, autoload=True)
     project_table.create_column(
         sql.Column('domain_id', sql.String(64),
@@ -381,7 +382,7 @@ def downgrade_user_table_with_col_drop(meta, migrate_engine, session):
     session.execute('ALTER TABLE "user" ADD UNIQUE (name);')
     session.commit()
     # And now go ahead an drop the domain_id column
-    domain_table = sql.Table('domain', meta, autoload=True)
+    sql.Table('domain', meta, autoload=True)
     user_table = sql.Table('user', meta, autoload=True)
     column = sql.Column('domain_id', sql.String(64),
                         sql.ForeignKey('domain.id'), nullable=False)
@@ -396,7 +397,7 @@ def downgrade_project_table_with_col_drop(meta, migrate_engine, session):
                     'UNIQUE (name);')
     session.commit()
     # And now go ahead an drop the domain_id column
-    domain_table = sql.Table('domain', meta, autoload=True)
+    sql.Table('domain', meta, autoload=True)
     project_table = sql.Table('project', meta, autoload=True)
     column = sql.Column('domain_id', sql.String(64),
                         sql.ForeignKey('domain.id'), nullable=False)

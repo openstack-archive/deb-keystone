@@ -14,6 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os.path
+
 import ldap
 from ldap import filter as ldap_filter
 
@@ -34,6 +36,9 @@ LDAP_DEREF = {'always': ldap.DEREF_ALWAYS,
               'finding': ldap.DEREF_FINDING,
               'never': ldap.DEREF_NEVER,
               'searching': ldap.DEREF_SEARCHING}
+LDAP_TLS_CERTS = {'never': ldap.OPT_X_TLS_NEVER,
+                  'demand': ldap.OPT_X_TLS_DEMAND,
+                  'allow': ldap.OPT_X_TLS_ALLOW}
 
 
 def py2ldap(val):
@@ -75,12 +80,25 @@ def parse_deref(opt):
                          opt) + ', '.join(LDAP_DEREF.keys()))
 
 
+def parse_tls_cert(opt):
+    try:
+        return LDAP_TLS_CERTS[opt]
+    except KeyError:
+        raise ValueError(_(
+            'Invalid LDAP TLS certs option: %(option). '
+            'Choose one of: %(options)s') % {
+                'option': opt,
+                'options': ', '.join(LDAP_TLS_CERTS.keys())})
+
+
 def ldap_scope(scope):
     try:
         return LDAP_SCOPES[scope]
     except KeyError:
-        raise ValueError(_('Invalid LDAP scope: %s. Choose one of: ' % scope) +
-                         ', '.join(LDAP_SCOPES.keys()))
+        raise ValueError(
+            _('Invalid LDAP scope: %(scope)s. Choose one of: %(options)s') % {
+                'scope': scope,
+                'options': ', '.join(LDAP_SCOPES.keys())})
 
 
 class BaseLdap(object):
@@ -90,6 +108,7 @@ class BaseLdap(object):
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_OBJECTCLASS = None
     DEFAULT_FILTER = None
+    DEFAULT_EXTRA_ATTR_MAPPING = []
     DUMB_MEMBER_DN = 'cn=dumb,dc=nonexistent'
     NotFound = None
     notfound_arg = None
@@ -106,6 +125,10 @@ class BaseLdap(object):
         self.LDAP_SCOPE = ldap_scope(conf.ldap.query_scope)
         self.alias_dereferencing = parse_deref(conf.ldap.alias_dereferencing)
         self.page_size = conf.ldap.page_size
+        self.use_tls = conf.ldap.use_tls
+        self.tls_cacertfile = conf.ldap.tls_cacertfile
+        self.tls_cacertdir = conf.ldap.tls_cacertdir
+        self.tls_req_cert = parse_tls_cert(conf.ldap.tls_req_cert)
 
         if self.options_name is not None:
             self.suffix = conf.ldap.suffix
@@ -121,6 +144,12 @@ class BaseLdap(object):
             objclass = '%s_objectclass' % self.options_name
             self.object_class = (getattr(conf.ldap, objclass)
                                  or self.DEFAULT_OBJECTCLASS)
+
+            attr_mapping_opt = ('%s_additional_attribute_mapping' %
+                                self.options_name)
+            attr_mapping = (getattr(conf.ldap, attr_mapping_opt)
+                            or self.DEFAULT_EXTRA_ATTR_MAPPING)
+            self.extra_attr_mapping = self._parse_extra_attrs(attr_mapping)
 
             filter = '%s_filter' % self.options_name
             self.filter = getattr(conf.ldap, filter) or self.DEFAULT_FILTER
@@ -151,13 +180,37 @@ class BaseLdap(object):
         else:
             return self.NotFound(**{self.notfound_arg: object_id})
 
+    def _parse_extra_attrs(self, option_list):
+        mapping = {}
+        for item in option_list:
+            try:
+                ldap_attr, attr_map = item.split(':')
+            except Exception:
+                LOG.warn(_(
+                    'Invalid additional attribute mapping: "%s". '
+                    'Format must be <ldap_attribute>:<keystone_attribute>')
+                    % item)
+                continue
+            if attr_map not in self.attribute_mapping:
+                LOG.warn(_('Invalid additional attribute mapping: "%(item)s". '
+                           'Value "%(attr_map)s" must use one of %(keys)s.') %
+                         {'item': item, 'attr_map': attr_map,
+                          'keys': ', '.join(self.attribute_mapping.keys())})
+                continue
+            mapping[ldap_attr] = attr_map
+        return mapping
+
     def get_connection(self, user=None, password=None):
         if self.LDAP_URL.startswith('fake://'):
             conn = fakeldap.FakeLdap(self.LDAP_URL)
         else:
             conn = LdapWrapper(self.LDAP_URL,
                                self.page_size,
-                               alias_dereferencing=self.alias_dereferencing)
+                               alias_dereferencing=self.alias_dereferencing,
+                               use_tls=self.use_tls,
+                               tls_cacertfile=self.tls_cacertfile,
+                               tls_cacertdir=self.tls_cacertdir,
+                               tls_req_cert=self.tls_req_cert)
 
         if user is None:
             user = self.LDAP_USER
@@ -250,6 +303,11 @@ class BaseLdap(object):
             if v is not None:
                 attr_type = self.attribute_mapping.get(k, k)
                 attrs.append((attr_type, [v]))
+                extra_attrs = [attr for attr, name
+                               in self.extra_attr_mapping.iteritems()
+                               if name == k]
+                for attr in extra_attrs:
+                    attrs.append((attr, [v]))
 
         if 'groupOfNames' in object_classes and self.use_dumb_member:
             attrs.append(('member', [self.dumb_member]))
@@ -267,8 +325,9 @@ class BaseLdap(object):
                     'filter': (filter or self.filter or ''),
                     'object_class': self.object_class})
         try:
-            res = conn.search_s(self.tree_dn, self.LDAP_SCOPE, query,
-                                self.attribute_mapping.values())
+            attrs = list(set((self.attribute_mapping.values() +
+                              self.extra_attr_mapping.keys())))
+            res = conn.search_s(self.tree_dn, self.LDAP_SCOPE, query, attrs)
         except ldap.NO_SUCH_OBJECT:
             return None
         try:
@@ -365,12 +424,74 @@ class BaseLdap(object):
 
 
 class LdapWrapper(object):
-    def __init__(self, url, page_size, alias_dereferencing=None):
+    def __init__(self, url, page_size, alias_dereferencing=None,
+                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
+                 tls_req_cert='demand'):
         LOG.debug(_("LDAP init: url=%s"), url)
+        LOG.debug(_('LDAP init: use_tls=%(use_tls)s\n'
+                  'tls_cacertfile=%(tls_cacertfile)s\n'
+                  'tls_cacertdir=%(tls_cacertdir)s\n'
+                  'tls_req_cert=%(tls_req_cert)s\n'
+                  'tls_avail=%(tls_avail)s\n') %
+                  {'use_tls': use_tls,
+                   'tls_cacertfile': tls_cacertfile,
+                   'tls_cacertdir': tls_cacertdir,
+                   'tls_req_cert': tls_req_cert,
+                   'tls_avail': ldap.TLS_AVAIL
+                   })
+
+        #NOTE(topol)
+        #for extra debugging uncomment the following line
+        #ldap.set_option(ldap.OPT_DEBUG_LEVEL, 4095)
+
+        using_ldaps = url.lower().startswith("ldaps")
+
+        if use_tls and using_ldaps:
+            raise AssertionError(_('Invalid TLS / LDAPS combination'))
+
+        if use_tls:
+            if not ldap.TLS_AVAIL:
+                raise ValueError(_('Invalid LDAP TLS_AVAIL option: %s. TLS'
+                                   'not available') % ldap.TLS_AVAIL)
+            if tls_cacertfile:
+                #NOTE(topol)
+                #python ldap TLS does not verify CACERTFILE or CACERTDIR
+                #so we add some extra simple sanity check verification
+                #Also, setting these values globally (i.e. on the ldap object)
+                #works but these values are ignored when setting them on the
+                #connection
+                if not os.path.isfile(tls_cacertfile):
+                    raise IOError(_("tls_cacertfile %s not found "
+                                    "or is not a file") %
+                                  tls_cacertfile)
+                ldap.set_option(ldap.OPT_X_TLS_CACERTFILE, tls_cacertfile)
+            elif tls_cacertdir:
+                #NOTE(topol)
+                #python ldap TLS does not verify CACERTFILE or CACERTDIR
+                #so we add some extra simple sanity check verification
+                #Also, setting these values globally (i.e. on the ldap object)
+                #works but these values are ignored when setting them on the
+                #connection
+                if not os.path.isdir(tls_cacertdir):
+                    raise IOError(_("tls_cacertdir %s not found "
+                                    "or is not a directory") %
+                                  tls_cacertdir)
+                ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, tls_cacertdir)
+            if tls_req_cert in LDAP_TLS_CERTS.values():
+                ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, tls_req_cert)
+            else:
+                LOG.debug(_("LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s"),
+                          tls_req_cert)
+
         self.conn = ldap.initialize(url)
+        self.conn.protocol_version = ldap.VERSION3
+
         if alias_dereferencing is not None:
             self.conn.set_option(ldap.OPT_DEREF, alias_dereferencing)
         self.page_size = page_size
+
+        if use_tls:
+            self.conn.start_tls_s()
 
     def simple_bind_s(self, user, password):
         LOG.debug(_("LDAP bind: dn=%s"), user)
@@ -384,16 +505,19 @@ class LdapWrapper(object):
                            if kind != 'userPassword'
                            else ['****'])
                           for kind, values in ldap_attrs]
-            LOG.debug(_('LDAP add: dn=%s, attrs=%s'), dn, sane_attrs)
+            LOG.debug(_('LDAP add: dn=%(dn)s, attrs=%(attrs)s') % {
+                'dn': dn, 'attrs': sane_attrs})
         return self.conn.add_s(dn, ldap_attrs)
 
     def search_s(self, dn, scope, query, attrlist=None):
         if LOG.isEnabledFor(logging.DEBUG):
-            LOG.debug(_('LDAP search: dn=%s, scope=%s, query=%s, attrs=%s'),
-                      dn,
-                      scope,
-                      query,
-                      attrlist)
+            LOG.debug(_(
+                'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
+                'attrs=%(attrs)s') % {
+                    'dn': dn,
+                    'scope': scope,
+                    'query': query,
+                    'attrlist': attrlist})
         if self.page_size:
             res = self.paged_search_s(dn, scope, query, attrlist)
         else:
@@ -457,7 +581,8 @@ class LdapWrapper(object):
             sane_modlist = [(op, kind, (values if kind != 'userPassword'
                                         else ['****']))
                             for op, kind, values in ldap_modlist]
-            LOG.debug(_("LDAP modify: dn=%s, modlist=%s"), dn, sane_modlist)
+            LOG.debug(_('LDAP modify: dn=%(dn)s, modlist=%(modlist)s') % {
+                'dn': dn, 'modlist': sane_modlist})
 
         return self.conn.modify_s(dn, ldap_modlist)
 
@@ -466,7 +591,9 @@ class LdapWrapper(object):
         return self.conn.delete_s(dn)
 
     def delete_ext_s(self, dn, serverctrls):
-        LOG.debug(_("LDAP delete_ext: dn=%s, serverctrls=%s"), dn, serverctrls)
+        LOG.debug(
+            _('LDAP delete_ext: dn=%(dn)s, serverctrls=%(serverctrls)s') % {
+                'dn': dn, 'serverctrls': serverctrls})
         return self.conn.delete_ext_s(dn, serverctrls)
 
     def _disable_paging(self):

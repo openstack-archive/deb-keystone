@@ -14,9 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-
-from keystone.common import logging
 from keystone import auth
+from keystone.common import logging
 from keystone import exception
 from keystone import identity
 
@@ -104,12 +103,12 @@ class UserAuthInfo(object):
 
 class Password(auth.AuthMethodHandler):
     def authenticate(self, context, auth_payload, user_context):
-        """ Try to authenticate against the identity backend. """
+        """Try to authenticate against the identity backend."""
         user_info = UserAuthInfo(context, auth_payload)
 
-        # FIXME: identity.authenticate() can use some refactoring since
+        # FIXME(gyee): identity.authenticate() can use some refactoring since
         # all we care is password matches
-        user_auth_data = self.identity_api.authenticate(
+        self.identity_api.authenticate(
             context=context,
             user_id=user_info.user_id,
             password=user_info.password)

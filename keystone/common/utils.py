@@ -79,7 +79,7 @@ def trunc_password(password):
 
 
 def hash_user_password(user):
-    """Hash a user dict's password without modifying the passed-in dict"""
+    """Hash a user dict's password without modifying the passed-in dict."""
     try:
         password = user['password']
     except KeyError:
@@ -89,7 +89,7 @@ def hash_user_password(user):
 
 
 def hash_ldap_user_password(user):
-    """Hash a user dict's password without modifying the passed-in dict"""
+    """Hash a user dict's password without modifying the passed-in dict."""
     try:
         password = user['password']
     except KeyError:
@@ -151,9 +151,10 @@ def check_output(*popenargs, **kwargs):
     The stdout argument is not allowed as it is used internally.
     To capture standard error in the result, use stderr=STDOUT.
 
+    >>> import sys
     >>> check_output(['/bin/sh', '-c',
     ...               'ls -l non_existent_file ; exit 0'],
-    ...              stderr=STDOUT)
+    ...              stderr=sys.STDOUT)
     'ls: non_existent_file: No such file or directory\n'
     """
     if 'stdout' in kwargs:
@@ -216,10 +217,6 @@ def hash_signed_token(signed_text):
 
 def setup_remote_pydev_debug():
     if CONF.pydev_debug_host and CONF.pydev_debug_port:
-        error_msg = ('Error setting up the debug environment.  Verify that the'
-                     ' option --debug-url has the format <host>:<port> and '
-                     'that a debugger processes is listening on that port.')
-
         try:
             try:
                 from pydevd import pydevd
@@ -231,15 +228,19 @@ def setup_remote_pydev_debug():
                             stdoutToServer=True,
                             stderrToServer=True)
             return True
-        except:
-            LOG.exception(_(error_msg))
+        except Exception:
+            LOG.exception(_(
+                'Error setting up the debug environment. Verify that the '
+                'option --debug-url has the format <host>:<port> and that a '
+                'debugger processes is listening on that port.'))
             raise
 
 
 class LimitingReader(object):
     """Reader to limit the size of an incoming request."""
     def __init__(self, data, limit):
-        """
+        """Create an iterator on the underlying data.
+
         :param data: Underlying data object
         :param limit: maximum number of bytes the reader should allow
         """
@@ -255,15 +256,8 @@ class LimitingReader(object):
             else:
                 yield chunk
 
-    def read(self, i):
+    def read(self, i=None):
         result = self.data.read(i)
-        self.bytes_read += len(result)
-        if self.bytes_read > self.limit:
-            raise exception.RequestTooLarge()
-        return result
-
-    def read(self):
-        result = self.data.read()
         self.bytes_read += len(result)
         if self.bytes_read > self.limit:
             raise exception.RequestTooLarge()

@@ -22,9 +22,9 @@ import sqlalchemy.engine.url
 from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.ext import declarative
 import sqlalchemy.orm
+from sqlalchemy.orm.attributes import InstrumentedAttribute
 import sqlalchemy.pool
 from sqlalchemy import types as sql_types
-from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from keystone.common import logging
 from keystone import config
@@ -47,6 +47,7 @@ String = sql.String
 ForeignKey = sql.ForeignKey
 DateTime = sql.DateTime
 IntegrityError = sql.exc.IntegrityError
+OperationalError = sql.exc.OperationalError
 NotFound = sql.orm.exc.NoResultFound
 Boolean = sql.Boolean
 Text = sql.Text
@@ -73,8 +74,10 @@ def initialize_decorator(init):
                 if isinstance(attr, InstrumentedAttribute):
                     column = attr.property.columns[0]
                     if isinstance(column.type, String):
+                        if not isinstance(v, unicode):
+                            v = str(v)
                         if column.type.length and \
-                                column.type.length < len(str(v)):
+                                column.type.length < len(v):
                             #if signing.token_format == 'PKI', the id will
                             #store it's public key which is very long.
                             if config.CONF.signing.token_format == 'PKI' and \
@@ -179,9 +182,7 @@ class DictBase(object):
 
 class MySQLPingListener(object):
 
-    """
-    Ensures that MySQL connections checked out of the
-    pool are alive.
+    """Ensures that MySQL connections checked out of the pool are alive.
 
     Borrowed from:
     http://groups.google.com/group/sqlalchemy/msg/a4ce563d802c929f
@@ -270,7 +271,7 @@ def handle_conflicts(type='object'):
         def wrapper(*args, **kwargs):
             try:
                 return method(*args, **kwargs)
-            except IntegrityError as e:
+            except (IntegrityError, OperationalError) as e:
                 raise exception.Conflict(type=type, details=str(e.orig))
         return wrapper
     return decorator

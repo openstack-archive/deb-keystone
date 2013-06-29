@@ -22,7 +22,6 @@ import subprocess
 import sys
 import time
 
-import eventlet
 import mox
 import nose.exc
 from paste import deploy
@@ -34,17 +33,19 @@ from keystone.common import kvs
 from keystone.common import logging
 from keystone.common import utils
 from keystone.common import wsgi
+from keystone.common import wsgi_server
 from keystone import config
+from keystone import credential
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common import timeutils
 from keystone import policy
 from keystone import token
 from keystone import trust
 
 
-do_monkeypatch = not os.getenv('STANDARD_THREADS')
-eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
-                              thread=do_monkeypatch)
+wsgi_server.monkey_patch_eventlet()
+
 
 LOG = logging.getLogger(__name__)
 ROOTDIR = os.path.dirname(os.path.abspath(os.curdir))
@@ -75,6 +76,7 @@ def testsdir(*p):
 
 def initialize_drivers():
     DRIVERS['catalog_api'] = catalog.Manager()
+    DRIVERS['credential_api'] = credential.Manager()
     DRIVERS['identity_api'] = identity.Manager()
     DRIVERS['policy_api'] = policy.Manager()
     DRIVERS['token_api'] = token.Manager()
@@ -207,6 +209,7 @@ class TestCase(NoModule, unittest.TestCase):
 
     def tearDown(self):
         try:
+            timeutils.clear_time_override()
             self.mox.UnsetStubs()
             self.stubs.UnsetAll()
             self.stubs.SmartUnsetAll()
@@ -299,8 +302,8 @@ class TestCase(NoModule, unittest.TestCase):
             test_path = os.path.join(TESTSDIR, config)
             etc_path = os.path.join(ROOTDIR, 'etc', config)
             for path in [test_path, etc_path]:
-                if os.path.exists('%s.conf.sample' % path):
-                    return 'config:%s.conf.sample' % path
+                if os.path.exists('%s-paste.ini' % path):
+                    return 'config:%s-paste.ini' % path
         return config
 
     def loadapp(self, config, name='main'):
@@ -312,7 +315,7 @@ class TestCase(NoModule, unittest.TestCase):
     def serveapp(self, config, name=None, cert=None, key=None, ca=None,
                  cert_required=None, host="127.0.0.1", port=0):
         app = self.loadapp(config, name=name)
-        server = wsgi.Server(app, host, port)
+        server = wsgi_server.Server(app, host, port)
         if cert is not None and ca is not None and key is not None:
             server.set_ssl(certfile=cert, keyfile=key, ca_certs=ca,
                            cert_required=cert_required)
@@ -337,14 +340,35 @@ class TestCase(NoModule, unittest.TestCase):
         """
         self.assertAlmostEqual(a, b, delta=datetime.timedelta(seconds=delta))
 
-    def assertDictContainsSubset(self, dict1, dict2):
-        if len(dict1) < len(dict2):
-            (subset, fullset) = dict1, dict2
-        else:
-            (subset, fullset) = dict2, dict1
-        for x in subset:
-            self.assertIn(x, fullset)
-            self.assertEquals(subset.get(x), fullset.get(x))
+    def assertNotEmpty(self, l):
+        self.assertTrue(len(l))
+
+    def assertDictContainsSubset(self, expected, actual, msg=None):
+        """Checks whether actual is a superset of expected."""
+        safe_repr = unittest.util.safe_repr
+        missing = []
+        mismatched = []
+        for key, value in expected.iteritems():
+            if key not in actual:
+                missing.append(key)
+            elif value != actual[key]:
+                mismatched.append('%s, expected: %s, actual: %s' %
+                                  (safe_repr(key), safe_repr(value),
+                                   safe_repr(actual[key])))
+
+        if not (missing or mismatched):
+            return
+
+        standardMsg = ''
+        if missing:
+            standardMsg = 'Missing: %s' % ','.join(safe_repr(m) for m in
+                                                   missing)
+        if mismatched:
+            if standardMsg:
+                standardMsg += '; '
+            standardMsg += 'Mismatched values: %s' % ','.join(mismatched)
+
+        self.fail(self._formatMessage(msg, standardMsg))
 
     @staticmethod
     def skip_if_no_ipv6():

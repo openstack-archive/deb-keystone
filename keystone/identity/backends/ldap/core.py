@@ -17,7 +17,6 @@
 import uuid
 
 import ldap
-from ldap import filter as ldap_filter
 
 from keystone import clean
 from keystone.common import ldap as common_ldap
@@ -203,6 +202,7 @@ class Identity(identity.Driver):
     def create_user(self, user_id, user):
         user = self._validate_domain(user)
         user['name'] = clean.user_name(user['name'])
+        user['enabled'] = clean.user_enabled(user.get('enabled', True))
         user_ref = self.user.create(user)
         return self._set_default_domain(identity.filter_user(user_ref))
 
@@ -210,6 +210,8 @@ class Identity(identity.Driver):
         user = self._validate_domain(user)
         if 'name' in user:
             user['name'] = clean.user_name(user['name'])
+        if 'enabled' in user:
+            user['enabled'] = clean.user_enabled(user['enabled'])
         return self._set_default_domain(self.user.update(user_id, user))
 
     def create_project(self, tenant_id, tenant):
@@ -670,8 +672,6 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
         return model
 
     def create(self, values):
-        #values['id'] = values['name']
-        #delattr(values, 'name')
         return super(RoleApi, self).create(values)
 
     def add_user(self, role_id, user_id, tenant_id=None):
@@ -838,7 +838,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
             pass
         super(RoleApi, self).delete(id)
 
-# TODO (spzala) - this is only placeholder for group and domain role support
+# TODO(spzala): this is only placeholder for group and domain role support
 # which will be added under bug 1101287
     def roles_delete_subtree_by_type(self, id, type):
         conn = self.get_connection()
@@ -853,10 +853,7 @@ class RoleApi(common_ldap.BaseLdap, ApiShimMixin):
                 roles = conn.search_s(dn, ldap.SCOPE_ONELEVEL,
                                       query, ['%s' % '1.1'])
                 for role_dn, _ in roles:
-                    try:
-                        conn.delete_s(role_dn)
-                    except:
-                        raise Exception
+                    conn.delete_s(role_dn)
             except ldap.NO_SUCH_OBJECT:
                 pass
 
@@ -920,9 +917,9 @@ class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
                   self.member_attribute,
                   self.user_api._id_to_dn(user_id))])
         except ldap.TYPE_OR_VALUE_EXISTS:
-            msg = _('User %s is already a member of group %s'
-                    % (user_id, group_id))
-            raise exception.Conflict(msg)
+            raise exception.Conflict(_(
+                'User %(user_id)s is already a member of group %(group_id)s') %
+                {'user_id': user_id, 'group_id': group_id})
 
     def remove_user(self, user_id, group_id):
         conn = self.get_connection()
@@ -936,14 +933,14 @@ class GroupApi(common_ldap.BaseLdap, ApiShimMixin):
             raise exception.UserNotFound(user_id=user_id)
 
     def list_user_groups(self, user_id):
-        """Returns a list of groups a user has access to"""
+        """Return a list of groups for which the user is a member."""
         user_dn = self.user_api._id_to_dn(user_id)
         query = '(%s=%s)' % (self.member_attribute, user_dn)
         memberships = self.get_all(query)
         return memberships
 
     def list_group_users(self, group_id):
-        """Returns a list of users that belong to a group"""
+        """Return a list of users which are members of a group."""
         query = '(objectClass=%s)' % self.object_class
         conn = self.get_connection()
         group_dn = self._id_to_dn(group_id)

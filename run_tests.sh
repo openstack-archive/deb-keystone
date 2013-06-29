@@ -69,7 +69,7 @@ always_venv=0
 never_venv=0
 force=0
 noseargs=
-noseopts=
+noseopts="--with-openstack --openstack-color"
 wrapper=""
 just_pep8=0
 short_pep8=0
@@ -90,8 +90,16 @@ fi
 
 if [ $nokeystoneclient -eq 1 ]; then
     # disable the integration tests
-    noseopts="$noseopts -I test_keystoneclient*"
+    noseopts="$noseopts -I test_keystoneclient* -I _test_import_auth_token.py"
 fi
+
+function cleanup_test_db {
+  # Default test settings will leave around some test*.db files
+  # TODO(termie): this could probably be moved into tests/__init__.py
+  #               but there have been some issues with creating that
+  #               file for some users
+  rm -f tests/test*.db
+}
 
 function run_tests {
   # Just run the test suites in current environment
@@ -179,7 +187,7 @@ fi
 
 
 if [ $recreate_db -eq 1 ]; then
-    rm -f tests.sqlite
+    cleanup_test_db
 fi
 
 run_tests

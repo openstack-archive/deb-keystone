@@ -26,7 +26,6 @@ from keystone import test
 from keystone import token
 from keystone import trust
 
-
 import default_fixtures
 import test_backend
 
@@ -34,7 +33,8 @@ CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class SqlTests(test.TestCase):
+class SqlTests(test.TestCase, sql.Base):
+
     def setUp(self):
         super(SqlTests, self).setUp()
         self.config([test.etcdir('keystone.conf.sample'),
@@ -47,6 +47,11 @@ class SqlTests(test.TestCase):
         self.token_man = token.Manager()
         self.trust_man = trust.Manager()
         self.policy_man = policy.Manager()
+
+        # create tables and keep an engine reference for cleanup.
+        # this must be done after the models are loaded by the managers.
+        self.engine = self.get_engine()
+        sql.ModelBase.metadata.create_all(bind=self.engine)
 
         # create shortcut references to each driver
         self.catalog_api = self.catalog_man.driver
@@ -61,11 +66,18 @@ class SqlTests(test.TestCase):
         self.user_foo['enabled'] = True
 
     def tearDown(self):
+        sql.ModelBase.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
         sql.set_global_engine(None)
         super(SqlTests, self).tearDown()
 
 
 class SqlIdentity(SqlTests, test_backend.IdentityTests):
+    def test_password_hashed(self):
+        session = self.identity_api.get_session()
+        user_ref = self.identity_api._get_user(session, self.user_foo['id'])
+        self.assertNotEqual(user_ref['password'], self.user_foo['password'])
+
     def test_delete_user_with_project_association(self):
         user = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex,

@@ -20,12 +20,9 @@
 
 """Utility methods for working with WSGI servers."""
 
-import socket
-import sys
+import re
 
-import eventlet.wsgi
 import routes.middleware
-import ssl
 import webob.dec
 import webob.exc
 
@@ -48,6 +45,34 @@ CONTEXT_ENV = 'openstack.context'
 PARAMS_ENV = 'openstack.params'
 
 
+_RE_PASS = re.compile(r'([\'"].*?password[\'"]\s*:\s*u?[\'"]).*?([\'"])',
+                      re.DOTALL)
+
+
+def mask_password(message, is_unicode=False, secret="***"):
+    """Replace password with 'secret' in message.
+
+    :param message: The string which include security information.
+    :param is_unicode: Is unicode string ?
+    :param secret: substitution string default to "***".
+    :returns: The string
+
+    For example:
+       >>> mask_password('"password" : "aaaaa"')
+       '"password" : "***"'
+       >>> mask_password("'original_password' : 'aaaaa'")
+       "'original_password' : '***'"
+       >>> mask_password("u'original_password' :   u'aaaaa'")
+       "u'original_password' :   u'***'"
+    """
+    if is_unicode:
+        message = unicode(message)
+    # Match the group 1,2 and replace all others with 'secret'
+    secret = r"\g<1>" + secret + r"\g<2>"
+    result = _RE_PASS.sub(secret, message)
+    return result
+
+
 class WritableLogger(object):
     """A thin wrapper that responds to `write` and logs."""
 
@@ -57,85 +82,6 @@ class WritableLogger(object):
 
     def write(self, msg):
         self.logger.log(self.level, msg)
-
-
-class Server(object):
-    """Server class to manage multiple WSGI sockets and applications."""
-
-    def __init__(self, application, host=None, port=None, threads=1000):
-        self.application = application
-        self.host = host or '0.0.0.0'
-        self.port = port or 0
-        self.pool = eventlet.GreenPool(threads)
-        self.socket_info = {}
-        self.greenthread = None
-        self.do_ssl = False
-        self.cert_required = False
-
-    def start(self, key=None, backlog=128):
-        """Run a WSGI server with the given application."""
-        LOG.debug(_('Starting %(arg0)s on %(host)s:%(port)s') %
-                  {'arg0': sys.argv[0],
-                   'host': self.host,
-                   'port': self.port})
-
-        # TODO(dims): eventlet's green dns/socket module does not actually
-        # support IPv6 in getaddrinfo(). We need to get around this in the
-        # future or monitor upstream for a fix
-        info = socket.getaddrinfo(self.host,
-                                  self.port,
-                                  socket.AF_UNSPEC,
-                                  socket.SOCK_STREAM)[0]
-        _socket = eventlet.listen(info[-1],
-                                  family=info[0],
-                                  backlog=backlog)
-        if key:
-            self.socket_info[key] = _socket.getsockname()
-        # SSL is enabled
-        if self.do_ssl:
-            if self.cert_required:
-                cert_reqs = ssl.CERT_REQUIRED
-            else:
-                cert_reqs = ssl.CERT_NONE
-            sslsocket = eventlet.wrap_ssl(_socket, certfile=self.certfile,
-                                          keyfile=self.keyfile,
-                                          server_side=True,
-                                          cert_reqs=cert_reqs,
-                                          ca_certs=self.ca_certs)
-            _socket = sslsocket
-
-        self.greenthread = self.pool.spawn(self._run,
-                                           self.application,
-                                           _socket)
-
-    def set_ssl(self, certfile, keyfile=None, ca_certs=None,
-                cert_required=True):
-        self.certfile = certfile
-        self.keyfile = keyfile
-        self.ca_certs = ca_certs
-        self.cert_required = cert_required
-        self.do_ssl = True
-
-    def kill(self):
-        if self.greenthread:
-            self.greenthread.kill()
-
-    def wait(self):
-        """Wait until all servers have completed running."""
-        try:
-            self.pool.waitall()
-        except KeyboardInterrupt:
-            pass
-
-    def _run(self, application, socket):
-        """Start a WSGI server in a new green thread."""
-        log = logging.getLogger('eventlet.wsgi.server')
-        try:
-            eventlet.wsgi.server(socket, application, custom_pool=self.pool,
-                                 log=WritableLogger(log))
-        except Exception:
-            LOG.exception(_('Server error'))
-            raise
 
 
 class Request(webob.Request):
@@ -235,17 +181,18 @@ class Application(BaseApplication):
         try:
             result = method(context, **params)
         except exception.Unauthorized as e:
-            LOG.warning(_("Authorization failed. %s from %s")
-                        % (e, req.environ['REMOTE_ADDR']))
+            LOG.warning(
+                _('Authorization failed. %(exception)s from %(remote_addr)s') %
+                {'exception': e, 'remote_addr': req.environ['REMOTE_ADDR']})
             return render_exception(e)
         except exception.Error as e:
             LOG.warning(e)
             return render_exception(e)
         except TypeError as e:
-            logging.exception(e)
+            LOG.exception(e)
             return render_exception(exception.ValidationError(e))
         except Exception as e:
-            logging.exception(e)
+            LOG.exception(e)
             return render_exception(exception.UnexpectedError(exception=e))
 
         if result is None:
@@ -288,13 +235,13 @@ class Application(BaseApplication):
             try:
                 creds['user_id'] = user_token_ref['user'].get('id')
             except AttributeError:
-                logging.debug('Invalid user')
+                LOG.debug('Invalid user')
                 raise exception.Unauthorized()
 
             try:
                 creds['tenant_id'] = user_token_ref['tenant'].get('id')
             except AttributeError:
-                logging.debug('Invalid tenant')
+                LOG.debug('Invalid tenant')
                 raise exception.Unauthorized()
 
             # NOTE(vish): this is pretty inefficient
@@ -362,11 +309,21 @@ class Middleware(Application):
 
     @webob.dec.wsgify(RequestClass=Request)
     def __call__(self, request):
-        response = self.process_request(request)
-        if response:
-            return response
-        response = request.get_response(self.application)
-        return self.process_response(request, response)
+        try:
+            response = self.process_request(request)
+            if response:
+                return response
+            response = request.get_response(self.application)
+            return self.process_response(request, response)
+        except exception.Error as e:
+            LOG.warning(e)
+            return render_exception(e)
+        except TypeError as e:
+            LOG.exception(e)
+            return render_exception(exception.ValidationError(e))
+        except Exception as e:
+            LOG.exception(e)
+            return render_exception(exception.UnexpectedError(exception=e))
 
 
 class Debug(Middleware):
@@ -379,21 +336,23 @@ class Debug(Middleware):
 
     @webob.dec.wsgify(RequestClass=Request)
     def __call__(self, req):
-        LOG.debug('%s %s %s', ('*' * 20), 'REQUEST ENVIRON', ('*' * 20))
-        for key, value in req.environ.items():
-            LOG.debug('%s = %s', key, value)
-        LOG.debug('')
-        LOG.debug('%s %s %s', ('*' * 20), 'REQUEST BODY', ('*' * 20))
-        for line in req.body_file:
-            LOG.debug(line)
-        LOG.debug('')
+        if LOG.isEnabledFor(logging.DEBUG):
+            LOG.debug('%s %s %s', ('*' * 20), 'REQUEST ENVIRON', ('*' * 20))
+            for key, value in req.environ.items():
+                LOG.debug('%s = %s', key, mask_password(value,
+                                                        is_unicode=True))
+            LOG.debug('')
+            LOG.debug('%s %s %s', ('*' * 20), 'REQUEST BODY', ('*' * 20))
+            for line in req.body_file:
+                LOG.debug(mask_password(line))
+            LOG.debug('')
 
         resp = req.get_response(self.application)
-
-        LOG.debug('%s %s %s', ('*' * 20), 'RESPONSE HEADERS', ('*' * 20))
-        for (key, value) in resp.headers.iteritems():
-            LOG.debug('%s = %s', key, value)
-        LOG.debug('')
+        if LOG.isEnabledFor(logging.DEBUG):
+            LOG.debug('%s %s %s', ('*' * 20), 'RESPONSE HEADERS', ('*' * 20))
+            for (key, value) in resp.headers.iteritems():
+                LOG.debug('%s = %s', key, value)
+            LOG.debug('')
 
         resp.app_iter = self.print_generator(resp.app_iter)
 

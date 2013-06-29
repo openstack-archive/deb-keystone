@@ -78,8 +78,7 @@ CONF = cfg.CONF
 
 
 def setup_logging(conf):
-    """
-    Sets up the logging options for a log with supplied name
+    """Sets up the logging options for a log with supplied name
 
     :param conf: a cfg.ConfOpts object
     """
@@ -194,8 +193,8 @@ def configure():
     register_int('admin_port', default=35357)
     register_int('public_port', default=5000)
     register_str(
-        'public_endpoint', default='http://localhost:%(public_port)d/')
-    register_str('admin_endpoint', default='http://localhost:%(admin_port)d/')
+        'public_endpoint', default='http://localhost:%(public_port)s/')
+    register_str('admin_endpoint', default='http://localhost:%(admin_port)s/')
     register_str('onready')
     register_str('auth_admin_prefix', default='')
     register_str('policy_file', default='policy.json')
@@ -217,10 +216,20 @@ def configure():
 
     # ssl
     register_bool('enable', group='ssl', default=False)
-    register_str('certfile', group='ssl', default=None)
-    register_str('keyfile', group='ssl', default=None)
-    register_str('ca_certs', group='ssl', default=None)
+    register_str('certfile', group='ssl',
+                 default="/etc/keystone/ssl/certs/keystone.pem")
+    register_str('keyfile', group='ssl',
+                 default="/etc/keystone/ssl/private/keystonekey.pem")
+    register_str('ca_certs', group='ssl',
+                 default="/etc/keystone/ssl/certs/ca.pem")
+    register_str('ca_key', group='ssl',
+                 default="/etc/keystone/ssl/certs/cakey.pem")
     register_bool('cert_required', group='ssl', default=False)
+    register_int('key_size', group='ssl', default=1024)
+    register_int('valid_days', group='ssl', default=3650)
+    register_str('ca_password', group='ssl', default=None)
+    register_str('cert_subject', group='ssl',
+                 default='/C=US/ST=Unset/L=Unset/O=Unset/CN=localhost')
 
     # signing
     register_str(
@@ -237,12 +246,17 @@ def configure():
         'ca_certs',
         group='signing',
         default="/etc/keystone/ssl/certs/ca.pem")
+    register_str('ca_key', group='signing',
+                 default="/etc/keystone/ssl/certs/cakey.pem")
     register_int('key_size', group='signing', default=1024)
     register_int('valid_days', group='signing', default=3650)
     register_str('ca_password', group='signing', default=None)
+    register_str('cert_subject', group='signing',
+                 default='/C=US/ST=Unset/L=Unset/O=Unset/CN=www.example.com')
 
     # sql
-    register_str('connection', group='sql', default='sqlite:///keystone.db')
+    register_str('connection', group='sql', secret=True,
+                 default='sqlite:///keystone.db')
     register_int('idle_timeout', group='sql', default=200)
 
     register_str(
@@ -253,6 +267,10 @@ def configure():
         'driver',
         group='identity',
         default='keystone.identity.backends.sql.Identity')
+    register_str(
+        'driver',
+        group='credential',
+        default='keystone.credential.backends.sql.Credential')
     register_str(
         'driver',
         group='policy',
@@ -299,6 +317,8 @@ def configure():
     register_bool('user_allow_delete', group='ldap', default=True)
     register_bool('user_enabled_emulation', group='ldap', default=False)
     register_str('user_enabled_emulation_dn', group='ldap', default=None)
+    register_list(
+        'user_additional_attribute_mapping', group='ldap', default=None)
 
     register_str('tenant_tree_dn', group='ldap', default=None)
     register_str('tenant_filter', group='ldap', default=None)
@@ -316,6 +336,8 @@ def configure():
     register_bool('tenant_allow_delete', group='ldap', default=True)
     register_bool('tenant_enabled_emulation', group='ldap', default=False)
     register_str('tenant_enabled_emulation_dn', group='ldap', default=None)
+    register_list(
+        'tenant_additional_attribute_mapping', group='ldap', default=None)
 
     register_str('role_tree_dn', group='ldap', default=None)
     register_str('role_filter', group='ldap', default=None)
@@ -328,6 +350,8 @@ def configure():
     register_bool('role_allow_create', group='ldap', default=True)
     register_bool('role_allow_update', group='ldap', default=True)
     register_bool('role_allow_delete', group='ldap', default=True)
+    register_list(
+        'role_additional_attribute_mapping', group='ldap', default=None)
 
     register_str('group_tree_dn', group='ldap', default=None)
     register_str('group_filter', group='ldap', default=None)
@@ -342,6 +366,8 @@ def configure():
     register_bool('group_allow_create', group='ldap', default=True)
     register_bool('group_allow_update', group='ldap', default=True)
     register_bool('group_allow_delete', group='ldap', default=True)
+    register_list(
+        'group_additional_attribute_mapping', group='ldap', default=None)
 
     register_str('domain_tree_dn', group='ldap', default=None)
     register_str('domain_filter', group='ldap', default=None)
@@ -357,9 +383,15 @@ def configure():
     register_bool('domain_allow_delete', group='ldap', default=True)
     register_bool('domain_enabled_emulation', group='ldap', default=False)
     register_str('domain_enabled_emulation_dn', group='ldap', default=None)
+    register_list(
+        'domain_additional_attribute_mapping', group='ldap', default=None)
+
+    register_str('tls_cacertfile', group='ldap', default=None)
+    register_str('tls_cacertdir', group='ldap', default=None)
+    register_bool('use_tls', group='ldap', default=False)
+    register_str('tls_req_cert', group='ldap', default='demand')
 
     # pam
-    register_str('url', group='pam', default=None)
     register_str('userid', group='pam', default=None)
     register_str('password', group='pam', default=None)
 
@@ -375,3 +407,6 @@ def configure():
     for method_name in CONF.auth.methods:
         if method_name not in _DEFAULT_AUTH_METHODS:
             register_str(method_name, group='auth')
+
+    # PasteDeploy config file
+    register_str('config_file', group='paste_deploy', default=None)

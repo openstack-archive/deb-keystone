@@ -14,13 +14,11 @@
 
 import copy
 import datetime
-import time
 import uuid
 
 from keystone import auth
 from keystone import config
 from keystone import exception
-from keystone import identity
 from keystone.openstack.common import timeutils
 from keystone import test
 from keystone import token
@@ -97,22 +95,21 @@ class AuthBadRequests(AuthTest):
         super(AuthBadRequests, self).setUp()
 
     def test_no_external_auth(self):
-        """Verify that _authenticate_external() raises exception if
-        not applicable"""
+        """Verify that _authenticate_external() raises exception if N/A."""
         self.assertRaises(
             token.controllers.ExternalAuthNotApplicable,
             self.controller._authenticate_external,
             {}, {})
 
     def test_no_token_in_auth(self):
-        """Verity that _authenticate_token() raises exception if no token"""
+        """Verify that _authenticate_token() raises exception if no token."""
         self.assertRaises(
             exception.ValidationError,
             self.controller._authenticate_token,
             None, {})
 
     def test_no_credentials_in_auth(self):
-        """Verity that _authenticate_local() raises exception if no creds"""
+        """Verify that _authenticate_local() raises exception if no creds."""
         self.assertRaises(
             exception.ValidationError,
             self.controller._authenticate_local,
@@ -188,7 +185,7 @@ class AuthWithToken(AuthTest):
         super(AuthWithToken, self).setUp()
 
     def test_unscoped_token(self):
-        """Verify getting an unscoped token with password creds"""
+        """Verify getting an unscoped token with password creds."""
         body_dict = _build_user_auth(username='FOO',
                                      password='foo2')
         unscoped_token = self.controller.authenticate({}, body_dict)
@@ -196,7 +193,7 @@ class AuthWithToken(AuthTest):
         self.assertEqual(tenant, None)
 
     def test_auth_invalid_token(self):
-        """Verify exception is raised if invalid token"""
+        """Verify exception is raised if invalid token."""
         body_dict = _build_user_auth(token={"id": uuid.uuid4().hex})
         self.assertRaises(
             exception.Unauthorized,
@@ -204,7 +201,7 @@ class AuthWithToken(AuthTest):
             {}, body_dict)
 
     def test_auth_bad_formatted_token(self):
-        """Verify exception is raised if invalid token"""
+        """Verify exception is raised if invalid token."""
         body_dict = _build_user_auth(token={})
         self.assertRaises(
             exception.ValidationError,
@@ -212,7 +209,7 @@ class AuthWithToken(AuthTest):
             {}, body_dict)
 
     def test_auth_unscoped_token_no_project(self):
-        """Verify getting an unscoped token with an unscoped token"""
+        """Verify getting an unscoped token with an unscoped token."""
         body_dict = _build_user_auth(
             username='FOO',
             password='foo2')
@@ -225,7 +222,7 @@ class AuthWithToken(AuthTest):
         self.assertEqualTokens(unscoped_token, unscoped_token_2)
 
     def test_auth_unscoped_token_project(self):
-        """Verify getting a token in a tenant with an unscoped token"""
+        """Verify getting a token in a tenant with an unscoped token."""
         # Add a role in so we can check we get this back
         self.identity_api.add_role_to_user_and_project(
             self.user_foo['id'],
@@ -248,7 +245,7 @@ class AuthWithToken(AuthTest):
         self.assertEquals(roles[0], self.role_member['id'])
 
     def test_auth_token_project_group_role(self):
-        """Verify getting a token in a tenant with group roles"""
+        """Verify getting a token in a tenant with group roles."""
         # Add a v2 style role in so we can check we get this back
         self.identity_api.add_role_to_user_and_project(
             self.user_foo['id'],
@@ -280,7 +277,7 @@ class AuthWithToken(AuthTest):
         self.assertIn(self.role_admin['id'], roles)
 
     def test_auth_token_cross_domain_group_and_project(self):
-        """Verify getting a token in cross domain group/project roles"""
+        """Verify getting a token in cross domain group/project roles."""
         # create domain, project and group and grant roles to user
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.identity_api.create_domain(domain1['id'], domain1)
@@ -377,7 +374,7 @@ class AuthWithPasswordCredentials(AuthTest):
         super(AuthWithPasswordCredentials, self).setUp()
 
     def test_auth_invalid_user(self):
-        """Verify exception is raised if invalid user"""
+        """Verify exception is raised if invalid user."""
         body_dict = _build_user_auth(
             username=uuid.uuid4().hex,
             password=uuid.uuid4().hex)
@@ -387,7 +384,7 @@ class AuthWithPasswordCredentials(AuthTest):
             {}, body_dict)
 
     def test_auth_valid_user_invalid_password(self):
-        """Verify exception is raised if invalid password"""
+        """Verify exception is raised if invalid password."""
         body_dict = _build_user_auth(
             username="FOO",
             password=uuid.uuid4().hex)
@@ -397,7 +394,7 @@ class AuthWithPasswordCredentials(AuthTest):
             {}, body_dict)
 
     def test_auth_empty_password(self):
-        """Verify exception is raised if empty password"""
+        """Verify exception is raised if empty password."""
         body_dict = _build_user_auth(
             username="FOO",
             password="")
@@ -407,7 +404,7 @@ class AuthWithPasswordCredentials(AuthTest):
             {}, body_dict)
 
     def test_auth_no_password(self):
-        """Verify exception is raised if empty password"""
+        """Verify exception is raised if empty password."""
         body_dict = _build_user_auth(username="FOO")
         self.assertRaises(
             exception.ValidationError,
@@ -415,8 +412,7 @@ class AuthWithPasswordCredentials(AuthTest):
             {}, body_dict)
 
     def test_authenticate_blank_password_credentials(self):
-        """Verify sending empty json dict as passwordCredentials raises the
-        right exception."""
+        """Sending empty dict as passwordCredentials raises a 400 error."""
         body_dict = {'passwordCredentials': {}, 'tenantName': 'demo'}
         self.assertRaises(exception.ValidationError,
                           self.controller.authenticate,
@@ -436,7 +432,7 @@ class AuthWithRemoteUser(AuthTest):
         super(AuthWithRemoteUser, self).setUp()
 
     def test_unscoped_remote_authn(self):
-        """Verify getting an unscoped token with external authn"""
+        """Verify getting an unscoped token with external authn."""
         body_dict = _build_user_auth(
             username='FOO',
             password='foo2')
@@ -450,7 +446,7 @@ class AuthWithRemoteUser(AuthTest):
         self.assertEqualTokens(local_token, remote_token)
 
     def test_unscoped_remote_authn_jsonless(self):
-        """Verify that external auth with invalid request fails"""
+        """Verify that external auth with invalid request fails."""
         self.assertRaises(
             exception.ValidationError,
             self.controller.authenticate,
@@ -458,7 +454,7 @@ class AuthWithRemoteUser(AuthTest):
             None)
 
     def test_scoped_remote_authn(self):
-        """Verify getting a token with external authn"""
+        """Verify getting a token with external authn."""
         body_dict = _build_user_auth(
             username='FOO',
             password='foo2',
@@ -474,7 +470,7 @@ class AuthWithRemoteUser(AuthTest):
         self.assertEqualTokens(local_token, remote_token)
 
     def test_scoped_nometa_remote_authn(self):
-        """Verify getting a token with external authn and no metadata"""
+        """Verify getting a token with external authn and no metadata."""
         body_dict = _build_user_auth(
             username='TWO',
             password='two2',
@@ -489,7 +485,7 @@ class AuthWithRemoteUser(AuthTest):
         self.assertEqualTokens(local_token, remote_token)
 
     def test_scoped_remote_authn_invalid_user(self):
-        """Verify that external auth with invalid user fails"""
+        """Verify that external auth with invalid user fails."""
         body_dict = _build_user_auth(tenant_name="BAR")
         self.assertRaises(
             exception.Unauthorized,
@@ -598,10 +594,9 @@ class AuthWithTrust(AuthTest):
         self.assertEquals(token_user['id'],
                           self.new_trust['trustee_user_id'])
 
-        #TODO Endpoints
+        # TODO(ayoung): Endpoints
 
     def test_token_from_trust_wrong_user_fails(self):
-        new_trust = self.create_trust()
         request_body = self.build_v2_token_request('FOO', 'foo2')
         self.assertRaises(
             exception.Forbidden,
@@ -683,7 +678,7 @@ class AuthWithTrust(AuthTest):
 
     def test_delete_tokens_for_user_invalidates_tokens_from_trust(self):
         self.assert_token_count_for_trust(0)
-        auth_response = self.fetch_v2_token_from_trust()
+        self.fetch_v2_token_from_trust()
         self.assert_token_count_for_trust(1)
         self.trust_controller._delete_tokens_for_user(
             {},
@@ -701,9 +696,8 @@ class AuthWithTrust(AuthTest):
 
     def test_delete_trust_revokes_token(self):
         context = {'token_id': self.unscoped_token['access']['token']['id']}
-        auth_response = self.fetch_v2_token_from_trust()
+        self.fetch_v2_token_from_trust()
         trust_id = self.new_trust['id']
-        trust_token_id = auth_response['access']['token']['id']
         tokens = self.token_api.list_tokens(self.trustor['id'],
                                             trust_id=trust_id)
         self.assertEquals(len(tokens), 1)
@@ -748,6 +742,8 @@ class AuthWithTrust(AuthTest):
 class TokenExpirationTest(AuthTest):
     def _maintain_token_expiration(self):
         """Token expiration should be maintained after re-auth & validation."""
+        timeutils.set_time_override()
+
         r = self.controller.authenticate(
             {},
             auth={
@@ -759,14 +755,14 @@ class TokenExpirationTest(AuthTest):
         unscoped_token_id = r['access']['token']['id']
         original_expiration = r['access']['token']['expires']
 
-        time.sleep(0.5)
+        timeutils.advance_time_seconds(1)
 
         r = self.controller.validate_token(
             dict(is_admin=True, query_string={}),
             token_id=unscoped_token_id)
         self.assertEqual(original_expiration, r['access']['token']['expires'])
 
-        time.sleep(0.5)
+        timeutils.advance_time_seconds(1)
 
         r = self.controller.authenticate(
             {},
@@ -779,7 +775,7 @@ class TokenExpirationTest(AuthTest):
         scoped_token_id = r['access']['token']['id']
         self.assertEqual(original_expiration, r['access']['token']['expires'])
 
-        time.sleep(0.5)
+        timeutils.advance_time_seconds(1)
 
         r = self.controller.validate_token(
             dict(is_admin=True, query_string={}),

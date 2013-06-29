@@ -1,13 +1,11 @@
 import uuid
-import json
 
-from keystone import config
-from keystone import exception
-from keystone import identity
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import logging
+from keystone import config
 from keystone import exception
+from keystone import identity
 from keystone.openstack.common import timeutils
 
 
@@ -66,7 +64,7 @@ class TrustV3(controller.V3Controller):
                                    (trust['expires_at'],
                                     subsecond=True))
 
-        if not 'roles' in trust:
+        if 'roles' not in trust:
             trust['roles'] = []
         trust_full_roles = []
         for trust_role in trust['roles']:
@@ -108,12 +106,14 @@ class TrustV3(controller.V3Controller):
 
     @controller.protected
     def create_trust(self, context, trust=None):
-        """
-        The user creating the trust must be trustor
+        """Create a new trust.
+
+        The user creating the trust must be the trustor.
+
         """
 
-        #TODO instead of raising  ValidationError on the first problem,
-        #return a collection of all the problems.
+        # TODO(ayoung): instead of raising ValidationError on the first
+        # problem, return a collection of all the problems.
         if not trust:
             raise exception.ValidationError(attribute='trust',
                                             target='request')

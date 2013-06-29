@@ -1,11 +1,8 @@
 import json
-import uuid
 
 import sqlalchemy as sql
-from sqlalchemy import orm
 
 from keystone import config
-from keystone import exception
 
 
 CONF = config.CONF
@@ -15,9 +12,9 @@ def upgrade(migrate_engine):
     meta = sql.MetaData()
     meta.bind = migrate_engine
 
-    user_table = sql.Table('user', meta, autoload=True)
-    role_table = sql.Table('role', meta, autoload=True)
-    project_table = sql.Table('project', meta, autoload=True)
+    sql.Table('user', meta, autoload=True)
+    sql.Table('role', meta, autoload=True)
+    sql.Table('project', meta, autoload=True)
     new_metadata_table = sql.Table('user_project_metadata',
                                    meta,
                                    autoload=True)
@@ -26,7 +23,7 @@ def upgrade(migrate_engine):
     session = sql.orm.sessionmaker(bind=migrate_engine)()
 
     for metadata in session.query(old_metadata_table):
-        if not config.CONF.member_role_id in metadata.data:
+        if config.CONF.member_role_id not in metadata.data:
             data = json.loads(metadata.data)
             data['roles'].append(config.CONF.member_role_id)
         else:
@@ -61,19 +58,18 @@ def downgrade(migrate_engine):
     meta = sql.MetaData()
     meta.bind = migrate_engine
 
-    user_table = sql.Table('user', meta, autoload=True)
-    project_table = sql.Table('project', meta, autoload=True)
+    sql.Table('user', meta, autoload=True)
+    sql.Table('project', meta, autoload=True)
 
     metadata_table = sql.Table(
         'metadata',
         meta,
         sql.Column(
-            'user_id',
+            u'user_id',
             sql.String(64),
-            sql.ForeignKey('user.id'),
             primary_key=True),
         sql.Column(
-            'tenant_id',
+            u'tenant_id',
             sql.String(64),
             primary_key=True),
         sql.Column('data',
@@ -94,9 +90,8 @@ def downgrade(migrate_engine):
 
     for metadata in session.query(user_project_metadata_table):
         if 'roles' in metadata:
-            roles = json.loads(metadata.data)
-            ins = (metadata_table.insert()
-                   .values(user_id=metadata.user_id,
-                           tenant_id=metadata.project_id))
+            metadata_table.insert().values(
+                user_id=metadata.user_id,
+                tenant_id=metadata.project_id)
 
     session.close()

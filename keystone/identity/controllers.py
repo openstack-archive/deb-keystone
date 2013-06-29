@@ -194,6 +194,9 @@ class User(controller.V2Controller):
         if 'name' not in user or not user['name']:
             msg = 'Name field is required and cannot be empty'
             raise exception.ValidationError(message=msg)
+        if 'enabled' in user and not isinstance(user['enabled'], bool):
+            msg = 'Enabled field must be a boolean'
+            raise exception.ValidationError(message=msg)
 
         default_tenant_id = user.get('tenantId', None)
         if (default_tenant_id is not None
@@ -213,6 +216,11 @@ class User(controller.V2Controller):
     def update_user(self, context, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
         self.assert_admin(context)
+
+        if 'enabled' in user and not isinstance(user['enabled'], bool):
+            msg = 'Enabled field should be a boolean'
+            raise exception.ValidationError(message=msg)
+
         user_ref = self.identity_api.update_user(context, user_id, user)
 
         if user.get('password') or not user.get('enabled', True):
@@ -387,8 +395,6 @@ class Role(controller.V2Controller):
         role_id = role_ref_ref.get('roleId')[0]
         self.identity_api.remove_role_from_user_and_project(
             context, user_id, tenant_id, role_id)
-        roles = self.identity_api.get_roles_for_user_and_project(
-            context, user_id, tenant_id)
         self._delete_tokens_for_user(context, user_id)
 
 
@@ -466,7 +472,7 @@ class DomainV3(controller.V3Controller):
         """
         # Start by disabling all the users in this domain, to minimize the
         # the risk that things are changing under our feet.
-        # TODO(henry-nash) In theory this step should not be necessary, since
+        # TODO(henry-nash): In theory this step should not be necessary, since
         # users of a disabled domain are prevented from authenticating.
         # However there are some existing bugs in this area (e.g. 1130236).
         # Consider removing this code once these have been fixed.
@@ -572,9 +578,9 @@ class ProjectV3(controller.V3Controller):
 
     def _delete_project(self, context, project_id):
         # Delete any credentials that reference this project
-        for cred in self.identity_api.list_credentials(context):
+        for cred in self.credential_api.list_credentials(context):
             if cred['project_id'] == project_id:
-                self.identity_api.delete_credential(context, cred['id'])
+                self.credential_api.delete_credential(context, cred['id'])
         # Finally delete the project itself - the backend is
         # responsible for deleting any role assignments related
         # to this project
@@ -643,9 +649,9 @@ class UserV3(controller.V3Controller):
 
     def _delete_user(self, context, user_id):
         # Delete any credentials that reference this user
-        for cred in self.identity_api.list_credentials(context):
+        for cred in self.credential_api.list_credentials(context):
             if cred['user_id'] == user_id:
-                self.identity_api.delete_credential(context, cred['id'])
+                self.credential_api.delete_credential(context, cred['id'])
 
         # Make sure any tokens are marked as deleted
         self._delete_tokens_for_user(context, user_id)
@@ -707,44 +713,6 @@ class GroupV3(controller.V3Controller):
     @controller.protected
     def delete_group(self, context, group_id):
         return self._delete_group(context, group_id)
-
-
-class CredentialV3(controller.V3Controller):
-    collection_name = 'credentials'
-    member_name = 'credential'
-
-    @controller.protected
-    def create_credential(self, context, credential):
-        ref = self._assign_unique_id(self._normalize_dict(credential))
-        ref = self.identity_api.create_credential(context, ref['id'], ref)
-        return CredentialV3.wrap_member(context, ref)
-
-    @controller.protected
-    def list_credentials(self, context):
-        refs = self.identity_api.list_credentials(context)
-        return CredentialV3.wrap_collection(context, refs)
-
-    @controller.protected
-    def get_credential(self, context, credential_id):
-        ref = self.identity_api.get_credential(context, credential_id)
-        return CredentialV3.wrap_member(context, ref)
-
-    @controller.protected
-    def update_credential(self, context, credential_id, credential):
-        self._require_matching_id(credential_id, credential)
-
-        ref = self.identity_api.update_credential(
-            context,
-            credential_id,
-            credential)
-        return CredentialV3.wrap_member(context, ref)
-
-    def _delete_credential(self, context, credential_id):
-        return self.identity_api.delete_credential(context, credential_id)
-
-    @controller.protected
-    def delete_credential(self, context, credential_id):
-        return self._delete_credential(context, credential_id)
 
 
 class RoleV3(controller.V3Controller):

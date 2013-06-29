@@ -15,10 +15,9 @@ DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
-
-    LOG.debug(_('RBAC: Authorizing %s(%s)') % (
-        action,
-        ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])))
+    LOG.debug(_('RBAC: Authorizing %(action)s(%(kwargs)s)') % {
+        'action': action,
+        'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
     try:
         token_ref = self.token_api.get_token(
@@ -149,7 +148,7 @@ def filterprotected(*filters):
 
 
 @dependency.requires('identity_api', 'policy_api', 'token_api',
-                     'trust_api', 'catalog_api')
+                     'trust_api', 'catalog_api', 'credential_api')
 class V2Controller(wsgi.Application):
     """Base controller class for Identity API v2."""
 

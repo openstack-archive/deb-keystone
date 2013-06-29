@@ -41,11 +41,9 @@ class Token(sql.Base, token.Driver):
         if token_id is None:
             raise exception.TokenNotFound(token_id=token_id)
         session = self.get_session()
-        query = session.query(TokenModel)
-        query = query.filter_by(id=token.unique_id(token_id), valid=True)
-        token_ref = query.first()
+        token_ref = session.query(TokenModel).get(token.unique_id(token_id))
         now = datetime.datetime.utcnow()
-        if not token_ref:
+        if not token_ref or not token_ref.valid:
             raise exception.TokenNotFound(token_id=token_id)
         if not token_ref.expires:
             raise exception.TokenNotFound(token_id=token_id)
@@ -73,9 +71,8 @@ class Token(sql.Base, token.Driver):
         session = self.get_session()
         key = token.unique_id(token_id)
         with session.begin():
-            token_ref = session.query(TokenModel).filter_by(id=key,
-                                                            valid=True).first()
-            if not token_ref:
+            token_ref = session.query(TokenModel).get(key)
+            if not token_ref or not token_ref.valid:
                 raise exception.TokenNotFound(token_id=token_id)
             token_ref.valid = False
             session.flush()
@@ -91,7 +88,7 @@ class Token(sql.Base, token.Driver):
         token_references = query.filter_by(valid=True)
         for token_ref in token_references:
             token_ref_dict = token_ref.to_dict()
-            tokens.append(token_ref['id'])
+            tokens.append(token_ref_dict['id'])
         return tokens
 
     def _list_tokens_for_user(self, user_id, tenant_id=None):
@@ -134,3 +131,12 @@ class Token(sql.Base, token.Driver):
             }
             tokens.append(record)
         return tokens
+
+    def flush_expired_tokens(self):
+        session = self.get_session()
+
+        query = session.query(TokenModel)
+        query = query.filter(TokenModel.expires < timeutils.utcnow())
+        query.delete(synchronize_session=False)
+
+        session.flush()
