@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
-"POT-Creation-Date: 2013-01-14 16:21+0000\n"
+"POT-Creation-Date: 2013-07-10 23:09+0800\n"
 "PO-Revision-Date: 2012-08-12 18:22+0100\n"
 "Last-Translator: Julien Patriarca <patriarcaj@gmail.com>\n"
 "Language-Team: FRENCH <debian-l10n-french@lists.debian.org>\n"
@@ -25,9 +25,13 @@ msgstr "Faut-il configurer une base de données pour Keystone ?"
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
+#, fuzzy
+#| msgid ""
+#| "No database has been set up for Keystone to use. If you want to set one "
+#| "up now, please make sure you have all needed information:"
 msgid ""
-"No database has been set up for Keystone to use. If you want to set one up "
-"now, please make sure you have all needed information:"
+"No database has been set up for Keystone to use. Before continuing, you "
+"should make sure you have the following information:"
 msgstr ""
 "Aucune base de données n'a été configurée pour Keystone. Si vous souhaitez "
 "en configurer une maintenant, veuillez vous assurer de disposer de toutes "
@@ -36,11 +40,18 @@ msgstr ""
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
+#, fuzzy
+#| msgid ""
+#| " * the host name of the database server (which must allow TCP\n"
+#| "   connections from this machine);\n"
+#| " * a username and password to access the database;\n"
+#| " * the type of database management software you want to use."
 msgid ""
-" * the host name of the database server (which must allow TCP\n"
-"   connections from this machine);\n"
-" * a username and password to access the database;\n"
-" * the type of database management software you want to use."
+" * the type of database that you want to use;\n"
+" * the database server host name (that server must allow TCP connections "
+"from this\n"
+"   machine);\n"
+" * a username and password to access the database."
 msgstr ""
 " * le nom d'hôte du serveur de bases de données (qui doit autoriser\n"
 "   les connexions TCP depuis cette machine) ;\n"
@@ -53,11 +64,9 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid ""
-"If you don't choose this option, no database will be set up and Keystone "
-"will use regular SQLite support."
+"If some of these requirements are missing, do not choose this option and run "
+"with regular SQLite support."
 msgstr ""
-"Si vous ne choisissez pas cette option, aucune base de données ne sera "
-"configurée et Keystone utilisera la gestion SQLite de base."
 
 #. Type: boolean
 #. Description
@@ -84,22 +93,32 @@ msgstr ""
 
 #. Type: boolean
 #. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
 #: ../keystone.templates:4001
-msgid "Register admin tenants?"
-msgstr ""
+#, fuzzy
+#| msgid "Authentication server administration token:"
+msgid "Register administration tenants?"
+msgstr "Jeton d'authentification pour le serveur d'administration :"
 
 #. Type: boolean
 #. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
 #: ../keystone.templates:4001
 msgid ""
-"For Openstack to work, you need a basic tenant configuration. The keystone "
-"package can create these admin tenants automatically for you."
-msgstr ""
-
-#. Type: string
-#. Description
-#: ../keystone.templates:5001
-msgid "User name of the admin user:"
+"For OpenStack to work, you need a basic tenant configuration. The creation "
+"of these administration tenants can be done automatically."
 msgstr ""
 
 #. Type: string
@@ -107,15 +126,27 @@ msgstr ""
 #: ../keystone.templates:5001
 #, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
-msgid "Please enter an user name for the administrative user."
+msgid "Username of the administrative user:"
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: string
+#. Description
+#: ../keystone.templates:5001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter a username for the administrative user."
 msgstr ""
 "Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-msgid "Email address of the admin user:"
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Email address of the administrative user:"
 msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: string
 #. Description
@@ -129,8 +160,11 @@ msgstr ""
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
-msgid "Password of the admin user:"
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Password of the administrative user:"
 msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: password
 #. Description
@@ -141,20 +175,40 @@ msgstr ""
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-msgid "Password of the admin user (confirm):"
+msgid "Re-enter password to verify:"
 msgstr ""
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-msgid "Please confirm the password for the administrative user."
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid ""
+"Please enter the same administrative password again to verify that you have "
+"typed it correctly."
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: error
+#. Description
+#: ../keystone.templates:9001
+msgid "Password input error"
+msgstr ""
+
+#. Type: error
+#. Description
+#: ../keystone.templates:9001
+msgid "The two passwords you entered were not the same. Please try again."
 msgstr ""
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-msgid "Name of the admin role:"
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Name of the administrative role:"
 msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: string
 #. Description
@@ -167,32 +221,49 @@ msgstr ""
 
 #. Type: string
 #. Description
-#: ../keystone.templates:11001
-msgid "Name of the admin tenant:"
-msgstr ""
-
-#. Type: string
-#. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
 #: ../keystone.templates:11001
 #, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
-msgid "Please enter the name of the administrative tenant (project)."
+msgid "Name of the administrative tenant:"
+msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
+
+#. Type: string
+#. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
+#: ../keystone.templates:11001
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter the name of the administrative tenant."
 msgstr ""
 "Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
-msgid "Register keystone endpoint?"
+msgid "Register Keystone endpoint?"
 msgstr ""
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid ""
-"Each Openstack services (each API) should be registered in order to be "
+"Each OpenStack service (each API) should be registered in order to be "
 "accessible. This is done using \"keystone service-create\" and \"keystone "
-"endpoint-create\". Select if you want to run these commands now."
+"endpoint-create\". This can be done automatically now."
 msgstr ""
 
 #. Type: string
@@ -204,8 +275,11 @@ msgstr ""
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
-msgid "Enter the IP address that will be used to contact keystone."
+#, fuzzy
+#| msgid "Please enter the token to use with the authentication server."
+msgid "Please enter the IP address that will be used to contact Keystone."
 msgstr ""
+"Veuillez indiquer le jeton à utiliser pour le serveur d'authentification."
 
 #. Type: string
 #. Description
@@ -217,7 +291,14 @@ msgstr ""
 #. Description
 #: ../keystone.templates:14001
 msgid ""
-"Openstack can be used using availability zones, with each region "
-"representing a location. Please enter the zone that you wish to use when "
-"registering the endpoint."
+"OpenStack supports using availability zones, with each region representing a "
+"location. Please enter the zone that you wish to use when registering the "
+"endpoint."
 msgstr ""
+
+#~ msgid ""
+#~ "If you don't choose this option, no database will be set up and Keystone "
+#~ "will use regular SQLite support."
+#~ msgstr ""
+#~ "Si vous ne choisissez pas cette option, aucune base de données ne sera "
+#~ "configurée et Keystone utilisera la gestion SQLite de base."

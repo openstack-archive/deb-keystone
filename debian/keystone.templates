@@ -11,20 +11,19 @@ Template: keystone/configure_db
 Type: boolean
 Default: false
 _Description: Set up a database for Keystone?
- No database has been set up for Keystone to use. If you want
- to set one up now, please make sure you have all needed
- information:
+ No database has been set up for Keystone to use. Before
+ continuing, you should make sure you have the following information:
  .
-  * the host name of the database server (which must allow TCP
-    connections from this machine);
-  * a username and password to access the database;
-  * the type of database management software you want to use.
+  * the type of database that you want to use;
+  * the database server host name (that server must allow TCP connections from this
+    machine);
+  * a username and password to access the database.
  .
- If you don't choose this option, no database will be set up and
- Keystone will use regular SQLite support.
+ If some of these requirements are missing, do not choose this option and run with
+ regular SQLite support.
  .
- You can change this setting later on by running "dpkg-reconfigure
- -plow keystone".
+ You can change this setting later on by running "dpkg-reconfigure -plow
+ keystone".
 
 Template: keystone/auth-token
 Type: password
@@ -35,66 +34,81 @@ _Description: Authentication server administration token:
 Template: keystone/create-admin-tenant
 Type: boolean
 Default: false
-_Description: Register admin tenants?
- For Openstack to work, you need a basic tenant configuration. The keystone
- package can create these admin tenants automatically for you.
+# Translators: a "tenant" in OpenStack world is
+# an entity that contains one or more username/password couples. 
+# It's typically the tenant that will be used for billing. Having more than one
+# username/password is very helpful in larger organization.
+# You're advised to either keep "tenant" without translating it
+# or keep it parenthezised. Example for French:
+# locataire ("tenant")
+_Description: Register administration tenants?
+ For OpenStack to work, you need a basic tenant configuration. The
+ creation of these administration tenants can be done automatically.
 
 Template: keystone/admin-user
 Type: string
 Default: admin
-_Description: User name of the admin user:
- Please enter an user name for the administrative user.
+_Description: Username of the administrative user:
+ Please enter a username for the administrative user.
 
 Template: keystone/admin-email
 Type: string
 Default: root@localhost
-_Description: Email address of the admin user:
+_Description: Email address of the administrative user:
  Please enter the email address of the administrative user.
 
 Template: keystone/admin-password
 Type: password
-_Description: Password of the admin user:
+_Description: Password of the administrative user:
  Please enter a password for the administrative user.
 
 Template: keystone/admin-password-confirm
 Type: password
-_Description: Password of the admin user (confirm):
- Please confirm the password for the administrative user.
+_Description: Re-enter password to verify:
+ Please enter the same administrative password again to verify that you have typed it
+ correctly.
 
 Template: keystone/passwords-do-not-match
 Type: error
-Description: Password mismatch
- The password and its confirmation do not match.
+_Description: Password input error
+ The two passwords you entered were not the same. Please try again.
 
 Template: keystone/admin-role-name
 Type: string
 Default: admin
-_Description: Name of the admin role:
+_Description: Name of the administrative role:
  Please enter the name of the administrative role.
 
 Template: keystone/admin-tenant-name
 Type: string
 Default: admin
-_Description: Name of the admin tenant:
- Please enter the name of the administrative tenant (project).
+# Translators: a "tenant" in OpenStack world is
+# an entity that contains one or more username/password couples. 
+# It's typically the tenant that will be used for billing. Having more than one
+# username/password is very helpful in larger organization.
+# You're advised to either keep "tenant" without translating it
+# or keep it parenthezised. Example for French:
+# locataire ("tenant")
+_Description: Name of the administrative tenant:
+ Please enter the name of the administrative tenant.
 
 Template: keystone/register-endpoint
 Type: boolean
 Default: false
-_Description: Register keystone endpoint?
- Each Openstack services (each API) should be registered in order to be
+_Description: Register Keystone endpoint?
+ Each OpenStack service (each API) should be registered in order to be
  accessible. This is done using "keystone service-create" and "keystone
- endpoint-create". Select if you want to run these commands now.
+ endpoint-create". This can be done automatically now.
 
 Template: keystone/endpoint-ip
 Type: string
 _Description: Keystone endpoint IP address:
- Enter the IP address that will be used to contact keystone.
+ Please enter the IP address that will be used to contact Keystone.
 
 Template: keystone/region-name
 Type: string
 Default: regionOne
 _Description: Name of the region to register:
- Openstack can be used using availability zones, with each region representing
+ OpenStack supports using availability zones, with each region representing
  a location. Please enter the zone that you wish to use when registering the
  endpoint.
