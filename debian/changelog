@@ -1,3 +1,10 @@
+keystone (2013.1.2-3) unstable; urgency=low
+
+  * Updated keystone templates after the debian-l10n-english. A big thanks to
+    them for their huge work (Closes: #708660).
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 10 Jul 2013 23:10:57 +0800
+
 keystone (2013.1.2-2) unstable; urgency=low
 
   * Keystone starts after rabbitmq-server and ntp.
