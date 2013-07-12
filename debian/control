@@ -105,6 +105,7 @@ Depends: adduser,
          python-configobj,
          python-keystone (= ${source:Version}),
          ssl-cert (>= 1.0.12),
+         sqlite3,
          ${misc:Depends},
          ${ostack-lsb-base},
          ${python:Depends}
