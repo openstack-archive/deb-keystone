@@ -1,3 +1,9 @@
+keystone (2013.1.2-4) unstable; urgency=low
+
+  * Added missing dependency: sqlite3.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 12 Jul 2013 13:05:13 +0800
+
 keystone (2013.1.2-3) unstable; urgency=low
 
   * Updated keystone templates after the debian-l10n-english. A big thanks to
