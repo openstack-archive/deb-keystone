@@ -60,6 +60,9 @@ if [ "$1" = "configure" ] ; then
 
 	# Create user and group keystone, plus /var/log and /var/lib owned by it
 	pkgos_var_user_group keystone
+	# We need a bash shell so that keystone-manage pkg_setup works, and the
+	# Wheezy package doesn't have it, failing upgrades
+	usermod -s /bin/bash keystone
 	# Make sure we have a folder to create certs, that isn't world readable
 	mkdir -p /etc/keystone/ssl/certs
 	chown keystone:keystone /etc/keystone/ssl/certs
