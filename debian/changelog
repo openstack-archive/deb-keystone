@@ -1,3 +1,10 @@
+keystone (2013.1.2-5) unstable; urgency=low
+
+  * Calls usermod -s /bin/bash keystone to ensure wheezy upgraded box can run
+    sudo -c "keystone-manage pkg_setup" keystone (Closes: #706540).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 19 Jul 2013 02:46:15 +0800
+
 keystone (2013.1.2-4) unstable; urgency=low
 
   * Added missing dependency: sqlite3 (Closes: #706540).
