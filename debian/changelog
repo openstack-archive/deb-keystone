@@ -1,3 +1,13 @@
+keystone (2013.1.2-6) unstable; urgency=low
+
+  * Cleans correctly to allow Keystone to be built twice (Closes: #717628).
+    Thanks to Kouhei Maeda <mkouhei@palmtb.net> for reporting.
+  * Adds python-swift build-depends to run the test_s3_token_middleware unit
+    tests (Closes: #717631). Thanks to Kouhei Maeda <mkouhei@palmtb.net> for
+    reporting.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 24 Jul 2013 11:08:34 +0800
+
 keystone (2013.1.2-5) unstable; urgency=low
 
   * Calls usermod -s /bin/bash keystone to ensure wheezy upgraded box can run
