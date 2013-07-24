@@ -70,7 +70,9 @@ override_dh_clean:
 	# should be fixed upstream or updated here post-essex
 	rm -rf $(CURDIR)/doc/source/keystone*.rst
 	rm -rf $(CURDIR)/doc/source/modules.rst
-	rm -rf $(CURDIR)/doc/source/sourcecode
+	rm -rf $(CURDIR)/doc/source/sourcecode $(CURDIR)/doc/source/api
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
 	rm -f $(CURDIR)/debian/keystone.config $(CURDIR)/debian/keystone.postinst
+	find $(CURDIR)/tests -name '*.db' -delete
+	rm -rf $(CURDIR)/vendor
 	dh_clean
