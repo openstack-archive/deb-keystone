@@ -1,3 +1,10 @@
+keystone (2013.1.2-7) UNRELEASED; urgency=low
+
+  * Added ja.po Debconf translation thanks to victory <victory.deb@gmail.com>,
+    and several DDs (Closes: #717707).
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 25 Jul 2013 23:24:18 +0800
+
 keystone (2013.1.2-6) unstable; urgency=low
 
   * Cleans correctly to allow Keystone to be built twice (Closes: #717628).
