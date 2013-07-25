@@ -16,18 +16,17 @@
 
 import uuid
 
-from keystone import catalog
+import sqlalchemy
+
+from keystone import test
+
 from keystone.common import sql
 from keystone import config
 from keystone import exception
-from keystone import identity
-from keystone import policy
-from keystone import test
-from keystone import token
-from keystone import trust
 
 import default_fixtures
 import test_backend
+
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
@@ -41,24 +40,12 @@ class SqlTests(test.TestCase, sql.Base):
                      test.testsdir('test_overrides.conf'),
                      test.testsdir('backend_sql.conf')])
 
-        # initialize managers and override drivers
-        self.catalog_man = catalog.Manager()
-        self.identity_man = identity.Manager()
-        self.token_man = token.Manager()
-        self.trust_man = trust.Manager()
-        self.policy_man = policy.Manager()
+        self.load_backends()
 
         # create tables and keep an engine reference for cleanup.
         # this must be done after the models are loaded by the managers.
         self.engine = self.get_engine()
         sql.ModelBase.metadata.create_all(bind=self.engine)
-
-        # create shortcut references to each driver
-        self.catalog_api = self.catalog_man.driver
-        self.identity_api = self.identity_man.driver
-        self.token_api = self.token_man.driver
-        self.policy_api = self.policy_man.driver
-        self.trust_api = self.trust_man.driver
 
         # populate the engine with tables & fixtures
         self.load_fixtures(default_fixtures)
@@ -72,6 +59,94 @@ class SqlTests(test.TestCase, sql.Base):
         super(SqlTests, self).tearDown()
 
 
+class SqlModels(SqlTests):
+    def setUp(self):
+        super(SqlModels, self).setUp()
+
+        self.metadata = sql.ModelBase.metadata
+        self.metadata.bind = self.engine
+
+    def select_table(self, name):
+        table = sqlalchemy.Table(name,
+                                 self.metadata,
+                                 autoload=True)
+        s = sqlalchemy.select([table])
+        return s
+
+    def assertExpectedSchema(self, table, cols):
+        table = self.select_table(table)
+        for col, type_, length in cols:
+            self.assertIsInstance(table.c[col].type, type_)
+            if length:
+                self.assertEquals(table.c[col].type.length, length)
+
+    def test_user_model(self):
+        cols = (('id', sql.String, 64),
+                ('name', sql.String, 64),
+                ('password', sql.String, 128),
+                ('domain_id', sql.String, 64),
+                ('enabled', sql.Boolean, None),
+                ('extra', sql.JsonBlob, None))
+        self.assertExpectedSchema('user', cols)
+
+    def test_group_model(self):
+        cols = (('id', sql.String, 64),
+                ('name', sql.String, 64),
+                ('description', sql.Text, None),
+                ('domain_id', sql.String, 64),
+                ('extra', sql.JsonBlob, None))
+        self.assertExpectedSchema('group', cols)
+
+    def test_domain_model(self):
+        cols = (('id', sql.String, 64),
+                ('name', sql.String, 64),
+                ('enabled', sql.Boolean, None))
+        self.assertExpectedSchema('domain', cols)
+
+    def test_project_model(self):
+        cols = (('id', sql.String, 64),
+                ('name', sql.String, 64),
+                ('description', sql.Text, None),
+                ('domain_id', sql.String, 64),
+                ('enabled', sql.Boolean, None),
+                ('extra', sql.JsonBlob, None))
+        self.assertExpectedSchema('project', cols)
+
+    def test_role_model(self):
+        cols = (('id', sql.String, 64),
+                ('name', sql.String, 64))
+        self.assertExpectedSchema('role', cols)
+
+    def test_user_project_metadata_model(self):
+        cols = (('user_id', sql.String, 64),
+                ('project_id', sql.String, 64),
+                ('data', sql.JsonBlob, None))
+        self.assertExpectedSchema('user_project_metadata', cols)
+
+    def test_user_domain_metadata_model(self):
+        cols = (('user_id', sql.String, 64),
+                ('domain_id', sql.String, 64),
+                ('data', sql.JsonBlob, None))
+        self.assertExpectedSchema('user_domain_metadata', cols)
+
+    def test_group_project_metadata_model(self):
+        cols = (('group_id', sql.String, 64),
+                ('project_id', sql.String, 64),
+                ('data', sql.JsonBlob, None))
+        self.assertExpectedSchema('group_project_metadata', cols)
+
+    def test_group_domain_metadata_model(self):
+        cols = (('group_id', sql.String, 64),
+                ('domain_id', sql.String, 64),
+                ('data', sql.JsonBlob, None))
+        self.assertExpectedSchema('group_domain_metadata', cols)
+
+    def test_user_group_membership(self):
+        cols = (('group_id', sql.String, 64),
+                ('user_id', sql.String, 64))
+        self.assertExpectedSchema('user_group_membership', cols)
+
+
 class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_password_hashed(self):
         session = self.identity_api.get_session()
@@ -83,7 +158,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                 'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': uuid.uuid4().hex}
-        self.identity_man.create_user({}, user['id'], user)
+        self.identity_api.create_user(user['id'], user)
         self.identity_api.add_user_to_project(self.tenant_bar['id'],
                                               user['id'])
         self.identity_api.delete_user(user['id'])
@@ -97,7 +172,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': uuid.uuid4().hex}
         self.assertRaises(exception.ValidationError,
-                          self.identity_man.create_user, {},
+                          self.identity_api.create_user,
                           user['id'],
                           user)
         self.assertRaises(exception.UserNotFound,
@@ -113,7 +188,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                   'name': None,
                   'domain_id': DEFAULT_DOMAIN_ID}
         self.assertRaises(exception.ValidationError,
-                          self.identity_man.create_project, {},
+                          self.identity_api.create_project,
                           tenant['id'],
                           tenant)
         self.assertRaises(exception.ProjectNotFound,
@@ -140,40 +215,58 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                 'name': 'fakeuser',
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_man.create_user({}, 'fake', user)
+        self.identity_api.create_user('fake', user)
         self.identity_api.add_user_to_project(self.tenant_bar['id'],
                                               user['id'])
         self.identity_api.delete_project(self.tenant_bar['id'])
         tenants = self.identity_api.get_projects_for_user(user['id'])
         self.assertEquals(tenants, [])
 
-    def test_delete_user_with_metadata(self):
-        user = {'id': 'fake',
-                'name': 'fakeuser',
+    def test_metadata_removed_on_delete_user(self):
+        # A test to check that the internal representation
+        # or roles is correctly updated when a user is deleted
+        user = {'id': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_man.create_user({}, 'fake', user)
-        self.identity_api.create_metadata(user['id'],
-                                          self.tenant_bar['id'],
-                                          {'extra': 'extra'})
+        self.identity_api.create_user(user['id'], user)
+        role = {'id': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex}
+        self.identity_api.create_role(role['id'], role)
+        self.identity_api.add_role_to_user_and_project(
+            user['id'],
+            self.tenant_bar['id'],
+            role['id'])
         self.identity_api.delete_user(user['id'])
+
+        # Now check whether the internal representation of roles
+        # has been deleted
         self.assertRaises(exception.MetadataNotFound,
-                          self.identity_api.get_metadata,
+                          self.assignment_api._get_metadata,
                           user['id'],
                           self.tenant_bar['id'])
 
-    def test_delete_project_with_metadata(self):
-        user = {'id': 'fake',
-                'name': 'fakeuser',
+    def test_metadata_removed_on_delete_project(self):
+        # A test to check that the internal representation
+        # or roles is correctly updated when a project is deleted
+        user = {'id': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_man.create_user({}, 'fake', user)
-        self.identity_api.create_metadata(user['id'],
-                                          self.tenant_bar['id'],
-                                          {'extra': 'extra'})
+        self.identity_api.create_user(user['id'], user)
+        role = {'id': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex}
+        self.identity_api.create_role(role['id'], role)
+        self.identity_api.add_role_to_user_and_project(
+            user['id'],
+            self.tenant_bar['id'],
+            role['id'])
         self.identity_api.delete_project(self.tenant_bar['id'])
+
+        # Now check whether the internal representation of roles
+        # has been deleted
         self.assertRaises(exception.MetadataNotFound,
-                          self.identity_api.get_metadata,
+                          self.assignment_api._get_metadata,
                           user['id'],
                           self.tenant_bar['id'])
 
@@ -195,7 +288,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
             'name': uuid.uuid4().hex,
             'domain_id': DEFAULT_DOMAIN_ID,
             arbitrary_key: arbitrary_value}
-        ref = self.identity_man.create_project({}, tenant_id, tenant)
+        ref = self.identity_api.create_project(tenant_id, tenant)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('extra'))
 
@@ -223,7 +316,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
             'domain_id': DEFAULT_DOMAIN_ID,
             'password': uuid.uuid4().hex,
             arbitrary_key: arbitrary_value}
-        ref = self.identity_man.create_user({}, user_id, user)
+        ref = self.identity_api.create_user(user_id, user)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('password'))
         self.assertIsNone(ref.get('extra'))
@@ -316,4 +409,8 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
 
 class SqlPolicy(SqlTests, test_backend.PolicyTests):
+    pass
+
+
+class SqlInheritance(SqlTests, test_backend.InheritanceTests):
     pass

@@ -18,27 +18,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
 import socket
 import ssl
 import sys
 
 import eventlet
 import eventlet.wsgi
+import greenlet
 
 from keystone.common import logging
 from keystone.common import wsgi
 
 
 LOG = logging.getLogger(__name__)
-
-
-def monkey_patch_eventlet(monkeypatch_thread=None):
-    if monkeypatch_thread is None:
-        monkeypatch_thread = not os.getenv('STANDARD_THREADS')
-
-    eventlet.patcher.monkey_patch(all=False, socket=True, time=True,
-                                  thread=monkeypatch_thread)
 
 
 class Server(object):
@@ -107,6 +99,8 @@ class Server(object):
         try:
             self.pool.waitall()
         except KeyboardInterrupt:
+            pass
+        except greenlet.GreenletExit:
             pass
 
     def _run(self, application, socket):

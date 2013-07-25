@@ -21,9 +21,11 @@ from lxml import etree
 import nose.exc
 import webtest
 
+from keystone import test
+
+from keystone.common import extension
 from keystone.common import serializer
 from keystone.openstack.common import jsonutils
-from keystone import test
 
 import default_fixtures
 
@@ -69,14 +71,12 @@ class RestfulTestCase(test.TestCase):
         self.admin_app = webtest.TestApp(
             self.loadapp('keystone', name='admin'))
 
-        # TODO(termie): is_admin is being deprecated once the policy stuff
-        #               is all working
         # TODO(termie): add an admin user to the fixtures and use that user
         # override the fixtures, for now
-        self.metadata_foobar = self.identity_api.update_metadata(
+        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
             self.user_foo['id'],
             self.tenant_bar['id'],
-            dict(roles=[self.role_admin['id']], is_admin='1'))
+            self.role_admin['id'])
 
     def tearDown(self):
         """Kill running servers and release references to avoid leaks."""
@@ -214,21 +214,35 @@ class RestfulTestCase(test.TestCase):
     def admin_request(self, **kwargs):
         return self._request(app=self.admin_app, **kwargs)
 
-    def get_scoped_token(self):
+    def _get_token(self, body):
         """Convenience method so that we can test authenticated requests."""
-        r = self.public_request(
-            method='POST',
-            path='/v2.0/tokens',
-            body={
-                'auth': {
-                    'passwordCredentials': {
-                        'username': self.user_foo['name'],
-                        'password': self.user_foo['password'],
-                    },
-                    'tenantId': self.tenant_bar['id'],
-                },
-            })
+        r = self.public_request(method='POST', path='/v2.0/tokens', body=body)
         return self._get_token_id(r)
+
+    def get_unscoped_token(self):
+        """Convenience method so that we can test authenticated requests."""
+        return self._get_token({
+            'auth': {
+                'passwordCredentials': {
+                    'username': self.user_foo['name'],
+                    'password': self.user_foo['password'],
+                },
+            },
+        })
+
+    def get_scoped_token(self, tenant_id=None):
+        """Convenience method so that we can test authenticated requests."""
+        if not tenant_id:
+            tenant_id = self.tenant_bar['id']
+        return self._get_token({
+            'auth': {
+                'passwordCredentials': {
+                    'username': self.user_foo['name'],
+                    'password': self.user_foo['password'],
+                },
+                'tenantId': tenant_id,
+            },
+        })
 
     def _get_token_id(self, r):
         """Helper method to return a token ID from a response.
@@ -321,14 +335,14 @@ class CoreApiTests(object):
         self.assertValidVersionResponse(r)
 
     def test_public_extensions(self):
-        self.public_request(path='/v2.0/extensions',)
-
-        # TODO(dolph): can't test this without any public extensions defined
-        # self.assertValidExtensionListResponse(r)
+        r = self.public_request(path='/v2.0/extensions')
+        self.assertValidExtensionListResponse(r,
+                                              extension.PUBLIC_EXTENSIONS)
 
     def test_admin_extensions(self):
-        r = self.admin_request(path='/v2.0/extensions',)
-        self.assertValidExtensionListResponse(r)
+        r = self.admin_request(path='/v2.0/extensions')
+        self.assertValidExtensionListResponse(r,
+                                              extension.ADMIN_EXTENSIONS)
 
     def test_admin_extensions_404(self):
         self.admin_request(path='/v2.0/extensions/invalid-extension',
@@ -340,7 +354,8 @@ class CoreApiTests(object):
 
     def test_admin_osksadm_extension(self):
         r = self.admin_request(path='/v2.0/extensions/OS-KSADM')
-        self.assertValidExtensionResponse(r)
+        self.assertValidExtensionResponse(r,
+                                          extension.ADMIN_EXTENSIONS)
 
     def test_authenticate(self):
         r = self.public_request(
@@ -384,6 +399,18 @@ class CoreApiTests(object):
             path='/v2.0/tokens/%(token_id)s' % {
                 'token_id': token,
             },
+            token=token)
+        self.assertValidAuthenticationResponse(r)
+
+    def test_validate_token_service_role(self):
+        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
+            self.user_foo['id'],
+            self.tenant_service['id'],
+            self.role_service['id'])
+
+        token = self.get_scoped_token(tenant_id='service')
+        r = self.admin_request(
+            path='/v2.0/tokens/%s' % token,
             token=token)
         self.assertValidAuthenticationResponse(r)
 
@@ -586,24 +613,26 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
         self.assertValidError(r.result['error'])
         self.assertEqual(r.result['error']['code'], r.status_code)
 
-    def assertValidExtension(self, extension):
+    def assertValidExtension(self, extension, expected):
         super(JsonTestCase, self).assertValidExtension(extension)
-
-        self.assertIsNotNone(extension.get('description'))
+        descriptions = [ext['description'] for ext in expected.itervalues()]
+        description = extension.get('description')
+        self.assertIsNotNone(description)
+        self.assertIn(description, descriptions)
         self.assertIsNotNone(extension.get('links'))
         self.assertNotEmpty(extension.get('links'))
         for link in extension.get('links'):
             self.assertValidExtensionLink(link)
 
-    def assertValidExtensionListResponse(self, r):
+    def assertValidExtensionListResponse(self, r, expected):
         self.assertIsNotNone(r.result.get('extensions'))
         self.assertIsNotNone(r.result['extensions'].get('values'))
         self.assertNotEmpty(r.result['extensions'].get('values'))
         for extension in r.result['extensions']['values']:
-            self.assertValidExtension(extension)
+            self.assertValidExtension(extension, expected)
 
-    def assertValidExtensionResponse(self, r):
-        self.assertValidExtension(r.result.get('extension'))
+    def assertValidExtensionResponse(self, r, expected):
+        self.assertValidExtension(r.result.get('extension'), expected)
 
     def assertValidAuthenticationResponse(self, r,
                                           require_service_catalog=False):
@@ -825,29 +854,31 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
         self.assertValidError(xml)
         self.assertEqual(xml.get('code'), str(r.status_code))
 
-    def assertValidExtension(self, extension):
+    def assertValidExtension(self, extension, expected):
         super(XmlTestCase, self).assertValidExtension(extension)
 
         self.assertIsNotNone(extension.find(self._tag('description')))
         self.assertTrue(extension.find(self._tag('description')).text)
         links = extension.find(self._tag('links'))
         self.assertNotEmpty(links.findall(self._tag('link')))
+        descriptions = [ext['description'] for ext in expected.itervalues()]
+        description = extension.find(self._tag('description')).text
+        self.assertIn(description, descriptions)
         for link in links.findall(self._tag('link')):
             self.assertValidExtensionLink(link)
 
-    def assertValidExtensionListResponse(self, r):
+    def assertValidExtensionListResponse(self, r, expected):
         xml = r.result
         self.assertEqual(xml.tag, self._tag('extensions'))
-
         self.assertNotEmpty(xml.findall(self._tag('extension')))
-        for extension in xml.findall(self._tag('extension')):
-            self.assertValidExtension(extension)
+        for ext in xml.findall(self._tag('extension')):
+            self.assertValidExtension(ext, expected)
 
-    def assertValidExtensionResponse(self, r):
+    def assertValidExtensionResponse(self, r, expected):
         xml = r.result
         self.assertEqual(xml.tag, self._tag('extension'))
 
-        self.assertValidExtension(xml)
+        self.assertValidExtension(xml, expected)
 
     def assertValidVersion(self, version):
         super(XmlTestCase, self).assertValidVersion(version)
@@ -1025,7 +1056,7 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
                 {"tenant":{
                     "name":"test1",
                     "description":"",
-                    "enabled":"true"}
+                    "enabled":true}
                 }
             """,
             convert=False)
@@ -1033,3 +1064,42 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
         self.assertIsNotNone(r.result.get('tenant'))
         self.assertValidTenant(r.result['tenant'])
         self.assertEqual(r.result['tenant'].get('description'), "")
+
+    def test_create_project_invalid_enabled_type_string(self):
+        # Forbidden usage of string for 'enabled' field in JSON and XML
+        token = self.get_scoped_token()
+
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/tenants',
+            body={
+                'tenant': {
+                    'name': uuid.uuid4().hex,
+                    # In XML, only "true|false" are converted to boolean.
+                    'enabled': "False",
+                },
+            },
+            token=token,
+            expected_status=400)
+        self.assertValidErrorResponse(r)
+
+    def test_update_project_invalid_enabled_type_string(self):
+        # Forbidden usage of string for 'enabled' field in JSON and XML
+        token = self.get_scoped_token()
+
+        path = '/v2.0/tenants/%(tenant_id)s' % {
+               'tenant_id': self.tenant_bar['id'],
+        }
+
+        r = self.admin_request(
+            method='PUT',
+            path=path,
+            body={
+                'tenant': {
+                    # In XML, only "true|false" are converted to boolean.
+                    'enabled': "False",
+                },
+            },
+            token=token,
+            expected_status=400)
+        self.assertValidErrorResponse(r)

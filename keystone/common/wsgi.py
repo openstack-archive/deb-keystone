@@ -73,6 +73,55 @@ def mask_password(message, is_unicode=False, secret="***"):
     return result
 
 
+def validate_token_bind(context, token_ref):
+    bind_mode = CONF.token.enforce_token_bind
+
+    if bind_mode == 'disabled':
+        return
+
+    bind = token_ref.get('bind', {})
+
+    # permissive and strict modes don't require there to be a bind
+    permissive = bind_mode in ('permissive', 'strict')
+
+    # get the named mode if bind_mode is not one of the known
+    name = None if permissive or bind_mode == 'required' else bind_mode
+
+    if not bind:
+        if permissive:
+            # no bind provided and none required
+            return
+        else:
+            LOG.info(_("No bind information present in token"))
+            raise exception.Unauthorized()
+
+    if name and name not in bind:
+        LOG.info(_("Named bind mode %s not in bind information"), name)
+        raise exception.Unauthorized()
+
+    for bind_type, identifier in bind.iteritems():
+        if bind_type == 'kerberos':
+            if not context.get('AUTH_TYPE', '').lower() == 'negotiate':
+                LOG.info(_("Kerberos credentials required and not present"))
+                raise exception.Unauthorized()
+
+            if not context.get('REMOTE_USER') == identifier:
+                LOG.info(_("Kerberos credentials do not match those in bind"))
+                raise exception.Unauthorized()
+
+            LOG.info(_("Kerberos bind authentication successful"))
+
+        elif bind_mode == 'permissive':
+            LOG.debug(_("Ignoring unknown bind for permissive mode: "
+                        "{%(bind_type)s: %(identifier)s}"),
+                      {'bind_type': bind_type, 'identifier': identifier})
+        else:
+            LOG.info(_("Couldn't verify unknown bind: "
+                       "{%(bind_type)s: %(identifier)s}"),
+                     {'bind_type': bind_type, 'identifier': identifier})
+            raise exception.Unauthorized()
+
+
 class WritableLogger(object):
     """A thin wrapper that responds to `write` and logs."""
 
@@ -103,18 +152,18 @@ class BaseApplication(object):
 
             [app:wadl]
             latest_version = 1.3
-            paste.app_factory = nova.api.fancy_api:Wadl.factory
+            paste.app_factory = keystone.fancy_api:Wadl.factory
 
         which would result in a call to the `Wadl` class as
 
-            import nova.api.fancy_api
-            fancy_api.Wadl(latest_version='1.3')
+            import keystone.fancy_api
+            keystone.fancy_api.Wadl(latest_version='1.3')
 
         You could of course re-implement the `factory` method in subclasses,
         but using the kwarg passing it shouldn't be necessary.
 
         """
-        return cls()
+        return cls(**local_config)
 
     def __call__(self, environ, start_response):
         r"""Subclasses will probably want to implement __call__ like this:
@@ -161,16 +210,25 @@ class Application(BaseApplication):
         del arg_dict['controller']
         LOG.debug(_('arg_dict: %s'), arg_dict)
 
-        # allow middleware up the stack to provide context & params
+        # allow middleware up the stack to provide context, params and headers.
         context = req.environ.get(CONTEXT_ENV, {})
         context['query_string'] = dict(req.params.iteritems())
+        context['headers'] = dict(req.headers.iteritems())
         context['path'] = req.environ['PATH_INFO']
         params = req.environ.get(PARAMS_ENV, {})
-        if 'REMOTE_USER' in req.environ:
-            context['REMOTE_USER'] = req.environ['REMOTE_USER']
-        elif context.get('REMOTE_USER', None) is not None:
-            del context['REMOTE_USER']
+
+        for name in ['REMOTE_USER', 'AUTH_TYPE']:
+            try:
+                context[name] = req.environ[name]
+            except KeyError:
+                try:
+                    del context[name]
+                except KeyError:
+                    pass
+
         params.update(arg_dict)
+
+        context.setdefault('is_admin', False)
 
         # TODO(termie): do some basic normalization on methods
         method = getattr(self, action)
@@ -226,10 +284,11 @@ class Application(BaseApplication):
         if not context['is_admin']:
             try:
                 user_token_ref = self.token_api.get_token(
-                    context=context, token_id=context['token_id'])
+                    token_id=context['token_id'])
             except exception.TokenNotFound as e:
                 raise exception.Unauthorized(e)
 
+            validate_token_bind(context, user_token_ref)
             creds = user_token_ref['metadata'].copy()
 
             try:
@@ -245,10 +304,10 @@ class Application(BaseApplication):
                 raise exception.Unauthorized()
 
             # NOTE(vish): this is pretty inefficient
-            creds['roles'] = [self.identity_api.get_role(context, role)['name']
+            creds['roles'] = [self.identity_api.get_role(role)['name']
                               for role in creds.get('roles', [])]
             # Accept either is_admin or the admin role
-            self.policy_api.enforce(context, creds, 'admin_required', {})
+            self.policy_api.enforce(creds, 'admin_required', {})
 
 
 class Middleware(Application):
@@ -273,12 +332,12 @@ class Middleware(Application):
 
             [filter:analytics]
             redis_host = 127.0.0.1
-            paste.filter_factory = nova.api.analytics:Analytics.factory
+            paste.filter_factory = keystone.analytics:Analytics.factory
 
         which would result in a call to the `Analytics` class as
 
-            import nova.api.analytics
-            analytics.Analytics(app_from_paste, redis_host='127.0.0.1')
+            import keystone.analytics
+            keystone.analytics.Analytics(app, redis_host='127.0.0.1')
 
         You could of course re-implement the `factory` method in subclasses,
         but using the kwarg passing it shouldn't be necessary.
@@ -287,7 +346,7 @@ class Middleware(Application):
         def _factory(app):
             conf = global_config.copy()
             conf.update(local_config)
-            return cls(app)
+            return cls(app, **local_config)
         return _factory
 
     def __init__(self, application):
@@ -483,12 +542,12 @@ class ExtensionRouter(Router):
 
             [filter:analytics]
             redis_host = 127.0.0.1
-            paste.filter_factory = nova.api.analytics:Analytics.factory
+            paste.filter_factory = keystone.analytics:Analytics.factory
 
         which would result in a call to the `Analytics` class as
 
-            import nova.api.analytics
-            analytics.Analytics(app_from_paste, redis_host='127.0.0.1')
+            import keystone.analytics
+            keystone.analytics.Analytics(app, redis_host='127.0.0.1')
 
         You could of course re-implement the `factory` method in subclasses,
         but using the kwarg passing it shouldn't be necessary.
@@ -497,7 +556,7 @@ class ExtensionRouter(Router):
         def _factory(app):
             conf = global_config.copy()
             conf.update(local_config)
-            return cls(app)
+            return cls(app, **local_config)
         return _factory
 
 

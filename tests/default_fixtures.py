@@ -17,6 +17,7 @@
 # NOTE(dolph): please try to avoid additional fixtures if possible; test suite
 #              performance may be negatively affected.
 
+from keystone import assignment
 from keystone import config
 
 
@@ -45,10 +46,16 @@ TENANTS = [
         'description': 'description',
         'enabled': True,
         'domain_id': DEFAULT_DOMAIN_ID
+    }, {
+        'id': 'service',
+        'name': 'service',
+        'description': 'description',
+        'enabled': True,
+        'domain_id': DEFAULT_DOMAIN_ID
     }
 ]
 
-# NOTE(ja): a role of keystone_admin and attribute "is_admin" is done in setUp
+# NOTE(ja): a role of keystone_admin is done in setUp
 USERS = [
     {
         'id': 'foo',
@@ -89,13 +96,6 @@ USERS = [
     }
 ]
 
-METADATA = [
-    {
-        'user_id': 'sna',
-        'tenant_id': 'mtu',
-    }
-]
-
 ROLES = [
     {
         'id': 'admin',
@@ -115,16 +115,10 @@ ROLES = [
     }, {
         'id': 'writer',
         'name': 'Writer',
-    }
-
-]
-
-DOMAINS = [
-    {
-        'id': DEFAULT_DOMAIN_ID,
-        'name': 'Default',
-        'enabled': True,
-        'description': 'Owns users and tenants (i.e. projects) available '
-                       'on Identity API v2.'
+    }, {
+        'id': 'service',
+        'name': 'Service',
     }
 ]
+
+DOMAINS = [assignment.DEFAULT_DOMAIN]

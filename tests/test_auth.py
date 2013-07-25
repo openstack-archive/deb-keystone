@@ -16,11 +16,12 @@ import copy
 import datetime
 import uuid
 
+from keystone import test
+
 from keystone import auth
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import timeutils
-from keystone import test
 from keystone import token
 from keystone import trust
 
@@ -66,6 +67,10 @@ class AuthTest(test.TestCase):
         CONF.identity.driver = 'keystone.identity.backends.kvs.Identity'
         self.load_backends()
         self.load_fixtures(default_fixtures)
+
+        # need to register the token provider first because auth controller
+        # depends on it
+        token.provider.Manager()
 
         self.controller = token.controllers.Auth()
 
@@ -368,6 +373,33 @@ class AuthWithToken(AuthTest):
             dict(is_admin=True, query_string={'belongsTo': 'BAR'}),
             token_id=scoped_token_id)
 
+    def test_token_auth_with_binding(self):
+        CONF.token.bind = ['kerberos']
+        body_dict = _build_user_auth()
+        context = {'REMOTE_USER': 'FOO', 'AUTH_TYPE': 'Negotiate'}
+        unscoped_token = self.controller.authenticate(context, body_dict)
+
+        # the token should have bind information in it
+        bind = unscoped_token['access']['token']['bind']
+        self.assertEqual(bind['kerberos'], 'FOO')
+
+        body_dict = _build_user_auth(
+            token=unscoped_token['access']['token'],
+            tenant_name='BAR')
+
+        # using unscoped token without remote user context fails
+        self.assertRaises(
+            exception.Unauthorized,
+            self.controller.authenticate,
+            {}, body_dict)
+
+        # using token with remote user context succeeds
+        scoped_token = self.controller.authenticate(context, body_dict)
+
+        # the bind information should be carried over from the original token
+        bind = scoped_token['access']['token']['bind']
+        self.assertEqual(bind['kerberos'], 'FOO')
+
 
 class AuthWithPasswordCredentials(AuthTest):
     def setUp(self):
@@ -425,6 +457,13 @@ class AuthWithPasswordCredentials(AuthTest):
         self.assertRaises(exception.ValidationError,
                           self.controller.authenticate,
                           {}, body_dict)
+
+    def test_bind_without_remote_user(self):
+        CONF.token.bind = ['kerberos']
+        body_dict = _build_user_auth(username='FOO', password='foo2',
+                                     tenant_name='BAR')
+        token = self.controller.authenticate({}, body_dict)
+        self.assertNotIn('bind', token['access']['token'])
 
 
 class AuthWithRemoteUser(AuthTest):
@@ -493,6 +532,20 @@ class AuthWithRemoteUser(AuthTest):
             {'REMOTE_USER': uuid.uuid4().hex},
             body_dict)
 
+    def test_bind_with_kerberos(self):
+        CONF.token.bind = ['kerberos']
+        kerb = {'REMOTE_USER': 'FOO', 'AUTH_TYPE': 'Negotiate'}
+        body_dict = _build_user_auth(tenant_name="BAR")
+        token = self.controller.authenticate(kerb, body_dict)
+        self.assertEqual(token['access']['token']['bind']['kerberos'], 'FOO')
+
+    def test_bind_without_config_opt(self):
+        CONF.token.bind = ['x509']
+        kerb = {'REMOTE_USER': 'FOO', 'AUTH_TYPE': 'Negotiate'}
+        body_dict = _build_user_auth(tenant_name='BAR')
+        token = self.controller.authenticate(kerb, body_dict)
+        self.assertNotIn('bind', token['access']['token'])
+
 
 class AuthWithTrust(AuthTest):
     def setUp(self):
@@ -531,8 +584,8 @@ class AuthWithTrust(AuthTest):
         trust_data['expires_at'] = expires_at
         trust_data['impersonation'] = impersonation
 
-        self.new_trust = (self.trust_controller.create_trust
-                          (context, trust=trust_data)['trust'])
+        self.new_trust = self.trust_controller.create_trust(
+            context, trust=trust_data)['trust']
 
     def build_v2_token_request(self, username, password):
         body_dict = _build_user_auth(username=username, password=password)
@@ -620,7 +673,7 @@ class AuthWithTrust(AuthTest):
                 'project': {
                     'id': self.tenant_baz['id']}}}
         auth_response = (self.auth_v3_controller.authenticate_for_token
-                         ({}, v3_password_data))
+                         ({'query_string': {}}, v3_password_data))
         token = auth_response.headers['X-Subject-Token']
 
         v3_req_with_trust = {
@@ -630,7 +683,7 @@ class AuthWithTrust(AuthTest):
             "scope": {
                 "OS-TRUST:trust": {"id": self.new_trust['id']}}}
         token_auth_response = (self.auth_v3_controller.authenticate_for_token
-                               ({}, v3_req_with_trust))
+                               ({'query_string': {}}, v3_req_with_trust))
         return token_auth_response
 
     def test_create_v3_token_from_trust(self):
@@ -652,14 +705,14 @@ class AuthWithTrust(AuthTest):
     def test_v3_trust_token_get_token_fails(self):
         auth_response = self.fetch_v3_token_from_trust()
         trust_token = auth_response.headers['X-Subject-Token']
-        v3_token_data = {
-            "methods": ["token"],
-            "token": {"id": trust_token}
-        }
+        v3_token_data = {'identity': {
+            'methods': ['token'],
+            'token': {'id': trust_token}
+        }}
         self.assertRaises(
-            exception.Unauthorized,
+            exception.Forbidden,
             self.auth_v3_controller.authenticate_for_token,
-            {}, v3_token_data)
+            {'query_string': {}}, v3_token_data)
 
     def test_token_from_trust(self):
         auth_response = self.fetch_v2_token_from_trust()
@@ -672,7 +725,7 @@ class AuthWithTrust(AuthTest):
 
     def assert_token_count_for_trust(self, expected_value):
         tokens = self.trust_controller.token_api.list_tokens(
-            {}, self.trustee['id'], trust_id=self.new_trust['id'])
+            self.trustee['id'], trust_id=self.new_trust['id'])
         token_count = len(tokens)
         self.assertEquals(token_count, expected_value)
 
@@ -680,9 +733,7 @@ class AuthWithTrust(AuthTest):
         self.assert_token_count_for_trust(0)
         self.fetch_v2_token_from_trust()
         self.assert_token_count_for_trust(1)
-        self.trust_controller._delete_tokens_for_user(
-            {},
-            self.trustee['id'])
+        self.trust_controller._delete_tokens_for_user(self.trustee['id'])
         self.assert_token_count_for_trust(0)
 
     def test_token_from_trust_cant_get_another_token(self):

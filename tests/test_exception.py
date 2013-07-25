@@ -16,11 +16,12 @@
 
 import uuid
 
+from keystone import test
+
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import jsonutils
-from keystone import test
 
 
 CONF = config.CONF
@@ -74,6 +75,22 @@ class ExceptionTestCase(test.TestCase):
         e = exception.NotFound(target=target)
         self.assertValidJsonRendering(e)
         self.assertIn(target, str(e))
+
+    def test_403_title(self):
+        e = exception.Forbidden()
+        resp = wsgi.render_exception(e)
+        j = jsonutils.loads(resp.body)
+        self.assertEqual('Forbidden', e.title)
+        self.assertEqual('Forbidden', j['error'].get('title'))
+
+    def test_unicode_message(self):
+        message = u'Comment \xe7a va'
+        e = exception.Error(message)
+
+        try:
+            self.assertEqual(unicode(e), message)
+        except UnicodeEncodeError:
+            self.fail("unicode error message not supported")
 
 
 class SecurityErrorTestCase(ExceptionTestCase):
@@ -136,12 +153,3 @@ class SecurityErrorTestCase(ExceptionTestCase):
         e = exception.ForbiddenAction(action=risky_info)
         self.assertValidJsonRendering(e)
         self.assertIn(risky_info, str(e))
-
-    def test_unicode_message(self):
-        message = u'Comment \xe7a va'
-        e = exception.Error(message)
-        self.assertEqual(e.message, message)
-        try:
-            unicode(e)
-        except UnicodeEncodeError:
-            self.fail("unicode error message not supported")

@@ -347,6 +347,8 @@ def upgrade_user_table_with_col_create(meta, migrate_engine, session):
     session.execute('ALTER TABLE "user" ADD CONSTRAINT user_dom_name_unique '
                     'UNIQUE (domain_id, name);')
 
+    session.commit()
+
 
 def upgrade_project_table_with_col_create(meta, migrate_engine, session):
     # Create the domain_id column.  We want this to be not nullable
@@ -379,7 +381,9 @@ def downgrade_user_table_with_col_drop(meta, migrate_engine, session):
     # Revert uniqueness settings for the name attribute
     session.execute('ALTER TABLE "user" DROP CONSTRAINT '
                     'user_dom_name_unique;')
-    session.execute('ALTER TABLE "user" ADD UNIQUE (name);')
+    # specify the constraint name so it can be referenced later
+    session.execute('ALTER TABLE "user" ADD CONSTRAINT user_name_key '
+                    'UNIQUE (name);')
     session.commit()
     # And now go ahead an drop the domain_id column
     sql.Table('domain', meta, autoload=True)

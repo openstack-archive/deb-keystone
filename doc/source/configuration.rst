@@ -74,11 +74,12 @@ following sections:
 * ``[s3]`` - Amazon S3 authentication driver configuration.
 * ``[identity]`` - identity system driver configuration
 * ``[catalog]`` - service catalog driver configuration
-* ``[token]`` - token driver configuration
+* ``[token]`` - token driver & token provider configuration
 * ``[policy]`` - policy system driver configuration for RBAC
 * ``[signing]`` - cryptographic signatures for PKI based tokens
 * ``[ssl]`` - SSL configuration
 * ``[auth]`` - Authentication plugin configuration
+* ``[os_inherit]`` - Inherited Role Assignment extension
 * ``[paste_deploy]`` - Pointer to the PasteDeploy configuration file
 
 The Keystone primary configuration file is expected to be named ``keystone.conf``.
@@ -106,7 +107,10 @@ file. It is up to the plugin to register its own configuration options.
 * ``methods`` - comma-delimited list of authentication plugin names
 * ``<plugin name>`` - specify the class which handles to authentication method, in the same manner as one would specify a backend driver.
 
-Keystone provides two authentication methods by default. ``password`` handles password authentication and ``token`` handles token authentication.
+Keystone provides three authentication methods by default. ``password`` handles password
+authentication and ``token`` handles token authentication.  ``external`` is used in conjunction
+with authentication performed by a container web server that sets the ``REMOTE_USER``
+environment variable.
 
 How to Implement an Authentication Plugin
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -148,6 +152,32 @@ invoked, all plugins must succeed in order to for the entire
 authentication to be successful. Furthermore, all the plugins invoked must
 agree on the ``user_id`` in the ``auth_context``.
 
+The ``REMOTE_USER`` environment variable is only set from a containing webserver.  However,
+to ensure that a user must go through other authentication mechanisms, even if this variable
+is set, remove ``external`` from the list of plugins specified in ``methods``.  This effectively
+disables external authentication.
+
+
+Token Provider
+--------------
+
+Keystone supports customizable token provider and it is specified in the
+``[token]`` section of the configuration file. Keystone provides both UUID and
+PKI token providers, with PKI token provider enabled as default. However, users
+may register their own token provider by configuring the following property.
+
+* ``provider`` - token provider driver. Defaults to
+  ``keystone.token.providers.pki.Provider``
+
+Note that ``token_format`` in the ``[signing]`` section is deprecated but still
+being supported for backward compatibility. Therefore, if ``provider`` is set
+to ``keystone.token.providers.pki.Provider``, ``token_format`` must be ``PKI``.
+Conversely, if ``provider`` is ``keystone.token.providers.uuid.Provider``,
+``token_format`` must be ``UUID``.
+
+For a customized provider, ``token_format`` must not set to ``PKI`` or
+``UUID``.
+
 Certificates for PKI
 --------------------
 
@@ -163,12 +193,14 @@ private key should only be readable by the system user that will run Keystone.
 The values that specify where to read the certificates are under the
 ``[signing]`` section of the configuration file.  The configuration values are:
 
-* ``token_format`` - Determines the algorithm used to generate tokens.  Can be either ``UUID`` or ``PKI``. Defaults to ``PKI``
+* ``token_format`` - Determines the algorithm used to generate tokens.  Can be
+  either ``UUID`` or ``PKI``. Defaults to ``PKI``. This option must be used in
+  conjunction with ``provider`` configuration in the ``[token]`` section.
 * ``certfile`` - Location of certificate used to verify tokens.  Default is ``/etc/keystone/ssl/certs/signing_cert.pem``
 * ``keyfile`` - Location of private key used to sign tokens.  Default is ``/etc/keystone/ssl/private/signing_key.pem``
 * ``ca_certs`` - Location of certificate for the authority that issued the above certificate. Default is ``/etc/keystone/ssl/certs/ca.pem``
 * ``ca_key`` - Default is ``/etc/keystone/ssl/certs/cakey.pem``
-* ``key_size`` - Default is ``1024``
+* ``key_size`` - Default is ``2048``
 * ``valid_days`` - Default is ``3650``
 * ``ca_password``  - Password required to read the ca_file. Default is None
 
@@ -202,9 +234,9 @@ generate a PKCS #10 Certificate Request Syntax (CRS) using OpenSSL CLI.
 First create a certificate request configuration file (e.g. ``cert_req.conf``)::
 
     [ req ]
-    default_bits            = 1024
+    default_bits            = 2048
     default_keyfile         = keystonekey.pem
-    default_md              = sha1
+    default_md              = default
 
     prompt                  = no
     distinguished_name      = distinguished_name
@@ -223,7 +255,7 @@ key. Must use the -nodes option.**
 
 For example::
 
-    openssl req -newkey rsa:1024 -keyout signing_key.pem -keyform PEM -out signing_cert_req.pem -outform PEM -config cert_req.conf -nodes
+    openssl req -newkey rsa:2048 -keyout signing_key.pem -keyform PEM -out signing_cert_req.pem -outform PEM -config cert_req.conf -nodes
 
 
 If everything is successfully, you should end up with ``signing_cert_req.pem``
@@ -461,6 +493,55 @@ Each user can then change their own password with a HTTP PATCH ::
 
 In addition to changing their password all of the users current tokens will be
 deleted (if the backend used is kvs or sql)
+
+
+Inherited Role Assignment Extension
+-----------------------------------
+
+Keystone provides an optional extension that adds the capability to assign roles to a domain that, rather than
+affect the domain itself, are instead inherited to all projects owned by theat domain.  This extension is disabled by
+default, but can be enabled by including the following in ``keystone.conf``.
+
+    [os_inherit]
+    enabled = True
+
+
+Token Binding
+-------------
+
+Token binding refers to the practice of embedding information from external
+authentication providers (like a company's Kerberos server) inside the token
+such that a client may enforce that the token only be used in conjunction with
+that specified authentication. This is an additional security mechanism as it
+means that if a token is stolen it will not be usable without also providing the
+external authentication.
+
+To activate token binding you must specify the types of authentication that
+token binding should be used for in ``keystone.conf`` e.g.::
+
+    [token]
+    bind = kerberos
+
+Currently only ``kerberos`` is supported.
+
+To enforce checking of token binding the ``enforce_token_bind`` parameter
+should be set to one of the following modes:
+
+* ``disabled`` disable token bind checking
+* ``permissive`` enable bind checking, if a token is bound to a mechanism that
+  is unknown to the server then ignore it. This is the default.
+* ``strict`` enable bind checking, if a token is bound to a mechanism that is
+  unknown to the server then this token should be rejected.
+* ``required`` enable bind checking and require that at least 1 bind mechanism
+  is used for tokens.
+* named enable bind checking and require that the specified authentication
+  mechanism is used. e.g.::
+
+    [token]
+    enforce_token_bind = kerberos
+
+  *Do not* set ``enforce_token_bind = named`` as there is not an authentication
+  mechanism called ``named``.
 
 
 Sample Configuration Files
@@ -1002,23 +1083,23 @@ As an alternative to the SQL Database backing store, Keystone can use a
 directory server to provide the Identity service.  An example Schema
 for openstack would look like this::
 
-  dn: cn=openstack,cn=org
+  dn: dc=openstack,dc=org
   dc: openstack
   objectClass: dcObject
   objectClass: organizationalUnit
   ou: openstack
 
-  dn: ou=Groups,cn=openstack,cn=org
+  dn: ou=Projects,dc=openstack,dc=org
   objectClass: top
   objectClass: organizationalUnit
   ou: groups
 
-  dn: ou=Users,cn=openstack,cn=org
+  dn: ou=Users,dc=openstack,dc=org
   objectClass: top
   objectClass: organizationalUnit
   ou: users
 
-  dn: ou=Roles,cn=openstack,cn=org
+  dn: ou=Roles,dc=openstack,dc=org
   objectClass: top
   objectClass: organizationalUnit
   ou: roles
@@ -1033,13 +1114,13 @@ The corresponding entries in the Keystone configuration file are::
   use_dumb_member = False
   allow_subtree_delete = False
 
-  user_tree_dn = ou=Users,dc=openstack,dc=com
+  user_tree_dn = ou=Users,dc=openstack,dc=org
   user_objectclass = inetOrgPerson
 
-  tenant_tree_dn = ou=Groups,dc=openstack,dc=com
+  tenant_tree_dn = ou=Projects,dc=openstack,dc=org
   tenant_objectclass = groupOfNames
 
-  role_tree_dn = ou=Roles,dc=example,dc=com
+  role_tree_dn = ou=Roles,dc=openstack,dc=org
   role_objectclass = organizationalRole
 
 The default object classes and attributes are intentionally simplistic.  They
@@ -1079,7 +1160,7 @@ if the backend is providing too much output, in such case the configuration
 will look like::
 
   [ldap]
-  user_filter = (memberof=CN=openstack-users,OU=workgroups,DC=openstack,DC=com)
+  user_filter = (memberof=CN=openstack-users,OU=workgroups,DC=openstack,DC=org)
   tenant_filter =
   role_filter =
 

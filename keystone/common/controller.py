@@ -20,14 +20,17 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
     try:
-        token_ref = self.token_api.get_token(
-            context=context, token_id=context['token_id'])
+        token_ref = self.token_api.get_token(context['token_id'])
     except exception.TokenNotFound:
         LOG.warning(_('RBAC: Invalid token'))
         raise exception.Unauthorized()
 
+    # NOTE(jamielennox): whilst this maybe shouldn't be within this function
+    # it would otherwise need to reload the token_ref from backing store.
+    wsgi.validate_token_bind(context, token_ref)
+
     creds = {}
-    if 'token_data' in token_ref:
+    if 'token_data' in token_ref and 'token' in token_ref['token_data']:
         #V3 Tokens
         token_data = token_ref['token_data']['token']
         try:
@@ -61,7 +64,7 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         except AttributeError:
             LOG.debug(_('RBAC: Proceeding without tenant'))
         # NOTE(vish): this is pretty inefficient
-        creds['roles'] = [self.identity_api.get_role(context, role)['name']
+        creds['roles'] = [self.identity_api.get_role(role)['name']
                           for role in creds.get('roles', [])]
 
     return creds
@@ -87,7 +90,7 @@ def flatten(d, parent_key=''):
 def protected(f):
     """Wraps API calls with role based access controls (RBAC)."""
     @functools.wraps(f)
-    def wrapper(self, context, **kwargs):
+    def wrapper(self, context, *args, **kwargs):
         if 'is_admin' in context and context['is_admin']:
             LOG.warning(_('RBAC: Bypassing authorization'))
         else:
@@ -97,10 +100,10 @@ def protected(f):
             # Simply use the passed kwargs as the target dict, which
             # would typically include the prime key of a get/update/delete
             # call.
-            self.policy_api.enforce(context, creds, action, flatten(kwargs))
+            self.policy_api.enforce(creds, action, flatten(kwargs))
             LOG.debug(_('RBAC: Authorization granted'))
 
-        return f(self, context, **kwargs)
+        return f(self, context, *args, **kwargs)
     return wrapper
 
 
@@ -136,8 +139,7 @@ def filterprotected(*filters):
                 for key in kwargs:
                     target[key] = kwargs[key]
 
-                self.policy_api.enforce(context, creds, action,
-                                        flatten(target))
+                self.policy_api.enforce(creds, action, flatten(target))
 
                 LOG.debug(_('RBAC: Authorization granted'))
             else:
@@ -148,35 +150,23 @@ def filterprotected(*filters):
 
 
 @dependency.requires('identity_api', 'policy_api', 'token_api',
-                     'trust_api', 'catalog_api', 'credential_api')
+                     'trust_api', 'catalog_api', 'credential_api',
+                     'assignment_api')
 class V2Controller(wsgi.Application):
     """Base controller class for Identity API v2."""
 
-    def _delete_tokens_for_trust(self, context, user_id, trust_id):
-        try:
-            token_list = self.token_api.list_tokens(context, user_id,
-                                                    trust_id=trust_id)
-            for token in token_list:
-                self.token_api.delete_token(context, token)
-        except exception.NotFound:
-            pass
+    def _delete_tokens_for_trust(self, user_id, trust_id):
+        self.token_api.delete_tokens(user_id, trust_id=trust_id)
 
-    def _delete_tokens_for_user(self, context, user_id, project_id=None):
+    def _delete_tokens_for_user(self, user_id, project_id=None):
         #First delete tokens that could get other tokens.
-        for token_id in self.token_api.list_tokens(context,
-                                                   user_id,
-                                                   tenant_id=project_id):
-            try:
-                self.token_api.delete_token(context, token_id)
-            except exception.NotFound:
-                pass
+        self.token_api.delete_tokens(user_id, tenant_id=project_id)
 
         #delete tokens generated from trusts
-        for trust in self.trust_api.list_trusts_for_trustee(context, user_id):
-            self._delete_tokens_for_trust(context, user_id, trust['id'])
-        for trust in self.trust_api.list_trusts_for_trustor(context, user_id):
-            self._delete_tokens_for_trust(context,
-                                          trust['trustee_user_id'],
+        for trust in self.trust_api.list_trusts_for_trustee(user_id):
+            self._delete_tokens_for_trust(user_id, trust['id'])
+        for trust in self.trust_api.list_trusts_for_trustor(user_id):
+            self._delete_tokens_for_trust(trust['trustee_user_id'],
                                           trust['id'])
 
     def _require_attribute(self, ref, attr):
@@ -214,10 +204,10 @@ class V3Controller(V2Controller):
     collection_name = 'entities'
     member_name = 'entity'
 
-    def _delete_tokens_for_group(self, context, group_id):
-        user_refs = self.identity_api.list_users_in_group(context, group_id)
+    def _delete_tokens_for_group(self, group_id):
+        user_refs = self.identity_api.list_users_in_group(group_id)
         for user in user_refs:
-            self._delete_tokens_for_user(context, user['id'])
+            self._delete_tokens_for_user(user['id'])
 
     @classmethod
     def base_url(cls, path=None):
@@ -295,7 +285,8 @@ class V3Controller(V2Controller):
 
         if attr in context['query_string']:
             value = context['query_string'][attr]
-            return [r for r in refs if _attr_match(r[attr], value)]
+            return [r for r in refs if _attr_match(
+                flatten(r).get(attr), value)]
         return refs
 
     def _require_matching_id(self, value, ref):
@@ -326,7 +317,7 @@ class V3Controller(V2Controller):
                 # worth the duplication of state
                 try:
                     token_ref = self.token_api.get_token(
-                        context=context, token_id=context['token_id'])
+                        token_id=context['token_id'])
                 except exception.TokenNotFound:
                     LOG.warning(_('Invalid token in normalize_domain_id'))
                     raise exception.Unauthorized()

@@ -14,7 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import gettext
 import os
 import sys
 
@@ -23,11 +22,9 @@ from oslo.config import cfg
 from keystone.common import logging
 
 
-gettext.install('keystone', unicode=1)
-
 _DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)8s [%(name)s] %(message)s"
 _DEFAULT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-_DEFAULT_AUTH_METHODS = ['password', 'token']
+_DEFAULT_AUTH_METHODS = ['external', 'password', 'token']
 
 COMMON_CLI_OPTS = [
     cfg.BoolOpt('debug',
@@ -182,10 +179,13 @@ def configure():
     CONF.register_cli_opts(COMMON_CLI_OPTS)
     CONF.register_cli_opts(LOGGING_CLI_OPTS)
 
-    register_cli_bool('standard-threads', default=False)
+    register_cli_bool('standard-threads', default=False,
+                      help='Do not monkey-patch threading system modules.')
 
-    register_cli_str('pydev-debug-host', default=None)
-    register_cli_int('pydev-debug-port', default=None)
+    register_cli_str('pydev-debug-host', default=None,
+                     help='Host to connect to for remote debugger.')
+    register_cli_int('pydev-debug-port', default=None,
+                     help='Port to connect to for remote debugger.')
 
     register_str('admin_token', secret=True, default='ADMIN')
     register_str('bind_host', default='0.0.0.0')
@@ -213,6 +213,13 @@ def configure():
 
     # trust
     register_bool('enabled', group='trust', default=True)
+
+    # os_inherit
+    register_bool('enabled', group='os_inherit', default=False)
+
+    # binding
+    register_list('bind', group='token', default=[])
+    register_str('enforce_token_bind', group='token', default='permissive')
 
     # ssl
     register_bool('enable', group='ssl', default=False)
@@ -248,7 +255,7 @@ def configure():
         default="/etc/keystone/ssl/certs/ca.pem")
     register_str('ca_key', group='signing',
                  default="/etc/keystone/ssl/certs/cakey.pem")
-    register_int('key_size', group='signing', default=1024)
+    register_int('key_size', group='signing', default=2048)
     register_int('valid_days', group='signing', default=3650)
     register_str('ca_password', group='signing', default=None)
     register_str('cert_subject', group='signing',
@@ -259,6 +266,12 @@ def configure():
                  default='sqlite:///keystone.db')
     register_int('idle_timeout', group='sql', default=200)
 
+    #assignment has no default for backward compatibility reasons.
+    #If assignment is not specified, the identity driver chooses the backend
+    register_str(
+        'driver',
+        group='assignment',
+        default=None)
     register_str(
         'driver',
         group='catalog',
@@ -276,7 +289,7 @@ def configure():
         group='policy',
         default='keystone.policy.backends.sql.Policy')
     register_str(
-        'driver', group='token', default='keystone.token.backends.kvs.Token')
+        'driver', group='token', default='keystone.token.backends.sql.Token')
     register_str(
         'driver', group='trust', default='keystone.trust.backends.sql.Trust')
     register_str(
@@ -369,23 +382,6 @@ def configure():
     register_list(
         'group_additional_attribute_mapping', group='ldap', default=None)
 
-    register_str('domain_tree_dn', group='ldap', default=None)
-    register_str('domain_filter', group='ldap', default=None)
-    register_str('domain_objectclass', group='ldap', default='groupOfNames')
-    register_str('domain_id_attribute', group='ldap', default='cn')
-    register_str('domain_name_attribute', group='ldap', default='ou')
-    register_str('domain_member_attribute', group='ldap', default='member')
-    register_str('domain_desc_attribute', group='ldap', default='description')
-    register_str('domain_enabled_attribute', group='ldap', default='enabled')
-    register_list('domain_attribute_ignore', group='ldap', default='')
-    register_bool('domain_allow_create', group='ldap', default=True)
-    register_bool('domain_allow_update', group='ldap', default=True)
-    register_bool('domain_allow_delete', group='ldap', default=True)
-    register_bool('domain_enabled_emulation', group='ldap', default=False)
-    register_str('domain_enabled_emulation_dn', group='ldap', default=None)
-    register_list(
-        'domain_additional_attribute_mapping', group='ldap', default=None)
-
     register_str('tls_cacertfile', group='ldap', default=None)
     register_str('tls_cacertdir', group='ldap', default=None)
     register_bool('use_tls', group='ldap', default=False)
@@ -402,7 +398,11 @@ def configure():
     register_str(
         'token', group='auth',
         default='keystone.auth.plugins.password.Password')
-
+    #deals with REMOTE_USER authentication
+    register_str(
+        'external',
+        group='auth',
+        default='keystone.auth.plugins.external.ExternalDefault')
     # register any non-default auth methods here (used by extensions, etc)
     for method_name in CONF.auth.methods:
         if method_name not in _DEFAULT_AUTH_METHODS:
@@ -410,3 +410,9 @@ def configure():
 
     # PasteDeploy config file
     register_str('config_file', group='paste_deploy', default=None)
+
+    # token provider
+    register_str(
+        'provider',
+        group='token',
+        default=None)

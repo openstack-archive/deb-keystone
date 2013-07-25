@@ -17,12 +17,14 @@
 from __future__ import absolute_import
 
 import grp
+import os
 import pwd
 
 from oslo.config import cfg
 import pbr.version
 
 from keystone.common import openssl
+from keystone.common.sql import migration
 from keystone import config
 from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
@@ -47,12 +49,32 @@ class DbSync(BaseApp):
 
     name = 'db_sync'
 
+    @classmethod
+    def add_argument_parser(cls, subparsers):
+        parser = super(DbSync, cls).add_argument_parser(subparsers)
+        parser.add_argument('version', default=None, nargs='?',
+                            help=('Migrate the database up to a specified '
+                                  'version. If not provided, db_sync will '
+                                  'migrate the database to the latest known '
+                                  'version.'))
+        return parser
+
     @staticmethod
     def main():
         for k in ['identity', 'catalog', 'policy', 'token', 'credential']:
             driver = importutils.import_object(getattr(CONF, k).driver)
             if hasattr(driver, 'db_sync'):
-                driver.db_sync()
+                driver.db_sync(CONF.command.version)
+
+
+class DbVersion(BaseApp):
+    """Print the current migration version of the database."""
+
+    name = 'db_version'
+
+    @staticmethod
+    def main():
+        print(migration.db_version())
 
 
 class BaseCertificateSetup(BaseApp):
@@ -62,8 +84,9 @@ class BaseCertificateSetup(BaseApp):
     def add_argument_parser(cls, subparsers):
         parser = super(BaseCertificateSetup,
                        cls).add_argument_parser(subparsers)
-        parser.add_argument('--keystone-user')
-        parser.add_argument('--keystone-group')
+        running_as_root = (os.geteuid() == 0)
+        parser.add_argument('--keystone-user', required=running_as_root)
+        parser.add_argument('--keystone-group', required=running_as_root)
         return parser
 
     @staticmethod
@@ -157,7 +180,7 @@ class ExportLegacyCatalog(BaseApp):
     def main():
         from keystone.common.sql import legacy
         migration = legacy.LegacyMigration(CONF.command.old_db)
-        print '\n'.join(migration.dump_catalog())
+        print('\n'.join(migration.dump_catalog()))
 
 
 class ImportNovaAuth(BaseApp):
@@ -180,6 +203,7 @@ class ImportNovaAuth(BaseApp):
 
 CMDS = [
     DbSync,
+    DbVersion,
     ExportLegacyCatalog,
     ImportLegacy,
     ImportNovaAuth,

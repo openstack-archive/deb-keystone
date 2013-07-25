@@ -4,13 +4,14 @@ import uuid
 from lxml import etree
 import webtest
 
+from keystone import test
+from keystone import token
+
 from keystone import auth
 from keystone.common import serializer
-from keystone.common.sql import util as sql_util
 from keystone import config
 from keystone.openstack.common import timeutils
 from keystone.policy.backends import rules
-from keystone import test
 
 import test_content_types
 
@@ -22,6 +23,15 @@ TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 
 class RestfulTestCase(test_content_types.RestfulTestCase):
+    _config_file_list = [test.etcdir('keystone.conf.sample'),
+                         test.testsdir('test_overrides.conf'),
+                         test.testsdir('backend_sql.conf'),
+                         test.testsdir('backend_sql_disk.conf')]
+
+    #override this to sepcify the complete list of configuration files
+    def config_files(self):
+        return self._config_file_list
+
     def setUp(self, load_sample_data=True):
         """Setup for v3 Restful Test Cases.
 
@@ -30,14 +40,12 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         load_sample_data should be set to false.
 
         """
-        self.config([
-            test.etcdir('keystone.conf.sample'),
-            test.testsdir('test_overrides.conf'),
-            test.testsdir('backend_sql.conf'),
-            test.testsdir('backend_sql_disk.conf')])
+        self.config(self.config_files())
 
-        sql_util.setup_test_database()
+        test.setup_test_database()
         self.load_backends()
+
+        self.token_provider_api = token.provider.Manager()
 
         self.public_app = webtest.TestApp(
             self.loadapp('keystone', name='main'))
@@ -101,7 +109,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         self.admin_server.kill()
         self.public_server = None
         self.admin_server = None
-        sql_util.teardown_test_database()
+        test.teardown_test_database()
         # need to reset the plug-ins
         auth.controllers.AUTH_METHODS = {}
         #drop the policy rules
@@ -330,7 +338,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
                 links['previous'])
 
     def assertValidListResponse(self, resp, key, entity_validator, ref=None,
-                                expected_length=None):
+                                expected_length=None, keys_to_check=None):
         """Make assertions common to all API list responses.
 
         If a reference is provided, it's ID will be searched for in the
@@ -351,11 +359,12 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
 
         for entity in entities:
             self.assertIsNotNone(entity)
-            self.assertValidEntity(entity)
+            self.assertValidEntity(entity, keys_to_check=keys_to_check)
             entity_validator(entity)
         if ref:
             entity = [x for x in entities if x['id'] == ref['id']][0]
-            self.assertValidEntity(entity, ref)
+            self.assertValidEntity(entity, ref=ref,
+                                   keys_to_check=keys_to_check)
             entity_validator(entity, ref)
         return entities
 
@@ -364,17 +373,21 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         """Make assertions common to all API responses."""
         entity = resp.result.get(key)
         self.assertIsNotNone(entity)
-        self.assertValidEntity(entity, *args, **kwargs)
+        keys = kwargs.pop('keys_to_check', None)
+        self.assertValidEntity(entity, keys_to_check=keys, *args, **kwargs)
         entity_validator(entity, *args, **kwargs)
         return entity
 
-    def assertValidEntity(self, entity, ref=None):
+    def assertValidEntity(self, entity, ref=None, keys_to_check=None):
         """Make assertions common to all API entities.
 
         If a reference is provided, the entity will also be compared against
         the reference.
         """
-        keys = ['name', 'description', 'enabled']
+        if keys_to_check:
+            keys = keys_to_check
+        else:
+            keys = ['name', 'description', 'enabled']
 
         for k in ['id'] + keys:
             msg = '%s unexpectedly None in %s' % (k, entity)
@@ -438,9 +451,14 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         return token
 
     def assertValidScopedTokenResponse(self, r, *args, **kwargs):
+        require_catalog = kwargs.pop('require_catalog', True)
         token = self.assertValidTokenResponse(r, *args, **kwargs)
 
-        self.assertIn('catalog', token)
+        if require_catalog:
+            self.assertIn('catalog', token)
+        else:
+            self.assertNotIn('catalog', token)
+
         self.assertIn('roles', token)
         self.assertTrue(token['roles'])
         for role in token['roles']:
@@ -697,6 +715,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             resp,
             'roles',
             self.assertValidRole,
+            keys_to_check=['name'],
             *args,
             **kwargs)
 
@@ -705,6 +724,7 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
             resp,
             'role',
             self.assertValidRole,
+            keys_to_check=['name'],
             *args,
             **kwargs)
 
@@ -713,6 +733,87 @@ class RestfulTestCase(test_content_types.RestfulTestCase):
         if ref:
             self.assertEqual(ref['name'], entity['name'])
         return entity
+
+    def assertValidRoleAssignmentListResponse(self, resp, ref=None,
+                                              expected_length=None):
+
+        entities = resp.result.get('role_assignments')
+
+        if expected_length is not None:
+            self.assertEqual(len(entities), expected_length)
+        elif ref is not None:
+            # we're at least expecting the ref
+            self.assertNotEmpty(entities)
+
+        # collections should have relational links
+        self.assertValidListLinks(resp.result.get('links'))
+
+        for entity in entities:
+            self.assertIsNotNone(entity)
+            self.assertValidRoleAssignment(entity)
+        if ref:
+            self.assertValidRoleAssignment(entity, ref)
+        return entities
+
+    def assertValidRoleAssignment(self, entity, ref=None, url=None):
+        self.assertIsNotNone(entity.get('role'))
+        self.assertIsNotNone(entity.get('scope'))
+
+        # Only one of user or group should be present
+        self.assertIsNotNone(entity.get('user') or
+                             entity.get('group'))
+        self.assertIsNone(entity.get('user') and
+                          entity.get('group'))
+
+        # Only one of domain or project should be present
+        self.assertIsNotNone(entity['scope'].get('project') or
+                             entity['scope'].get('domain'))
+        self.assertIsNone(entity['scope'].get('project') and
+                          entity['scope'].get('domain'))
+
+        if entity['scope'].get('project'):
+            self.assertIsNotNone(entity['scope']['project'].get('id'))
+        else:
+            self.assertIsNotNone(entity['scope']['domain'].get('id'))
+        self.assertIsNotNone(entity.get('links'))
+        self.assertIsNotNone(entity['links'].get('assignment'))
+
+        if ref:
+            if ref.get('user'):
+                self.assertEqual(ref['user']['id'], entity['user']['id'])
+            if ref.get('group'):
+                self.assertEqual(ref['group']['id'], entity['group']['id'])
+            if ref.get('role'):
+                self.assertEqual(ref['role']['id'], entity['role']['id'])
+            if ref['scope'].get('project'):
+                self.assertEqual(ref['scope']['project']['id'],
+                                 entity['scope']['project']['id'])
+            if ref['scope'].get('domain'):
+                self.assertEqual(ref['scope']['domain']['id'],
+                                 entity['scope']['domain']['id'])
+        if url:
+            self.assertIn(url, entity['links']['assignment'])
+
+    def assertRoleAssignmentInListResponse(
+            self, resp, ref, link_url=None, expected=1):
+
+        found_count = 0
+        for entity in resp.result.get('role_assignments'):
+            try:
+                self.assertValidRoleAssignment(
+                    entity, ref=ref, url=link_url)
+            except Exception:
+                # It doesn't match, so let's go onto the next one
+                pass
+            else:
+                found_count += 1
+        self.assertEqual(found_count, expected)
+
+    def assertRoleAssignmentNotInListResponse(
+            self, resp, ref, link_url=None):
+
+        self.assertRoleAssignmentInListResponse(
+            resp, ref=ref, link_url=link_url, expected=0)
 
     # policy validation
 

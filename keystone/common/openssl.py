@@ -12,12 +12,13 @@
 # distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
+# under the License.
 #
 
 import os
 import stat
-import subprocess
 
+from keystone.common import environment
 from keystone.common import logging
 from keystone import config
 
@@ -77,7 +78,7 @@ class BaseCertificateConfigure(object):
     def exec_command(self, command):
         to_exec = command % self.ssl_dictionary
         LOG.info(to_exec)
-        subprocess.check_call(to_exec.rsplit(' '))
+        environment.subprocess.check_call(to_exec.rsplit(' '))
 
     def build_ssl_config_file(self):
         if not file_exists(self.ssl_config_file_name):
@@ -197,7 +198,7 @@ new_certs_dir     = $dir
 serial            = $dir/serial
 database          = $dir/index.txt
 default_days      = 365
-default_md        = sha1
+default_md        = default # use public key default MD
 preserve          = no
 email_in_dn       = no
 nameopt           = default_ca
@@ -215,7 +216,7 @@ commonName              = supplied
 emailAddress            = optional
 
 [ req ]
-default_bits       = 1024 # Size of keys
+default_bits       = 2048 # Size of keys
 default_keyfile    = key.pem # name of generated keys
 default_md         = default # message digest algorithm
 string_mask        = nombstr # permitted characters

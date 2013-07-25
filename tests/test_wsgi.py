@@ -16,10 +16,11 @@
 
 import webob
 
+from keystone import test
+
 from keystone.common import wsgi
 from keystone import exception
 from keystone.openstack.common import jsonutils
-from keystone import test
 
 
 class FakeApp(wsgi.Application):
@@ -84,6 +85,17 @@ class ApplicationTest(BaseWSGITest):
         resp = req.get_response(FakeApp())
         self.assertEqual(jsonutils.loads(resp.body), {'1': '2'})
 
+    def test_headers_available(self):
+        class FakeApp(wsgi.Application):
+            def index(self, context):
+                return context['headers']
+
+        app = FakeApp()
+        req = self._make_request(url='/?1=2')
+        req.headers['X-Foo'] = "bar"
+        resp = req.get_response(app)
+        self.assertIn('X-Foo', eval(resp.body))
+
     def test_render_response(self):
         data = {'attribute': 'value'}
         body = '{"attribute": "value"}'
@@ -112,6 +124,27 @@ class ApplicationTest(BaseWSGITest):
         self.assertEqual(resp.body, '')
         self.assertEqual(resp.headers.get('Content-Length'), '0')
         self.assertEqual(resp.headers.get('Content-Type'), None)
+
+    def test_application_local_config(self):
+        class FakeApp(wsgi.Application):
+            def __init__(self, *args, **kwargs):
+                self.kwargs = kwargs
+
+        app = FakeApp.factory({}, testkey="test")
+        self.assertIn("testkey", app.kwargs)
+        self.assertEquals("test", app.kwargs["testkey"])
+
+
+class ExtensionRouterTest(BaseWSGITest):
+    def test_extensionrouter_local_config(self):
+        class FakeRouter(wsgi.ExtensionRouter):
+            def __init__(self, *args, **kwargs):
+                self.kwargs = kwargs
+
+        factory = FakeRouter.factory({}, testkey="test")
+        app = factory(self.app)
+        self.assertIn("testkey", app.kwargs)
+        self.assertEquals("test", app.kwargs["testkey"])
 
 
 class MiddlewareTest(BaseWSGITest):
@@ -164,3 +197,13 @@ class MiddlewareTest(BaseWSGITest):
         resp = FakeMiddleware(self.app)(req)
         self.assertEquals(resp.status_int, exception.UnexpectedError.code)
         self.assertIn("EXCEPTIONERROR", resp.body)
+
+    def test_middleware_local_config(self):
+        class FakeMiddleware(wsgi.Middleware):
+            def __init__(self, *args, **kwargs):
+                self.kwargs = kwargs
+
+        factory = FakeMiddleware.factory({}, testkey="test")
+        app = factory(self.app)
+        self.assertIn("testkey", app.kwargs)
+        self.assertEquals("test", app.kwargs["testkey"])

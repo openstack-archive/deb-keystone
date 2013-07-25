@@ -17,23 +17,32 @@
 import datetime
 import errno
 import os
+import shutil
 import socket
-import subprocess
+import StringIO
 import sys
 import time
 
+import gettext
+from lxml import etree
 import mox
 import nose.exc
 from paste import deploy
 import stubout
 import unittest2 as unittest
 
+gettext.install('keystone', unicode=1)
+
+from keystone.common import environment
+environment.use_eventlet()
+
+from keystone import assignment
 from keystone import catalog
 from keystone.common import kvs
 from keystone.common import logging
+from keystone.common import sql
 from keystone.common import utils
 from keystone.common import wsgi
-from keystone.common import wsgi_server
 from keystone import config
 from keystone import credential
 from keystone import exception
@@ -44,17 +53,14 @@ from keystone import token
 from keystone import trust
 
 
-wsgi_server.monkey_patch_eventlet()
-
-
 LOG = logging.getLogger(__name__)
 ROOTDIR = os.path.dirname(os.path.abspath(os.curdir))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
 TESTSDIR = os.path.join(ROOTDIR, 'tests')
 ETCDIR = os.path.join(ROOTDIR, 'etc')
-CONF = config.CONF
-DRIVERS = {}
+TMPDIR = os.path.join(TESTSDIR, 'tmp')
 
+CONF = config.CONF
 
 cd = os.chdir
 
@@ -74,14 +80,8 @@ def testsdir(*p):
     return os.path.join(TESTSDIR, *p)
 
 
-def initialize_drivers():
-    DRIVERS['catalog_api'] = catalog.Manager()
-    DRIVERS['credential_api'] = credential.Manager()
-    DRIVERS['identity_api'] = identity.Manager()
-    DRIVERS['policy_api'] = policy.Manager()
-    DRIVERS['token_api'] = token.Manager()
-    DRIVERS['trust_api'] = trust.Manager()
-    return DRIVERS
+def tmpdir(*p):
+    return os.path.join(TMPDIR, *p)
 
 
 def checkout_vendor(repo, rev):
@@ -110,10 +110,30 @@ def checkout_vendor(repo, rev):
         # write out a modified time
         with open(modcheck, 'w') as fd:
             fd.write('1')
-    except subprocess.CalledProcessError:
+    except environment.subprocess.CalledProcessError:
         LOG.warning(_('Failed to checkout %s'), repo)
     cd(working_dir)
     return revdir
+
+
+def setup_test_database():
+    db = tmpdir('test.db')
+    pristine = tmpdir('test.db.pristine')
+
+    try:
+        if os.path.exists(db):
+            os.unlink(db)
+        if not os.path.exists(pristine):
+            sql.migration.db_sync()
+            shutil.copyfile(db, pristine)
+        else:
+            shutil.copyfile(pristine, db)
+    except Exception:
+        pass
+
+
+def teardown_test_database():
+    sql.core.set_global_engine(None)
 
 
 class TestClient(object):
@@ -231,9 +251,11 @@ class TestCase(NoModule, unittest.TestCase):
             CONF.set_override(k, v)
 
     def load_backends(self):
-        """Create shortcut references to each driver for data manipulation."""
-        for name, manager in initialize_drivers().iteritems():
-            setattr(self, name, manager.driver)
+        """Initializes each manager and assigns them to an attribute."""
+        for manager in [assignment, catalog, credential, identity, policy,
+                        token, trust]:
+            manager_name = '%s_api' % manager.__name__.split('.')[-1]
+            setattr(self, manager_name, manager.Manager())
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -284,19 +306,6 @@ class TestCase(NoModule, unittest.TestCase):
                         pass
                 setattr(self, 'user_%s' % user['id'], user_copy)
 
-            for metadata in fixtures.METADATA:
-                metadata_ref = metadata.copy()
-                # TODO(termie): these will probably end up in the model anyway,
-                #               so this may be futile
-                del metadata_ref['user_id']
-                del metadata_ref['tenant_id']
-                rv = self.identity_api.create_metadata(metadata['user_id'],
-                                                       metadata['tenant_id'],
-                                                       metadata_ref)
-                setattr(self,
-                        'metadata_%s%s' % (metadata['user_id'],
-                                           metadata['tenant_id']), rv)
-
     def _paste_config(self, config):
         if not config.startswith('config:'):
             test_path = os.path.join(TESTSDIR, config)
@@ -315,7 +324,7 @@ class TestCase(NoModule, unittest.TestCase):
     def serveapp(self, config, name=None, cert=None, key=None, ca=None,
                  cert_required=None, host="127.0.0.1", port=0):
         app = self.loadapp(config, name=name)
-        server = wsgi_server.Server(app, host, port)
+        server = environment.Server(app, host, port)
         if cert is not None and ca is not None and key is not None:
             server.set_ssl(certfile=cert, keyfile=key, ca_certs=ca,
                            cert_required=cert_required)
@@ -370,13 +379,31 @@ class TestCase(NoModule, unittest.TestCase):
 
         self.fail(self._formatMessage(msg, standardMsg))
 
+    def assertEqualXML(self, a, b):
+        """Parses two XML documents from strings and compares the results.
+
+        This provides easy-to-read failures from nose.
+
+        """
+        parser = etree.XMLParser(remove_blank_text=True)
+
+        def canonical_xml(s):
+            s = s.strip()
+
+            fp = StringIO.StringIO()
+            dom = etree.fromstring(s, parser)
+            dom.getroottree().write_c14n(fp)
+            s = fp.getvalue()
+
+            dom = etree.fromstring(s, parser)
+            return etree.tostring(dom, pretty_print=True)
+
+        a = canonical_xml(a)
+        b = canonical_xml(b)
+        self.assertEqual(a.split('\n'), b.split('\n'))
+
     @staticmethod
     def skip_if_no_ipv6():
-
-        # TODO(blk-u): lp 1176204. At this time, eventlet address resolution
-        # doesn't support IPv6. Once it does, remove the next line.
-        raise nose.exc.SkipTest("Eventlet doesn't support IPv6, lp 1176204")
-
         try:
             s = socket.socket(socket.AF_INET6)
         except socket.error as e:

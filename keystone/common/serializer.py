@@ -125,7 +125,8 @@ class XmlDeserializer(object):
         values = values or text or {}
         decoded_tag = XmlDeserializer._tag_name(element.tag, namespace)
         list_item_tag = None
-        if decoded_tag[-1] == 's' and len(values) == 0:
+        if (decoded_tag[-1] == 's' and len(values) == 0 and
+                decoded_tag != 'access'):
             # FIXME(gyee): special-case lists for now unti we
             # figure out how to properly handle them.
             # If any key ends with an 's', we are assuming it is a list.
@@ -300,6 +301,18 @@ class XmlSerializer(object):
             self._populate_sequence(element, value)
         elif isinstance(value, dict):
             self._populate_tree(element, value)
+
+            # NOTE(blk-u): For compatibility with Folsom, when serializing the
+            # v2.0 version element also add the links to the base element.
+            if (value.get('id') == 'v2.0' and
+                    value.get('status') == 'stable' and
+                    value.get('updated') == '2013-03-06T00:00:00Z'):
+
+                for item in value['links']:
+                    child = etree.Element('link')
+                    self.populate_element(child, item)
+                    element.append(child)
+
         elif isinstance(value, basestring):
             element.text = unicode(value)
 

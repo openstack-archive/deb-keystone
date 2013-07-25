@@ -16,6 +16,8 @@
 
 """Main entry point into the Identity service."""
 
+from keystone import assignment
+from keystone import clean
 from keystone.common import dependency
 from keystone.common import logging
 from keystone.common import manager
@@ -59,298 +61,165 @@ class Manager(manager.Manager):
 
     """
 
-    def __init__(self):
+    def __init__(self, assignment_api=None):
         super(Manager, self).__init__(CONF.identity.driver)
+        if assignment_api is None:
+            assignment_api = assignment.Manager(self)
+        self.assignment = assignment_api
+        self.driver.assignment = assignment_api
 
-    def create_user(self, context, user_id, user_ref):
+    def create_user(self, user_id, user_ref):
         user = user_ref.copy()
-        if 'enabled' not in user:
-            user['enabled'] = True
+        user['name'] = clean.user_name(user['name'])
+        user.setdefault('enabled', True)
+        user['enabled'] = clean.user_enabled(user['enabled'])
         return self.driver.create_user(user_id, user)
 
-    def create_group(self, context, group_id, group_ref):
+    def update_user(self, user_id, user_ref):
+        user = user_ref.copy()
+        if 'name' in user:
+            user['name'] = clean.user_name(user['name'])
+        if 'enabled' in user:
+            user['enabled'] = clean.user_enabled(user['enabled'])
+        return self.driver.update_user(user_id, user)
+
+    def create_group(self, group_id, group_ref):
         group = group_ref.copy()
-        if 'description' not in group:
-            group['description'] = ''
+        group.setdefault('description', '')
         return self.driver.create_group(group_id, group)
 
-    def create_project(self, context, tenant_id, tenant_ref):
+    def create_project(self, tenant_id, tenant_ref):
         tenant = tenant_ref.copy()
-        if 'enabled' not in tenant:
-            tenant['enabled'] = True
-        if 'description' not in tenant:
-            tenant['description'] = ''
-        return self.driver.create_project(tenant_id, tenant)
+        tenant.setdefault('enabled', True)
+        tenant['enabled'] = clean.project_enabled(tenant['enabled'])
+        tenant.setdefault('description', '')
+        return self.assignment_api.create_project(tenant_id, tenant)
+
+    def update_project(self, tenant_id, tenant_ref):
+        tenant = tenant_ref.copy()
+        if 'enabled' in tenant:
+            tenant['enabled'] = clean.project_enabled(tenant['enabled'])
+        return self.assignment_api.update_project(tenant_id, tenant)
+
+    def get_project_by_name(self, tenant_name, domain_id):
+        return self.assignment.get_project_by_name(tenant_name, domain_id)
+
+    def get_project(self, tenant_id):
+        return self.assignment.get_project(tenant_id)
+
+    def list_projects(self, domain_id=None):
+        return self.assignment.list_projects(domain_id)
+
+    def get_role(self, role_id):
+        return self.assignment.get_role(role_id)
+
+    def list_roles(self):
+        return self.assignment.list_roles()
+
+    def get_projects_for_user(self, user_id):
+        return self.assignment.get_projects_for_user(user_id)
+
+    def get_project_users(self, tenant_id):
+        return self.assignment.get_project_users(tenant_id)
+
+    def get_roles_for_user_and_project(self, user_id, tenant_id):
+        return self.assignment.get_roles_for_user_and_project(user_id,
+                                                              tenant_id)
+
+    def get_roles_for_user_and_domain(self, user_id, domain_id):
+        return (self.assignment.get_roles_for_user_and_domain
+                (user_id, domain_id))
+
+    def _subrole_id_to_dn(self, role_id, tenant_id):
+        return self.assignment._subrole_id_to_dn(role_id, tenant_id)
+
+    def add_role_to_user_and_project(self, user_id,
+                                     tenant_id, role_id):
+        return (self.assignment_api.add_role_to_user_and_project
+                (user_id, tenant_id, role_id))
+
+    def create_role(self, role_id, role):
+        return self.assignment.create_role(role_id, role)
+
+    def delete_role(self, role_id):
+        return self.assignment.delete_role(role_id)
+
+    def delete_project(self, tenant_id):
+        return self.assignment.delete_project(tenant_id)
+
+    def remove_role_from_user_and_project(self, user_id,
+                                          tenant_id, role_id):
+        return (self.assignment_api.remove_role_from_user_and_project
+                (user_id, tenant_id, role_id))
+
+    def update_role(self, role_id, role):
+        return self.assignment.update_role(role_id, role)
+
+    def create_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        return (self.assignment.create_grant
+                (role_id, user_id, group_id, domain_id, project_id,
+                 inherited_to_projects))
+
+    def list_grants(self, user_id=None, group_id=None,
+                    domain_id=None, project_id=None,
+                    inherited_to_projects=False):
+        return (self.assignment.list_grants
+                (user_id, group_id, domain_id, project_id,
+                 inherited_to_projects))
+
+    def get_grant(self, role_id, user_id=None, group_id=None,
+                  domain_id=None, project_id=None,
+                  inherited_to_projects=False):
+        return (self.assignment.get_grant
+                (role_id, user_id, group_id, domain_id, project_id,
+                 inherited_to_projects))
+
+    def delete_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        return (self.assignment.delete_grant
+                (role_id, user_id, group_id, domain_id, project_id,
+                 inherited_to_projects))
+
+    def create_domain(self, domain_id, domain):
+        return self.assignment.create_domain(domain_id, domain)
+
+    def get_domain_by_name(self, domain_name):
+        return self.assignment.get_domain_by_name(domain_name)
+
+    def get_domain(self, domain_id):
+        return self.assignment.get_domain(domain_id)
+
+    def update_domain(self, domain_id, domain):
+        return self.assignment.update_domain(domain_id, domain)
+
+    def delete_domain(self, domain_id):
+        return self.assignment.delete_domain(domain_id)
+
+    def list_domains(self):
+        return self.assignment.list_domains()
+
+    def list_user_projects(self, user_id):
+        return self.assignment.list_user_projects(user_id)
+
+    def add_user_to_project(self, tenant_id, user_id):
+        return self.assignment.add_user_to_project(tenant_id, user_id)
+
+    def remove_user_from_project(self, tenant_id, user_id):
+        return self.assignment.remove_user_from_project(tenant_id, user_id)
+
+    def list_role_assignments(self):
+        return self.assignment_api.list_role_assignments()
 
 
 class Driver(object):
     """Interface description for an Identity driver."""
-
-    def authenticate(self, user_id=None, tenant_id=None, password=None):
-        """Authenticate a given user, tenant and password.
-
-        :returns: (user_ref, tenant_ref, metadata_ref)
-        :raises: AssertionError
-
-        """
-        raise exception.NotImplemented()
-
-    def get_project_by_name(self, tenant_name, domain_id):
-        """Get a tenant by name.
-
-        :returns: tenant_ref
-        :raises: keystone.exception.ProjectNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_user_by_name(self, user_name, domain_id):
-        """Get a user by name.
-
+    def authenticate_user(self, user_id, password):
+        """Authenticate a given user and password.
         :returns: user_ref
-        :raises: keystone.exception.UserNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def add_user_to_project(self, tenant_id, user_id):
-        """Add user to a tenant by creating a default role relationship.
-
-        :raises: keystone.exception.ProjectNotFound,
-                 keystone.exception.UserNotFound
-
-        """
-        self.add_role_to_user_and_project(user_id,
-                                          tenant_id,
-                                          config.CONF.member_role_id)
-
-    def remove_user_from_project(self, tenant_id, user_id):
-        """Remove user from a tenant
-
-        :raises: keystone.exception.ProjectNotFound,
-                 keystone.exception.UserNotFound
-
-        """
-        roles = self.get_roles_for_user_and_project(user_id, tenant_id)
-        if not roles:
-            raise exception.NotFound(tenant_id)
-        for role_id in roles:
-            self.remove_role_from_user_and_project(user_id, tenant_id, role_id)
-
-    def get_project_users(self, tenant_id):
-        """Lists all users with a relationship to the specified project.
-
-        :returns: a list of user_refs or an empty set.
-        :raises: keystone.exception.ProjectNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_projects_for_user(self, user_id):
-        """Get the tenants associated with a given user.
-
-        :returns: a list of tenant_id's.
-        :raises: keystone.exception.UserNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_roles_for_user_and_project(self, user_id, tenant_id):
-        """Get the roles associated with a user within given tenant.
-
-        :returns: a list of role ids.
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.ProjectNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_roles_for_user_and_domain(self, user_id, domain_id):
-        """Get the roles associated with a user within given domain.
-
-        :returns: a list of role ids.
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.ProjectNotFound
-
-        """
-
-        def update_metadata_for_group_domain_roles(self, metadata_ref,
-                                                   user_id, domain_id):
-            group_refs = self.list_groups_for_user(user_id=user_id)
-            for x in group_refs:
-                try:
-                    metadata_ref.update(
-                        self.get_metadata(group_id=x['id'],
-                                          domain_id=domain_id))
-                except exception.MetadataNotFound:
-                    # no group grant, skip
-                    pass
-
-        def update_metadata_for_user_domain_roles(self, metadata_ref,
-                                                  user_id, domain_id):
-            try:
-                metadata_ref.update(self.get_metadata(user_id=user_id,
-                                                      domain_id=domain_id))
-            except exception.MetadataNotFound:
-                pass
-
-        self.get_user(user_id)
-        self.get_domain(domain_id)
-        metadata_ref = {}
-        update_metadata_for_user_domain_roles(self, metadata_ref,
-                                              user_id, domain_id)
-        update_metadata_for_group_domain_roles(self, metadata_ref,
-                                               user_id, domain_id)
-        return list(set(metadata_ref.get('roles', [])))
-
-    def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
-        """Add a role to a user within given tenant.
-
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.ProjectNotFound,
-                 keystone.exception.RoleNotFound
-        """
-        raise exception.NotImplemented()
-
-    def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
-        """Remove a role from a user within given tenant.
-
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.ProjectNotFound,
-                 keystone.exception.RoleNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    # metadata crud
-    def get_metadata(self, user_id=None, tenant_id=None,
-                     domain_id=None, group_id=None):
-        """Gets the metadata for the specified user/group on project/domain.
-
-        :raises: keystone.exception.MetadataNotFound
-        :returns: metadata
-
-        """
-        raise exception.NotImplemented()
-
-    def create_metadata(self, user_id, tenant_id, metadata,
-                        domain_id=None, group_id=None):
-        """Creates the metadata for the specified user/group on project/domain.
-
-        :returns: metadata created
-
-        """
-        raise exception.NotImplemented()
-
-    def update_metadata(self, user_id, tenant_id, metadata,
-                        domain_id=None, group_id=None):
-        """Updates the metadata for the specified user/group on project/domain.
-
-        :returns: metadata updated
-
-        """
-        raise exception.NotImplemented()
-
-    # domain crud
-    def create_domain(self, domain_id, domain):
-        """Creates a new domain.
-
-        :raises: keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def list_domains(self):
-        """List all domains in the system.
-
-        :returns: a list of domain_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()
-
-    def get_domain(self, domain_id):
-        """Get a domain by ID.
-
-        :returns: domain_ref
-        :raises: keystone.exception.DomainNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_domain_by_name(self, domain_name):
-        """Get a domain by name.
-
-        :returns: domain_ref
-        :raises: keystone.exception.DomainNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def update_domain(self, domain_id, domain):
-        """Updates an existing domain.
-
-        :raises: keystone.exception.DomainNotFound,
-                 keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def delete_domain(self, domain_id):
-        """Deletes an existing domain.
-
-        :raises: keystone.exception.DomainNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    # project crud
-    def create_project(self, project_id, project):
-        """Creates a new project.
-
-        :raises: keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def list_projects(self):
-        """List all projects in the system.
-
-        :returns: a list of project_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()
-
-    def list_user_projects(self, user_id):
-        """List all projects associated with a given user.
-
-        :returns: a list of project_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()
-
-    def get_project(self, project_id):
-        """Get a project by ID.
-
-        :returns: project_ref
-        :raises: keystone.exception.ProjectNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def update_project(self, project_id, project):
-        """Updates an existing project.
-
-        :raises: keystone.exception.ProjectNotFound,
-                 keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def delete_project(self, project_id):
-        """Deletes an existing project.
-
-        :raises: keystone.exception.ProjectNotFound
-
+        :raises: AssertionError
         """
         raise exception.NotImplemented()
 
@@ -432,46 +301,11 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
-    # role crud
+    def get_user_by_name(self, user_name, domain_id):
+        """Get a user by name.
 
-    def create_role(self, role_id, role):
-        """Creates a new role.
-
-        :raises: keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def list_roles(self):
-        """List all roles in the system.
-
-        :returns: a list of role_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()
-
-    def get_role(self, role_id):
-        """Get a role by ID.
-
-        :returns: role_ref
-        :raises: keystone.exception.RoleNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def update_role(self, role_id, role):
-        """Updates an existing role.
-
-        :raises: keystone.exception.RoleNotFound,
-                 keystone.exception.Conflict
-
-        """
-        raise exception.NotImplemented()
-
-    def delete_role(self, role_id):
-        """Deletes an existing role.
-
-        :raises: keystone.exception.RoleNotFound
+        :returns: user_ref
+        :raises: keystone.exception.UserNotFound
 
         """
         raise exception.NotImplemented()
@@ -527,3 +361,7 @@ class Driver(object):
 
         """
         raise exception.NotImplemented()
+
+    #end of identity
+
+    # Assignments

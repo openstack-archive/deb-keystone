@@ -451,7 +451,7 @@ class LdapWrapper(object):
 
         if use_tls:
             if not ldap.TLS_AVAIL:
-                raise ValueError(_('Invalid LDAP TLS_AVAIL option: %s. TLS'
+                raise ValueError(_('Invalid LDAP TLS_AVAIL option: %s. TLS '
                                    'not available') % ldap.TLS_AVAIL)
             if tls_cacertfile:
                 #NOTE(topol)
@@ -513,7 +513,7 @@ class LdapWrapper(object):
         if LOG.isEnabledFor(logging.DEBUG):
             LOG.debug(_(
                 'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
-                'attrs=%(attrs)s') % {
+                'attrs=%(attrlist)s') % {
                     'dn': dn,
                     'scope': scope,
                     'query': query,

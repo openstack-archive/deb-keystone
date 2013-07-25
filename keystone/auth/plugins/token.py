@@ -16,6 +16,7 @@
 
 from keystone import auth
 from keystone.common import logging
+from keystone.common import wsgi
 from keystone import exception
 from keystone import token
 
@@ -35,7 +36,8 @@ class Token(auth.AuthMethodHandler):
                 raise exception.ValidationError(attribute='id',
                                                 target=METHOD_NAME)
             token_id = auth_payload['id']
-            token_ref = self.token_api.get_token(context, token_id)
+            token_ref = self.token_api.get_token(token_id)
+            wsgi.validate_token_bind(context, token_ref)
             user_context.setdefault(
                 'user_id', token_ref['token_data']['token']['user']['id'])
             # to support Grizzly-3 to Grizzly-RC1 transition
@@ -46,7 +48,8 @@ class Token(auth.AuthMethodHandler):
                 token_ref['token_data']['token']['extras'])
             user_context['method_names'].extend(
                 token_ref['token_data']['token']['methods'])
-            if 'trust' in token_ref['token_data']:
+            if ('OS-TRUST:trust' in token_ref['token_data']['token'] or
+                    'trust' in token_ref['token_data']['token']):
                 raise exception.Forbidden()
         except AssertionError as e:
             LOG.error(e)

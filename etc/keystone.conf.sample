@@ -34,6 +34,15 @@
 # member_role_id = 9fe2ff9ee4384b1894a90878d3e92bab
 # member_role_name = _member_
 
+# enforced by optional sizelimit middleware (keystone.middleware:RequestBodySizeLimiter)
+# max_request_body_size = 114688
+
+# limit the sizes of user & tenant ID/names
+# max_param_size = 64
+
+# similar to max_param_size, but provides an exception for token values
+# max_token_size = 8192
+
 # === Logging Options ===
 # Print debugging output
 # (includes plaintext request logging, potentially including passwords)
@@ -100,6 +109,11 @@
 # delegation and impersonation features can be optionally disabled
 # enabled = True
 
+[os_inherit]
+# role-assignment inheritance to projects from owning domain can be
+# optionally enabled
+# enabled = False
+
 [catalog]
 # dynamic, sql-based backend (supports API/CLI-based management commands)
 # driver = keystone.catalog.backends.sql.Catalog
@@ -110,10 +124,23 @@
 # template_file = default_catalog.templates
 
 [token]
-# driver = keystone.token.backends.kvs.Token
+# Provides token persistence.
+# driver = keystone.token.backends.sql.Token
+
+# Controls the token construction, validation, and revocation operations.
+# provider = keystone.token.providers.pki.Provider
 
 # Amount of time a token should remain valid (in seconds)
 # expiration = 86400
+
+# External auth mechanisms that should add bind information to token.
+# eg kerberos, x509
+# bind =
+
+# Enforcement policy on tokens presented to keystone with bind information.
+# One of disabled, permissive, strict, required or a specifically required bind
+# mode e.g. kerberos or x509 to require binding to that authentication.
+# enforce_token_bind = permissive
 
 [policy]
 # driver = keystone.policy.backends.sql.Policy
@@ -123,9 +150,10 @@
 
 [ssl]
 #enable = True
-#certfile = /etc/keystone/ssl/certs/keystone.pem
-#keyfile = /etc/keystone/ssl/private/keystonekey.pem
-#ca_certs = /etc/keystone/ssl/certs/ca.pem
+#certfile = /etc/keystone/pki/certs/ssl_cert.pem
+#keyfile = /etc/keystone/pki/private/ssl_key.pem
+#ca_certs = /etc/keystone/pki/certs/cacert.pem
+#ca_key = /etc/keystone/pki/private/cakey.pem
 #key_size = 1024
 #valid_days = 3650
 #ca_password = None
@@ -133,11 +161,14 @@
 #cert_subject = /C=US/ST=Unset/L=Unset/O=Unset/CN=localhost
 
 [signing]
+# Deprecated in favor of provider in the [token] section
 #token_format = PKI
-#certfile = /etc/keystone/ssl/certs/signing_cert.pem
-#keyfile = /etc/keystone/ssl/private/signing_key.pem
-#ca_certs = /etc/keystone/ssl/certs/ca.pem
-#key_size = 1024
+
+#certfile = /etc/keystone/pki/certs/signing_cert.pem
+#keyfile = /etc/keystone/pki/private/signing_key.pem
+#ca_certs = /etc/keystone/pki/certs/cacert.pem
+#ca_key = /etc/keystone/pki/private/cakey.pem
+#key_size = 2048
 #valid_days = 3650
 #ca_password = None
 #cert_subject = /C=US/ST=Unset/L=Unset/O=Unset/CN=www.example.com
@@ -181,7 +212,7 @@
 # user_enabled_emulation = False
 # user_enabled_emulation_dn =
 
-# tenant_tree_dn = ou=Groups,dc=example,dc=com
+# tenant_tree_dn = ou=Projects,dc=example,dc=com
 # tenant_filter =
 # tenant_objectclass = groupOfNames
 # tenant_domain_id_attribute = businessCategory
@@ -242,7 +273,8 @@
 # user_additional_attribute_mapping =
 
 [auth]
-methods = password,token
+methods = external,password,token
+#external = keystone.auth.plugins.external.ExternalDefault
 password = keystone.auth.plugins.password.Password
 token = keystone.auth.plugins.token.Token
 

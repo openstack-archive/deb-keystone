@@ -32,10 +32,12 @@ from keystone import exception
 from keystone.openstack.common import jsonutils
 
 
+LOG = logging.getLogger(__name__)
 CONF = config.CONF
 
-# maintain a single engine reference for sqlite in-memory
+# maintain a single engine reference for sqlalchemy engine
 GLOBAL_ENGINE = None
+GLOBAL_ENGINE_CALLBACKS = set()
 
 
 ModelBase = declarative.declarative_base()
@@ -78,13 +80,6 @@ def initialize_decorator(init):
                             v = str(v)
                         if column.type.length and \
                                 column.type.length < len(v):
-                            #if signing.token_format == 'PKI', the id will
-                            #store it's public key which is very long.
-                            if config.CONF.signing.token_format == 'PKI' and \
-                                    self.__tablename__ == 'token' and \
-                                    k == 'id':
-                                continue
-
                             raise exception.StringLengthExceeded(
                                 string=v, type=k, length=column.type.length)
 
@@ -95,12 +90,48 @@ ModelBase.__init__ = initialize_decorator(ModelBase.__init__)
 
 
 def set_global_engine(engine):
+    """Set the global engine.
+
+    This sets the current global engine, which is returned by
+    Base.get_engine(allow_global_engine=True).
+
+    When the global engine is changed, all of the callbacks registered via
+    register_global_engine_callback since the last time set_global_engine was
+    changed are called. The callback functions are invoked with no arguments.
+
+    """
+
     global GLOBAL_ENGINE
+    global GLOBAL_ENGINE_CALLBACKS
+
+    if engine is GLOBAL_ENGINE:
+        # It's the same engine so nothing to do.
+        return
+
     GLOBAL_ENGINE = engine
 
+    cbs = GLOBAL_ENGINE_CALLBACKS
+    GLOBAL_ENGINE_CALLBACKS = set()
+    for cb in cbs:
+        try:
+            cb()
+        except Exception:
+            LOG.exception(_("Global engine callback raised."))
+            # Just logging the exception so can process other callbacks.
 
-def get_global_engine():
-    return GLOBAL_ENGINE
+
+def register_global_engine_callback(cb_fn):
+    """Register a function to be called when the global engine is set.
+
+    Note that the callback will be called only once or not at all, so to get
+    called each time the global engine is changed the function must be
+    re-registered.
+
+    """
+
+    global GLOBAL_ENGINE_CALLBACKS
+
+    GLOBAL_ENGINE_CALLBACKS.add(cb_fn)
 
 
 # Special Fields
@@ -180,8 +211,7 @@ class DictBase(object):
         #return local.iteritems()
 
 
-class MySQLPingListener(object):
-
+def mysql_on_checkout(dbapi_conn, connection_rec, connection_proxy):
     """Ensures that MySQL connections checked out of the pool are alive.
 
     Borrowed from:
@@ -196,16 +226,14 @@ class MySQLPingListener(object):
 
     from http://dev.mysql.com/doc/refman/5.6/en/error-messages-client.html
     """
-
-    def checkout(self, dbapi_con, con_record, con_proxy):
-        try:
-            dbapi_con.cursor().execute('select 1')
-        except dbapi_con.OperationalError as e:
-            if e.args[0] in (2006, 2013, 2014, 2045, 2055):
-                logging.warn(_('Got mysql server has gone away: %s'), e)
-                raise DisconnectionError("Database server went away")
-            else:
-                raise
+    try:
+        dbapi_conn.cursor().execute('select 1')
+    except dbapi_conn.OperationalError as e:
+        if e.args[0] in (2006, 2013, 2014, 2045, 2055):
+            logging.warn(_('Got mysql server has gone away: %s'), e)
+            raise DisconnectionError("Database server went away")
+        else:
+            raise
 
 
 # Backends
@@ -218,7 +246,8 @@ class Base(object):
         self._engine = self._engine or self.get_engine()
         self._sessionmaker = self._sessionmaker or self.get_sessionmaker(
             self._engine)
-        return self._sessionmaker()
+        return self._sessionmaker(autocommit=autocommit,
+                                  expire_on_commit=expire_on_commit)
 
     def get_engine(self, allow_global_engine=True):
         """Return a SQLAlchemy engine.
@@ -239,19 +268,27 @@ class Base(object):
 
             if 'sqlite' in connection_dict.drivername:
                 engine_config['poolclass'] = sqlalchemy.pool.StaticPool
-            elif 'mysql' in connection_dict.drivername:
-                engine_config['listeners'] = [MySQLPingListener()]
 
-            return sql.create_engine(CONF.sql.connection, **engine_config)
+            engine = sql.create_engine(CONF.sql.connection, **engine_config)
 
-        engine = get_global_engine() or new_engine()
+            if engine.name == 'mysql':
+                sql.event.listen(engine, 'checkout', mysql_on_checkout)
+
+            return engine
+
+        if not allow_global_engine:
+            return new_engine()
+
+        if GLOBAL_ENGINE:
+            return GLOBAL_ENGINE
+
+        engine = new_engine()
 
         # auto-build the db to support wsgi server w/ in-memory backend
-        if allow_global_engine and CONF.sql.connection == 'sqlite://':
+        if CONF.sql.connection == 'sqlite://':
             ModelBase.metadata.create_all(bind=engine)
 
-        if allow_global_engine:
-            set_global_engine(engine)
+        set_global_engine(engine)
 
         return engine
 

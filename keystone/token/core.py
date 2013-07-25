@@ -16,6 +16,7 @@
 
 """Main entry point into the Token service."""
 
+import copy
 import datetime
 
 from keystone.common import cms
@@ -32,19 +33,6 @@ config.register_int('expiration', group='token', default=86400)
 LOG = logging.getLogger(__name__)
 
 
-def unique_id(token_id):
-    """Return a unique ID for a token.
-
-    The returned value is useful as the primary key of a database table,
-    memcache store, or other lookup table.
-
-    :returns: Given a PKI token, returns it's hashed value. Otherwise, returns
-              the passed-in value (such as a UUID token ID or an existing
-              hash).
-    """
-    return cms.cms_hash_token(token_id)
-
-
 def default_expire_time():
     """Determine when a fresh token should expire.
 
@@ -57,7 +45,7 @@ def default_expire_time():
     return timeutils.utcnow() + expire_delta
 
 
-def validate_auth_info(self, context, user_ref, tenant_ref):
+def validate_auth_info(self, user_ref, tenant_ref):
     """Validate user and tenant auth info.
 
     Validate the user and tenant auth into in order to ensure that user and
@@ -66,7 +54,6 @@ def validate_auth_info(self, context, user_ref, tenant_ref):
     Consolidate the checks here to ensure consistency between token auth and
     ec2 auth.
 
-    :params context: keystone's request context
     :params user_ref: the authenticating user
     :params tenant_ref: the scope of authorization, if any
     :raises Unauthorized: if any of the user, user's domain, tenant or
@@ -80,7 +67,6 @@ def validate_auth_info(self, context, user_ref, tenant_ref):
 
     # If the user's domain is disabled don't allow them to authenticate
     user_domain_ref = self.identity_api.get_domain(
-        context,
         user_ref['domain_id'])
     if user_domain_ref and not user_domain_ref.get('enabled', True):
         msg = 'Domain is disabled: %s' % user_domain_ref['id']
@@ -96,7 +82,6 @@ def validate_auth_info(self, context, user_ref, tenant_ref):
 
         # If the project's domain is disabled don't allow them to authenticate
         project_domain_ref = self.identity_api.get_domain(
-            context,
             tenant_ref['domain_id'])
         if (project_domain_ref and
                 not project_domain_ref.get('enabled', True)):
@@ -116,6 +101,29 @@ class Manager(manager.Manager):
 
     def __init__(self):
         super(Manager, self).__init__(CONF.token.driver)
+
+    def _unique_id(self, token_id):
+        """Return a unique ID for a token.
+
+        The returned value is useful as the primary key of a database table,
+        memcache store, or other lookup table.
+
+        :returns: Given a PKI token, returns it's hashed value. Otherwise,
+                  returns the passed-in value (such as a UUID token ID or an
+                  existing hash).
+        """
+        return cms.cms_hash_token(token_id)
+
+    def get_token(self, token_id):
+        return self.driver.get_token(self._unique_id(token_id))
+
+    def create_token(self, token_id, data):
+        data_copy = copy.deepcopy(data)
+        data_copy['id'] = self._unique_id(token_id)
+        return self.driver.create_token(self._unique_id(token_id), data_copy)
+
+    def delete_token(self, token_id):
+        return self.driver.delete_token(self._unique_id(token_id))
 
 
 class Driver(object):
@@ -165,6 +173,32 @@ class Driver(object):
 
         """
         raise exception.NotImplemented()
+
+    def delete_tokens(self, user_id, tenant_id=None, trust_id=None):
+        """Deletes tokens by user.
+        If the tenant_id is not None, only delete the tokens by user id under
+        the specified tenant.
+        If the trust_id is not None, it will be used to query tokens and the
+        user_id will be ignored.
+
+        :param user_id: identity of user
+        :type user_id: string
+        :param tenant_id: identity of the tenant
+        :type tenant_id: string
+        :param trust_id: identified of the trust
+        :type trust_id: string
+        :returns: None.
+        :raises: keystone.exception.TokenNotFound
+
+        """
+        token_list = self.list_tokens(user_id,
+                                      tenant_id=tenant_id,
+                                      trust_id=trust_id)
+        for token in token_list:
+            try:
+                self.delete_token(token)
+            except exception.NotFound:
+                pass
 
     def list_tokens(self, user_id, tenant_id=None, trust_id=None):
         """Returns a list of current token_id's for a user

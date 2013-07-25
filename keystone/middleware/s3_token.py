@@ -34,11 +34,11 @@ This WSGI component:
 """
 
 import httplib
-
 import webob
 
-from keystone.openstack.common import jsonutils
 from swift.common import utils as swift_utils
+
+from keystone.openstack.common import jsonutils
 
 
 PROTOCOL_NAME = 'S3 Token Authentication'

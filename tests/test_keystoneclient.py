@@ -19,10 +19,12 @@ import webob
 
 import nose.exc
 
+from keystone import test
+from keystone import token
+
 from keystone import config
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
-from keystone import test
 
 import default_fixtures
 
@@ -41,18 +43,18 @@ class CompatTestCase(test.TestCase):
         self.clear_module('keystoneclient')
 
         self.load_backends()
+        self.token_provider_api = token.provider.Manager()
         self.load_fixtures(default_fixtures)
 
         self.public_server = self.serveapp('keystone', name='main')
         self.admin_server = self.serveapp('keystone', name='admin')
 
-        # TODO(termie): is_admin is being deprecated once the policy stuff
-        #               is all working
         # TODO(termie): add an admin user to the fixtures and use that user
         # override the fixtures, for now
-        self.metadata_foobar = self.identity_api.update_metadata(
-            self.user_foo['id'], self.tenant_bar['id'],
-            dict(roles=[self.role_admin['id']], is_admin='1'))
+        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
+            self.user_foo['id'],
+            self.tenant_bar['id'],
+            self.role_admin['id'])
 
     def tearDown(self):
         self.public_server.kill()
@@ -482,6 +484,19 @@ class KeystoneClientTests(object):
                                     tenant_id='bar')
         self.assertEquals(user2.name, test_username)
 
+    def test_update_default_tenant_to_existing_value(self):
+        client = self.get_client(admin=True)
+
+        user = client.users.create(
+            name=uuid.uuid4().hex,
+            password=uuid.uuid4().hex,
+            email=uuid.uuid4().hex,
+            tenant_id=self.tenant_bar['id'])
+
+        # attempting to update the tenant with the existing value should work
+        user = client.users.update_tenant(
+            user=user, tenant=self.tenant_bar['id'])
+
     def test_user_create_no_name(self):
         from keystoneclient import exceptions as client_exceptions
         client = self.get_client(admin=True)
@@ -825,6 +840,28 @@ class KeystoneClientTests(object):
 class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
     def get_checkout(self):
         return KEYSTONECLIENT_REPO, 'master'
+
+    def test_ec2_auth(self):
+        client = self.get_client()
+        cred = client.ec2.create(user_id=self.user_foo['id'],
+                                 tenant_id=self.tenant_bar['id'])
+
+        from keystoneclient.contrib.ec2 import utils as ec2_utils
+        signer = ec2_utils.Ec2Signer(cred.secret)
+        credentials = {'params': {'SignatureVersion': '2'},
+                       'access': cred.access,
+                       'verb': 'GET',
+                       'host': 'localhost',
+                       'path': '/thisisgoingtowork'}
+        signature = signer.generate(credentials)
+        credentials['signature'] = signature
+        url = '%s/ec2tokens' % (client.auth_url)
+        (resp, token) = client.request(url=url,
+                                       method='POST',
+                                       body={'credentials': credentials})
+        # make sure we have a v2 token
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('access', token)
 
     def test_tenant_add_and_remove_user(self):
         client = self.get_client(admin=True)
