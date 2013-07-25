@@ -1,3 +1,2 @@
 sql_conn.patch
 fixes-keystone-default-catalog.patch
-CVE-2013-2157_Force_simple_Bind_for_authentication.patch
