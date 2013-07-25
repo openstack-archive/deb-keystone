@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2013-07-10 23:09+0800\n"
-"PO-Revision-Date: 2012-11-09 23:27+0900\n"
+"PO-Revision-Date: 2013-07-11 00:09+0900\n"
 "Last-Translator: victory <victory.deb@gmail.com>\n"
 "Language-Team: Japanese <debian-japanese@lists.debian.org>\n"
 "Language: ja\n"
@@ -25,26 +25,16 @@ msgstr "Keystone 用のデータベースを用意しますか?"
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| "No database has been set up for Keystone to use. If you want to set one "
-#| "up now, please make sure you have all needed information:"
 msgid ""
 "No database has been set up for Keystone to use. Before continuing, you "
 "should make sure you have the following information:"
 msgstr ""
-"Keystone で利用するデータベースが用意されていません。ここで用意する場合は、必"
-"要な情報がすべて揃っているか確認してください:"
+"Keystone で利用するデータベースが用意されていません。続行する前に以下の情報が"
+"揃っているか確認してください:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| " * the host name of the database server (which must allow TCP\n"
-#| "   connections from this machine);\n"
-#| " * a username and password to access the database;\n"
-#| " * the type of database management software you want to use."
 msgid ""
 " * the type of database that you want to use;\n"
 " * the database server host name (that server must allow TCP connections "
@@ -52,10 +42,10 @@ msgid ""
 "   machine);\n"
 " * a username and password to access the database."
 msgstr ""
-" * データベースサーバのホスト名 (このマシンからの\n"
-"   TCP 接続を許可しなければなりません)\n"
-" * データベースにアクセスするためのユーザ名とパスワード\n"
-" * 使いたいデータベース管理ソフトウェアの種類。"
+" * 使いたいデータベースの種類\n"
+" * データベースサーバのホスト名 (このサーバはこの\n"
+"   マシンからの TCP 接続を許可しなければなりません)\n"
+" * データベースにアクセスするためのユーザ名とパスワード。"
 
 #. Type: boolean
 #. Description
@@ -64,6 +54,8 @@ msgid ""
 "If some of these requirements are missing, do not choose this option and run "
 "with regular SQLite support."
 msgstr ""
+"必要なものが欠けている場合はこのオプションを選択せず、普通の SQLite サポートで"
+"進めてください。"
 
 #. Type: boolean
 #. Description
@@ -97,10 +89,8 @@ msgstr "認証サーバに使う文字列を入力してください。"
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:4001
-#, fuzzy
-#| msgid "Authentication server administration token:"
 msgid "Register administration tenants?"
-msgstr "認証サーバ管理文字列:"
+msgstr "管理用アカウント (tenant) を登録しますか?"
 
 #. Type: boolean
 #. Description
@@ -116,52 +106,50 @@ msgid ""
 "For OpenStack to work, you need a basic tenant configuration. The creation "
 "of these administration tenants can be done automatically."
 msgstr ""
+"OpenStack が機能するためには基本的な管理用アカウント (tenant) の設定が必要で"
+"す。そういった管理用アカウント (tenant) の作成は自動的に行うことができます。"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
 msgid "Username of the administrative user:"
-msgstr ""
+msgstr "管理用ユーザのユーザ名:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter a username for the administrative user."
-msgstr "認証サーバに使う文字列を入力してください。"
+msgstr "管理用ユーザのユーザ名を入力してください。"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
 msgid "Email address of the administrative user:"
-msgstr ""
+msgstr "管理用ユーザのメールアドレス:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the email address of the administrative user."
-msgstr "認証サーバに使う文字列を入力してください。"
+msgstr "管理用ユーザのメールアドレスを入力してください。"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Password of the administrative user:"
-msgstr ""
+msgstr "管理用ユーザのパスワード:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Please enter a password for the administrative user."
-msgstr ""
+msgstr "管理用ユーザのパスワードを入力してください。"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
 msgid "Re-enter password to verify:"
-msgstr ""
+msgstr "検証するためにパスワードを再入力してください:"
 
 #. Type: password
 #. Description
@@ -170,32 +158,32 @@ msgid ""
 "Please enter the same administrative password again to verify that you have "
 "typed it correctly."
 msgstr ""
+"正しく打ち込まれたことを検証するため、同一の管理用パスワードを再び入力してくだ"
+"さい。"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "Password input error"
-msgstr ""
+msgstr "パスワード入力エラー"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "The two passwords you entered were not the same. Please try again."
-msgstr ""
+msgstr "入力された二つのパスワードが同一ではありません。やり直してください。"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
 msgid "Name of the administrative role:"
-msgstr ""
+msgstr "管理用の役割名:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative role."
-msgstr "認証サーバに使う文字列を入力してください。"
+msgstr "管理用の役割の名前を入力してください。"
 
 #. Type: string
 #. Description
@@ -208,7 +196,7 @@ msgstr "認証サーバに使う文字列を入力してください。"
 #. locataire ("tenant")
 #: ../keystone.templates:11001
 msgid "Name of the administrative tenant:"
-msgstr ""
+msgstr "管理用アカウント (tenant) の名前"
 
 #. Type: string
 #. Description
@@ -220,16 +208,14 @@ msgstr ""
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative tenant."
-msgstr "認証サーバに使う文字列を入力してください。"
+msgstr "管理用アカウント (tenant) の名前を入力してください。"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid "Register Keystone endpoint?"
-msgstr ""
+msgstr "Keystone の端末を登録しますか?"
 
 #. Type: boolean
 #. Description
@@ -239,24 +225,27 @@ msgid ""
 "accessible. This is done using \"keystone service-create\" and \"keystone "
 "endpoint-create\". This can be done automatically now."
 msgstr ""
+"OpenStack のサービスごと (API ごと) に、アクセスできるようにするため登録すべき"
+"です。「keystone service-create」と「keystone endpoint-create」を使って登録す"
+"ることができます。ここで自動的に行うことができます。"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Keystone endpoint IP address:"
-msgstr ""
+msgstr "Keystone 端末の IP アドレス:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Please enter the IP address that will be used to contact Keystone."
-msgstr ""
+msgstr "Keystone への通信に利用する IP アドレスを入力してください。"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:14001
 msgid "Name of the region to register:"
-msgstr ""
+msgstr "登録する領域の名前:"
 
 #. Type: string
 #. Description
@@ -266,10 +255,5 @@ msgid ""
 "location. Please enter the zone that you wish to use when registering the "
 "endpoint."
 msgstr ""
-
-#~ msgid ""
-#~ "If you don't choose this option, no database will be set up and Keystone "
-#~ "will use regular SQLite support."
-#~ msgstr ""
-#~ "ここで選択しない場合はデータベースの用意は行われず、Keystone は標準の "
-#~ "SQLite を利用します。"
+"OpenStack は位置を示す各領域による利用可能区分の利用をサポートしています。端末"
+"の登録時に利用したい区分を入力してください。"
