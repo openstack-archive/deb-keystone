@@ -2,6 +2,8 @@ keystone (2013.1.2-7) UNRELEASED; urgency=low
 
   * Added ja.po Debconf translation thanks to victory <victory.deb@gmail.com>,
     and several DDs (Closes: #717707).
+  * Installs httpd/keystone.py in /usr/share/keystone/wsgi.py as requested
+    by fc__.
 
  -- Thomas Goirand <zigo@debian.org>  Thu, 25 Jul 2013 23:24:18 +0800
 
