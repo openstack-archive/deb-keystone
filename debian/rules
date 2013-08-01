@@ -58,9 +58,9 @@ override_dh_install:
 	sed -i -e "s|^[ \t#]*log_dir[ \t#]*=.*|log_dir = /var/log/keystone|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
 	sed -i -e "s|^[ \t#]*log_file[ \t#]*=.*|log_file = keystone.log|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
 	cp -f etc/keystone.conf.sample debian/keystone/usr/share/doc/keystone/keystone.conf.sample
-	for i in `pyversions -s` ; do \
-		install -D -m 0644 httpd/keystone.py $(CURDIR)/debian/python-keystone/usr/lib/$$i/dist-packages/keystone/httpd/keystone.py ; \
-	done
+
+	install -D -m 0644 httpd/keystone.py $(CURDIR)/debian/python-keystone/usr/share/keystone/wsgi.py
+	dh_python2 /usr/share/keystone
 
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
