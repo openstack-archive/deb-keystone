@@ -1,17 +1,17 @@
 # Danish translation keystone.
-# Copyright (C) 2012 keystone & nedenstående oversættere.
+# Copyright (C) 2013 keystone & nedenstående oversættere.
 # This file is distributed under the same license as the keystone package.
-# Joe Hansen <joedalton2@yahoo.dk>, 2012.
+# Joe Hansen <joedalton2@yahoo.dk>, 2012, 2013.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: keystone\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2013-07-10 23:09+0800\n"
-"PO-Revision-Date: 2012-08-11 17:30+01:00\n"
+"PO-Revision-Date: 2013-08-17 17:30+01:00\n"
 "Last-Translator: Joe Hansen <joedalton2@yahoo.dk>\n"
 "Language-Team: Danish <debian-l10n-danish@lists.debian.org>\n"
-"Language: \n"
+"Language: da\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -20,31 +20,21 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
-msgstr "Opsæt en database for keystone?"
+msgstr "Opsæt en database for Keystone?"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| "No database has been set up for Keystone to use. If you want to set one "
-#| "up now, please make sure you have all needed information:"
 msgid ""
 "No database has been set up for Keystone to use. Before continuing, you "
 "should make sure you have the following information:"
 msgstr ""
-"Ingen database er blevet opsat for Keystone. Hvis du ønsker at opsætte en "
-"database nu så sikr dig, at du har den krævede information:"
+"Ingen database er blevet opsat for Keystone. Før du fortsætter så sikr "
+"dig, at du har den følgende information:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| " * the host name of the database server (which must allow TCP\n"
-#| "   connections from this machine);\n"
-#| " * a username and password to access the database;\n"
-#| " * the type of database management software you want to use."
 msgid ""
 " * the type of database that you want to use;\n"
 " * the database server host name (that server must allow TCP connections "
@@ -52,10 +42,10 @@ msgid ""
 "   machine);\n"
 " * a username and password to access the database."
 msgstr ""
-" * værtsnavnet for databaseserveren (som skal tillade TCP-\n"
+" * typen af håndteringsprogram for databasen du ønsker at bruge\n"
+" * værtsnavnet for databaseserveren (den server som skal tillade TCP-\n"
 "   forbindelser fra denne maskine)\n"
-" * et brugernavn og adgangskode for at tilgå databasen\n"
-" * typen af håndteringsprogram for databasen du ønsker at bruge"
+" * et brugernavn og adgangskode for at tilgå databasen"
 
 #. Type: boolean
 #. Description
@@ -64,6 +54,8 @@ msgid ""
 "If some of these requirements are missing, do not choose this option and run "
 "with regular SQLite support."
 msgstr ""
+"Hvis nogle af kravene mangler, så vælg ikke denne indstilling men kør "
+"med normal SQLite-understøttelse."
 
 #. Type: boolean
 #. Description
@@ -97,10 +89,8 @@ msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:4001
-#, fuzzy
-#| msgid "Authentication server administration token:"
 msgid "Register administration tenants?"
-msgstr "Symbol for godkendelse af serveradministration:"
+msgstr "Registrer administrationslejere (tenants)?"
 
 #. Type: boolean
 #. Description
@@ -116,96 +106,85 @@ msgid ""
 "For OpenStack to work, you need a basic tenant configuration. The creation "
 "of these administration tenants can be done automatically."
 msgstr ""
+"For at OpenStack kan fungere, så skal du bruge en grundlæggende tenant-"
+"konfiguration. Oprettelsen af disse administrationslejere (tenants) kan "
+"udføres automatisk."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Username of the administrative user:"
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Brugernavn for den administrative bruger:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter a username for the administrative user."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Indtast venligst et brugernavn for den administrative bruger."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Email address of the administrative user:"
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "E-postadresse for den administrative bruger:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the email address of the administrative user."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Indtast venligst e-postadressen for den administrative bruger."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Password of the administrative user:"
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Adgangskode for den administrative bruger:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Please enter a password for the administrative user."
-msgstr ""
+msgstr "Indtast venligst en adgangskode for den administrative bruger."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
 msgid "Re-enter password to verify:"
-msgstr ""
+msgstr "Indtast adgangskoden igen for at verificere:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid ""
 "Please enter the same administrative password again to verify that you have "
 "typed it correctly."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr ""
+"Indtast venligst den samme administrative adgangskode igen for at verificere "
+"at du har indtastet den korrekt."
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "Password input error"
-msgstr ""
+msgstr "Inddatafejl for adgangskode"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "The two passwords you entered were not the same. Please try again."
-msgstr ""
+msgstr "De to adgangskoder du indtastede var ikke ens. Prøv igen."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative role:"
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Navn for den administrative rolle:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative role."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Indtast venligst navnet for den administrative rolle."
 
 #. Type: string
 #. Description
@@ -217,10 +196,8 @@ msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative tenant:"
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Navn på den administrative lejer (tenant):"
 
 #. Type: string
 #. Description
@@ -232,16 +209,14 @@ msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative tenant."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Indtast venligst navnet for den administrative lejer (tenant)."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid "Register Keystone endpoint?"
-msgstr ""
+msgstr "Registrer Keystoneslutpunkt?"
 
 #. Type: boolean
 #. Description
@@ -251,26 +226,27 @@ msgid ""
 "accessible. This is done using \"keystone service-create\" and \"keystone "
 "endpoint-create\". This can be done automatically now."
 msgstr ""
+"Hver OpenStack-tjeneste (hver API) skal registreres for at kunne tilgås. "
+"Dette gøres med »keystone service-create« og »keystone endpoint-create«. "
+"Denne kan nu gøres automatisk."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Keystone endpoint IP address:"
-msgstr ""
+msgstr "IP-adresse for Keystones slutpunkt:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the IP address that will be used to contact Keystone."
-msgstr "Indtast venligst symbolet til brug for godkendelsesserveren."
+msgstr "Indtast venligst IP-adressen som vil blive brugt til at kontakte Keystone."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:14001
 msgid "Name of the region to register:"
-msgstr ""
+msgstr "Navn for regionen der skal registreres:"
 
 #. Type: string
 #. Description
@@ -280,10 +256,7 @@ msgid ""
 "location. Please enter the zone that you wish to use when registering the "
 "endpoint."
 msgstr ""
+"OpenStack understøtter tilgængelighedszoner, hvor hver region repræsenterer "
+"et sted. Indtast venligst zonen som du ønsker at bruge, når du registrerer "
+"slutpunktet."
 
-#~ msgid ""
-#~ "If you don't choose this option, no database will be set up and Keystone "
-#~ "will use regular SQLite support."
-#~ msgstr ""
-#~ "Hvis du ikke vælger denne indstilling, så vil ingen database blive opsat "
-#~ "og Keystone vil bruge den normale SQLite-understøttelse."

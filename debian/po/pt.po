@@ -1,17 +1,17 @@
 # Portuguese translation of nova's package debconf messages
 # Copyright (C) 2012 THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the nova package.
-# Miguel Figueiredo <elmig@debianpt.org>, 2012.
+# Miguel Figueiredo <elmig@debianpt.org>, 2012, 2013.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: nova\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2013-07-10 23:09+0800\n"
-"PO-Revision-Date: 2012-08-19 18:48+0100\n"
+"PO-Revision-Date: 2013-08-18 08:45+0100\n"
 "Last-Translator: Miguel Figueiredo <elmig@debianpt.org>\n"
 "Language-Team: Portuguese <traduz@debianpt.org>\n"
-"Language: \n"
+"Language: Portuguese\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -20,12 +20,11 @@ msgstr ""
 #. Description
 #: ../keystone.templates:2001
 msgid "Set up a database for Keystone?"
-msgstr "Configurar uma base de dados para Keystone?"
+msgstr "Configurar uma base de dados para o Keystone?"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
 #| msgid ""
 #| "No database has been set up for Keystone to use. If you want to set one "
 #| "up now, please make sure you have all needed information:"
@@ -33,14 +32,12 @@ msgid ""
 "No database has been set up for Keystone to use. Before continuing, you "
 "should make sure you have the following information:"
 msgstr ""
-"Não foi configurada nenhuma base de dados para ser utilizada por Keystone. "
-"Se desejar agora configurar uma, assegure-se que tem toda a informação "
-"necessária:"
+"Não foi configurada nenhuma base de dados para ser utilizada pelo Keystone. "
+"Antes de continuar deve assegurar-se que tem a seguinte informação:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
 #| msgid ""
 #| " * the host name of the database server (which must allow TCP\n"
 #| "   connections from this machine);\n"
@@ -53,10 +50,10 @@ msgid ""
 "   machine);\n"
 " * a username and password to access the database."
 msgstr ""
-" * o nome da máquina do servidor da base de dados\n"
-"   (o qual tem de aceitar ligações TCP a partir desta máquina);\n"
-" * um nome de utilizador e palavra-passe para aceder à base de dados;\n"
-" * o tipo de software de gestão de base de dados que quer utilizar."
+" * o tipo de base de dados que deseja utilizar;\n"
+" * o nome da máquina do servidor da base de dados (esse servidor tem de "
+"permitir ligações TCP a partir desta máquina);\n"
+" * um nome de utilizador e palavra-passe para aceder à base de dados."
 
 #. Type: boolean
 #. Description
@@ -65,6 +62,8 @@ msgid ""
 "If some of these requirements are missing, do not choose this option and run "
 "with regular SQLite support."
 msgstr ""
+"Se algum desses requisitos estiver em falta então não escolha esta opção e "
+"utilize com o usual suporte SQLite."
 
 #. Type: boolean
 #. Description
@@ -98,10 +97,9 @@ msgstr "Por favor introduza o token a utilizar com o servidor de autenticação.
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:4001
-#, fuzzy
 #| msgid "Authentication server administration token:"
 msgid "Register administration tenants?"
-msgstr "Token de administração do servidor de autenticação:"
+msgstr "Registar tenants de administração?"
 
 #. Type: boolean
 #. Description
@@ -117,96 +115,93 @@ msgid ""
 "For OpenStack to work, you need a basic tenant configuration. The creation "
 "of these administration tenants can be done automatically."
 msgstr ""
+"Para o OpenStack funcionar necessita de uma configuração básica de tenant. A "
+"criação destes tenants de administração pode ser feita automaticamente."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Username of the administrative user:"
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Nome de utilizador do utilizador administrador:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter a username for the administrative user."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Por favor introduza um nome de utilizador para o utilizador administrador."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Email address of the administrative user:"
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Endereço de email do utilizador administrador:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the email address of the administrative user."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Por favor introduza um endereço de email do utilizador administrador."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Password of the administrative user:"
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Palavra-passe do utilizador administrador:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Please enter a password for the administrative user."
-msgstr ""
+msgstr "Por favor introduza uma palavra-passe para o utilizador administrador."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
 msgid "Re-enter password to verify:"
-msgstr ""
+msgstr "Introduza novamente a palavra-passe para verificação:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid ""
 "Please enter the same administrative password again to verify that you have "
 "typed it correctly."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr ""
+"Por favor introduza a mesma palavra-passe de administrador para verificar "
+"que a escreveu correctamente."
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "Password input error"
-msgstr ""
+msgstr "Erro de introdução da palavra-passe"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "The two passwords you entered were not the same. Please try again."
-msgstr ""
+msgstr "As duas palavras-passe que introduziu não são iguais. Por favor tente "
+"novamente."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative role:"
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Nome do cargo ('role') de administrador:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative role."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Por favor introduza o nome do cargo de administrador."
 
 #. Type: string
 #. Description
@@ -218,10 +213,9 @@ msgstr "Por favor introduza o token a utilizar com o servidor de autenticação.
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative tenant:"
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Nome do tenant administrador:"
 
 #. Type: string
 #. Description
@@ -233,16 +227,15 @@ msgstr "Por favor introduza o token a utilizar com o servidor de autenticação.
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative tenant."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Por favor introduza o nome do tenant administrador."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid "Register Keystone endpoint?"
-msgstr ""
+msgstr "Registar o endpoint Keystone?"
 
 #. Type: boolean
 #. Description
@@ -252,26 +245,28 @@ msgid ""
 "accessible. This is done using \"keystone service-create\" and \"keystone "
 "endpoint-create\". This can be done automatically now."
 msgstr ""
+"Cada serviço OpenStack (cada API) deve estar registado de forma a ser "
+"acessível. Isto é feito utilizando \"keystone service-create\" e \"keystone "
+"endpoint-create\". Isto pode ser feito agora, automaticamente."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Keystone endpoint IP address:"
-msgstr ""
+msgstr "Endereço IP do endpoint Keystone:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the IP address that will be used to contact Keystone."
-msgstr "Por favor introduza o token a utilizar com o servidor de autenticação."
+msgstr "Por favor introduza o endereço IP que irá ser utilizado para contactar o Keystone."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:14001
 msgid "Name of the region to register:"
-msgstr ""
+msgstr "Nome da região a registar:"
 
 #. Type: string
 #. Description
@@ -281,6 +276,9 @@ msgid ""
 "location. Please enter the zone that you wish to use when registering the "
 "endpoint."
 msgstr ""
+"O OpenStack suporta zonas de disponibilidade, com cada região a representar "
+"um local. Por favor introduza a zona que deseja utilizar ao registar o "
+"endpoint."
 
 #~ msgid ""
 #~ "If you don't choose this option, no database will be set up and Keystone "
