@@ -1,5 +1,6 @@
-keystone (2013.1.2-7) UNRELEASED; urgency=low
+keystone (2013.1.3-1) UNRELEASED; urgency=low
 
+  * New upstream point release.
   * Added ja.po Debconf translation thanks to victory <victory.deb@gmail.com>,
     and several DDs (Closes: #717707).
   * Installs httpd/keystone.py in /usr/share/keystone/wsgi.py as requested
