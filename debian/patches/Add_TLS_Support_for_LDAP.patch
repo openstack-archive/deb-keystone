@@ -10,11 +10,11 @@ Origin: upstream, https://review.openstack.org/#/c/25327/
 Bug-Ubuntu: https://launchpad.net/bugs/1040115
 Date: Mon, 25 Mar 2013 15:23:15 -0500
 
-diff --git a/doc/source/configuration.rst b/doc/source/configuration.rst
-index 377dfbe..c390a7f 100644
---- a/doc/source/configuration.rst
-+++ b/doc/source/configuration.rst
-@@ -1082,3 +1082,25 @@ specified classes in the LDAP module so you can configure them like::
+Index: keystone/doc/source/configuration.rst
+===================================================================
+--- keystone.orig/doc/source/configuration.rst	2013-08-30 11:13:31.000000000 +0800
++++ keystone/doc/source/configuration.rst	2013-08-30 11:29:35.000000000 +0800
+@@ -1082,3 +1082,25 @@
    role_name_attribute      = ou
    role_member_attribute    = roleOccupant
    role_attribute_ignore    =
@@ -41,10 +41,10 @@ index 377dfbe..c390a7f 100644
 +tls_req_cert are demand, never, and allow.  These correspond to the
 +standard options permitted by the TLS_REQCERT TLS option.
 \ No newline at end of file
-diff --git a/etc/keystone.conf.sample b/etc/keystone.conf.sample
-index 9e66eb6..ee2a562 100644
---- a/etc/keystone.conf.sample
-+++ b/etc/keystone.conf.sample
+Index: keystone/etc/keystone.conf.sample
+===================================================================
+--- keystone.orig/etc/keystone.conf.sample	2013-08-30 11:29:31.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2013-08-30 11:29:35.000000000 +0800
 @@ -212,6 +212,15 @@
  # group_allow_update = True
  # group_allow_delete = True
@@ -61,11 +61,11 @@ index 9e66eb6..ee2a562 100644
  [auth]
  methods = password,token
  password = keystone.auth.plugins.password.Password
-diff --git a/keystone/common/config.py b/keystone/common/config.py
-index a96c814..fce333d 100644
---- a/keystone/common/config.py
-+++ b/keystone/common/config.py
-@@ -351,6 +351,10 @@ def configure():
+Index: keystone/keystone/common/config.py
+===================================================================
+--- keystone.orig/keystone/common/config.py	2013-08-30 11:13:31.000000000 +0800
++++ keystone/keystone/common/config.py	2013-08-30 11:29:35.000000000 +0800
+@@ -357,6 +357,10 @@
      register_bool('domain_allow_delete', group='ldap', default=True)
      register_bool('domain_enabled_emulation', group='ldap', default=False)
      register_str('domain_enabled_emulation_dn', group='ldap', default=None)
@@ -76,10 +76,10 @@ index a96c814..fce333d 100644
  
      # pam
      register_str('url', group='pam', default=None)
-diff --git a/keystone/common/ldap/core.py b/keystone/common/ldap/core.py
-index b06f227..80189b1 100644
---- a/keystone/common/ldap/core.py
-+++ b/keystone/common/ldap/core.py
+Index: keystone/keystone/common/ldap/core.py
+===================================================================
+--- keystone.orig/keystone/common/ldap/core.py	2013-08-30 11:13:31.000000000 +0800
++++ keystone/keystone/common/ldap/core.py	2013-08-30 11:29:35.000000000 +0800
 @@ -14,6 +14,8 @@
  # License for the specific language governing permissions and limitations
  # under the License.
@@ -89,7 +89,7 @@ index b06f227..80189b1 100644
  import ldap
  from ldap import filter as ldap_filter
  
-@@ -34,6 +36,9 @@ LDAP_DEREF = {'always': ldap.DEREF_ALWAYS,
+@@ -34,6 +36,9 @@
                'finding': ldap.DEREF_FINDING,
                'never': ldap.DEREF_NEVER,
                'searching': ldap.DEREF_SEARCHING}
@@ -99,7 +99,7 @@ index b06f227..80189b1 100644
  
  
  def py2ldap(val):
-@@ -75,6 +80,15 @@ def parse_deref(opt):
+@@ -75,6 +80,15 @@
                           opt) + ', '.join(LDAP_DEREF.keys()))
  
  
@@ -115,7 +115,7 @@ index b06f227..80189b1 100644
  def ldap_scope(scope):
      try:
          return LDAP_SCOPES[scope]
-@@ -106,6 +120,10 @@ class BaseLdap(object):
+@@ -106,6 +120,10 @@
          self.LDAP_SCOPE = ldap_scope(conf.ldap.query_scope)
          self.alias_dereferencing = parse_deref(conf.ldap.alias_dereferencing)
          self.page_size = conf.ldap.page_size
@@ -126,7 +126,7 @@ index b06f227..80189b1 100644
  
          if self.options_name is not None:
              self.suffix = conf.ldap.suffix
-@@ -157,7 +175,11 @@ class BaseLdap(object):
+@@ -157,7 +175,11 @@
          else:
              conn = LdapWrapper(self.LDAP_URL,
                                 self.page_size,
@@ -139,7 +139,7 @@ index b06f227..80189b1 100644
  
          if user is None:
              user = self.LDAP_USER
-@@ -363,13 +385,75 @@ class BaseLdap(object):
+@@ -365,13 +387,75 @@
  
  
  class LdapWrapper(object):
@@ -216,11 +216,10 @@ index b06f227..80189b1 100644
      def simple_bind_s(self, user, password):
          LOG.debug(_("LDAP bind: dn=%s"), user)
          return self.conn.simple_bind_s(user, password)
-diff --git a/tests/_ldap_tls_livetest.py b/tests/_ldap_tls_livetest.py
-new file mode 100644
-index 0000000..8503e51
---- /dev/null
-+++ b/tests/_ldap_tls_livetest.py
+Index: keystone/tests/_ldap_tls_livetest.py
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ keystone/tests/_ldap_tls_livetest.py	2013-08-30 11:29:35.000000000 +0800
 @@ -0,0 +1,118 @@
 +# vim: tabstop=4 shiftwidth=4 softtabstop=4
 +
@@ -340,11 +339,10 @@ index 0000000..8503e51
 +                'password': 'fakepass1',
 +                'tenants': ['bar']}
 +        self.assertRaises(IOError, self.identity_api.create_user, 'fake', user)
-diff --git a/tests/backend_tls_liveldap.conf b/tests/backend_tls_liveldap.conf
-new file mode 100644
-index 0000000..0c9d7f2
---- /dev/null
-+++ b/tests/backend_tls_liveldap.conf
+Index: keystone/tests/backend_tls_liveldap.conf
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ keystone/tests/backend_tls_liveldap.conf	2013-08-30 11:29:35.000000000 +0800
 @@ -0,0 +1,23 @@
 +[ldap]
 +url = ldap://
@@ -369,6 +367,3 @@ index 0000000..0c9d7f2
 +[identity]
 +driver = keystone.identity.backends.ldap.Identity
 +
--- 
-1.7.10.4
-
