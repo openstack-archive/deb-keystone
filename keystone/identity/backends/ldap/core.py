@@ -53,18 +53,6 @@ class Identity(identity.Driver):
         self.role = RoleApi(CONF)
         self.group = GroupApi(CONF)
 
-    def get_connection(self, user=None, password=None):
-        if self.LDAP_URL.startswith('fake://'):
-            conn = fakeldap.FakeLdap(self.LDAP_URL)
-        else:
-            conn = common_ldap.LdapWrapper(self.LDAP_URL)
-        if user is None:
-            user = self.LDAP_USER
-        if password is None:
-            password = self.LDAP_PASSWORD
-        conn.simple_bind_s(user, password)
-        return conn
-
     def _validate_domain(self, ref):
         """Validate that either the default domain or nothing is specified.
 
@@ -110,6 +98,8 @@ class Identity(identity.Driver):
         except exception.UserNotFound:
             raise AssertionError('Invalid user / password')
 
+        if not user_id or not password:
+            raise AssertionError('Invalid user / password')
         try:
             conn = self.user.get_connection(self.user._id_to_dn(user_id),
                                             password)
@@ -163,12 +153,20 @@ class Identity(identity.Driver):
 
     def get_metadata(self, user_id=None, tenant_id=None,
                      domain_id=None, group_id=None):
+
+        def _get_roles_for_just_user_and_project(user_id, tenant_id):
+            self.get_user(user_id)
+            self.get_project(tenant_id)
+            return [a.role_id
+                    for a in self.role.get_role_assignments(tenant_id)
+                    if a.user_id == user_id]
         if domain_id is not None:
-            raise NotImplemented('Domain metadata not supported by LDAP.')
+            msg = 'Domain metadata not supported by LDAP'
+            raise exception.NotImplemented(message=msg)
         if not self.get_project(tenant_id) or not self.get_user(user_id):
             return {}
 
-        metadata_ref = self.get_roles_for_user_and_project(user_id, tenant_id)
+        metadata_ref = _get_roles_for_just_user_and_project(user_id, tenant_id)
         if not metadata_ref:
             return {}
         return {'roles': metadata_ref}
@@ -186,12 +184,6 @@ class Identity(identity.Driver):
     def get_project_users(self, tenant_id):
         self.get_project(tenant_id)
         return self._set_default_domain(self.project.get_users(tenant_id))
-
-    def get_roles_for_user_and_project(self, user_id, tenant_id):
-        self.get_user(user_id)
-        self.get_project(tenant_id)
-        return [a.role_id for a in self.role.get_role_assignments(tenant_id)
-                if a.user_id == user_id]
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
         self.get_user(user_id)

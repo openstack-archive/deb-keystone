@@ -485,7 +485,56 @@ class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
         raise nose.exc.SkipTest('N/A: LDAP does not support multiple domains')
 
     def test_multi_role_grant_by_user_group_on_project_domain(self):
-        raise nose.exc.SkipTest('N/A: LDAP does not support multiple domains')
+        # This is a partial implementation of the standard test that
+        # is defined in test_backend.py.  It omits both domain and
+        # group grants. since neither of these are yet supported by
+        # the ldap backend.
+
+        role_list = []
+        for _ in range(2):
+            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            self.identity_api.create_role(role['id'], role)
+            role_list.append(role)
+
+        user1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                 'domain_id': CONF.identity.default_domain_id,
+                 'password': uuid.uuid4().hex,
+                 'enabled': True}
+        self.identity_api.create_user(user1['id'], user1)
+        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': CONF.identity.default_domain_id}
+        self.identity_api.create_project(project1['id'], project1)
+
+        self.identity_api.add_role_to_user_and_project(
+            user_id=user1['id'],
+            tenant_id=project1['id'],
+            role_id=role_list[0]['id'])
+        self.identity_api.add_role_to_user_and_project(
+            user_id=user1['id'],
+            tenant_id=project1['id'],
+            role_id=role_list[1]['id'])
+
+        # Although list_grants are not yet supported, we can test the
+        # alternate way of getting back lists of grants, where user
+        # and group roles are combined.  Only directly assigned user
+        # roles are available, since group grants are not yet supported
+
+        combined_role_list = self.identity_api.get_roles_for_user_and_project(
+            user1['id'], project1['id'])
+        self.assertEquals(len(combined_role_list), 2)
+        self.assertIn(role_list[0]['id'], combined_role_list)
+        self.assertIn(role_list[1]['id'], combined_role_list)
+
+        # Finally, although domain roles are not implemented, check we can
+        # issue the combined get roles call with benign results, since thus is
+        # used in token generation
+
+        combined_role_list = self.identity_api.get_roles_for_user_and_domain(
+            user1['id'], CONF.identity.default_domain_id)
+        self.assertEquals(len(combined_role_list), 0)
+
+    def test_multi_group_grants_on_project_domain(self):
+        raise nose.exc.SkipTest('Blocked by bug 1101287')
 
     def test_delete_role_with_user_and_group_grants(self):
         raise nose.exc.SkipTest('Blocked by bug 1101287')
@@ -576,6 +625,26 @@ class LDAPIdentity(test.TestCase, test_backend.IdentityTests):
             [{'id': CONF.identity.default_domain_id,
               'name': 'Default',
               'enabled': True}])
+
+    def test_authenticate_requires_simple_bind(self):
+        user = {
+            'id': 'no_meta',
+            'name': 'NO_META',
+            'domain_id': test_backend.DEFAULT_DOMAIN_ID,
+            'password': 'no_meta2',
+            'enabled': True,
+        }
+        self.identity_man.create_user({}, user['id'], user)
+        self.identity_api.add_user_to_project(self.tenant_baz['id'],
+                                              user['id'])
+        self.identity_api.user.LDAP_USER = None
+        self.identity_api.user.LDAP_PASSWORD = None
+
+        self.assertRaises(AssertionError,
+                          self.identity_api.authenticate,
+                          user_id=user['id'],
+                          tenant_id=self.tenant_baz['id'],
+                          password=None)
 
 
 class LDAPIdentityEnabledEmulation(LDAPIdentity):

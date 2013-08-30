@@ -491,6 +491,48 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
                                        group_id=self.group1['id'],
                                        project_id=self.projectA['id'])
 
+    def test_unscoped_token_remains_valid_after_role_assignment(self):
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.user1['id'],
+                password=self.user1['password']))
+        unscoped_token = r.getheader('X-Subject-Token')
+
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                token=unscoped_token,
+                project_id=self.projectA['id']))
+        scoped_token = r.getheader('X-Subject-Token')
+
+        # confirm both tokens are valid
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': unscoped_token},
+                  expected_status=204)
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': scoped_token},
+                  expected_status=204)
+
+        # create a new role
+        role = self.new_role_ref()
+        self.identity_api.create_role(role['id'], role)
+
+        # assign a new role
+        self.put(
+            '/projects/%(project_id)s/users/%(user_id)s/roles/%(role_id)s' % {
+                'project_id': self.projectA['id'],
+                'user_id': self.user1['id'],
+                'role_id': role['id']})
+
+        # both tokens should remain valid
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': unscoped_token},
+                  expected_status=204)
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': scoped_token},
+                  expected_status=204)
+
     def test_deleting_user_grant_revokes_token(self):
         """Test deleting a user grant revokes token.
 
@@ -522,13 +564,13 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
                   headers={'X-Subject-Token': token},
                   expected_status=401)
 
-    def test_creating_user_grant_revokes_token(self):
-        """Test creating a user grant revokes token.
+    def test_domain_user_role_assignment_maintains_token(self):
+        """Test user-domain role assignment maintains existing token.
 
         Test Plan:
         - Get a token for user1, scoped to ProjectA
         - Create a grant for user1 on DomainB
-        - Check token is no longer valid
+        - Check token is still valid
 
         """
         auth_data = self.build_authentication_request(
@@ -541,7 +583,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
                   expected_status=204)
-        # Delete the grant, which should invalidate the token
+        # Assign a role, which should not affect the token
         grant_url = (
             '/domains/%(domain_id)s/users/%(user_id)s/'
             'roles/%(role_id)s' % {
@@ -551,7 +593,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         self.put(grant_url)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=401)
+                  expected_status=204)
 
     def test_deleting_group_grant_revokes_tokens(self):
         """Test deleting a group grant revokes tokens.
@@ -614,13 +656,13 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
                   headers={'X-Subject-Token': token3},
                   expected_status=204)
 
-    def test_creating_group_grant_revokes_token(self):
-        """Test creating a group grant revokes token.
+    def test_domain_group_role_assignment_maintains_token(self):
+        """Test domain-group role assignment maintains existing token.
 
         Test Plan:
         - Get a token for user1, scoped to ProjectA
         - Create a grant for group1 on DomainB
-        - Check token is no longer valid
+        - Check token is still longer valid
 
         """
         auth_data = self.build_authentication_request(
@@ -643,7 +685,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         self.put(grant_url)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=401)
+                  expected_status=204)
 
     def test_group_membership_changes_revokes_token(self):
         """Test add/removal to/from group revokes token.
@@ -846,6 +888,137 @@ class TestAuthJSON(test_v3.RestfulTestCase):
             password=self.user['password'],
             project_id=project['id'])
         self.post('/auth/tokens', body=auth_data, expected_status=401)
+
+    def test_user_and_group_roles_scoped_token(self):
+        """Test correct roles are returned in scoped token.
+
+        Test Plan:
+        - Create a domain, with 1 project, 2 users (user1 and user2)
+          and 2 groups (group1 and group2)
+        - Make user1 a member of group1, user2 a member of group2
+        - Create 8 roles, assigning them to each of the 8 combinations
+          of users/groups on domain/project
+        - Get a project scoped token for user1, checking that the right
+          two roles are returned (one directly assigned, one by virtue
+          of group membership)
+        - Repeat this for a domain scoped token
+        - Make user1 also a member of group2
+        - Get another scoped token making sure the additional role
+          shows up
+        - User2 is just here as a spoiler, to make sure we don't get
+          any roles uniquely assigned to it returned in any of our
+          tokens
+
+        """
+
+        domainA = self.new_domain_ref()
+        self.identity_api.create_domain(domainA['id'], domainA)
+        projectA = self.new_project_ref(domain_id=domainA['id'])
+        self.identity_api.create_project(projectA['id'], projectA)
+
+        user1 = self.new_user_ref(
+            domain_id=domainA['id'])
+        user1['password'] = uuid.uuid4().hex
+        self.identity_api.create_user(user1['id'], user1)
+
+        user2 = self.new_user_ref(
+            domain_id=domainA['id'])
+        user2['password'] = uuid.uuid4().hex
+        self.identity_api.create_user(user2['id'], user2)
+
+        group1 = self.new_group_ref(
+            domain_id=domainA['id'])
+        self.identity_api.create_group(group1['id'], group1)
+
+        group2 = self.new_group_ref(
+            domain_id=domainA['id'])
+        self.identity_api.create_group(group2['id'], group2)
+
+        self.identity_api.add_user_to_group(user1['id'],
+                                            group1['id'])
+        self.identity_api.add_user_to_group(user2['id'],
+                                            group2['id'])
+
+        # Now create all the roles and assign them
+        role_list = []
+        for _ in range(8):
+            role = self.new_role_ref()
+            self.identity_api.create_role(role['id'], role)
+            role_list.append(role)
+
+        self.identity_api.create_grant(role_list[0]['id'],
+                                       user_id=user1['id'],
+                                       domain_id=domainA['id'])
+        self.identity_api.create_grant(role_list[1]['id'],
+                                       user_id=user1['id'],
+                                       project_id=projectA['id'])
+        self.identity_api.create_grant(role_list[2]['id'],
+                                       user_id=user2['id'],
+                                       domain_id=domainA['id'])
+        self.identity_api.create_grant(role_list[3]['id'],
+                                       user_id=user2['id'],
+                                       project_id=projectA['id'])
+        self.identity_api.create_grant(role_list[4]['id'],
+                                       group_id=group1['id'],
+                                       domain_id=domainA['id'])
+        self.identity_api.create_grant(role_list[5]['id'],
+                                       group_id=group1['id'],
+                                       project_id=projectA['id'])
+        self.identity_api.create_grant(role_list[6]['id'],
+                                       group_id=group2['id'],
+                                       domain_id=domainA['id'])
+        self.identity_api.create_grant(role_list[7]['id'],
+                                       group_id=group2['id'],
+                                       project_id=projectA['id'])
+
+        # First, get a project scoped token - which should
+        # contain the direct user role and the one by virtue
+        # of group membership
+        auth_data = self.build_authentication_request(
+            user_id=user1['id'],
+            password=user1['password'],
+            project_id=projectA['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        token = self.assertValidScopedTokenResponse(r)
+        roles_ids = []
+        for i, ref in enumerate(token['roles']):
+            roles_ids.append(ref['id'])
+        self.assertEqual(len(token['roles']), 2)
+        self.assertIn(role_list[1]['id'], roles_ids)
+        self.assertIn(role_list[5]['id'], roles_ids)
+
+        # Now the same thing for a domain scoped token
+        auth_data = self.build_authentication_request(
+            user_id=user1['id'],
+            password=user1['password'],
+            domain_id=domainA['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        token = self.assertValidScopedTokenResponse(r)
+        roles_ids = []
+        for i, ref in enumerate(token['roles']):
+            roles_ids.append(ref['id'])
+        self.assertEqual(len(token['roles']), 2)
+        self.assertIn(role_list[0]['id'], roles_ids)
+        self.assertIn(role_list[4]['id'], roles_ids)
+
+        # Finally, add user1 to the 2nd group, and get a new
+        # scoped token - the extra role should now be included
+        # by virtue of the 2nd group
+        self.identity_api.add_user_to_group(user1['id'],
+                                            group2['id'])
+        auth_data = self.build_authentication_request(
+            user_id=user1['id'],
+            password=user1['password'],
+            project_id=projectA['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        token = self.assertValidScopedTokenResponse(r)
+        roles_ids = []
+        for i, ref in enumerate(token['roles']):
+            roles_ids.append(ref['id'])
+        self.assertEqual(len(token['roles']), 3)
+        self.assertIn(role_list[1]['id'], roles_ids)
+        self.assertIn(role_list[5]['id'], roles_ids)
+        self.assertIn(role_list[7]['id'], roles_ids)
 
     def test_project_id_scoped_token_with_user_domain_id(self):
         auth_data = self.build_authentication_request(
