@@ -1,14 +1,14 @@
 # Czech PO debconf template translation of keystone.
 # Copyright (C) 2012 Michal Simunek <michal.simunek@gmail.com>
 # This file is distributed under the same license as the keystone package.
-# Michal Simunek <michal.simunek@gmail.com>, 2012.
+# Michal Simunek <michal.simunek@gmail.com>, 2012 - 2013.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: keystone 2012.1.1-4\n"
+"Project-Id-Version: keystone 2013.1.2-6\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2013-07-10 23:09+0800\n"
-"PO-Revision-Date: 2012-08-20 18:31+0200\n"
+"PO-Revision-Date: 2013-08-27 11:31+0200\n"
 "Last-Translator: Michal Simunek <michal.simunek@gmail.com>\n"
 "Language-Team: Czech <debian-l10n-czech@lists.debian.org>\n"
 "Language: cs\n"
@@ -25,26 +25,16 @@ msgstr "Nastavit databázi pro Keystone?"
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| "No database has been set up for Keystone to use. If you want to set one "
-#| "up now, please make sure you have all needed information:"
 msgid ""
 "No database has been set up for Keystone to use. Before continuing, you "
 "should make sure you have the following information:"
 msgstr ""
-"Nebyla nastavena žádná databáze k použití s Keystone. Chcete-li ji nyní "
-"nastavit, ujistěte se prosím, že máte všechny potřebné údaje:"
+"Nebyla nastavena žádná databáze k použití s Keystone. Než budete pokračovat, "
+"měli byste se ujistit, že máte následující údaje:"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
-#| msgid ""
-#| " * the host name of the database server (which must allow TCP\n"
-#| "   connections from this machine);\n"
-#| " * a username and password to access the database;\n"
-#| " * the type of database management software you want to use."
 msgid ""
 " * the type of database that you want to use;\n"
 " * the database server host name (that server must allow TCP connections "
@@ -52,10 +42,10 @@ msgid ""
 "   machine);\n"
 " * a username and password to access the database."
 msgstr ""
+" * typ databáze, kterou chcete používat;\n"
 " * název hostitele databázového serveru (který musí přijímat TCP\n"
 "   spojení z tohoto počítače);\n"
 " * uživatelské jméno a heslo pro přístup k databázi;\n"
-" * typ softwaru pro správu databáze, který chcete používat."
 
 #. Type: boolean
 #. Description
@@ -64,6 +54,8 @@ msgid ""
 "If some of these requirements are missing, do not choose this option and run "
 "with regular SQLite support."
 msgstr ""
+"Pokud vám některý z těchto nutných údajů chybí, nevybírejte tuto možnost a "
+"kystone spouštějte s běžnou podporou SQLite."
 
 #. Type: boolean
 #. Description
@@ -97,10 +89,8 @@ msgstr "Zadejte prosím klíč, který se bude používat pro autentizační ser
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:4001
-#, fuzzy
-#| msgid "Authentication server administration token:"
 msgid "Register administration tenants?"
-msgstr "Klíč pro správu autentizačního serveru:"
+msgstr "Zaregistrovat administrativní nájemce?"
 
 #. Type: boolean
 #. Description
@@ -116,96 +106,84 @@ msgid ""
 "For OpenStack to work, you need a basic tenant configuration. The creation "
 "of these administration tenants can be done automatically."
 msgstr ""
+"Aby OpenStack fungoval, musíte mít základní nastavení nájemců. Vytvoření "
+"administrativních nájemců lze provést automaticky."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Username of the administrative user:"
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Uživatelské jméno administrativního uživatele:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter a username for the administrative user."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Zadejte prosím uživatelské jméno administrativního uživatele."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Email address of the administrative user:"
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "E-mailová adresa administrativního uživatele:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the email address of the administrative user."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Zadejte prosím e-mailovou adresu administrativního uživatele."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Password of the administrative user:"
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Heslo administrativního uživatele:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Please enter a password for the administrative user."
-msgstr ""
+msgstr "Zadejte prosím heslo administrativního uživatele."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
 msgid "Re-enter password to verify:"
-msgstr ""
+msgstr "Znovu zadejte heslo:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid ""
 "Please enter the same administrative password again to verify that you have "
 "typed it correctly."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr ""
+"Zadejte prosím znovu stejné heslo administrativního uživatele pro ověření, "
+"že jste jej napsali správně."
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "Password input error"
-msgstr ""
+msgstr "Chyba při zadávání hesla"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "The two passwords you entered were not the same. Please try again."
-msgstr ""
+msgstr "Zadaná hesla nejsou stejná. Zkuste to prosím znovu."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative role:"
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Název administrativní role:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative role."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Zadejte prosím název administrativní role."
 
 #. Type: string
 #. Description
@@ -217,10 +195,8 @@ msgstr "Zadejte prosím klíč, který se bude používat pro autentizační ser
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative tenant:"
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Jméno administrativního nájemce:"
 
 #. Type: string
 #. Description
@@ -232,16 +208,14 @@ msgstr "Zadejte prosím klíč, který se bude používat pro autentizační ser
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative tenant."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Zadejte prosím jméno administrativního nájemce."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid "Register Keystone endpoint?"
-msgstr ""
+msgstr "Zaregistrovat koncový bod Keystone?"
 
 #. Type: boolean
 #. Description
@@ -251,26 +225,27 @@ msgid ""
 "accessible. This is done using \"keystone service-create\" and \"keystone "
 "endpoint-create\". This can be done automatically now."
 msgstr ""
+"Aby byla každá služba OpenStack (každé API) přístupná, musí být "
+"zaregistrována. To se provádí příkazy \"keystone service-create\" a "
+"\"keystone endpoint-create\". Tyto příkazy lze nyní automaticky provést."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Keystone endpoint IP address:"
-msgstr ""
+msgstr "IP adresa koncového bodu Keystone:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
-#, fuzzy
-#| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the IP address that will be used to contact Keystone."
-msgstr "Zadejte prosím klíč, který se bude používat pro autentizační server."
+msgstr "Zadejte prosím IP adresu, která se bude používat pro spojení s Keystone."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:14001
 msgid "Name of the region to register:"
-msgstr ""
+msgstr "Název registrované oblasti:"
 
 #. Type: string
 #. Description
@@ -280,10 +255,6 @@ msgid ""
 "location. Please enter the zone that you wish to use when registering the "
 "endpoint."
 msgstr ""
-
-#~ msgid ""
-#~ "If you don't choose this option, no database will be set up and Keystone "
-#~ "will use regular SQLite support."
-#~ msgstr ""
-#~ "Pokud tuto volbu nezadáte, databáze nebude vytvořena a Keystone bude "
-#~ "používat běžnou podporu pro SQLite."
+"OpenStack podporuje využívání oblastí dostupnosti, přičemž každá oblast "
+"představuje umístění. Zadejte prosím oblast, kterou chcete při registraci "
+"koncového bodu použít."
