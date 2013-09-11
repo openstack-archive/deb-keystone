@@ -40,10 +40,6 @@ VERSIONS = frozenset([V2, V3])
 PKI_PROVIDER = 'keystone.token.providers.pki.Provider'
 UUID_PROVIDER = 'keystone.token.providers.uuid.Provider'
 
-# default token providers
-PKI_PROVIDER = 'keystone.token.providers.pki.Provider'
-UUID_PROVIDER = 'keystone.token.providers.uuid.Provider'
-
 
 class UnsupportedTokenVersionException(Exception):
     """Token version is unrecognizable or unsupported."""
