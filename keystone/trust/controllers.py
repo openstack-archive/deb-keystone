@@ -1,11 +1,27 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2013 OpenStack Foundation
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 import uuid
 
 from keystone.common import controller
 from keystone.common import dependency
-from keystone.common import logging
 from keystone import config
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common import log as logging
 from keystone.openstack.common import timeutils
 
 
@@ -34,6 +50,21 @@ def _admin_trustor_only(context, trust, user_id):
 class TrustV3(controller.V3Controller):
     collection_name = "trusts"
     member_name = "trust"
+
+    @classmethod
+    def base_url(cls, path=None):
+        endpoint = CONF.public_endpoint % CONF
+
+        # allow a missing trailing slash in the config
+        if endpoint[-1] != '/':
+            endpoint += '/'
+
+        url = endpoint + 'v3/OS-TRUST'
+
+        if path:
+            return url + path
+        else:
+            return url + '/' + cls.collection_name
 
     def _get_user_id(self, context):
         if 'token_id' in context:
@@ -78,8 +109,7 @@ class TrustV3(controller.V3Controller):
                 trust_full_roles.append(full_role)
         trust['roles'] = trust_full_roles
         trust['roles_links'] = {
-            'self': (CONF.public_endpoint % CONF +
-                     "trusts/%s/roles" % trust['id']),
+            'self': (self.base_url() + "/%s/roles" % trust['id']),
             'next': None,
             'previous': None}
 
@@ -104,7 +134,7 @@ class TrustV3(controller.V3Controller):
                                                 target='roles')
         return trust_roles
 
-    @controller.protected
+    @controller.protected()
     def create_trust(self, context, trust=None):
         """Create a new trust.
 
@@ -153,7 +183,7 @@ class TrustV3(controller.V3Controller):
             raise exception.ValidationError(attribute=e.args[0],
                                             target='trust')
 
-    @controller.protected
+    @controller.protected()
     def list_trusts(self, context):
         query = context['query_string']
         trusts = []
@@ -178,7 +208,7 @@ class TrustV3(controller.V3Controller):
             self._fill_in_roles(context, trust, global_roles)
         return TrustV3.wrap_collection(context, trusts)
 
-    @controller.protected
+    @controller.protected()
     def delete_trust(self, context, trust_id):
         trust = self.trust_api.get_trust(trust_id)
         if not trust:
@@ -188,11 +218,9 @@ class TrustV3(controller.V3Controller):
         _admin_trustor_only(context, trust, user_id)
         self.trust_api.delete_trust(trust_id)
         userid = trust['trustor_user_id']
-        token_list = self.token_api.list_tokens(userid, trust_id=trust_id)
-        for token in token_list:
-            self.token_api.delete_token(token)
+        self.token_api.delete_tokens(userid, trust_id=trust_id)
 
-    @controller.protected
+    @controller.protected()
     def list_roles_for_trust(self, context, trust_id):
         trust = self.get_trust(context, trust_id)['trust']
         if not trust:
@@ -202,7 +230,7 @@ class TrustV3(controller.V3Controller):
         return {'roles': trust['roles'],
                 'links': trust['roles_links']}
 
-    @controller.protected
+    @controller.protected()
     def check_role_for_trust(self, context, trust_id, role_id):
         """Checks if a role has been assigned to a trust."""
         trust = self.trust_api.get_trust(trust_id)
@@ -215,7 +243,7 @@ class TrustV3(controller.V3Controller):
         if not matching_roles:
             raise exception.RoleNotFound(role_id=role_id)
 
-    @controller.protected
+    @controller.protected()
     def get_role_for_trust(self, context, trust_id, role_id):
         """Checks if a role has been assigned to a trust."""
         trust = self.trust_api.get_trust(trust_id)

@@ -16,18 +16,19 @@
 
 from __future__ import absolute_import
 
-import grp
 import os
-import pwd
+
+from migrate import exceptions
 
 from oslo.config import cfg
 import pbr.version
 
 from keystone.common import openssl
 from keystone.common.sql import migration
+from keystone.common import utils
 from keystone import config
+from keystone import contrib
 from keystone.openstack.common import importutils
-from keystone.openstack.common import jsonutils
 from keystone import token
 
 CONF = config.CONF
@@ -57,14 +58,35 @@ class DbSync(BaseApp):
                                   'version. If not provided, db_sync will '
                                   'migrate the database to the latest known '
                                   'version.'))
+        parser.add_argument('--extension', default=None,
+                            help=('Migrate the database for the specified '
+                                  'extension. If not provided, db_sync will '
+                                  'migrate the common repository.'))
+
         return parser
 
     @staticmethod
     def main():
-        for k in ['identity', 'catalog', 'policy', 'token', 'credential']:
-            driver = importutils.import_object(getattr(CONF, k).driver)
-            if hasattr(driver, 'db_sync'):
-                driver.db_sync(CONF.command.version)
+        version = CONF.command.version
+        extension = CONF.command.extension
+        if not extension:
+            migration.db_sync(version=version)
+        else:
+            package_name = "%s.%s.migrate_repo" % (contrib.__name__, extension)
+            try:
+                package = importutils.import_module(package_name)
+                repo_path = os.path.abspath(os.path.dirname(package.__file__))
+            except ImportError:
+                print(_("This extension does not provide migrations."))
+                exit(0)
+            try:
+                # Register the repo with the version control API
+                # If it already knows about the repo, it will throw
+                # an exception that we can safely ignore
+                migration.db_version_control(version=None, repo_path=repo_path)
+            except exceptions.DatabaseAlreadyControlledError:
+                pass
+            migration.db_sync(version=None, repo_path=repo_path)
 
 
 class DbVersion(BaseApp):
@@ -72,9 +94,29 @@ class DbVersion(BaseApp):
 
     name = 'db_version'
 
+    @classmethod
+    def add_argument_parser(cls, subparsers):
+        parser = super(DbVersion, cls).add_argument_parser(subparsers)
+        parser.add_argument('--extension', default=None,
+                            help=('Migrate the database for the specified '
+                                  'extension. If not provided, db_sync will '
+                                  'migrate the common repository.'))
+
     @staticmethod
     def main():
-        print(migration.db_version())
+        extension = CONF.command.extension
+        if extension:
+            try:
+                package_name = ("%s.%s.migrate_repo" %
+                                (contrib.__name__, extension))
+                package = importutils.import_module(package_name)
+                repo_path = os.path.abspath(os.path.dirname(package.__file__))
+                print(migration.db_version(repo_path))
+            except ImportError:
+                print(_("This extension does not provide migrations."))
+                exit(1)
+        else:
+            print(migration.db_version())
 
 
 class BaseCertificateSetup(BaseApp):
@@ -97,14 +139,14 @@ class BaseCertificateSetup(BaseApp):
         try:
             a = CONF.command.keystone_user
             if a:
-                keystone_user_id = pwd.getpwnam(a).pw_uid
+                keystone_user_id = utils.get_unix_user(a)[0]
         except KeyError:
             raise ValueError("Unknown user '%s' in --keystone-user" % a)
 
         try:
             a = CONF.command.keystone_group
             if a:
-                keystone_group_id = grp.getgrnam(a).gr_gid
+                keystone_group_id = utils.get_unix_group(a)[0]
         except KeyError:
             raise ValueError("Unknown group '%s' in --keystone-group" % a)
 
@@ -146,67 +188,9 @@ class TokenFlush(BaseApp):
         token_manager.driver.flush_expired_tokens()
 
 
-class ImportLegacy(BaseApp):
-    """Import a legacy database."""
-
-    name = 'import_legacy'
-
-    @classmethod
-    def add_argument_parser(cls, subparsers):
-        parser = super(ImportLegacy, cls).add_argument_parser(subparsers)
-        parser.add_argument('old_db')
-        return parser
-
-    @staticmethod
-    def main():
-        from keystone.common.sql import legacy
-        migration = legacy.LegacyMigration(CONF.command.old_db)
-        migration.migrate_all()
-
-
-class ExportLegacyCatalog(BaseApp):
-    """Export the service catalog from a legacy database."""
-
-    name = 'export_legacy_catalog'
-
-    @classmethod
-    def add_argument_parser(cls, subparsers):
-        parser = super(ExportLegacyCatalog,
-                       cls).add_argument_parser(subparsers)
-        parser.add_argument('old_db')
-        return parser
-
-    @staticmethod
-    def main():
-        from keystone.common.sql import legacy
-        migration = legacy.LegacyMigration(CONF.command.old_db)
-        print('\n'.join(migration.dump_catalog()))
-
-
-class ImportNovaAuth(BaseApp):
-    """Import a dump of nova auth data into keystone."""
-
-    name = 'import_nova_auth'
-
-    @classmethod
-    def add_argument_parser(cls, subparsers):
-        parser = super(ImportNovaAuth, cls).add_argument_parser(subparsers)
-        parser.add_argument('dump_file')
-        return parser
-
-    @staticmethod
-    def main():
-        from keystone.common.sql import nova
-        dump_data = jsonutils.loads(open(CONF.command.dump_file).read())
-        nova.import_auth(dump_data)
-
-
 CMDS = [
     DbSync,
     DbVersion,
-    ExportLegacyCatalog,
-    ImportLegacy,
-    ImportNovaAuth,
     PKISetup,
     SSLSetup,
     TokenFlush,

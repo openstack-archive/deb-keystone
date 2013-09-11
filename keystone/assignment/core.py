@@ -16,15 +16,20 @@
 
 """Main entry point into the assignment service."""
 
+
+from keystone import clean
+from keystone.common import cache
 from keystone.common import dependency
-from keystone.common import logging
 from keystone.common import manager
 from keystone import config
 from keystone import exception
+from keystone import notifications
+from keystone.openstack.common import log as logging
 
 
 CONF = config.CONF
 LOG = logging.getLogger(__name__)
+SHOULD_CACHE = cache.should_cache_fn('assignment')
 
 DEFAULT_DOMAIN = {'description':
                   (u'Owns users and tenants (i.e. projects)'
@@ -35,6 +40,7 @@ DEFAULT_DOMAIN = {'description':
 
 
 @dependency.provider('assignment_api')
+@dependency.requires('identity_api')
 class Manager(manager.Manager):
     """Default pivot point for the Assignment backend.
 
@@ -45,18 +51,47 @@ class Manager(manager.Manager):
     api object by both managers.
     """
 
-    def __init__(self, identity_api=None):
-        if identity_api is None:
-            from keystone import identity
-            identity_api = identity.Manager(self)
-
+    def __init__(self):
         assignment_driver = CONF.assignment.driver
+
         if assignment_driver is None:
-            assignment_driver = identity_api.default_assignment_driver()
+            identity_driver = dependency.REGISTRY['identity_api'].driver
+            assignment_driver = identity_driver.default_assignment_driver()
+
         super(Manager, self).__init__(assignment_driver)
-        self.driver.identity_api = identity_api
-        self.identity_api = identity_api
-        self.identity_api.assignment_api = self
+
+    @notifications.created('project')
+    def create_project(self, tenant_id, tenant_ref):
+        tenant = tenant_ref.copy()
+        tenant.setdefault('enabled', True)
+        tenant['enabled'] = clean.project_enabled(tenant['enabled'])
+        tenant.setdefault('description', '')
+        ret = self.driver.create_project(tenant_id, tenant_ref)
+        if SHOULD_CACHE(ret):
+            self.get_project.set(ret, self, tenant_id)
+            self.get_project_by_name.set(ret, self, ret['name'],
+                                         ret['domain_id'])
+        return ret
+
+    @notifications.updated('project')
+    def update_project(self, tenant_id, tenant_ref):
+        tenant = tenant_ref.copy()
+        if 'enabled' in tenant:
+            tenant['enabled'] = clean.project_enabled(tenant['enabled'])
+        ret = self.driver.update_project(tenant_id, tenant_ref)
+        self.get_project.invalidate(self, tenant_id)
+        self.get_project_by_name.invalidate(self, ret['name'],
+                                            ret['domain_id'])
+        return ret
+
+    @notifications.deleted('project')
+    def delete_project(self, tenant_id):
+        project = self.driver.get_project(tenant_id)
+        ret = self.driver.delete_project(tenant_id)
+        self.get_project.invalidate(self, tenant_id)
+        self.get_project_by_name.invalidate(self, project['name'],
+                                            project['domain_id'])
+        return ret
 
     def get_roles_for_user_and_project(self, user_id, tenant_id):
         """Get the roles associated with a user within given project.
@@ -73,8 +108,7 @@ class Manager(manager.Manager):
         """
         def _get_group_project_roles(user_id, project_ref):
             role_list = []
-            group_refs = (self.identity_api.list_groups_for_user
-                          (user_id=user_id))
+            group_refs = self.identity_api.list_groups_for_user(user_id)
             for x in group_refs:
                 try:
                     metadata_ref = self._get_metadata(
@@ -121,7 +155,6 @@ class Manager(manager.Manager):
 
             return role_list
 
-        self.identity_api.get_user(user_id)
         project_ref = self.get_project(tenant_id)
         user_role_list = _get_user_project_roles(user_id, project_ref)
         group_role_list = _get_group_project_roles(user_id, project_ref)
@@ -139,8 +172,7 @@ class Manager(manager.Manager):
 
         def _get_group_domain_roles(user_id, domain_id):
             role_list = []
-            group_refs = (self.identity_api.
-                          list_groups_for_user(user_id=user_id))
+            group_refs = self.identity_api.list_groups_for_user(user_id)
             for x in group_refs:
                 try:
                     metadata_ref = self._get_metadata(group_id=x['id'],
@@ -167,7 +199,6 @@ class Manager(manager.Manager):
             return self._roles_from_role_dicts(
                 metadata_ref.get('roles', {}), False)
 
-        self.identity_api.get_user(user_id)
         self.get_domain(domain_id)
         user_role_list = _get_user_domain_roles(user_id, domain_id)
         group_role_list = _get_group_domain_roles(user_id, domain_id)
@@ -181,9 +212,23 @@ class Manager(manager.Manager):
                  keystone.exception.UserNotFound
 
         """
-        self.driver.add_role_to_user_and_project(user_id,
-                                                 tenant_id,
-                                                 config.CONF.member_role_id)
+        try:
+            self.driver.add_role_to_user_and_project(
+                user_id,
+                tenant_id,
+                config.CONF.member_role_id)
+        except exception.RoleNotFound:
+            LOG.info(_("Creating the default role %s "
+                       "because it does not exist.") %
+                     config.CONF.member_role_id)
+            role = {'id': CONF.member_role_id,
+                    'name': CONF.member_role_name}
+            self.driver.create_role(config.CONF.member_role_id, role)
+            #now that default role exists, the add should succeed
+            self.driver.add_role_to_user_and_project(
+                user_id,
+                tenant_id,
+                config.CONF.member_role_id)
 
     def remove_user_from_project(self, tenant_id, user_id):
         """Remove user from a tenant
@@ -197,6 +242,65 @@ class Manager(manager.Manager):
             raise exception.NotFound(tenant_id)
         for role_id in roles:
             self.remove_role_from_user_and_project(user_id, tenant_id, role_id)
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.assignment.cache_time)
+    def get_domain(self, domain_id):
+        return self.driver.get_domain(domain_id)
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.assignment.cache_time)
+    def get_domain_by_name(self, domain_name):
+        return self.driver.get_domain_by_name(domain_name)
+
+    def create_domain(self, domain_id, domain):
+        ret = self.driver.create_domain(domain_id, domain)
+        if SHOULD_CACHE(ret):
+            self.get_domain.set(ret, self, domain_id)
+            self.get_domain_by_name.set(ret, self, ret['name'])
+        return ret
+
+    def update_domain(self, domain_id, domain):
+        ret = self.driver.update_domain(domain_id, domain)
+        self.get_domain.invalidate(self, domain_id)
+        self.get_domain_by_name.invalidate(self, ret['name'])
+        return ret
+
+    def delete_domain(self, domain_id):
+        domain = self.driver.get_domain(domain_id)
+        self.driver.delete_domain(domain_id)
+        self.get_domain.invalidate(self, domain_id)
+        self.get_domain_by_name.invalidate(self, domain['name'])
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.assignment.cache_time)
+    def get_project(self, project_id):
+        return self.driver.get_project(project_id)
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.assignment.cache_time)
+    def get_project_by_name(self, tenant_name, domain_id):
+        return self.driver.get_project_by_name(tenant_name, domain_id)
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.assignment.cache_time)
+    def get_role(self, role_id):
+        return self.driver.get_role(role_id)
+
+    def create_role(self, role_id, role):
+        ret = self.driver.create_role(role_id, role)
+        if SHOULD_CACHE(ret):
+            self.get_role.set(ret, self, role_id)
+        return ret
+
+    def update_role(self, role_id, role):
+        ret = self.driver.update_role(role_id, role)
+        self.get_role.invalidate(self, role_id)
+        return ret
+
+    def delete_role(self, role_id):
+        self.driver.delete_role(role_id)
+        self.get_role.invalidate(self, role_id)
 
 
 class Driver(object):

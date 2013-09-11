@@ -18,25 +18,33 @@ import copy
 
 from keystone.common import kvs
 from keystone import exception
+from keystone.openstack.common import log as logging
 from keystone.openstack.common import timeutils
 from keystone import token
 
+LOG = logging.getLogger(__name__)
+
 
 class Token(kvs.Base, token.Driver):
+    """kvs backend for tokens is deprecated.
+
+    Deprecated in Havana and will be removed in Icehouse, as this backend
+    is not production grade.
+    """
+
+    def __init__(self, *args, **kw):
+        super(Token, self).__init__(*args, **kw)
+        LOG.warn(_("kvs token backend is DEPRECATED. Use "
+                   "keystone.token.backends.sql or "
+                   "keystone.token.backend.memcache instead."))
 
     # Public interface
     def get_token(self, token_id):
         try:
             ref = self.db.get('token-%s' % token_id)
-        except exception.NotFound:
-            raise exception.TokenNotFound(token_id=token_id)
-        now = timeutils.utcnow()
-        expiry = ref['expires']
-        if expiry is None:
-            raise exception.TokenNotFound(token_id=token_id)
-        if expiry > now:
             return copy.deepcopy(ref)
-        else:
+        except Exception:
+            # On any issues here, Token is not found.
             raise exception.TokenNotFound(token_id=token_id)
 
     def create_token(self, token_id, data):
@@ -76,6 +84,29 @@ class Token(kvs.Base, token.Driver):
                 tokens.append(token.split('-', 1)[1])
         return tokens
 
+    def _consumer_matches(self, consumer_id, token_ref_dict):
+        if consumer_id is None:
+            return True
+        else:
+            if 'token_data' in token_ref_dict:
+                token_data = token_ref_dict.get('token_data')
+                if 'token' in token_data:
+                    token = token_data.get('token')
+                    oauth = token.get('OS-OAUTH1')
+                    if oauth and oauth.get('consumer_id') == consumer_id:
+                        return True
+            return False
+
+    def _list_tokens_for_consumer(self, consumer_id):
+        tokens = []
+        now = timeutils.utcnow()
+        for token, ref in self.db.items():
+            if not token.startswith('token-') or self.is_expired(now, ref):
+                continue
+            if self._consumer_matches(consumer_id, ref):
+                tokens.append(token.split('-', 1)[1])
+        return tokens
+
     def _list_tokens_for_user(self, user_id, tenant_id=None):
         def user_matches(user_id, ref):
             return ref.get('user') and ref['user'].get('id') == user_id
@@ -96,9 +127,12 @@ class Token(kvs.Base, token.Driver):
                         tokens.append(token.split('-', 1)[1])
         return tokens
 
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None):
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                    consumer_id=None):
         if trust_id:
             return self._list_tokens_for_trust(trust_id)
+        if consumer_id:
+            return self._list_tokens_for_consumer(consumer_id)
         else:
             return self._list_tokens_for_user(user_id, tenant_id)
 

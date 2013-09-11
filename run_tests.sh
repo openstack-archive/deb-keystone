@@ -27,8 +27,9 @@ function usage {
   echo "  -x, --stop               Stop running tests after the first error or failure."
   echo "  -f, --force              Force a clean re-build of the virtual environment. Useful when dependencies have been added."
   echo "  -u, --update             Update the virtual environment with any newer package versions"
-  echo "  -p, --pep8               Just run pep8"
-  echo "  -P, --no-pep8            Don't run pep8"
+  echo "  -p, --pep8               Just run flake8"
+  echo "  -8, --8                  Just run flake8, don't show PEP8 text for each error"
+  echo "  -P, --no-pep8            Don't run flake8"
   echo "  -c, --coverage           Generate coverage report"
   echo "  -h, --help               Print this usage message"
   echo "  -xintegration            Ignore all keystoneclient test cases (integration tests)"
@@ -95,10 +96,10 @@ fi
 
 function cleanup_test_db {
   # Default test settings will leave around some test*.db files
-  # TODO(termie): this could probably be moved into tests/__init__.py
+  # TODO(termie): this could probably be moved into keystone/tests/__init__.py
   #               but there have been some issues with creating that
   #               file for some users
-  rm -f tests/test*.db
+  rm -f keystone/tests/*.db
 }
 
 function run_tests {
@@ -126,17 +127,9 @@ function run_flake8 {
 
 
   echo "Running flake8 ..."
-  # Opt-out files from flake8
-  ignore_scripts="*.pyc,*.pyo,*.sh,*.swp,*.rst"
-  ignore_files="*.txt"
-  ignore_dirs=".venv,.tox,dist,doc,openstack,vendor,*egg"
-  ignore="$ignore_scripts,$ignore_files,$ignore_dirs"
-  srcfiles="."
   # Just run flake8 in current environment
-  echo ${wrapper} flake8 $FLAGS --show-source \
-    --exclude=${ignore} ${srcfiles} | tee pep8.txt
-  ${wrapper} flake8 $FLAGS --show-source \
-    --exclude=${ignore} ${srcfiles} | tee pep8.txt
+  echo ${wrapper} flake8 $FLAGS | tee pep8.txt
+  ${wrapper} flake8 $FLAGS | tee pep8.txt
 }
 
 NOSETESTS="nosetests $noseopts $noseargs"

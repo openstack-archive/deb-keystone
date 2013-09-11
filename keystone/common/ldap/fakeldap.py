@@ -29,8 +29,8 @@ import shelve
 
 import ldap
 
-from keystone.common import logging
 from keystone.common import utils
+from keystone.openstack.common import log as logging
 
 
 SCOPE_NAMES = {
@@ -41,8 +41,27 @@ SCOPE_NAMES = {
 
 
 LOG = logging.getLogger(__name__)
-#Only enable a lower level than WARN if you are actively debugging
-LOG.level = logging.WARN
+
+
+def _process_attr(attr_name, value_or_values):
+    attr_fn = lambda x: x
+
+    def normalize_dn(dn):
+        # Capitalize the attribute names as an LDAP server might.
+        dn = ldap.dn.str2dn(dn)
+        norm = []
+        for part in dn:
+            name, val, i = part[0]
+            name = name.upper()
+            norm.append([(name, val, i)])
+        return ldap.dn.dn2str(norm)
+
+    if attr_name in ('member', 'roleOccupant'):
+        attr_fn = normalize_dn
+
+    if isinstance(value_or_values, list):
+        return [attr_fn(x) for x in value_or_values]
+    return [attr_fn(value_or_values)]
 
 
 def _match_query(query, attrs):
@@ -96,7 +115,7 @@ def _match(key, value, attrs):
         str_sids = [str(x) for x in attrs[key]]
         return str(value) in str_sids
     if key != 'objectclass':
-        return value in attrs[key]
+        return _process_attr(key, value)[0] in attrs[key]
     # it is an objectclass check, so check subclasses
     values = _subs(value)
     for v in values:
@@ -125,16 +144,12 @@ server_fail = False
 
 
 class FakeShelve(dict):
-    @classmethod
-    def get_instance(cls):
-        try:
-            return cls.__instance
-        except AttributeError:
-            cls.__instance = cls()
-            return cls.__instance
 
     def sync(self):
         pass
+
+
+FakeShelves = {}
 
 
 class FakeLdap(object):
@@ -144,8 +159,10 @@ class FakeLdap(object):
 
     def __init__(self, url):
         LOG.debug(_('FakeLdap initialize url=%s'), url)
-        if url == 'fake://memory':
-            self.db = FakeShelve.get_instance()
+        if url.startswith('fake://memory'):
+            if url not in FakeShelves:
+                FakeShelves[url] = FakeShelve()
+            self.db = FakeShelves[url]
         else:
             self.db = shelve.open(url[7:])
 
@@ -194,7 +211,7 @@ class FakeLdap(object):
                       ' already in store.'), dn)
             raise ldap.ALREADY_EXISTS(dn)
 
-        self.db[key] = dict([(k, v if isinstance(v, list) else [v])
+        self.db[key] = dict([(k, _process_attr(k, v))
                              for k, v in attrs])
         self.db.sync()
 
@@ -248,14 +265,13 @@ class FakeLdap(object):
         for cmd, k, v in attrs:
             values = entry.setdefault(k, [])
             if cmd == ldap.MOD_ADD:
-                if v in values:
-                    raise ldap.TYPE_OR_VALUE_EXISTS
-                if isinstance(v, list):
-                    values += v
-                else:
-                    values.append(v)
+                v = _process_attr(k, v)
+                for x in v:
+                    if x in values:
+                        raise ldap.TYPE_OR_VALUE_EXISTS
+                values += v
             elif cmd == ldap.MOD_REPLACE:
-                values[:] = v if isinstance(v, list) else [v]
+                values[:] = _process_attr(k, v)
             elif cmd == ldap.MOD_DELETE:
                 if v is None:
                     if len(values) == 0:
@@ -264,9 +280,7 @@ class FakeLdap(object):
                         raise ldap.NO_SUCH_ATTRIBUTE
                     values[:] = []
                 else:
-                    if not isinstance(v, list):
-                        v = [v]
-                    for val in v:
+                    for val in _process_attr(k, v):
                         try:
                             values.remove(val)
                         except ValueError:

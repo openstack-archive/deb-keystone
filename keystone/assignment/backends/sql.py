@@ -16,15 +16,14 @@
 
 from keystone import assignment
 from keystone import clean
+from keystone.common import dependency
 from keystone.common import sql
 from keystone.common.sql import migration
 from keystone import exception
 
 
+@dependency.requires('identity_api')
 class Assignment(sql.Base, assignment.Driver):
-    def __init__(self):
-        super(Assignment, self).__init__()
-        self.identity_api = None
 
     # Internal interface to manage the database
     def db_sync(self, version=None):
@@ -98,11 +97,6 @@ class Assignment(sql.Base, assignment.Driver):
     def create_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
                      inherited_to_projects=False):
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
-
         session = self.get_session()
         self._get_role(session, role_id)
 
@@ -136,10 +130,6 @@ class Assignment(sql.Base, assignment.Driver):
     def list_grants(self, user_id=None, group_id=None,
                     domain_id=None, project_id=None,
                     inherited_to_projects=False):
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
         session = self.get_session()
         if domain_id:
             self._get_domain(session, domain_id)
@@ -159,11 +149,6 @@ class Assignment(sql.Base, assignment.Driver):
     def get_grant(self, role_id, user_id=None, group_id=None,
                   domain_id=None, project_id=None,
                   inherited_to_projects=False):
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
-
         session = self.get_session()
         role_ref = self._get_role(session, role_id)
 
@@ -657,9 +642,10 @@ class Domain(sql.ModelBase, sql.DictBase):
     __tablename__ = 'domain'
     attributes = ['id', 'name', 'enabled']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True, nullable=False)
-    enabled = sql.Column(sql.Boolean, default=True)
+    name = sql.Column(sql.String(64), nullable=False)
+    enabled = sql.Column(sql.Boolean, default=True, nullable=False)
     extra = sql.Column(sql.JsonBlob())
+    __table_args__ = (sql.UniqueConstraint('name'), {})
 
 
 class Project(sql.ModelBase, sql.DictBase):
@@ -681,8 +667,9 @@ class Role(sql.ModelBase, sql.DictBase):
     __tablename__ = 'role'
     attributes = ['id', 'name']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), unique=True, nullable=False)
+    name = sql.Column(sql.String(255), nullable=False)
     extra = sql.Column(sql.JsonBlob())
+    __table_args__ = (sql.UniqueConstraint('name'), {})
 
 
 class BaseGrant(sql.DictBase):
@@ -720,9 +707,8 @@ class BaseGrant(sql.DictBase):
 
 class UserProjectGrant(sql.ModelBase, BaseGrant):
     __tablename__ = 'user_project_metadata'
-    user_id = sql.Column(sql.String(64),
-                         primary_key=True)
-    project_id = sql.Column(sql.String(64),
+    user_id = sql.Column(sql.String(64), primary_key=True)
+    project_id = sql.Column(sql.String(64), sql.ForeignKey('project.id'),
                             primary_key=True)
     data = sql.Column(sql.JsonBlob())
 
@@ -730,19 +716,22 @@ class UserProjectGrant(sql.ModelBase, BaseGrant):
 class UserDomainGrant(sql.ModelBase, BaseGrant):
     __tablename__ = 'user_domain_metadata'
     user_id = sql.Column(sql.String(64), primary_key=True)
-    domain_id = sql.Column(sql.String(64), primary_key=True)
+    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
+                           primary_key=True)
     data = sql.Column(sql.JsonBlob())
 
 
 class GroupProjectGrant(sql.ModelBase, BaseGrant):
     __tablename__ = 'group_project_metadata'
     group_id = sql.Column(sql.String(64), primary_key=True)
-    project_id = sql.Column(sql.String(64), primary_key=True)
+    project_id = sql.Column(sql.String(64), sql.ForeignKey('project.id'),
+                            primary_key=True)
     data = sql.Column(sql.JsonBlob())
 
 
 class GroupDomainGrant(sql.ModelBase, BaseGrant):
     __tablename__ = 'group_domain_metadata'
     group_id = sql.Column(sql.String(64), primary_key=True)
-    domain_id = sql.Column(sql.String(64), primary_key=True)
+    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
+                           primary_key=True)
     data = sql.Column(sql.JsonBlob())

@@ -19,18 +19,19 @@
 import copy
 import datetime
 
+from keystone.common import cache
 from keystone.common import cms
 from keystone.common import dependency
-from keystone.common import logging
 from keystone.common import manager
 from keystone import config
 from keystone import exception
+from keystone.openstack.common import log as logging
 from keystone.openstack.common import timeutils
 
 
 CONF = config.CONF
-config.register_int('expiration', group='token', default=86400)
 LOG = logging.getLogger(__name__)
+SHOULD_CACHE = cache.should_cache_fn('token')
 
 
 def default_expire_time():
@@ -90,6 +91,7 @@ def validate_auth_info(self, user_ref, tenant_ref):
             raise exception.Unauthorized(msg)
 
 
+@dependency.requires('token_provider_api')
 @dependency.provider('token_api')
 class Manager(manager.Manager):
     """Default pivot point for the Token backend.
@@ -102,7 +104,7 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.token.driver)
 
-    def _unique_id(self, token_id):
+    def unique_id(self, token_id):
         """Return a unique ID for a token.
 
         The returned value is useful as the primary key of a database table,
@@ -114,16 +116,83 @@ class Manager(manager.Manager):
         """
         return cms.cms_hash_token(token_id)
 
+    def _assert_valid(self, token_id, token_ref):
+        """Raise TokenNotFound if the token is expired."""
+        current_time = timeutils.normalize_time(timeutils.utcnow())
+        expires = token_ref.get('expires')
+        if not expires or current_time > timeutils.normalize_time(expires):
+            raise exception.TokenNotFound(token_id=token_id)
+
     def get_token(self, token_id):
-        return self.driver.get_token(self._unique_id(token_id))
+        unique_id = self.unique_id(token_id)
+        token_ref = self._get_token(unique_id)
+        # NOTE(morganfainberg): Lift expired checking to the manager, there is
+        # no reason to make the drivers implement this check. With caching,
+        # self._get_token could return an expired token. Make sure we behave
+        # as expected and raise TokenNotFound on those instances.
+        self._assert_valid(token_id, token_ref)
+        return token_ref
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.token.cache_time)
+    def _get_token(self, token_id):
+        # Only ever use the "unique" id in the cache key.
+        return self.driver.get_token(token_id)
 
     def create_token(self, token_id, data):
+        unique_id = self.unique_id(token_id)
         data_copy = copy.deepcopy(data)
-        data_copy['id'] = self._unique_id(token_id)
-        return self.driver.create_token(self._unique_id(token_id), data_copy)
+        data_copy['id'] = unique_id
+        ret = self.driver.create_token(unique_id, data_copy)
+        if SHOULD_CACHE(ret):
+            # NOTE(morganfainberg): when doing a cache set, you must pass the
+            # same arguments through, the same as invalidate (this includes
+            # "self"). First argument is always the value to be cached
+            self._get_token.set(ret, self, unique_id)
+        return ret
 
     def delete_token(self, token_id):
-        return self.driver.delete_token(self._unique_id(token_id))
+        unique_id = self.unique_id(token_id)
+        self.driver.delete_token(unique_id)
+        self._invalidate_individual_token_cache(unique_id)
+        self.invalidate_revocation_list()
+
+    def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
+                      consumer_id=None):
+        token_list = self.driver.list_tokens(user_id, tenant_id, trust_id,
+                                             consumer_id)
+        self.driver.delete_tokens(user_id, tenant_id, trust_id, consumer_id)
+        for token_id in token_list:
+            unique_id = self.unique_id(token_id)
+            self._invalidate_individual_token_cache(unique_id, tenant_id)
+        self.invalidate_revocation_list()
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.token.revocation_cache_time)
+    def list_revoked_tokens(self):
+        return self.driver.list_revoked_tokens()
+
+    def invalidate_revocation_list(self):
+        # NOTE(morganfainberg): we should always be keeping the revoked tokens
+        # list in memory, calling refresh in this case instead of ensures a
+        # cache hit when list_revoked_tokens is called again. This is an
+        # exception to the rule.  Note that ``self`` needs to be passed to
+        # refresh() because of the way the invalidation/refresh methods work on
+        # determining cache-keys.
+        self.list_revoked_tokens.refresh(self)
+
+    def _invalidate_individual_token_cache(self, token_id, belongs_to=None):
+        # NOTE(morganfainberg): invalidate takes the exact same arguments as
+        # the normal method, this means we need to pass "self" in (which gets
+        # stripped off).
+
+        # FIXME(morganfainberg): Does this cache actually need to be
+        # invalidated? We maintain a cached revocation list, which should be
+        # consulted before accepting a token as valid.  For now we will
+        # do the explicit individual token invalidation.
+        self._get_token.invalidate(self, token_id)
+        self.token_provider_api.invalidate_individual_token_cache(token_id,
+                                                                  belongs_to)
 
 
 class Driver(object):
@@ -174,41 +243,58 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
-    def delete_tokens(self, user_id, tenant_id=None, trust_id=None):
+    def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
+                      consumer_id=None):
         """Deletes tokens by user.
+
         If the tenant_id is not None, only delete the tokens by user id under
         the specified tenant.
+
         If the trust_id is not None, it will be used to query tokens and the
         user_id will be ignored.
+
+        If the consumer_id is not None, only delete the tokens by consumer id
+        that match the specified consumer id.
 
         :param user_id: identity of user
         :type user_id: string
         :param tenant_id: identity of the tenant
         :type tenant_id: string
-        :param trust_id: identified of the trust
+        :param trust_id: identity of the trust
         :type trust_id: string
+        :param consumer_id: identity of the consumer
+        :type consumer_id: string
         :returns: None.
         :raises: keystone.exception.TokenNotFound
 
         """
         token_list = self.list_tokens(user_id,
                                       tenant_id=tenant_id,
-                                      trust_id=trust_id)
+                                      trust_id=trust_id,
+                                      consumer_id=consumer_id)
+
         for token in token_list:
             try:
                 self.delete_token(token)
             except exception.NotFound:
                 pass
 
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None):
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                    consumer_id=None):
         """Returns a list of current token_id's for a user
+
+        This is effectively a private method only used by the ``delete_tokens``
+        method and should not be called by anything outside of the
+        ``token_api`` manager or the token driver itself.
 
         :param user_id: identity of the user
         :type user_id: string
         :param tenant_id: identity of the tenant
         :type tenant_id: string
-        :param trust_id: identified of the trust
+        :param trust_id: identity of the trust
         :type trust_id: string
+        :param consumer_id: identity of the consumer
+        :type consumer_id: string
         :returns: list of token_id's
 
         """

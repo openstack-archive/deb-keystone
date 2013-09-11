@@ -48,8 +48,7 @@ To run the keystone Admin and API server instances, use::
 
 this runs keystone with the configuration the etc/ directory of the project.
 See :doc:`configuration` for details on how Keystone is configured. By default,
-keystone is configured with KVS backends, so any data entered into keystone run
-in this fashion will not persist across restarts.
+keystone is configured with SQL backends.
 
 
 Interacting with Keystone
@@ -70,6 +69,36 @@ place::
     $ bin/keystone-manage db_sync
 
 .. _`python-keystoneclient`: https://github.com/openstack/python-keystoneclient
+
+Database Schema Migrations
+--------------------------
+
+Keystone uses SQLAlchemy-migrate
+_`SQLAlchemy-migrate`:http://code.google.com/p/sqlalchemy-migrate/ to migrate the SQL database
+between revisions.  For core components, the migrations are kept in a central
+repository under keystone/common/sql/migrate_repo.
+
+Extensions should be created as directories under `keystone/contrib`.  An
+extension that requires sql migrations should not change the common repository,
+but should instead have its own repository.  This repository must be in the
+extension's directory in `keystone/contrib/<extension>/migrate_repo.`  In
+addition it needs a subdirectory named `versions`.  For example, if the
+extension name is `my_extension` then the directory structure would be
+`keystone/contrib/my_extension/migrate_repo/versions/`.  For the migration
+o work, both the migrate_repo and versions subdirectories must have empty
+__init__.py files.  SQLAlchemy-migrate will look for a configuration file in
+the migrate_repo named migrate.cfg. This conforms to a Key/value ini file
+format.  A sample config file with the minimal set of values is::
+
+    [db_settings]
+    repository_id=my_extension
+    version_table=migrate_version
+    required_dbs=[]
+
+The directory `keystone/contrib/example` contains a sample extension migration.
+
+Migrations for extension must be explicitly run. To run a migration for a specific
+extension, run  `keystone-manage --extension <name> db_sync`.
 
 Initial Sample Data
 -------------------
@@ -103,8 +132,8 @@ Test Structure
 --------------
 
 ``./run_test.sh`` uses its python cohort (``run_tests.py``) to iterate
-through the ``tests`` directory, using Nosetest to collect the tests and
-invoke them using an OpenStack custom test running that displays the tests
+through the ``keystone/tests`` directory, using Nosetest to collect the tests
+and invoke them using an OpenStack custom test running that displays the tests
 as well as the time taken to run those tests.
 
 Not all of the tests in the tests directory are strictly unit tests. Keystone
@@ -193,9 +222,120 @@ and set environment variables ``KEYSTONE_IDENTITY_BACKEND=ldap`` and
 ``KEYSTONE_CLEAR_LDAP=yes`` in your ``localrc`` file.
 
 The unit tests can be run against a live server with
-``tests/_ldap_livetest.py``.  The default password is ``test`` but if you have
+``keystone/tests/_ldap_livetest.py``.  The default password is ``test`` but if you have
 installed devstack with a different LDAP password, modify the file
-``tests/backend_liveldap.conf`` to reflect your password.
+``keystone/tests/backend_liveldap.conf`` to reflect your password.
+
+
+Translated responses
+--------------------
+
+The Keystone server can provide error responses translated into the language in
+the ``Accept-Language`` header of the request. In order to test this in your
+development environment, there's a couple of things you need to do.
+
+1. Build the message files. Run the following command in your keystone
+   directory::
+
+ $ python setup.py compile_catalog
+
+This will generate .mo files like keystone/locale/[lang]/LC_MESSAGES/[lang].mo
+
+2. When running Keystone, set the ``KEYSTONE_LOCALEDIR`` environment variable
+   to the keystone/locale directory. For example::
+
+  $ KEYSTONE_LOCALEDIR=/opt/stack/keystone/keystone/locale keystone-all
+
+Now you can get a translated error response::
+
+ $ curl -s -H "Accept-Language: zh" http://localhost:5000/notapath | python -mjson.tool
+ {
+     "error": {
+         "code": 404,
+         "message": "\u627e\u4e0d\u5230\u8cc7\u6e90\u3002",
+         "title": "Not Found"
+     }
+ }
+
+
+Caching Layer
+-------------
+
+The caching layer is designed to be applied to any ``manager`` object within Keystone
+via the use of the ``on_arguments`` decorator provided in the ``keystone.common.cache``
+module.  This decorator leverages `dogpile.cache`_ caching system to provide a flexible
+caching backend.
+
+It is recommended that each of the managers have an independent toggle within the config
+file to enable caching.  The easiest method to utilize the toggle within the
+configuration file is to define a ``caching`` boolean option within that manager's
+configuration section (e.g. ``identity``).  Once that option is defined you can
+pass function to the ``on_arguments`` decorator with the named argument ``should_cache_fn``.
+In the ``keystone.common.cache`` module, there is a function called ``should_cache_fn``,
+which will provide a reference, to a function, that will consult the global cache
+``enabled`` option as well as the specific manager's caching enable toggle.
+
+    .. NOTE::
+        If a section-specific boolean option is not defined in the config section specified when
+        calling ``should_cache_fn``, the returned function reference will default to enabling
+        caching for that ``manager``.
+
+Example use of cache and ``should_cache_fn`` (in this example, ``token`` is the manager)::
+
+    from keystone.common import cache
+    SHOULD_CACHE = cache.should_cache_fn('token')
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE)
+    def cacheable_function(arg1, arg2, arg3):
+        ...
+        return some_value
+
+With the above example, each call to the ``cacheable_function`` would check to see if
+the arguments passed to it matched a currently valid cached item.  If the return value
+was cached, the caching layer would return the cached value; if the return value was
+not cached, the caching layer would call the function, pass the value to the ``SHOULD_CACHE``
+function reference, which would then determine if caching was globally enabled and enabled
+for the ``token`` manager.  If either caching toggle is disabled, the value is returned but
+not cached.
+
+It is recommended that each of the managers have an independent configurable time-to-live (TTL).
+If a configurable TTL has been defined for the manager configuration section, it is possible to
+pass it to the ``cache.on_arguments`` decorator with the named-argument ``expiration_time``.  For
+consistency, it is recommended that this option be called ``cache_time`` and default to ``None``.
+If the ``expiration_time`` argument passed to the decorator is set to ``None``, the expiration
+time will be set to the global default (``expiration_time`` option in the ``[cache]``
+configuration section.
+
+Example of using a section specific ``cache_time`` (in this example, ``identity`` is the manager)::
+
+    from keystone.common import cache
+    SHOULD_CACHE = cache.should_cache_fn('identity')
+
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=CONF.identity.cache_time)
+    def cachable_function(arg1, arg2, arg3):
+        ...
+        return some_value
+
+For cache invalidation, the ``on_arguments`` decorator will add an ``invalidate`` method
+(attribute) to your decorated function.  To invalidate the cache, you pass the same arguments
+to the ``invalidate`` method as you would the normal function.
+
+Example (using the above cacheable_function)::
+
+    def invalidate_cache(arg1, arg2, arg3):
+        cacheable_function.invalidate(arg1, arg2, arg3)
+
+.. WARNING::
+    The ``on_arguments`` decorator does not accept keyword-arguments/named arguments.  An
+    exception will be raised if keyword arguments are passed to a caching-decorated function.
+
+.. NOTE::
+    In all cases methods work the same as functions except if you are attempting to invalidate
+    the cache on a decorated bound-method, you need to pass  ``self`` to the ``invalidate``
+    method as the first argument before the arguments.
+
+.. _`dogpile.cache`: http://dogpilecache.readthedocs.org/
 
 
 Building the Documentation

@@ -1,16 +1,30 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2013 OpenStack Foundation
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 import json
 
 from keystone.common import cms
 from keystone.common import controller
 from keystone.common import dependency
-from keystone.common import logging
-from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
+from keystone.openstack.common import log as logging
 from keystone.openstack.common import timeutils
 from keystone.token import core
-from keystone.token import provider as token_provider
 
 
 CONF = config.CONF
@@ -91,9 +105,7 @@ class Auth(controller.V2Controller):
 
         if tenant_ref:
             catalog_ref = self.catalog_api.get_catalog(
-                user_id=user_ref['id'],
-                tenant_id=tenant_ref['id'],
-                metadata=metadata_ref)
+                user_ref['id'], tenant_ref['id'], metadata_ref)
         else:
             catalog_ref = {}
 
@@ -106,11 +118,8 @@ class Auth(controller.V2Controller):
             role_ref = self.identity_api.get_role(role_id)
             roles_ref.append(dict(name=role_ref['name']))
 
-        (token_id, token_data) = self.token_provider_api.issue_token(
-            version=token_provider.V2,
-            token_ref=auth_token_data,
-            roles_ref=roles_ref,
-            catalog_ref=catalog_ref)
+        (token_id, token_data) = self.token_provider_api.issue_v2_token(
+            auth_token_data, roles_ref=roles_ref, catalog_ref=catalog_ref)
         return token_data
 
     def _authenticate_token(self, context, auth):
@@ -217,10 +226,9 @@ class Auth(controller.V2Controller):
                 attribute='password', target='passwordCredentials')
 
         password = auth['passwordCredentials']['password']
-        max_pw_size = utils.MAX_PASSWORD_LENGTH
-        if password and len(password) > max_pw_size:
-            raise exception.ValidationSizeError(attribute='password',
-                                                size=max_pw_size)
+        if password and len(password) > CONF.identity.max_password_length:
+            raise exception.ValidationSizeError(
+                attribute='password', size=CONF.identity.max_password_length)
 
         if ("userId" not in auth['passwordCredentials'] and
                 "username" not in auth['passwordCredentials']):
@@ -398,7 +406,7 @@ class Auth(controller.V2Controller):
                     _('Token does not belong to specified tenant.'))
         return data
 
-    @controller.protected
+    @controller.protected()
     def validate_token_head(self, context, token_id):
         """Check that a token is valid.
 
@@ -408,11 +416,9 @@ class Auth(controller.V2Controller):
 
         """
         belongs_to = context['query_string'].get('belongsTo')
-        self.token_provider_api.check_token(token_id,
-                                            belongs_to=belongs_to,
-                                            version=token_provider.V2)
+        self.token_provider_api.check_v2_token(token_id, belongs_to)
 
-    @controller.protected
+    @controller.protected()
     def validate_token(self, context, token_id):
         """Check that a token is valid.
 
@@ -422,9 +428,7 @@ class Auth(controller.V2Controller):
 
         """
         belongs_to = context['query_string'].get('belongsTo')
-        return self.token_provider_api.validate_token(
-            token_id, belongs_to=belongs_to,
-            version=token_provider.V2)
+        return self.token_provider_api.validate_v2_token(token_id, belongs_to)
 
     def delete_token(self, context, token_id):
         """Delete a token, effectively invalidating it for authz."""
@@ -432,7 +436,7 @@ class Auth(controller.V2Controller):
         self.assert_admin(context)
         self.token_api.delete_token(token_id)
 
-    @controller.protected
+    @controller.protected()
     def revocation_list(self, context, auth=None):
         tokens = self.token_api.list_revoked_tokens()
 
@@ -457,9 +461,9 @@ class Auth(controller.V2Controller):
         catalog_ref = None
         if token_ref.get('tenant'):
             catalog_ref = self.catalog_api.get_catalog(
-                user_id=token_ref['user']['id'],
-                tenant_id=token_ref['tenant']['id'],
-                metadata=token_ref['metadata'])
+                token_ref['user']['id'],
+                token_ref['tenant']['id'],
+                token_ref['metadata'])
 
         return Auth.format_endpoint_list(catalog_ref)
 

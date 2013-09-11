@@ -17,12 +17,12 @@
 
 from keystone.common import controller
 from keystone.common import dependency
-from keystone.common import logging
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone import identity
 from keystone.openstack.common import importutils
+from keystone.openstack.common import log as logging
 from keystone import token
 from keystone import trust
 
@@ -246,7 +246,7 @@ class AuthInfo(object):
         :returns: (domain_id, project_id, trust_ref).
                    If scope to a project, (None, project_id, None)
                    will be returned.
-                   If scoped to a domain, (domain_id, None,None)
+                   If scoped to a domain, (domain_id, None, None)
                    will be returned.
                    If scoped to a trust, (None, project_id, trust_ref),
                    Will be returned, where the project_id comes from the
@@ -285,22 +285,23 @@ class Auth(controller.V3Controller):
             auth_info = AuthInfo(context, auth=auth)
             auth_context = {'extras': {}, 'method_names': [], 'bind': {}}
             self.authenticate(context, auth_info, auth_context)
+            if auth_context.get('access_token_id'):
+                auth_info.set_scope(None, auth_context['project_id'], None)
             self._check_and_set_default_scoping(auth_info, auth_context)
             (domain_id, project_id, trust) = auth_info.get_scope()
             method_names = auth_info.get_method_names()
             method_names += auth_context.get('method_names', [])
             # make sure the list is unique
             method_names = list(set(method_names))
+            expires_at = auth_context.get('expires_at')
+            # NOTE(morganfainberg): define this here so it is clear what the
+            # argument is during the issue_v3_token provider call.
+            metadata_ref = None
 
-            (token_id, token_data) = self.token_provider_api.issue_token(
-                user_id=auth_context['user_id'],
-                method_names=method_names,
-                expires_at=auth_context.get('expires_at'),
-                project_id=project_id,
-                domain_id=domain_id,
-                auth_context=auth_context,
-                trust=trust,
-                include_catalog=include_catalog)
+            (token_id, token_data) = self.token_provider_api.issue_v3_token(
+                auth_context['user_id'], method_names, expires_at, project_id,
+                domain_id, auth_context, trust, metadata_ref, include_catalog)
+
             return render_token_data_response(token_id, token_data,
                                               created=True)
         except exception.TrustNotFound as e:
@@ -328,7 +329,7 @@ class Auth(controller.V3Controller):
     def authenticate(self, context, auth_info, auth_context):
         """Authenticate user."""
 
-        # user have been authenticated externally
+        # user has been authenticated externally
         if 'REMOTE_USER' in context:
             external = get_auth_method('external')
             external.authenticate(context, auth_info, auth_context)
@@ -353,23 +354,23 @@ class Auth(controller.V3Controller):
             msg = _('User not found')
             raise exception.Unauthorized(msg)
 
-    @controller.protected
+    @controller.protected()
     def check_token(self, context):
         token_id = context.get('subject_token_id')
-        self.token_provider_api.check_token(token_id)
+        self.token_provider_api.check_v3_token(token_id)
 
-    @controller.protected
+    @controller.protected()
     def revoke_token(self, context):
         token_id = context.get('subject_token_id')
         return self.token_provider_api.revoke_token(token_id)
 
-    @controller.protected
+    @controller.protected()
     def validate_token(self, context):
         token_id = context.get('subject_token_id')
-        token_data = self.token_provider_api.validate_token(token_id)
+        token_data = self.token_provider_api.validate_v3_token(token_id)
         return render_token_data_response(token_id, token_data)
 
-    @controller.protected
+    @controller.protected()
     def revocation_list(self, context, auth=None):
         return self.token_controllers_ref.revocation_list(context, auth)
 

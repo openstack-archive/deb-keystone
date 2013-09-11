@@ -14,6 +14,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from keystone.common import dependency
 from keystone.common import sql
 from keystone.common.sql import migration
 from keystone.common import utils
@@ -25,7 +26,7 @@ class User(sql.ModelBase, sql.DictBase):
     __tablename__ = 'user'
     attributes = ['id', 'name', 'domain_id', 'password', 'enabled']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(64), nullable=False)
+    name = sql.Column(sql.String(255), nullable=False)
     domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
                            nullable=False)
     password = sql.Column(sql.String(128))
@@ -61,6 +62,7 @@ class UserGroupMembership(sql.ModelBase, sql.DictBase):
                           primary_key=True)
 
 
+@dependency.requires('assignment_api')
 class Identity(sql.Base, identity.Driver):
     def default_assignment_driver(self):
         return "keystone.assignment.backends.sql.Assignment"
@@ -83,8 +85,11 @@ class Identity(sql.Base, identity.Driver):
         """
         return utils.check_password(password, user_ref.password)
 
+    def is_domain_aware(self):
+        return True
+
     # Identity interface
-    def authenticate(self, user_id=None, password=None):
+    def authenticate(self, user_id, password):
         session = self.get_session()
         user_ref = None
         try:
@@ -196,18 +201,17 @@ class Identity(sql.Base, identity.Driver):
     def list_groups_for_user(self, user_id):
         session = self.get_session()
         self.get_user(user_id)
-        query = session.query(UserGroupMembership)
-        query = query.filter_by(user_id=user_id)
-        membership_refs = query.all()
-        return [self.get_group(x.group_id) for x in membership_refs]
+        query = session.query(Group).join(UserGroupMembership)
+        query = query.filter(UserGroupMembership.user_id == user_id)
+        return [g.to_dict() for g in query]
 
     def list_users_in_group(self, group_id):
         session = self.get_session()
         self.get_group(group_id)
-        query = session.query(UserGroupMembership)
-        query = query.filter_by(group_id=group_id)
-        membership_refs = query.all()
-        return [self.get_user(x.user_id) for x in membership_refs]
+        query = session.query(User).join(UserGroupMembership)
+        query = query.filter(UserGroupMembership.group_id == group_id)
+
+        return [identity.filter_user(u.to_dict()) for u in query]
 
     def delete_user(self, user_id):
         session = self.get_session()
@@ -221,7 +225,7 @@ class Identity(sql.Base, identity.Driver):
 
             session.delete(ref)
             session.flush()
-        self.assignment.delete_user(user_id)
+        self.assignment_api.delete_user(user_id)
 
     # group crud
 
@@ -278,4 +282,4 @@ class Identity(sql.Base, identity.Driver):
 
             session.delete(ref)
             session.flush()
-        self.assignment.delete_group(group_id)
+        self.assignment_api.delete_group(group_id)

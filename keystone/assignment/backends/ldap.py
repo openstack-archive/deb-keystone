@@ -21,12 +21,13 @@ import ldap as ldap
 
 from keystone import assignment
 from keystone import clean
+from keystone.common import dependency
 from keystone.common import ldap as common_ldap
-from keystone.common import logging
 from keystone.common import models
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import ldap as ldap_identity
+from keystone.openstack.common import log as logging
 
 
 CONF = config.CONF
@@ -39,6 +40,7 @@ DEFAULT_DOMAIN = {
 }
 
 
+@dependency.requires('identity_api')
 class Assignment(assignment.Driver):
     def __init__(self):
         super(Assignment, self).__init__()
@@ -55,19 +57,7 @@ class Assignment(assignment.Driver):
 
         self.project = ProjectApi(CONF)
         self.role = RoleApi(CONF)
-
         self._identity_api = None
-
-    @property
-    def identity_api(self):
-        return self._identity_api
-
-    @identity_api.setter
-    def identity_api(self, value):
-        self._identity_api = value
-        #TODO(ayoung): only left here to prevent unit test from breaking
-        #once we remove here. the getter and setter can be removed as well.
-        self._identity_api.driver.project = self.project
 
     def get_project(self, tenant_id):
         return self._set_default_domain(self.project.get(tenant_id))
@@ -103,17 +93,15 @@ class Assignment(assignment.Driver):
         def _get_roles_for_just_user_and_project(user_id, tenant_id):
             self.identity_api.get_user(user_id)
             self.get_project(tenant_id)
-            user_dn = self.user._id_to_dn(user_id)
             return [self.role._dn_to_id(a.role_dn)
                     for a in self.role.get_role_assignments
                     (self.project._id_to_dn(tenant_id))
-                    if a.user_dn == user_dn]
+                    if self.user._dn_to_id(a.user_dn) == user_id]
 
         if domain_id is not None:
             msg = 'Domain metadata not supported by LDAP'
             raise exception.NotImplemented(message=msg)
-        if (not self.get_project(tenant_id) or
-                not self.identity_api.get_user(user_id)):
+        if tenant_id is None or user_id is None:
             return {}
 
         metadata_ref = _get_roles_for_just_user_and_project(user_id, tenant_id)
@@ -273,31 +261,22 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
     DEFAULT_OBJECTCLASS = 'groupOfNames'
     DEFAULT_ID_ATTR = 'cn'
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
-    DEFAULT_ATTRIBUTE_IGNORE = []
     NotFound = exception.ProjectNotFound
     notfound_arg = 'project_id'  # NOTE(yorik-sar): while options_name = tenant
     options_name = 'tenant'
-    attribute_mapping = {'name': 'ou',
-                         'description': 'description',
-                         'tenantId': 'cn',
-                         'enabled': 'enabled',
-                         'domain_id': 'domain_id'}
+    attribute_options_names = {'name': 'name',
+                               'description': 'desc',
+                               'enabled': 'enabled',
+                               'domain_id': 'domain_id'}
+    immutable_attrs = ['name']
     model = models.Project
 
     def __init__(self, conf):
         super(ProjectApi, self).__init__(conf)
-        self.attribute_mapping['name'] = conf.ldap.tenant_name_attribute
-        self.attribute_mapping['description'] = conf.ldap.tenant_desc_attribute
-        self.attribute_mapping['enabled'] = conf.ldap.tenant_enabled_attribute
-        self.attribute_mapping['domain_id'] = (
-            conf.ldap.tenant_domain_id_attribute)
         self.member_attribute = (getattr(conf.ldap, 'tenant_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
-        self.attribute_ignore = (getattr(conf.ldap, 'tenant_attribute_ignore')
-                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
 
     def create(self, values):
-        self.affirm_unique(values)
         data = values.copy()
         if data.get('id') is None:
             data['id'] = uuid.uuid4().hex
@@ -359,9 +338,6 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
 
     def update(self, id, values):
         old_obj = self.get(id)
-        if old_obj['name'] != values['name']:
-            msg = 'Changing Name not supported by LDAP'
-            raise exception.NotImplemented(message=msg)
         return super(ProjectApi, self).update(id, values, old_obj)
 
 
@@ -391,21 +367,16 @@ class RoleApi(common_ldap.BaseLdap):
     DEFAULT_STRUCTURAL_CLASSES = []
     DEFAULT_OBJECTCLASS = 'organizationalRole'
     DEFAULT_MEMBER_ATTRIBUTE = 'roleOccupant'
-    DEFAULT_ATTRIBUTE_IGNORE = []
     NotFound = exception.RoleNotFound
     options_name = 'role'
-    attribute_mapping = {'name': 'ou',
-                         #'serviceId': 'service_id',
-                         }
+    attribute_options_names = {'name': 'name'}
+    immutable_attrs = ['id']
     model = models.Role
 
     def __init__(self, conf):
         super(RoleApi, self).__init__(conf)
-        self.attribute_mapping['name'] = conf.ldap.role_name_attribute
         self.member_attribute = (getattr(conf.ldap, 'role_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
-        self.attribute_ignore = (getattr(conf.ldap, 'role_attribute_ignore')
-                                 or self.DEFAULT_ATTRIBUTE_IGNORE)
 
     def get(self, id, filter=None):
         model = super(RoleApi, self).get(id, filter)
@@ -530,8 +501,6 @@ class RoleApi(common_ldap.BaseLdap):
             pass
 
     def update(self, role_id, role):
-        if role['id'] != role_id:
-            raise exception.ValidationError('Cannot change role ID')
         try:
             old_name = self.get_by_name(role['name'])
             raise exception.Conflict('Cannot duplicate name %s' % old_name)

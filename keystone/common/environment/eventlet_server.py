@@ -26,8 +26,7 @@ import eventlet
 import eventlet.wsgi
 import greenlet
 
-from keystone.common import logging
-from keystone.common import wsgi
+from keystone.openstack.common import log as logging
 
 
 LOG = logging.getLogger(__name__)
@@ -48,10 +47,10 @@ class Server(object):
 
     def start(self, key=None, backlog=128):
         """Run a WSGI server with the given application."""
-        LOG.debug(_('Starting %(arg0)s on %(host)s:%(port)s') %
-                  {'arg0': sys.argv[0],
-                   'host': self.host,
-                   'port': self.port})
+        LOG.info(_('Starting %(arg0)s on %(host)s:%(port)s') %
+                 {'arg0': sys.argv[0],
+                  'host': self.host,
+                  'port': self.port})
 
         # TODO(dims): eventlet's green dns/socket module does not actually
         # support IPv6 in getaddrinfo(). We need to get around this in the
@@ -108,7 +107,7 @@ class Server(object):
         log = logging.getLogger('eventlet.wsgi.server')
         try:
             eventlet.wsgi.server(socket, application, custom_pool=self.pool,
-                                 log=wsgi.WritableLogger(log))
+                                 log=logging.WritableLogger(log))
         except Exception:
             LOG.exception(_('Server error'))
             raise

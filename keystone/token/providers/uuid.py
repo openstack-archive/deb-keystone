@@ -18,13 +18,14 @@
 
 from __future__ import absolute_import
 
+import json
 import sys
 import uuid
 
 from keystone.common import dependency
-from keystone.common import logging
 from keystone import config
 from keystone import exception
+from keystone.openstack.common import log as logging
 from keystone.openstack.common import timeutils
 from keystone import token
 from keystone import trust
@@ -39,9 +40,11 @@ DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 class V2TokenDataHelper(object):
     """Creates V2 token data."""
     @classmethod
-    def format_token(cls, token_ref, roles_ref, catalog_ref=None):
+    def format_token(cls, token_ref, roles_ref=None, catalog_ref=None):
         user_ref = token_ref['user']
         metadata_ref = token_ref['metadata']
+        if roles_ref is None:
+            roles_ref = []
         expires = token_ref.get('expires', token.default_expire_time())
         if expires is not None:
             if not isinstance(expires, unicode):
@@ -128,16 +131,6 @@ class V2TokenDataHelper(object):
 
         return services.values()
 
-    @classmethod
-    def get_token_data(cls, **kwargs):
-        if 'token_ref' not in kwargs:
-            raise ValueError('Require token_ref to create V2 token data')
-        token_ref = kwargs.get('token_ref')
-        roles_ref = kwargs.get('roles_ref', [])
-        catalog_ref = kwargs.get('catalog_ref')
-        return V2TokenDataHelper.format_token(
-            token_ref, roles_ref, catalog_ref)
-
 
 @dependency.requires('catalog_api', 'identity_api')
 class V3TokenDataHelper(object):
@@ -206,10 +199,29 @@ class V3TokenDataHelper(object):
             'domain': self._get_filtered_domain(user_ref['domain_id'])}
         token_data['user'] = filtered_user
 
+    def _populate_oauth_section(self, token_data, access_token):
+        if access_token:
+            access_token_id = access_token['id']
+            consumer_id = access_token['consumer_id']
+            token_data['OS-OAUTH1'] = ({'access_token_id': access_token_id,
+                                        'consumer_id': consumer_id})
+
     def _populate_roles(self, token_data, user_id, domain_id, project_id,
-                        trust):
+                        trust, access_token):
         if 'roles' in token_data:
             # no need to repopulate roles
+            return
+
+        if access_token:
+            filtered_roles = []
+            authed_role_ids = json.loads(access_token['role_ids'])
+            all_roles = self.identity_api.list_roles()
+            for role in all_roles:
+                for authed_role in authed_role_ids:
+                    if authed_role == role['id']:
+                        filtered_roles.append({'id': role['id'],
+                                               'name': role['name']})
+            token_data['roles'] = filtered_roles
             return
 
         if CONF.trust.enabled and trust:
@@ -235,7 +247,7 @@ class V3TokenDataHelper(object):
                         filtered_roles.append(match_roles[0])
                     else:
                         raise exception.Forbidden(
-                            _('Trustee have no delegated roles.'))
+                            _('Trustee has no delegated roles.'))
             else:
                 for role in roles:
                     filtered_roles.append({'id': role['id'],
@@ -244,12 +256,12 @@ class V3TokenDataHelper(object):
             # user has no project or domain roles, therefore access denied
             if not filtered_roles:
                 if token_project_id:
-                    msg = _('User %(user_id)s have no access '
+                    msg = _('User %(user_id)s has no access '
                             'to project %(project_id)s') % {
                                 'user_id': user_id,
                                 'project_id': token_project_id}
                 else:
-                    msg = _('User %(user_id)s have no access '
+                    msg = _('User %(user_id)s has no access '
                             'to domain %(domain_id)s') % {
                                 'user_id': user_id,
                                 'domain_id': token_domain_id}
@@ -270,7 +282,6 @@ class V3TokenDataHelper(object):
             try:
                 service_catalog = self.catalog_api.get_v3_catalog(
                     user_id, project_id)
-            # TODO(ayoung): KVS backend needs a sample implementation
             except exception.NotImplemented:
                 service_catalog = {}
             # TODO(gyee): v3 service catalog is not quite completed yet
@@ -288,7 +299,7 @@ class V3TokenDataHelper(object):
     def get_token_data(self, user_id, method_names, extras,
                        domain_id=None, project_id=None, expires=None,
                        trust=None, token=None, include_catalog=True,
-                       bind=None):
+                       bind=None, access_token=None):
         token_data = {'methods': method_names,
                       'extras': extras}
 
@@ -307,15 +318,17 @@ class V3TokenDataHelper(object):
 
         self._populate_scope(token_data, domain_id, project_id)
         self._populate_user(token_data, user_id, domain_id, project_id, trust)
-        self._populate_roles(token_data, user_id, domain_id, project_id, trust)
+        self._populate_roles(token_data, user_id, domain_id, project_id, trust,
+                             access_token)
         if include_catalog:
             self._populate_service_catalog(token_data, user_id, domain_id,
                                            project_id, trust)
         self._populate_token_dates(token_data, expires=expires, trust=trust)
+        self._populate_oauth_section(token_data, access_token)
         return {'token': token_data}
 
 
-@dependency.requires('token_api', 'identity_api', 'catalog_api')
+@dependency.requires('token_api', 'identity_api', 'catalog_api', 'oauth_api')
 class Provider(token.provider.Provider):
     def __init__(self, *args, **kwargs):
         super(Provider, self).__init__(*args, **kwargs)
@@ -326,6 +339,13 @@ class Provider(token.provider.Provider):
 
     def get_token_version(self, token_data):
         if token_data and isinstance(token_data, dict):
+            if 'token_version' in token_data:
+                if token_data['token_version'] in token.provider.VERSIONS:
+                    return token_data['token_version']
+            # FIXME(morganfainberg): deprecate the following logic in future
+            # revisions. It is better to just specify the token_version in
+            # the token_data itself. This way we can support future versions
+            # that might have the same fields.
             if 'access' in token_data:
                 return token.provider.V2
             if 'token' in token_data and 'methods' in token_data['token']:
@@ -335,13 +355,14 @@ class Provider(token.provider.Provider):
     def _get_token_id(self, token_data):
         return uuid.uuid4().hex
 
-    def _issue_v2_token(self, **kwargs):
-        token_data = self.v2_token_data_helper.get_token_data(**kwargs)
+    def issue_v2_token(self, token_ref, roles_ref=None,
+                       catalog_ref=None):
+        token_data = self.v2_token_data_helper.format_token(
+            token_ref, roles_ref, catalog_ref)
         token_id = self._get_token_id(token_data)
         token_data['access']['token']['id'] = token_id
         try:
             expiry = token_data['access']['token']['expires']
-            token_ref = kwargs.get('token_ref')
             if isinstance(expiry, basestring):
                 expiry = timeutils.normalize_time(
                     timeutils.parse_isotime(expiry))
@@ -353,7 +374,8 @@ class Provider(token.provider.Provider):
                         metadata=token_ref['metadata'],
                         token_data=token_data,
                         bind=token_ref.get('bind'),
-                        trust_id=token_ref['metadata'].get('trust_id'))
+                        trust_id=token_ref['metadata'].get('trust_id'),
+                        token_version=token.provider.V2)
             self.token_api.create_token(token_id, data)
         except Exception:
             exc_info = sys.exc_info()
@@ -366,20 +388,19 @@ class Provider(token.provider.Provider):
 
         return (token_id, token_data)
 
-    def _issue_v3_token(self, **kwargs):
-        user_id = kwargs.get('user_id')
-        method_names = kwargs.get('method_names')
-        expires_at = kwargs.get('expires_at')
-        project_id = kwargs.get('project_id')
-        domain_id = kwargs.get('domain_id')
-        auth_context = kwargs.get('auth_context')
-        trust = kwargs.get('trust')
-        metadata_ref = kwargs.get('metadata_ref')
-        include_catalog = kwargs.get('include_catalog')
+    def issue_v3_token(self, user_id, method_names, expires_at=None,
+                       project_id=None, domain_id=None, auth_context=None,
+                       trust=None, metadata_ref=None, include_catalog=True):
         # for V2, trust is stashed in metadata_ref
         if (CONF.trust.enabled and not trust and metadata_ref and
                 'trust_id' in metadata_ref):
             trust = self.trust_api.get_trust(metadata_ref['trust_id'])
+
+        access_token = None
+        if 'oauth1' in method_names:
+            access_token_id = auth_context['access_token_id']
+            access_token = self.oauth_api.get_access_token(access_token_id)
+
         token_data = self.v3_token_data_helper.get_token_data(
             user_id,
             method_names,
@@ -389,7 +410,8 @@ class Provider(token.provider.Provider):
             expires=expires_at,
             trust=trust,
             bind=auth_context.get('bind') if auth_context else None,
-            include_catalog=include_catalog)
+            include_catalog=include_catalog,
+            access_token=access_token)
 
         token_id = self._get_token_id(token_data)
         try:
@@ -399,7 +421,8 @@ class Provider(token.provider.Provider):
                     timeutils.parse_isotime(expiry))
             # FIXME(gyee): is there really a need to store roles in metadata?
             role_ids = []
-            metadata_ref = kwargs.get('metadata_ref', {})
+            if metadata_ref is None:
+                metadata_ref = {}
             if 'project' in token_data['token']:
                 # project-scoped token, fill in the v2 token data
                 # all we care are the role IDs
@@ -416,7 +439,8 @@ class Provider(token.provider.Provider):
                         tenant=token_data['token'].get('project'),
                         metadata=metadata_ref,
                         token_data=token_data,
-                        trust_id=trust['id'] if trust else None)
+                        trust_id=trust['id'] if trust else None,
+                        token_version=token.provider.V3)
             self.token_api.create_token(token_id, data)
         except Exception:
             exc_info = sys.exc_info()
@@ -429,20 +453,23 @@ class Provider(token.provider.Provider):
 
         return (token_id, token_data)
 
-    def issue_token(self, version='v3.0', **kwargs):
-        if version == token.provider.V3:
-            return self._issue_v3_token(**kwargs)
-        elif version == token.provider.V2:
-            return self._issue_v2_token(**kwargs)
-        raise token.provider.UnsupportedTokenVersionException
-
     def _verify_token(self, token_id, belongs_to=None):
         """Verify the given token and return the token_ref."""
-        token_ref = self.token_api.get_token(token_id=token_id)
-        assert token_ref
+        try:
+            token_ref = self.token_api.get_token(token_id)
+            return self._verify_token_ref(token_ref, belongs_to)
+        except exception.TokenNotFound:
+                raise exception.Unauthorized()
+
+    def _verify_token_ref(self, token_ref, belongs_to=None):
+        """Verify and return the given token_ref."""
+        if not token_ref:
+            raise exception.Unauthorized()
         if belongs_to:
-            assert (token_ref['tenant'] and
-                    token_ref['tenant']['id'] == belongs_to)
+            if not (token_ref['tenant'] and
+                    token_ref['tenant']['id'] == belongs_to):
+                raise exception.Unauthorized()
+
         return token_ref
 
     def revoke_token(self, token_id):
@@ -489,9 +516,12 @@ class Provider(token.provider.Provider):
                 if project_ref['domain_id'] != DEFAULT_DOMAIN_ID:
                     raise exception.Unauthorized(msg)
 
-    def _validate_v2_token(self, token_id, belongs_to=None, **kwargs):
+    def validate_v2_token(self, token_id, belongs_to=None):
+        token_ref = self._verify_token(token_id, belongs_to)
+        return self._validate_v2_token_ref(token_ref)
+
+    def _validate_v2_token_ref(self, token_ref):
         try:
-            token_ref = self._verify_token(token_id, belongs_to=belongs_to)
             self._assert_default_domain(token_ref)
             # FIXME(gyee): performance or correctness? Should we return the
             # cached token or reconstruct it? Obviously if we are going with
@@ -507,9 +537,9 @@ class Provider(token.provider.Provider):
                     token.provider.V2):
                 # token is created by old v2 logic
                 metadata_ref = token_ref['metadata']
-                role_refs = []
+                roles_ref = []
                 for role_id in metadata_ref.get('roles', []):
-                    role_refs.append(self.identity_api.get_role(role_id))
+                    roles_ref.append(self.identity_api.get_role(role_id))
 
                 # Get a service catalog if possible
                 # This is needed for on-behalf-of requests
@@ -518,18 +548,25 @@ class Provider(token.provider.Provider):
                     catalog_ref = self.catalog_api.get_catalog(
                         token_ref['user']['id'],
                         token_ref['tenant']['id'],
-                        metadata=metadata_ref)
-                token_data = self.v2_token_data_helper.get_token_data(
-                    token_ref=token_ref,
-                    roles_ref=role_refs,
-                    catalog_ref=catalog_ref)
+                        metadata_ref)
+                token_data = self.v2_token_data_helper.format_token(
+                    token_ref, roles_ref, catalog_ref)
             return token_data
-        except AssertionError as e:
+        except (exception.ValidationError, exception.TokenNotFound) as e:
             LOG.exception(_('Failed to validate token'))
             raise exception.Unauthorized(e)
 
-    def _validate_v3_token(self, token_id):
-        token_ref = self._verify_token(token_id)
+    def validate_v3_token(self, token_id):
+        try:
+            token_ref = self._verify_token(token_id)
+            token_data = self._validate_v3_token_ref(token_ref)
+            return token_data
+        except (exception.ValidationError,
+                exception.TokenNotFound,
+                exception.UserNotFound):
+            LOG.exception(_('Failed to validate token'))
+
+    def _validate_v3_token_ref(self, token_ref):
         # FIXME(gyee): performance or correctness? Should we return the
         # cached token or reconstruct it? Obviously if we are going with
         # the cached token, any role, project, or domain name changes
@@ -554,24 +591,11 @@ class Provider(token.provider.Provider):
                 expires=token_ref['expires'])
         return token_data
 
-    def validate_token(self, token_id, belongs_to=None, version='v3.0'):
-        try:
-            if version == token.provider.V3:
-                return self._validate_v3_token(token_id)
-            elif version == token.provider.V2:
-                return self._validate_v2_token(token_id,
-                                               belongs_to=belongs_to)
-            raise token.provider.UnsupportedTokenVersionException()
-        except exception.TokenNotFound as e:
-            LOG.exception(_('Failed to verify token'))
-            raise exception.Unauthorized(e)
-
-    def check_token(self, token_id, belongs_to=None,
-                    version='v3.0', **kwargs):
-        try:
-            token_ref = self._verify_token(token_id, belongs_to=belongs_to)
-            if version == token.provider.V2:
-                self._assert_default_domain(token_ref)
-        except exception.TokenNotFound as e:
-            LOG.exception(_('Failed to verify token'))
-            raise exception.Unauthorized(e)
+    def validate_token(self, token_id, belongs_to=None):
+        token_ref = self._verify_token(token_id, belongs_to=belongs_to)
+        version = self.get_token_version(token_ref)
+        if version == token.provider.V3:
+            return self._validate_v3_token_ref(token_ref)
+        elif version == token.provider.V2:
+            return self._validate_v2_token_ref(token_ref)
+        raise token.provider.UnsupportedTokenVersionException()

@@ -72,9 +72,11 @@ following sections:
 * ``[sql]`` - optional storage backend configuration
 * ``[ec2]`` - Amazon EC2 authentication driver configuration
 * ``[s3]`` - Amazon S3 authentication driver configuration.
+* ``[oauth1]`` - Oauth 1.0a system driver configuration
 * ``[identity]`` - identity system driver configuration
 * ``[catalog]`` - service catalog driver configuration
 * ``[token]`` - token driver & token provider configuration
+* ``[cache]`` - caching layer configuration
 * ``[policy]`` - policy system driver configuration for RBAC
 * ``[signing]`` - cryptographic signatures for PKI based tokens
 * ``[ssl]`` - SSL configuration
@@ -95,6 +97,25 @@ order:
 
 PasteDeploy configuration file is specified by the ``config_file`` parameter in ``[paste_deploy]`` section of the primary configuration file. If the parameter
 is not an absolute path, then Keystone looks for it in the same directories as above. If not specified, WSGI pipeline definitions are loaded from the primary configuration file.
+
+Keystone supports the option (disabled by default) to specify identity driver
+configurations on a domain by domain basis, allowing, for example, a specific
+domain to have its own LDAP or SQL server. This is configured by specifying the
+following options::
+
+ [identity]
+ domain_specific_drivers_enabled = True
+ domain_config_dir = /etc/keystone/domains
+
+Setting ``domain_specific_drivers_enabled`` to True will enable this feature, causing
+keystone to look in the ``domain_config_dir`` for config files of the form::
+
+ keystone.<domain_name>.conf
+
+Options given in the domain specific configuration file will override those in the
+primary configuration file for the specified domain only. Domains without a specific
+configuration file will continue to use the options from the primary configuration
+file.
 
 Authentication Plugins
 ----------------------
@@ -177,6 +198,112 @@ Conversely, if ``provider`` is ``keystone.token.providers.uuid.Provider``,
 
 For a customized provider, ``token_format`` must not set to ``PKI`` or
 ``UUID``.
+
+
+Caching Layer
+-------------
+
+Keystone supports a caching layer that is above the configurable subsystems (e.g ``token``,
+``identity``, etc).  Keystone uses the `dogpile.cache`_ library which allows for flexible
+cache backends. The majority of the caching configuration options are set in the ``[cache]``
+section.  However, each section that has the capability to be cached usually has a ``caching``
+boolean value that will toggle caching for that specific section.  The current default
+behavior is that subsystem caching is enabled, but the global toggle is set to disabled.
+
+``[cache]`` configuration section:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* ``enabled`` - enables/disables caching across all of keystone
+* ``debug_cache_backend`` - enables more in-depth logging from the cache backend (get, set, delete, etc)
+* ``backend`` - the caching backend module to use e.g. ``dogpile.cache.memcache``
+
+    .. NOTE::
+        A given ``backend`` must be registered with ``dogpile.cache`` before it
+        can be used.  The default backend is the ``Keystone`` no-op backend
+        (``keystone.common.cache.noop``). If caching is desired a different backend will
+        need to be specified.  Current functional backends are:
+
+    * ``dogpile.cache.memcached`` - Memcached backend using the standard `python-memcached`_ library
+    * ``dogpile.cache.pylibmc`` - Memcached backend using the `pylibmc`_ library
+    * ``dogpile.cache.bmemcached`` - Memcached using `python-binary-memcached`_ library.
+    * ``dogpile.cache.redis`` - `Redis`_ backend
+    * ``dogpile.cache.dbm`` - local DBM file backend
+    * ``dogpile.cache.memory`` - in-memory cache
+
+        .. WARNING::
+            ``dogpile.cache.memory`` is not suitable for use outside of unit testing
+            as it does not cleanup it's internal cache on cache expiration, does
+            not provide isolation to the cached data (values in the store can be
+            inadvertently changed without extra layers of data protection added),
+            and does not share cache between processes.  This means that caching
+            and cache invalidation will not be consistent or reliable
+            when using ``Keystone`` and the ``dogpile.cache.memory`` backend under
+            any real workload.
+
+* ``expiration_time`` - int, the default length of time to cache a specific value. A value of ``0``
+    indicates to not cache anything.  It is recommended that the ``enabled`` option be used to disable
+    cache instead of setting this to ``0``.
+* ``backend_argument`` - an argument passed to the backend when instantiated
+    ``backend_argument`` should be specified once per argument to be passed to the
+    back end and in the format of ``<argument name>:<argument value>``.
+    e.g.: ``backend_argument = host:localhost``
+* ``proxies`` - comma delimited list of `ProxyBackends`_ e.g. ``my.example.Proxy, my.example.Proxy2``
+* ``use_key_mangler`` - Use a key-mangling function (sha1) to ensure fixed length cache-keys.
+    This is toggle-able for debugging purposes, it is highly recommended to always
+    leave this set to True.  If the cache backend provides a key-mangler, this
+    option has no effect.
+
+Current keystone systems that have caching capabilities:
+    * ``token``
+        The token system has a separate ``cache_time`` configuration option, that
+        can be set to a value above or below the global ``expiration_time`` default,
+        allowing for different caching behavior from the other systems in ``Keystone``.
+        This option is set in the ``[token]`` section of the configuration file.
+
+        The Token Revocation List cache time is handled by the configuration option
+        ``revocation_cache_time`` in the ``[token]`` section.  The revocation
+        list is refreshed whenever a token is revoked. It typically sees significantly
+        more requests than specific token retrievals or token validation calls.
+    * ``assignment``
+        The assignment system has a separate ``cache_time`` configuration option,
+        that can be set to a value above or below the global ``expiration_time``
+        default, allowing for different caching behavior from the other systems in
+        ``Keystone``.  This option is set in the ``[assignment]`` section of the
+        configuration file.
+
+        Currently ``assignment`` has caching for ``project``, ``domain``, and ``role``
+        specific requests (primarily around the CRUD actions).  Caching is currently not
+        implemented on grants.  The list (``list_projects``, ``list_domains``, etc)
+        methods are not subject to caching.
+
+        .. WARNING::
+            Be aware that if a read-only ``assignment`` backend is in use, the cache
+            will not immediately reflect changes on the back end.  Any given change
+            may take up to the ``cache_time`` (if set in the ``[assignment]``
+            section of the configuration) or the global ``expiration_time`` (set in
+            the ``[cache]`` section of the configuration) before it is reflected.
+            If this type of delay (when using a read-only ``assignment`` backend) is
+            an issue, it is recommended that caching be disabled on ``assignment``.
+            To disable caching specifically on ``assignment``, in the ``[assignment]``
+            section of the configuration set ``caching`` to ``False``.
+
+For more information about the different backends (and configuration options):
+    * `dogpile.cache.backends.memory`_
+    * `dogpile.cache.backends.memcached`_
+    * `dogpile.cache.backends.redis`_
+    * `dogpile.cache.backends.file`_
+
+.. _`dogpile.cache`: http://dogpilecache.readthedocs.org/en/latest/
+.. _`python-memcached`: http://www.tummy.com/software/python-memcached/
+.. _`pylibmc`: http://sendapatch.se/projects/pylibmc/index.html
+.. _`python-binary-memcached`: https://github.com/jaysonsantos/python-binary-memcached
+.. _`Redis`: http://redis.io/
+.. _`dogpile.cache.backends.memory`: http://dogpilecache.readthedocs.org/en/latest/api.html#memory-backend
+.. _`dogpile.cache.backends.memcached`: http://dogpilecache.readthedocs.org/en/latest/api.html#memcached-backends
+.. _`dogpile.cache.backends.redis`: http://dogpilecache.readthedocs.org/en/latest/api.html#redis-backends
+.. _`dogpile.cache.backends.file`: http://dogpilecache.readthedocs.org/en/latest/api.html#file-backends
+.. _`ProxyBackends`: http://dogpilecache.readthedocs.org/en/latest/api.html#proxy-backends
+
 
 Certificates for PKI
 --------------------
@@ -338,9 +465,6 @@ service catalog will not change very much over time.
 The value of ``template_file`` is expected to be an absolute path to your
 service catalog configuration. An example ``template_file`` is included in
 Keystone, however you should create your own to reflect your deployment.
-If you are migrating from a legacy deployment, a tool is available to help with
-this task (see `Migrating your Service Catalog from legacy versions of
-Keystone`_).
 
 Another such example is `available in devstack
 (files/default_catalog.templates)
@@ -492,7 +616,7 @@ Each user can then change their own password with a HTTP PATCH ::
     -H "X_Auth_Token: <authtokenid>" -d '{"user": {"password": "ABCD", "original_password": "DCBA"}}'
 
 In addition to changing their password all of the users current tokens will be
-deleted (if the backend used is kvs or sql)
+deleted (if the backend used is sql)
 
 
 Inherited Role Assignment Extension
@@ -555,6 +679,19 @@ files for each Server application.
 * ``etc/logging.conf.sample``
 * ``etc/default_catalog.templates``
 
+.. _`adding extensions`:
+
+Adding Extensions
+=================
+
+OAuth1.0a
+---------
+
+.. toctree::
+   :maxdepth: 1
+
+   extensions/oauth1-configuration.rst
+
 .. _`prepare your deployment`:
 
 Preparing your deployment
@@ -604,124 +741,6 @@ empty list from your new database)::
     values, or deployed Keystone to a different endpoint, you will need to
     change the provided command accordingly.
 
-Migrating from legacy versions of Keystone
-==========================================
-
-Migration support is provided for the following legacy Keystone versions:
-
-* diablo-5
-* stable/diablo
-* essex-2
-* essex-3
-
-.. NOTE::
-
-    Before you can import your legacy data, you must first
-    `prepare your deployment`_.
-
-Step 1: Ensure your deployment can access your legacy database
---------------------------------------------------------------------
-
-Your legacy ``keystone.conf`` contains a SQL configuration section called
-``[keystone.backends.sqlalchemy]`` connection string which, by default,
-looks like::
-
-    sql_connection = sqlite:///keystone.db
-
-This connection string needs to be accessible from your deployment (e.g.
-you may need to copy your SQLite ``*.db`` file to a new server, adjust the
-relative path as appropriate, or open a firewall for MySQL, etc).
-
-Step 2: Import your legacy data
--------------------------------
-
-Use the following command to import your old data using the value of
-``sql_connection`` from step 3::
-
-    $ keystone-manage import_legacy <sql_connection>
-
-You should now be able to run the same command you used to test your new
-database above, but now you'll see your legacy Keystone data::
-
-    $ keystone --token ADMIN --endpoint http://127.0.0.1:35357/v2.0/ tenant-list
-    +----------------------------------+----------------+---------+
-    |                id                |      name      | enabled |
-    +----------------------------------+----------------+---------+
-    | 12edde26a6224199a66ece67b762a065 | project-y      | True    |
-    | 593715ed4359404999915ea7005a7da1 | ANOTHER:TENANT | True    |
-    | be57fed798b049bc9637d2be30bfa857 | coffee-tea     | True    |
-    | e3c382f4757a4385b502056431763cca | customer-x     | True    |
-    +----------------------------------+----------------+---------+
-
-
-Migrating your Service Catalog from legacy versions of Keystone
-===============================================================
-
-While legacy Keystone deployments stored the service catalog in the database,
-the service catalog is stored in a flat ``template_file``. An example
-service catalog template file may be found in
-``etc/default_catalog.templates``. You can change the path to your service
-catalog template in ``keystone.conf`` by changing the value of
-``[catalog] template_file``.
-
-Import your legacy catalog and redirect the output to your ``template_file``::
-
-    $ keystone-manage export_legacy_catalog <sql_connection> > <template_file>
-
-.. NOTE::
-
-    After executing this command, you will need to restart the Keystone
-    service to see your changes.
-
-Migrating from Nova Auth
-========================
-
-Migration of users, projects (aka tenants), roles and EC2 credentials
-is supported for the Essex and later releases of Nova. To migrate your auth
-data from Nova, use the following steps:
-
-.. NOTE::
-
-    Before you can migrate from nova auth, you must first
-    `prepare your deployment`_.
-
-Step 1: Export your data from Nova
-----------------------------------
-
-Use the following command to export your data from Nova to a ``dump_file``::
-
-    $ nova-manage export auth > /path/to/dump
-
-It is important to redirect the output to a file so it can be imported in the
-next step.
-
-Step 2: Import your data to Keystone
-------------------------------------
-
-Import your Nova auth data from a ``dump_file`` created with ``nova-manage``::
-
-    $ keystone-manage import_nova_auth <dump_file>
-
-.. NOTE::
-
-    Users are added to Keystone with the user ID from Nova as the user name.
-    Nova's projects are imported with the project ID as the tenant name. The
-    password used to authenticate a user in Keystone will be the API key
-    (also EC2 access key) used in Nova. Users also lose any administrative
-    privileges they had in Nova. The necessary admin role must be explicitly
-    re-assigned to each user.
-
-.. NOTE::
-
-    Users in Nova's auth system have a single set of EC2 credentials that
-    works with all projects (tenants) that user can access. In Keystone, these
-    credentials are scoped to a single user/tenant pair. In order to use the
-    same secret keys from Nova, you must prefix each corresponding access key
-    with the ID of the project used in Nova. For example, if you had access
-    to the 'Beta' project in your Nova installation with the access/secret
-    keys 'ACCESS'/'SECRET', you should use 'Beta:ACCESS'/'SECRET' in Keystone.
-    These credentials are active once your migration is complete.
-
 Initializing Keystone
 =====================
 
@@ -729,9 +748,6 @@ Initializing Keystone
 through the normal REST API. At the moment, the following calls are supported:
 
 * ``db_sync``: Sync the database schema.
-* ``import_legacy``: Import data from a legacy (pre-Essex) database.
-* ``export_legacy_catalog``: Export service catalog from a legacy (pre-Essex) database.
-* ``import_nova_auth``: Load auth data from a dump created with ``nova-manage``.
 * ``pki_setup``: Initialize the certificates for PKI based tokens.
 * ``ssl_setup``: Generate certificates for HTTPS.
 
@@ -793,6 +809,71 @@ to be passed as arguments each time::
     $ export OS_USERNAME=my_username
     $ export OS_PASSWORD=my_password
     $ export OS_TENANT_NAME=my_tenant
+
+Keystone API protection with Role Based Access Control (RBAC)
+-------------------------------------------------------------
+
+Like most OpenStack projects, Keystone supports the protection of its APIs
+by defining policy rules based on an RBAC approach.  These are stored in a
+JSON policy file, the name and location of which is set in the main Keystone
+configuration file.
+
+Each keystone v3 API has a line in the policy file which dictates what level
+of protection is applied to it, where each line is of the form:
+
+<api name>: <rule statement> or <match statement>
+
+where
+
+<rule statement> can be contain <rule statement> or <match statement>
+
+<match statement> is a set of identifiers that must match between the token
+provided by the caller of the API and the parameters or target entities of
+the API call in question. For example:
+
+    "identity:create_user": [["role:admin", "domain_id:%(user.domain_id)s"]]
+
+indicates that to create a user you must have the admin role in your token and
+in addition the domain_id in your token (which implies this must be a domain
+scoped token) must match the domain_id in the user object you are trying to
+create.  In other words, you must have the admin role on the domain in which
+you are creating the user, and the token you are using must be scoped to that
+domain.
+
+Each component of a match statement is of the form:
+
+<attribute from token>:<constant> or <attribute related to API call>
+
+The following attributes are available
+
+* Attributes from token: user_id, the domain_id or project_id depending on
+  the scope, and the list of roles you have within that scope
+
+* Attributes related to API call: Any parameters that are passed into the
+  API call are available, along with any filters specified in the query
+  string. Attributes of objects passed can be refererenced using an
+  object.attribute syntax (e.g. user.domain_id). The target objects of an
+  API are also available using a target.object.attribute syntax.  For instance:
+
+    "identity:delete_user": [["role:admin", "domain_id:%(target.user.domain_id)s"]]
+
+  would ensure that the user object that is being deleted is in the same
+  domain as the token provided.
+
+The default policy.json file supplied provides a somewhat basic example of
+API protection, and does not assume any particular use of domains. For
+multi-domain configuration installations where, for example, a cloud
+provider wishes to allow adminsistration of the contents of a domain to
+be delegated, it is recommended that the supplied policy.v3cloudsample.json
+is used as a basis for creating a suitable production policy file. This
+example policy file also shows the use of an admin_domain to allow a cloud
+provider to enable cloud adminstrators to have wider access across the APIs.
+
+A clean installation would need to perhaps start with the standard policy
+file, to allow creation of the admin_domain with the first users within
+it. The domain_id of the admin domain would then be obtained and could be
+pasted into a modifed version of policy.v3cloudsample.json which could then
+be enabled as the main policy file.
 
 Example usage
 -------------
@@ -1067,8 +1148,8 @@ example::
 Removing Expired Tokens
 ===========================================================
 
-In the SQL and KVS token stores expired tokens are not automatically
-removed. These tokens can be removed with::
+In the SQL backend expired tokens are not automatically removed. These tokens
+can be removed with::
 
     $ keystone-manage token_flush
 

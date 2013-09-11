@@ -16,20 +16,19 @@
 #
 
 import os
-import stat
 
 from keystone.common import environment
-from keystone.common import logging
+from keystone.common import utils
 from keystone import config
-
+from keystone.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 CONF = config.CONF
-DIR_PERMS = (stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-             stat.S_IRGRP | stat.S_IXGRP |
-             stat.S_IROTH | stat.S_IXOTH)
-CERT_PERMS = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
-PRIV_PERMS = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+
+PUBLIC_DIR_PERMS = 0o755        # -rwxr-xr-x
+PRIVATE_DIR_PERMS = 0o750       # -rwxr-x---
+PUBLIC_FILE_PERMS = 0o644       # -rw-r--r--
+PRIVATE_FILE_PERMS = 0o640      # -rw-r-----
 
 
 def file_exists(file_path):
@@ -51,6 +50,7 @@ class BaseCertificateConfigure(object):
         self.request_file_name = os.path.join(self.conf_dir, "req.pem")
         self.ssl_dictionary = {'conf_dir': self.conf_dir,
                                'ca_cert': conf_obj.ca_certs,
+                               'default_md': 'default',
                                'ssl_config': self.ssl_config_file_name,
                                'ca_private_key': conf_obj.ca_key,
                                'request_file': self.request_file_name,
@@ -60,20 +60,18 @@ class BaseCertificateConfigure(object):
                                'valid_days': int(conf_obj.valid_days),
                                'cert_subject': conf_obj.cert_subject,
                                'ca_password': conf_obj.ca_password}
+
+        try:
+            # OpenSSL 1.0 and newer support default_md = default, olders do not
+            openssl_ver = environment.subprocess.Popen(
+                ['openssl', 'version'],
+                stdout=environment.subprocess.PIPE).stdout.read()
+            if "OpenSSL 0." in openssl_ver:
+                self.ssl_dictionary['default_md'] = 'sha1'
+        except OSError:
+            LOG.warn('Failed to invoke ``openssl version``, '
+                     'assuming is v1.0 or newer')
         self.ssl_dictionary.update(kwargs)
-
-    def _make_dirs(self, file_name):
-        dir = os.path.dirname(file_name)
-        if not file_exists(dir):
-            os.makedirs(dir, DIR_PERMS)
-        if os.geteuid() == 0 and self.use_keystone_group:
-            os.chown(dir, -1, self.use_keystone_group)
-
-    def _set_permissions(self, file_name, perms):
-        os.chmod(file_name, perms)
-        if os.geteuid() == 0:
-            os.chown(file_name, self.use_keystone_user or -1,
-                     self.use_keystone_group or -1)
 
     def exec_command(self, command):
         to_exec = command % self.ssl_dictionary
@@ -81,65 +79,92 @@ class BaseCertificateConfigure(object):
         environment.subprocess.check_call(to_exec.rsplit(' '))
 
     def build_ssl_config_file(self):
+        utils.make_dirs(os.path.dirname(self.ssl_config_file_name),
+                        mode=PUBLIC_DIR_PERMS,
+                        user=self.use_keystone_user,
+                        group=self.use_keystone_group, log=LOG)
         if not file_exists(self.ssl_config_file_name):
-            self._make_dirs(self.ssl_config_file_name)
             ssl_config_file = open(self.ssl_config_file_name, 'w')
             ssl_config_file.write(self.sslconfig % self.ssl_dictionary)
             ssl_config_file.close()
-        self._set_permissions(self.ssl_config_file_name, CERT_PERMS)
+        utils.set_permissions(self.ssl_config_file_name,
+                              mode=PRIVATE_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
         index_file_name = os.path.join(self.conf_dir, 'index.txt')
         if not file_exists(index_file_name):
             index_file = open(index_file_name, 'w')
             index_file.write('')
             index_file.close()
-        self._set_permissions(self.ssl_config_file_name, PRIV_PERMS)
+        utils.set_permissions(index_file_name,
+                              mode=PRIVATE_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
         serial_file_name = os.path.join(self.conf_dir, 'serial')
         if not file_exists(serial_file_name):
             index_file = open(serial_file_name, 'w')
             index_file.write('01')
             index_file.close()
-        self._set_permissions(self.ssl_config_file_name, PRIV_PERMS)
+        utils.set_permissions(serial_file_name,
+                              mode=PRIVATE_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
     def build_ca_cert(self):
         ca_key_file = self.ssl_dictionary['ca_private_key']
-        ca_cert = self.ssl_dictionary['ca_cert']
-
+        utils.make_dirs(os.path.dirname(ca_key_file),
+                        mode=PRIVATE_DIR_PERMS,
+                        user=self.use_keystone_user,
+                        group=self.use_keystone_group, log=LOG)
         if not file_exists(ca_key_file):
-            self._make_dirs(ca_key_file)
             self.exec_command('openssl genrsa -out %(ca_private_key)s '
                               '%(key_size)d')
-            self._set_permissions(self.ssl_dictionary['ca_private_key'],
-                                  stat.S_IRUSR)
+        utils.set_permissions(ca_key_file,
+                              mode=PRIVATE_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
+        ca_cert = self.ssl_dictionary['ca_cert']
+        utils.make_dirs(os.path.dirname(ca_cert),
+                        mode=PUBLIC_DIR_PERMS,
+                        user=self.use_keystone_user,
+                        group=self.use_keystone_group, log=LOG)
         if not file_exists(ca_cert):
-            self._make_dirs(ca_cert)
             self.exec_command('openssl req -new -x509 -extensions v3_ca '
                               '-passin pass:%(ca_password)s '
                               '-key %(ca_private_key)s -out %(ca_cert)s '
                               '-days %(valid_days)d '
                               '-config %(ssl_config)s '
                               '-subj %(cert_subject)s')
-            self._set_permissions(ca_cert, CERT_PERMS)
+        utils.set_permissions(ca_cert,
+                              mode=PUBLIC_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
     def build_private_key(self):
         signing_keyfile = self.ssl_dictionary['signing_key']
-
+        utils.make_dirs(os.path.dirname(signing_keyfile),
+                        mode=PRIVATE_DIR_PERMS,
+                        user=self.use_keystone_user,
+                        group=self.use_keystone_group, log=LOG)
         if not file_exists(signing_keyfile):
-            self._make_dirs(signing_keyfile)
-
             self.exec_command('openssl genrsa -out %(signing_key)s '
                               '%(key_size)d ')
-        self._set_permissions(os.path.dirname(signing_keyfile), PRIV_PERMS)
-        self._set_permissions(signing_keyfile, stat.S_IRUSR)
+        utils.set_permissions(signing_keyfile,
+                              mode=PRIVATE_FILE_PERMS,
+                              user=self.use_keystone_user,
+                              group=self.use_keystone_group, log=LOG)
 
     def build_signing_cert(self):
         signing_cert = self.ssl_dictionary['signing_cert']
 
+        utils.make_dirs(os.path.dirname(signing_cert),
+                        mode=PUBLIC_DIR_PERMS,
+                        user=self.use_keystone_user,
+                        group=self.use_keystone_group, log=LOG)
         if not file_exists(signing_cert):
-            self._make_dirs(signing_cert)
-
             self.exec_command('openssl req -key %(signing_key)s -new -nodes '
                               '-out %(request_file)s -config %(ssl_config)s '
                               '-subj %(cert_subject)s')
@@ -198,7 +223,7 @@ new_certs_dir     = $dir
 serial            = $dir/serial
 database          = $dir/index.txt
 default_days      = 365
-default_md        = default # use public key default MD
+default_md        = %(default_md)s
 preserve          = no
 email_in_dn       = no
 nameopt           = default_ca
@@ -218,35 +243,35 @@ emailAddress            = optional
 [ req ]
 default_bits       = 2048 # Size of keys
 default_keyfile    = key.pem # name of generated keys
-default_md         = default # message digest algorithm
-string_mask        = nombstr # permitted characters
+string_mask        = utf8only # permitted characters
 distinguished_name = req_distinguished_name
 req_extensions     = v3_req
+x509_extensions = v3_ca
 
 [ req_distinguished_name ]
-0.organizationName          = Organization Name (company)
-organizationalUnitName      = Organizational Unit Name (department, division)
-emailAddress                = Email Address
-emailAddress_max            = 40
-localityName                = Locality Name (city, district)
-stateOrProvinceName         = State or Province Name (full name)
 countryName                 = Country Name (2 letter code)
 countryName_min             = 2
 countryName_max             = 2
+stateOrProvinceName         = State or Province Name (full name)
+localityName                = Locality Name (city, district)
+0.organizationName          = Organization Name (company)
+organizationalUnitName      = Organizational Unit Name (department, division)
 commonName                  = Common Name (hostname, IP, or your name)
 commonName_max              = 64
+emailAddress                = Email Address
+emailAddress_max            = 64
 
 [ v3_ca ]
 basicConstraints       = CA:TRUE
 subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer:always
+authorityKeyIdentifier = keyid:always,issuer
 
 [ v3_req ]
 basicConstraints     = CA:FALSE
-subjectKeyIdentifier = hash
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
 
 [ usr_cert ]
 basicConstraints       = CA:FALSE
 subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer:always
+authorityKeyIdentifier = keyid:always
 """

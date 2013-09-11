@@ -99,6 +99,17 @@
 # There is nothing special about this domain, other than the fact that it must
 # exist to order to maintain support for your v2 clients.
 # default_domain_id = default
+#
+# A subset (or all) of domains can have their own identity driver, each with
+# their own partial configuration file in a domain configuration directory.
+# Only values specific to the domain need to be placed in the domain specific
+# configuration file. This feature is disabled by default; set
+# domain_specific_drivers_enabled to True to enable.
+# domain_specific_drivers_enabled = False
+# domain_config_dir = /etc/keystone/domains
+
+# Maximum supported length for user passwords; decrease to improve performance.
+# max_password_length = 4096
 
 [credential]
 # driver = keystone.credential.backends.sql.Credential
@@ -123,12 +134,19 @@
 
 # template_file = default_catalog.templates
 
+[endpoint_filter]
+# extension for creating associations between project and endpoints in order to
+# provide a tailored catalog for project-scoped token requests.
+# driver = keystone.contrib.endpoint_filter.backends.sql.EndpointFilter
+# return_all_endpoints_if_no_filter = True
+
 [token]
 # Provides token persistence.
 # driver = keystone.token.backends.sql.Token
 
 # Controls the token construction, validation, and revocation operations.
-# provider = keystone.token.providers.pki.Provider
+# Core providers are keystone.token.providers.[pki|uuid].Provider
+# provider =
 
 # Amount of time a token should remain valid (in seconds)
 # expiration = 86400
@@ -142,11 +160,82 @@
 # mode e.g. kerberos or x509 to require binding to that authentication.
 # enforce_token_bind = permissive
 
+# Token specific caching toggle. This has no effect unless the global caching
+# option is set to True
+# caching = True
+
+# Token specific cache time-to-live (TTL) in seconds.
+# cache_time =
+
+# Revocation-List specific cache time-to-live (TTL) in seconds.
+# revocation_cache_time = 3600
+
+[cache]
+# Global cache functionality toggle.
+# enabled = False
+
+# Prefix for building the configuration dictionary for the cache region. This
+# should not need to be changed unless there is another dogpile.cache region
+# with the same configuration name
+# config_prefix = cache.keystone
+
+# Default TTL, in seconds, for any cached item in the dogpile.cache region.
+# This applies to any cached method that doesn't have an explicit cache
+# expiration time defined for it.
+# expiration_time = 600
+
+# Dogpile.cache backend module. It is recommended that Memcache
+# (dogpile.cache.memcache) or Redis (dogpile.cache.redis) be used in production
+# deployments.  Small workloads (single process) like devstack can use the
+# dogpile.cache.memory backend.
+# backend = keystone.common.cache.noop
+
+# Arguments supplied to the backend module. Specify this option once per
+# argument to be passed to the dogpile.cache backend.
+# Example format: <argname>:<value>
+# backend_argument =
+
+# Proxy Classes to import that will affect the way the dogpile.cache backend
+# functions.  See the dogpile.cache documentation on changing-backend-behavior.
+# Comma delimited list e.g. my.dogpile.proxy.Class, my.dogpile.proxyClass2
+# proxies =
+
+# Use a key-mangling function (sha1) to ensure fixed length cache-keys. This
+# is toggle-able for debugging purposes, it is highly recommended to always
+# leave this set to True.
+# use_key_mangler = True
+
+# Extra debugging from the cache backend (cache keys, get/set/delete/etc calls)
+# This is only really useful if you need to see the specific cache-backend
+# get/set/delete calls with the keys/values.  Typically this should be left
+# set to False.
+# debug_cache_backend = False
+
 [policy]
 # driver = keystone.policy.backends.sql.Policy
 
 [ec2]
 # driver = keystone.contrib.ec2.backends.kvs.Ec2
+
+[assignment]
+# driver =
+
+# Assignment specific caching toggle. This has no effect unless the global
+# caching option is set to True
+# caching = True
+
+# Assignment specific cache time-to-live (TTL) in seconds.
+# cache_time =
+
+[oauth1]
+# driver = keystone.contrib.oauth1.backends.sql.OAuth1
+
+# The Identity service may include expire attributes.
+# If no such attribute is included, then the token lasts indefinitely.
+# Specify how quickly the request token will expire (in seconds)
+# request_token_duration = 28800
+# Specify how quickly the access token will expire (in seconds)
+# access_token_duration = 86400
 
 [ssl]
 #enable = True
@@ -162,7 +251,8 @@
 
 [signing]
 # Deprecated in favor of provider in the [token] section
-#token_format = PKI
+# Allowed values are PKI or UUID
+#token_format =
 
 #certfile = /etc/keystone/pki/certs/signing_cert.pem
 #keyfile = /etc/keystone/pki/private/signing_key.pem
@@ -273,10 +363,11 @@
 # user_additional_attribute_mapping =
 
 [auth]
-methods = external,password,token
+methods = external,password,token,oauth1
 #external = keystone.auth.plugins.external.ExternalDefault
 password = keystone.auth.plugins.password.Password
 token = keystone.auth.plugins.token.Token
+oauth1 = keystone.auth.plugins.oauth1.OAuth
 
 [paste_deploy]
 # Name of the paste configuration file that defines the available pipelines

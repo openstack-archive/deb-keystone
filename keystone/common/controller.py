@@ -1,13 +1,28 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2013 OpenStack Foundation
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 import collections
 import functools
 import uuid
 
 from keystone.common import dependency
-from keystone.common import logging
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-
+from keystone.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 CONF = config.CONF
@@ -87,23 +102,52 @@ def flatten(d, parent_key=''):
     return dict(items)
 
 
-def protected(f):
-    """Wraps API calls with role based access controls (RBAC)."""
-    @functools.wraps(f)
-    def wrapper(self, context, *args, **kwargs):
-        if 'is_admin' in context and context['is_admin']:
-            LOG.warning(_('RBAC: Bypassing authorization'))
-        else:
-            action = 'identity:%s' % f.__name__
-            creds = _build_policy_check_credentials(self, action,
-                                                    context, kwargs)
-            # Simply use the passed kwargs as the target dict, which
-            # would typically include the prime key of a get/update/delete
-            # call.
-            self.policy_api.enforce(creds, action, flatten(kwargs))
-            LOG.debug(_('RBAC: Authorization granted'))
+def protected(callback=None):
+    """Wraps API calls with role based access controls (RBAC).
 
-        return f(self, context, *args, **kwargs)
+    This handles both the protection of the API parameters as well as any
+    target entities for single-entity API calls.
+
+    More complex API calls (for example that deal with several different
+    entities) should pass in a callback function, that will be subsequently
+    called to check protection for these multiple entities. This callback
+    function should gather the appropriate entities needed and then call
+    check_proetction() in the V3Controller class.
+
+    """
+    def wrapper(f):
+        @functools.wraps(f)
+        def inner(self, context, *args, **kwargs):
+            if 'is_admin' in context and context['is_admin']:
+                LOG.warning(_('RBAC: Bypassing authorization'))
+            elif callback is not None:
+                prep_info = {'f_name': f.__name__,
+                             'input_attr': kwargs}
+                callback(self, context, prep_info, *args, **kwargs)
+            else:
+                action = 'identity:%s' % f.__name__
+                creds = _build_policy_check_credentials(self, action,
+                                                        context, kwargs)
+                # Check to see if we need to include the target entity in our
+                # policy checks.  We deduce this by seeing if the class has
+                # specified a get_member() method and that kwargs contains the
+                # appropriate entity id.
+                policy_dict = {}
+                if (hasattr(self, 'get_member_from_driver') and
+                        self.get_member_from_driver is not None):
+                            key = '%s_id' % self.member_name
+                            if key in kwargs:
+                                ref = self.get_member_from_driver(kwargs[key])
+                                policy_dict = {'target':
+                                               {self.member_name: ref}}
+
+                # Add in the kwargs, which means that any entity provided as a
+                # parameter for calls like create and update will be included.
+                policy_dict.update(kwargs)
+                self.policy_api.enforce(creds, action, flatten(policy_dict))
+                LOG.debug(_('RBAC: Authorization granted'))
+            return f(self, context, *args, **kwargs)
+        return inner
     return wrapper
 
 
@@ -127,13 +171,13 @@ def filterprotected(*filters):
                 # First  any query filter parameters
                 target = dict()
                 if len(filters) > 0:
-                    for filter in filters:
-                        if filter in context['query_string']:
-                            target[filter] = context['query_string'][filter]
+                    for item in filters:
+                        if item in context['query_string']:
+                            target[item] = context['query_string'][item]
 
                     LOG.debug(_('RBAC: Adding query filter params (%s)') % (
-                        ', '.join(['%s=%s' % (filter, target[filter])
-                                  for filter in target])))
+                        ', '.join(['%s=%s' % (item, target[item])
+                                  for item in target])))
 
                 # Now any formal url parameters
                 for key in kwargs:
@@ -169,6 +213,10 @@ class V2Controller(wsgi.Application):
             self._delete_tokens_for_trust(trust['trustee_user_id'],
                                           trust['id'])
 
+    def _delete_tokens_for_project(self, project_id):
+        for user_ref in self.identity_api.get_project_users(project_id):
+            self._delete_tokens_for_user(user_ref['id'], project_id=project_id)
+
     def _require_attribute(self, ref, attr):
         """Ensures the reference contains the specified attribute."""
         if ref.get(attr) is None or ref.get(attr) == '':
@@ -203,6 +251,7 @@ class V3Controller(V2Controller):
 
     collection_name = 'entities'
     member_name = 'entity'
+    get_member_from_driver = None
 
     def _delete_tokens_for_group(self, group_id):
         user_refs = self.identity_api.list_users_in_group(group_id)
@@ -300,36 +349,64 @@ class V3Controller(V2Controller):
         ref['id'] = uuid.uuid4().hex
         return ref
 
+    def _get_domain_id_for_request(self, context):
+        """Get the domain_id for a v3 call."""
+
+        if context['is_admin']:
+            return DEFAULT_DOMAIN_ID
+
+        # Fish the domain_id out of the token
+        #
+        # We could make this more efficient by loading the domain_id
+        # into the context in the wrapper function above (since
+        # this version of normalize_domain will only be called inside
+        # a v3 protected call).  However, this optimization is probably not
+        # worth the duplication of state
+        try:
+            token_ref = self.token_api.get_token(context['token_id'])
+        except exception.TokenNotFound:
+            LOG.warning(_('Invalid token in _get_domain_id_for_request'))
+            raise exception.Unauthorized()
+
+        if 'domain' in token_ref:
+            return token_ref['domain']['id']
+        else:
+            return DEFAULT_DOMAIN_ID
+
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id if not specified in a v3 call."""
-
         if 'domain_id' not in ref:
-            if context['is_admin']:
-                ref['domain_id'] = DEFAULT_DOMAIN_ID
-            else:
-                # Fish the domain_id out of the token
-                #
-                # We could make this more efficient by loading the domain_id
-                # into the context in the wrapper function above (since
-                # this version of normalize_domain will only be called inside
-                # a v3 protected call).  However, given that we only use this
-                # for creating entities, this optimization is probably not
-                # worth the duplication of state
-                try:
-                    token_ref = self.token_api.get_token(
-                        token_id=context['token_id'])
-                except exception.TokenNotFound:
-                    LOG.warning(_('Invalid token in normalize_domain_id'))
-                    raise exception.Unauthorized()
-
-                if 'domain' in token_ref:
-                    ref['domain_id'] = token_ref['domain']['id']
-                else:
-                    # FIXME(henry-nash) Revisit this once v3 token scoping
-                    # across domains has been hashed out
-                    ref['domain_id'] = DEFAULT_DOMAIN_ID
+            ref['domain_id'] = self._get_domain_id_for_request(context)
         return ref
 
     def _filter_domain_id(self, ref):
         """Override v2 filter to let domain_id out for v3 calls."""
         return ref
+
+    def check_protection(self, context, prep_info, target_attr=None):
+        """Provide call protection for complex target attributes.
+
+        As well as including the standard parameters from the original API
+        call (which is passed in prep_info), this call will add in any
+        additional entities or attributes (passed in target_attr), so that
+        they can be referenced by policy rules.
+
+         """
+        if 'is_admin' in context and context['is_admin']:
+            LOG.warning(_('RBAC: Bypassing authorization'))
+        else:
+            action = 'identity:%s' % prep_info['f_name']
+            # TODO(henry-nash) need to log the target attributes as well
+            creds = _build_policy_check_credentials(self, action,
+                                                    context,
+                                                    prep_info['input_attr'])
+            # Build the dict the policy engine will check against from both the
+            # parameters passed into the call we are protecting (which was
+            # stored in the prep_info by protected()), plus the target
+            # attributes provided.
+            policy_dict = {}
+            if target_attr:
+                policy_dict = {'target': target_attr}
+            policy_dict.update(prep_info['input_attr'])
+            self.policy_api.enforce(creds, action, flatten(policy_dict))
+            LOG.debug(_('RBAC: Authorization granted'))

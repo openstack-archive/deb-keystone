@@ -27,8 +27,11 @@ class Identity(kvs.Base, identity.Driver):
     def default_assignment_driver(self):
         return "keystone.assignment.backends.kvs.Assignment"
 
+    def is_domain_aware(self):
+        return True
+
     # Public interface
-    def authenticate(self, user_id=None, password=None):
+    def authenticate(self, user_id, password):
         user_ref = None
         try:
             user_ref = self._get_user(user_id)

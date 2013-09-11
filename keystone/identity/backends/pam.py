@@ -58,7 +58,10 @@ class PamIdentity(identity.Driver):
     Tenant is always the same as User, root user has admin role.
     """
 
-    def authenticate(self, user_id=None, password=None):
+    def is_domain_aware(self):
+        return False
+
+    def authenticate(self, user_id, password):
         auth = pam.authenticate if pam else PAM_authenticate
         if not auth(user_id, password):
             raise AssertionError('Invalid user / password')
@@ -115,15 +118,6 @@ class PamIdentity(identity.Driver):
         raise NotImplementedError()
 
     def delete_user(self, user_id):
-        raise NotImplementedError()
-
-    def create_project(self, tenant_id, tenant):
-        raise NotImplementedError()
-
-    def update_project(self, tenant_id, tenant):
-        raise NotImplementedError()
-
-    def delete_project(self, tenant_id, tenant):
         raise NotImplementedError()
 
     def _get_metadata(self, user_id, tenant_id):

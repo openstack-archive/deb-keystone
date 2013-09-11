@@ -15,8 +15,6 @@
 # under the License.
 
 import copy
-import datetime
-
 
 from keystone.common import sql
 from keystone import exception
@@ -30,9 +28,13 @@ class TokenModel(sql.ModelBase, sql.DictBase):
     id = sql.Column(sql.String(64), primary_key=True)
     expires = sql.Column(sql.DateTime(), default=None)
     extra = sql.Column(sql.JsonBlob())
-    valid = sql.Column(sql.Boolean(), default=True)
+    valid = sql.Column(sql.Boolean(), default=True, nullable=False)
     user_id = sql.Column(sql.String(64))
-    trust_id = sql.Column(sql.String(64), nullable=True)
+    trust_id = sql.Column(sql.String(64))
+    __table_args__ = (
+        sql.Index('ix_token_expires', 'expires'),
+        sql.Index('ix_token_valid', 'valid')
+    )
 
 
 class Token(sql.Base, token.Driver):
@@ -42,12 +44,7 @@ class Token(sql.Base, token.Driver):
             raise exception.TokenNotFound(token_id=token_id)
         session = self.get_session()
         token_ref = session.query(TokenModel).get(token_id)
-        now = datetime.datetime.utcnow()
         if not token_ref or not token_ref.valid:
-            raise exception.TokenNotFound(token_id=token_id)
-        if not token_ref.expires:
-            raise exception.TokenNotFound(token_id=token_id)
-        if now >= token_ref.expires:
             raise exception.TokenNotFound(token_id=token_id)
         return token_ref.to_dict()
 
@@ -75,7 +72,8 @@ class Token(sql.Base, token.Driver):
             token_ref.valid = False
             session.flush()
 
-    def delete_tokens(self, user_id, tenant_id=None, trust_id=None):
+    def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
+                      consumer_id=None):
         """Deletes all tokens in one session
 
         The user_id will be ignored if the trust_id is specified. user_id
@@ -100,6 +98,11 @@ class Token(sql.Base, token.Driver):
                     token_ref_dict = token_ref.to_dict()
                     if not self._tenant_matches(tenant_id, token_ref_dict):
                         continue
+                if consumer_id:
+                    token_ref_dict = token_ref.to_dict()
+                    if not self._consumer_matches(consumer_id, token_ref_dict):
+                        continue
+
                 token_ref.valid = False
 
             session.flush()
@@ -108,6 +111,16 @@ class Token(sql.Base, token.Driver):
         return ((tenant_id is None) or
                 (token_ref_dict.get('tenant') and
                  token_ref_dict['tenant'].get('id') == tenant_id))
+
+    def _consumer_matches(self, consumer_id, ref):
+        if consumer_id is None:
+            return True
+        else:
+            try:
+                oauth = ref['token_data']['token'].get('OS-OAUTH1', {})
+                return oauth and oauth['consumer_id'] == consumer_id
+            except KeyError:
+                return False
 
     def _list_tokens_for_trust(self, trust_id):
         session = self.get_session()
@@ -138,9 +151,29 @@ class Token(sql.Base, token.Driver):
                 tokens.append(token_ref['id'])
         return tokens
 
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None):
+    def _list_tokens_for_consumer(self, user_id, consumer_id):
+        tokens = []
+        session = self.get_session()
+        with session.begin():
+            now = timeutils.utcnow()
+            query = session.query(TokenModel)
+            query = query.filter(TokenModel.expires > now)
+            query = query.filter(TokenModel.user_id == user_id)
+            token_references = query.filter_by(valid=True)
+
+            for token_ref in token_references:
+                token_ref_dict = token_ref.to_dict()
+                if self._consumer_matches(consumer_id, token_ref_dict):
+                    tokens.append(token_ref_dict['id'])
+            session.flush()
+        return tokens
+
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                    consumer_id=None):
         if trust_id:
             return self._list_tokens_for_trust(trust_id)
+        if consumer_id:
+            return self._list_tokens_for_consumer(user_id, consumer_id)
         else:
             return self._list_tokens_for_user(user_id, tenant_id)
 

@@ -17,10 +17,10 @@
 """Main entry point into the Identity service."""
 
 from keystone.common import dependency
-from keystone.common import logging
 from keystone.common import manager
 from keystone import config
 from keystone import exception
+from keystone.openstack.common import log as logging
 
 
 CONF = config.CONF
@@ -59,4 +59,7 @@ class Driver(object):
         raise exception.NotImplemented()
 
     def list_trusts_for_trustor(self, trustor):
+        raise exception.NotImplemented()
+
+    def delete_trust(self, trust_id):
         raise exception.NotImplemented()

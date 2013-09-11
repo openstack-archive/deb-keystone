@@ -20,9 +20,8 @@ import ldap
 from ldap import filter as ldap_filter
 
 from keystone.common.ldap import fakeldap
-from keystone.common import logging
 from keystone import exception
-
+from keystone.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ def parse_tls_cert(opt):
         return LDAP_TLS_CERTS[opt]
     except KeyError:
         raise ValueError(_(
-            'Invalid LDAP TLS certs option: %(option). '
+            'Invalid LDAP TLS certs option: %(option)s. '
             'Choose one of: %(options)s') % {
                 'option': opt,
                 'options': ', '.join(LDAP_TLS_CERTS.keys())})
@@ -114,7 +113,8 @@ class BaseLdap(object):
     notfound_arg = None
     options_name = None
     model = None
-    attribute_mapping = {}
+    attribute_options_names = {}
+    immutable_attrs = []
     attribute_ignore = []
     tree_dn = None
 
@@ -129,6 +129,7 @@ class BaseLdap(object):
         self.tls_cacertfile = conf.ldap.tls_cacertfile
         self.tls_cacertdir = conf.ldap.tls_cacertdir
         self.tls_req_cert = parse_tls_cert(conf.ldap.tls_req_cert)
+        self.attribute_mapping = {}
 
         if self.options_name is not None:
             self.suffix = conf.ldap.suffix
@@ -144,6 +145,10 @@ class BaseLdap(object):
             objclass = '%s_objectclass' % self.options_name
             self.object_class = (getattr(conf.ldap, objclass)
                                  or self.DEFAULT_OBJECTCLASS)
+
+            for k, v in self.attribute_options_names.iteritems():
+                v = '%s_%s_attribute' % (self.options_name, v)
+                self.attribute_mapping[k] = getattr(conf.ldap, v)
 
             attr_mapping_opt = ('%s_additional_attribute_mapping' %
                                 self.options_name)
@@ -167,6 +172,10 @@ class BaseLdap(object):
 
             if self.notfound_arg is None:
                 self.notfound_arg = self.options_name + '_id'
+
+            attribute_ignore = '%s_attribute_ignore' % self.options_name
+            self.attribute_ignore = getattr(conf.ldap, attribute_ignore)
+
         self.use_dumb_member = getattr(conf.ldap, 'use_dumb_member')
         self.dumb_member = (getattr(conf.ldap, 'dumb_member') or
                             self.DUMB_MEMBER_DN)
@@ -290,6 +299,7 @@ class BaseLdap(object):
                                          values['id'])
 
     def create(self, values):
+        self.affirm_unique(values)
         if not self.allow_create:
             action = _('LDAP %s create') % self.options_name
             raise exception.ForbiddenAction(action=action)
@@ -379,6 +389,10 @@ class BaseLdap(object):
         for k, v in values.iteritems():
             if k == 'id' or k in self.attribute_ignore:
                 continue
+            if k in self.immutable_attrs and old_obj[k] != v:
+                msg = (_("Cannot change %(option_name)s %(attr)s") %
+                       {'option_name': self.options_name, 'attr': k})
+                raise exception.ValidationError(msg)
             if v is None:
                 if old_obj[k] is not None:
                     modlist.append((ldap.MOD_DELETE,
@@ -500,24 +514,22 @@ class LdapWrapper(object):
     def add_s(self, dn, attrs):
         ldap_attrs = [(kind, [py2ldap(x) for x in safe_iter(values)])
                       for kind, values in attrs]
-        if LOG.isEnabledFor(logging.DEBUG):
-            sane_attrs = [(kind, values
-                           if kind != 'userPassword'
-                           else ['****'])
-                          for kind, values in ldap_attrs]
-            LOG.debug(_('LDAP add: dn=%(dn)s, attrs=%(attrs)s') % {
-                'dn': dn, 'attrs': sane_attrs})
+        sane_attrs = [(kind, values
+                       if kind != 'userPassword'
+                       else ['****'])
+                      for kind, values in ldap_attrs]
+        LOG.debug(_('LDAP add: dn=%(dn)s, attrs=%(attrs)s') % {
+            'dn': dn, 'attrs': sane_attrs})
         return self.conn.add_s(dn, ldap_attrs)
 
     def search_s(self, dn, scope, query, attrlist=None):
-        if LOG.isEnabledFor(logging.DEBUG):
-            LOG.debug(_(
-                'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
-                'attrs=%(attrlist)s') % {
-                    'dn': dn,
-                    'scope': scope,
-                    'query': query,
-                    'attrlist': attrlist})
+        LOG.debug(_(
+            'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
+            'attrs=%(attrlist)s') % {
+                'dn': dn,
+                'scope': scope,
+                'query': query,
+                'attrlist': attrlist})
         if self.page_size:
             res = self.paged_search_s(dn, scope, query, attrlist)
         else:
@@ -577,12 +589,11 @@ class LdapWrapper(object):
                         else [py2ldap(x) for x in safe_iter(values)]))
             for op, kind, values in modlist]
 
-        if LOG.isEnabledFor(logging.DEBUG):
-            sane_modlist = [(op, kind, (values if kind != 'userPassword'
-                                        else ['****']))
-                            for op, kind, values in ldap_modlist]
-            LOG.debug(_('LDAP modify: dn=%(dn)s, modlist=%(modlist)s') % {
-                'dn': dn, 'modlist': sane_modlist})
+        sane_modlist = [(op, kind, (values if kind != 'userPassword'
+                                    else ['****']))
+                        for op, kind, values in ldap_modlist]
+        LOG.debug(_('LDAP modify: dn=%(dn)s, modlist=%(modlist)s') % {
+            'dn': dn, 'modlist': sane_modlist})
 
         return self.conn.modify_s(dn, ldap_modlist)
 
@@ -635,7 +646,7 @@ class EnabledEmuMixIn(BaseLdap):
         try:
             enabled_value = conn.search_s(self.enabled_emulation_dn,
                                           ldap.SCOPE_BASE,
-                                          query)
+                                          query, ['cn'])
         except ldap.NO_SUCH_OBJECT:
             return False
         else:

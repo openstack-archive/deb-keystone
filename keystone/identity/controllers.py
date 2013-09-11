@@ -22,10 +22,9 @@ import urlparse
 import uuid
 
 from keystone.common import controller
-from keystone.common import logging
 from keystone import config
 from keystone import exception
-
+from keystone.openstack.common import log as logging
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
@@ -98,7 +97,7 @@ class Tenant(controller.V2Controller):
 
         self.assert_admin(context)
         tenant_ref['id'] = tenant_ref.get('id', uuid.uuid4().hex)
-        tenant = self.identity_api.create_project(
+        tenant = self.assignment_api.create_project(
             tenant_ref['id'],
             self._normalize_domain_id(context, tenant_ref))
         return {'tenant': self._filter_domain_id(tenant)}
@@ -109,13 +108,21 @@ class Tenant(controller.V2Controller):
         # be specifying that
         clean_tenant = tenant.copy()
         clean_tenant.pop('domain_id', None)
-        tenant_ref = self.identity_api.update_project(
+
+        # If the project has been disabled (or enabled=False) we are
+        # deleting the tokens for that project.
+        if not tenant.get('enabled', True):
+            self._delete_tokens_for_project(tenant_id)
+
+        tenant_ref = self.assignment_api.update_project(
             tenant_id, clean_tenant)
         return {'tenant': tenant_ref}
 
     def delete_project(self, context, tenant_id):
         self.assert_admin(context)
-        self.identity_api.delete_project(tenant_id)
+        # Delete all tokens belonging to the users for that project
+        self._delete_tokens_for_project(tenant_id)
+        self.assignment_api.delete_project(tenant_id)
 
     def get_project_users(self, context, tenant_id, **kw):
         self.assert_admin(context)
@@ -401,8 +408,14 @@ class DomainV3(controller.V3Controller):
     collection_name = 'domains'
     member_name = 'domain'
 
-    @controller.protected
+    def __init__(self):
+        super(DomainV3, self).__init__()
+        self.get_member_from_driver = self.assignment_api.get_domain
+
+    @controller.protected()
     def create_domain(self, context, domain):
+        self._require_attribute(domain, 'name')
+
         ref = self._assign_unique_id(self._normalize_dict(domain))
         ref = self.identity_api.create_domain(ref['id'], ref)
         return DomainV3.wrap_member(context, ref)
@@ -412,12 +425,12 @@ class DomainV3(controller.V3Controller):
         refs = self.identity_api.list_domains()
         return DomainV3.wrap_collection(context, refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_domain(self, context, domain_id):
         ref = self.identity_api.get_domain(domain_id)
         return DomainV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def update_domain(self, context, domain_id, domain):
         self._require_matching_id(domain_id, domain)
 
@@ -506,7 +519,7 @@ class DomainV3(controller.V3Controller):
         for user in user_ids:
             user_cntl._delete_user(context, user)
 
-    @controller.protected
+    @controller.protected()
     def delete_domain(self, context, domain_id):
         # explicitly forbid deleting the default domain (this should be a
         # carefully orchestrated manual process involving configuration
@@ -542,11 +555,17 @@ class ProjectV3(controller.V3Controller):
     collection_name = 'projects'
     member_name = 'project'
 
-    @controller.protected
+    def __init__(self):
+        super(ProjectV3, self).__init__()
+        self.get_member_from_driver = self.assignment_api.get_project
+
+    @controller.protected()
     def create_project(self, context, project):
+        self._require_attribute(project, 'name')
+
         ref = self._assign_unique_id(self._normalize_dict(project))
         ref = self._normalize_domain_id(context, ref)
-        ref = self.identity_api.create_project(ref['id'], ref)
+        ref = self.assignment_api.create_project(ref['id'], ref)
         return ProjectV3.wrap_member(context, ref)
 
     @controller.filterprotected('domain_id', 'enabled', 'name')
@@ -559,16 +578,20 @@ class ProjectV3(controller.V3Controller):
         refs = self.identity_api.list_user_projects(user_id)
         return ProjectV3.wrap_collection(context, refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_project(self, context, project_id):
         ref = self.identity_api.get_project(project_id)
         return ProjectV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def update_project(self, context, project_id, project):
         self._require_matching_id(project_id, project)
 
-        ref = self.identity_api.update_project(project_id, project)
+        # The project was disabled so we delete the tokens
+        if not project.get('enabled', True):
+            self._delete_tokens_for_project(project_id)
+
+        ref = self.assignment_api.update_project(project_id, project)
         return ProjectV3.wrap_member(context, ref)
 
     def _delete_project(self, context, project_id):
@@ -576,12 +599,16 @@ class ProjectV3(controller.V3Controller):
         for cred in self.credential_api.list_credentials():
             if cred['project_id'] == project_id:
                 self.credential_api.delete_credential(cred['id'])
+
+        # Delete all tokens belonging to the users for that project
+        self._delete_tokens_for_project(project_id)
+
         # Finally delete the project itself - the backend is
         # responsible for deleting any role assignments related
         # to this project
-        return self.identity_api.delete_project(project_id)
+        return self.assignment_api.delete_project(project_id)
 
-    @controller.protected
+    @controller.protected()
     def delete_project(self, context, project_id):
         return self._delete_project(context, project_id)
 
@@ -590,8 +617,21 @@ class UserV3(controller.V3Controller):
     collection_name = 'users'
     member_name = 'user'
 
-    @controller.protected
+    def __init__(self):
+        super(UserV3, self).__init__()
+        self.get_member_from_driver = self.identity_api.get_user
+
+    def _check_user_and_group_protection(self, context, prep_info,
+                                         user_id, group_id):
+        ref = {}
+        ref['user'] = self.identity_api.get_user(user_id)
+        ref['group'] = self.identity_api.get_group(group_id)
+        self.check_protection(context, prep_info, ref)
+
+    @controller.protected()
     def create_user(self, context, user):
+        self._require_attribute(user, 'name')
+
         ref = self._assign_unique_id(self._normalize_dict(user))
         ref = self._normalize_domain_id(context, ref)
         ref = self.identity_api.create_user(ref['id'], ref)
@@ -599,23 +639,30 @@ class UserV3(controller.V3Controller):
 
     @controller.filterprotected('domain_id', 'email', 'enabled', 'name')
     def list_users(self, context, filters):
-        refs = self.identity_api.list_users()
+        refs = self.identity_api.list_users(
+            domain_scope=self._get_domain_id_for_request(context))
         return UserV3.wrap_collection(context, refs, filters)
 
     @controller.filterprotected('domain_id', 'email', 'enabled', 'name')
     def list_users_in_group(self, context, filters, group_id):
-        refs = self.identity_api.list_users_in_group(group_id)
+        refs = self.identity_api.list_users_in_group(
+            group_id,
+            domain_scope=self._get_domain_id_for_request(context))
         return UserV3.wrap_collection(context, refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_user(self, context, user_id):
-        ref = self.identity_api.get_user(user_id)
+        ref = self.identity_api.get_user(
+            user_id,
+            domain_scope=self._get_domain_id_for_request(context))
         return UserV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def update_user(self, context, user_id, user):
         self._require_matching_id(user_id, user)
-        ref = self.identity_api.update_user(user_id, user)
+        ref = self.identity_api.update_user(
+            user_id, user,
+            domain_scope=self._get_domain_id_for_request(context))
 
         if user.get('password') or not user.get('enabled', True):
             # revoke all tokens owned by this user
@@ -623,20 +670,26 @@ class UserV3(controller.V3Controller):
 
         return UserV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected(callback=_check_user_and_group_protection)
     def add_user_to_group(self, context, user_id, group_id):
-        self.identity_api.add_user_to_group(user_id, group_id)
+        self.identity_api.add_user_to_group(
+            user_id, group_id,
+            domain_scope=self._get_domain_id_for_request(context))
         # Delete any tokens so that group membership can have an
         # immediate effect
         self._delete_tokens_for_user(user_id)
 
-    @controller.protected
+    @controller.protected(callback=_check_user_and_group_protection)
     def check_user_in_group(self, context, user_id, group_id):
-        return self.identity_api.check_user_in_group(user_id, group_id)
+        return self.identity_api.check_user_in_group(
+            user_id, group_id,
+            domain_scope=self._get_domain_id_for_request(context))
 
-    @controller.protected
+    @controller.protected(callback=_check_user_and_group_protection)
     def remove_user_from_group(self, context, user_id, group_id):
-        self.identity_api.remove_user_from_group(user_id, group_id)
+        self.identity_api.remove_user_from_group(
+            user_id, group_id,
+            domain_scope=self._get_domain_id_for_request(context))
         self._delete_tokens_for_user(user_id)
 
     def _delete_user(self, context, user_id):
@@ -646,13 +699,15 @@ class UserV3(controller.V3Controller):
                 self.credential_api.delete_credential(cred['id'])
 
         # Make sure any tokens are marked as deleted
+        domain_id = self._get_domain_id_for_request(context)
         self._delete_tokens_for_user(user_id)
         # Finally delete the user itself - the backend is
         # responsible for deleting any role assignments related
         # to this user
-        return self.identity_api.delete_user(user_id)
+        return self.identity_api.delete_user(
+            user_id, domain_scope=domain_id)
 
-    @controller.protected
+    @controller.protected()
     def delete_user(self, context, user_id):
         return self._delete_user(context, user_id)
 
@@ -661,8 +716,14 @@ class GroupV3(controller.V3Controller):
     collection_name = 'groups'
     member_name = 'group'
 
-    @controller.protected
+    def __init__(self):
+        super(GroupV3, self).__init__()
+        self.get_member_from_driver = self.identity_api.get_group
+
+    @controller.protected()
     def create_group(self, context, group):
+        self._require_attribute(group, 'name')
+
         ref = self._assign_unique_id(self._normalize_dict(group))
         ref = self._normalize_domain_id(context, ref)
         ref = self.identity_api.create_group(ref['id'], ref)
@@ -670,24 +731,31 @@ class GroupV3(controller.V3Controller):
 
     @controller.filterprotected('domain_id', 'name')
     def list_groups(self, context, filters):
-        refs = self.identity_api.list_groups()
+        refs = self.identity_api.list_groups(
+            domain_scope=self._get_domain_id_for_request(context))
         return GroupV3.wrap_collection(context, refs, filters)
 
     @controller.filterprotected('name')
     def list_groups_for_user(self, context, filters, user_id):
-        refs = self.identity_api.list_groups_for_user(user_id)
+        refs = self.identity_api.list_groups_for_user(
+            user_id,
+            domain_scope=self._get_domain_id_for_request(context))
         return GroupV3.wrap_collection(context, refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_group(self, context, group_id):
-        ref = self.identity_api.get_group(group_id)
+        ref = self.identity_api.get_group(
+            group_id,
+            domain_scope=self._get_domain_id_for_request(context))
         return GroupV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def update_group(self, context, group_id, group):
         self._require_matching_id(group_id, group)
 
-        ref = self.identity_api.update_group(group_id, group)
+        ref = self.identity_api.update_group(
+            group_id, group,
+            domain_scope=self._get_domain_id_for_request(context))
         return GroupV3.wrap_member(context, ref)
 
     def _delete_group(self, context, group_id):
@@ -697,12 +765,14 @@ class GroupV3(controller.V3Controller):
         # deletion, so that we can remove these tokens after we know
         # the group deletion succeeded.
 
-        user_refs = self.identity_api.list_users_in_group(group_id)
-        self.identity_api.delete_group(group_id)
+        domain_id = self._get_domain_id_for_request(context)
+        user_refs = self.identity_api.list_users_in_group(
+            group_id, domain_scope=domain_id)
+        self.identity_api.delete_group(group_id, domain_scope=domain_id)
         for user in user_refs:
             self._delete_tokens_for_user(user['id'])
 
-    @controller.protected
+    @controller.protected()
     def delete_group(self, context, group_id):
         return self._delete_group(context, group_id)
 
@@ -711,8 +781,14 @@ class RoleV3(controller.V3Controller):
     collection_name = 'roles'
     member_name = 'role'
 
-    @controller.protected
+    def __init__(self):
+        super(RoleV3, self).__init__()
+        self.get_member_from_driver = self.assignment_api.get_role
+
+    @controller.protected()
     def create_role(self, context, role):
+        self._require_attribute(role, 'name')
+
         ref = self._assign_unique_id(self._normalize_dict(role))
         ref = self.identity_api.create_role(ref['id'], ref)
         return RoleV3.wrap_member(context, ref)
@@ -722,19 +798,19 @@ class RoleV3(controller.V3Controller):
         refs = self.identity_api.list_roles()
         return RoleV3.wrap_collection(context, refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_role(self, context, role_id):
         ref = self.identity_api.get_role(role_id)
         return RoleV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def update_role(self, context, role_id, role):
         self._require_matching_id(role_id, role)
 
         ref = self.identity_api.update_role(role_id, role)
         return RoleV3.wrap_member(context, ref)
 
-    @controller.protected
+    @controller.protected()
     def delete_role(self, context, role_id):
         return self.identity_api.delete_role(role_id)
 
@@ -753,20 +829,50 @@ class RoleV3(controller.V3Controller):
                 context['path'].startswith('/OS-INHERIT') and
                 context['path'].endswith('/inherited_to_projects'))
 
-    @controller.protected
-    def create_grant(self, context, role_id, user_id=None, group_id=None,
-                     domain_id=None, project_id=None):
+    def _check_grant_protection(self, context, protection, role_id=None,
+                                user_id=None, group_id=None,
+                                domain_id=None, project_id=None):
+        """Check protection for role grant APIs.
+
+        The policy rule might want to inspect attributes of any of the entities
+        involved in the grant.  So we get these and pass them to the
+        check_protection() handler in the controller.
+
+        """
+        ref = {}
+        if role_id:
+            ref['role'] = self.identity_api.get_role(role_id)
+        if user_id:
+            ref['user'] = self.identity_api.get_user(user_id)
+        else:
+            ref['group'] = self.identity_api.get_group(group_id)
+
+        if domain_id:
+            ref['domain'] = self.assignment_api.get_domain(domain_id)
+        else:
+            ref['project'] = self.assignment_api.get_project(project_id)
+
+        self.check_protection(context, protection, ref)
+
+    @controller.protected(callback=_check_grant_protection)
+    def create_grant(self, context, role_id, user_id=None,
+                     group_id=None, domain_id=None, project_id=None):
         """Grants a role to a user or group on either a domain or project."""
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
+
+        if user_id:
+            self.identity_api.get_user(user_id)
+        if group_id:
+            self.identity_api.get_group(group_id)
 
         self.identity_api.create_grant(
             role_id, user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
 
-    @controller.protected
-    def list_grants(self, context, user_id=None, group_id=None,
-                    domain_id=None, project_id=None):
+    @controller.protected(callback=_check_grant_protection)
+    def list_grants(self, context, user_id=None,
+                    group_id=None, domain_id=None, project_id=None):
         """Lists roles granted to user/group on either a domain or project."""
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
@@ -776,20 +882,25 @@ class RoleV3(controller.V3Controller):
             self._check_if_inherited(context))
         return RoleV3.wrap_collection(context, refs)
 
-    @controller.protected
-    def check_grant(self, context, role_id, user_id=None, group_id=None,
-                    domain_id=None, project_id=None):
+    @controller.protected(callback=_check_grant_protection)
+    def check_grant(self, context, role_id, user_id=None,
+                    group_id=None, domain_id=None, project_id=None):
         """Checks if a role has been granted on either a domain or project."""
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
+
+        if user_id:
+            self.identity_api.get_user(user_id)
+        if group_id:
+            self.identity_api.get_group(group_id)
 
         self.identity_api.get_grant(
             role_id, user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
 
-    @controller.protected
-    def revoke_grant(self, context, role_id, user_id=None, group_id=None,
-                     domain_id=None, project_id=None):
+    @controller.protected(callback=_check_grant_protection)
+    def revoke_grant(self, context, role_id, user_id=None,
+                     group_id=None, domain_id=None, project_id=None):
         """Revokes a role from user/group on either a domain or project."""
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
@@ -950,23 +1061,14 @@ class RoleAssignmentV3(controller.V3Controller):
             """Create a user assignment equivalent to the group one.
 
             The template has had the 'group' entity removed, so
-            substitute a 'user' one, modify the 'assignment' link
-            to match, and add a 'membership' link.
+            substitute a 'user' one. The 'assignment' link stays as it is,
+            referring to the group assignment that led to this role.
+            A 'membership' link is added that refers to this particular
+            user's membership of this group.
 
             """
             user_entry = copy.deepcopy(template)
             user_entry['user'] = {'id': user['id']}
-            scope = user_entry.get('scope')
-            if 'domain' in scope:
-                target_link = (
-                    '/domains/%s' % scope['domain']['id'])
-            else:
-                target_link = (
-                    '/projects/%s' % scope['project']['id'])
-            user_entry['links']['assignment'] = (
-                self.base_url('%s/users/%s/roles/%s' %
-                              (target_link, user['id'],
-                               user_entry['role']['id'])))
             user_entry['links']['membership'] = (
                 self.base_url('/groups/%s/users/%s' %
                               (group_id, user['id'])))
@@ -1129,14 +1231,14 @@ class RoleAssignmentV3(controller.V3Controller):
 
         return self.wrap_collection(context, formatted_refs, filters)
 
-    @controller.protected
+    @controller.protected()
     def get_role_assignment(self, context):
         raise exception.NotImplemented()
 
-    @controller.protected
+    @controller.protected()
     def update_role_assignment(self, context):
         raise exception.NotImplemented()
 
-    @controller.protected
+    @controller.protected()
     def delete_role_assignment(self, context):
         raise exception.NotImplemented()
