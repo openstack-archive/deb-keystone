@@ -73,6 +73,6 @@ override_dh_clean:
 	rm -rf $(CURDIR)/doc/source/sourcecode $(CURDIR)/doc/source/api
 	rm -rf $(CURDIR)/admin.log $(CURDIR)/keystone-legacy-auth.log
 	rm -f $(CURDIR)/debian/keystone.config $(CURDIR)/debian/keystone.postinst
-	find $(CURDIR)/tests -name '*.db' -delete
+	find $(CURDIR)/keystone/tests -name '*.db' -delete
 	rm -rf $(CURDIR)/vendor
 	dh_clean
