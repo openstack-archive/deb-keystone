@@ -1,0 +1,16 @@
+Description: Fix FTBFS because of missing gettext import
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: no
+Last-Update: 2013-09-12
+
+--- keystone-2013.2~b3.orig/keystone/exception.py
++++ keystone-2013.2~b3/keystone/exception.py
+@@ -16,7 +16,7 @@
+ 
+ from keystone.common import config
+ from keystone.openstack.common import log as logging
+-
++from keystone.openstack.common import gettextutils
+ 
+ CONF = config.CONF
+ LOG = logging.getLogger(__name__)
