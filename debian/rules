@@ -26,11 +26,11 @@ override_dh_auto_test:
 
 	# tests/test_overrides.conf can be used to setup the environment
 	# for unit testing.
-	cp tests/test_overrides.conf tests/test_overrides.conf.orig
-	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/tests/test_overrides.conf
-	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/tests/test_overrides.conf
+	cp keystone/tests/test_overrides.conf keystone/tests/test_overrides.conf.orig
+	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/keystone/tests/test_overrides.conf
+	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/keystone/tests/test_overrides.conf
 	PYTHONPATH=$(CURDIR) bash run_tests.sh -N || true
-	mv $(CURDIR)/tests/test_overrides.conf.orig $(CURDIR)/tests/test_overrides.conf
+	mv $(CURDIR)/keystone/tests/test_overrides.conf.orig $(CURDIR)/keystone/tests/test_overrides.conf
 	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
 endif
 
