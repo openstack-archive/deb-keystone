@@ -1,0 +1,16 @@
+Description: For an unkown reason, _() is undefine in keystone/exception.py and FTBFS
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: no
+Last-Update: 2013-09-13
+
+--- keystone-2013.2~b3.orig/keystone/exception.py
++++ keystone-2013.2~b3/keystone/exception.py
+@@ -24,6 +24,8 @@ LOG = logging.getLogger(__name__)
+ # Tests use this to make exception message format errors fatal
+ _FATAL_EXCEPTION_FORMAT_ERRORS = False
+ 
++def _(a):
++ return a
+ 
+ class Error(StandardError):
+     """Base error class.
