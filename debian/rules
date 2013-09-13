@@ -75,4 +75,5 @@ override_dh_clean:
 	rm -f $(CURDIR)/debian/keystone.config $(CURDIR)/debian/keystone.postinst
 	find $(CURDIR)/keystone/tests -name '*.db' -delete
 	rm -rf $(CURDIR)/vendor
+	rm -f $(CURDIR)/debian/tests/testing.db
 	dh_clean
