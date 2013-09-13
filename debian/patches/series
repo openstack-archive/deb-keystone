@@ -1,3 +1,2 @@
 sql_conn.patch
 fixes-keystone-default-catalog.patch
-fix-missing-gettext-import.patch
