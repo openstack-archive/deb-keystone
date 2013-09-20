@@ -1,3 +1,4 @@
 sql_conn.patch
 fixes-keystone-default-catalog.patch
 Add_TLS_Support_for_LDAP.patch
+CVE-2013-4294_Fix_and_test_token_revocation_list_API_grizzly.patch
