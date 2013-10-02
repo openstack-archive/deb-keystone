@@ -45,18 +45,18 @@ Build-Depends-Indep: pep8 (>= 1.3.3),
                      python-paste,
                      python-pastedeploy,
                      python-prettytable,
+                     python-pysqlite2,
                      python-requests (>= 1.0.0),
                      python-routes,
                      python-setuptools,
                      python-sphinx,
                      python-sqlalchemy,
-                     python-sqlite,
                      python-swift,
                      python-swiftclient (>= 1:1.2.0),
                      python-testtools (>= 0.9.32),
                      python-unittest2,
                      python-webob (>= 1.2.3),
-                     python-webtest
+                     python-webtest (>= 2.0)
 Standards-Version: 3.9.3
 Homepage: http://keystone.openstack.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
@@ -87,9 +87,9 @@ Depends: python-d2to1 (>= 0.2.10),
          python-pastescript,
          python-pbr,
          python-prettytable,
+         python-pysqlite2,
          python-routes,
          python-sqlalchemy,
-         python-sqlite,
          python-webob (>= 1.2.3),
          ${misc:Depends},
          ${python:Depends}
