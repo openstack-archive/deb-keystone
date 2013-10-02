@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2013 OpenStack LLC
+# Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -328,7 +328,8 @@ class V3TokenDataHelper(object):
         return {'token': token_data}
 
 
-@dependency.requires('token_api', 'identity_api', 'catalog_api', 'oauth_api')
+@dependency.optional('oauth_api')
+@dependency.requires('token_api', 'identity_api', 'catalog_api')
 class Provider(token.provider.Provider):
     def __init__(self, *args, **kwargs):
         super(Provider, self).__init__(*args, **kwargs)
@@ -398,8 +399,11 @@ class Provider(token.provider.Provider):
 
         access_token = None
         if 'oauth1' in method_names:
-            access_token_id = auth_context['access_token_id']
-            access_token = self.oauth_api.get_access_token(access_token_id)
+            if self.oauth_api:
+                access_token_id = auth_context['access_token_id']
+                access_token = self.oauth_api.get_access_token(access_token_id)
+            else:
+                raise exception.Forbidden(_('Oauth is disabled.'))
 
         token_data = self.v3_token_data_helper.get_token_data(
             user_id,
@@ -453,23 +457,15 @@ class Provider(token.provider.Provider):
 
         return (token_id, token_data)
 
-    def _verify_token(self, token_id, belongs_to=None):
+    def _verify_token(self, token_id):
         """Verify the given token and return the token_ref."""
-        try:
-            token_ref = self.token_api.get_token(token_id)
-            return self._verify_token_ref(token_ref, belongs_to)
-        except exception.TokenNotFound:
-                raise exception.Unauthorized()
+        token_ref = self.token_api.get_token(token_id)
+        return self._verify_token_ref(token_ref)
 
-    def _verify_token_ref(self, token_ref, belongs_to=None):
+    def _verify_token_ref(self, token_ref):
         """Verify and return the given token_ref."""
         if not token_ref:
             raise exception.Unauthorized()
-        if belongs_to:
-            if not (token_ref['tenant'] and
-                    token_ref['tenant']['id'] == belongs_to):
-                raise exception.Unauthorized()
-
         return token_ref
 
     def revoke_token(self, token_id):
@@ -516,8 +512,8 @@ class Provider(token.provider.Provider):
                 if project_ref['domain_id'] != DEFAULT_DOMAIN_ID:
                     raise exception.Unauthorized(msg)
 
-    def validate_v2_token(self, token_id, belongs_to=None):
-        token_ref = self._verify_token(token_id, belongs_to)
+    def validate_v2_token(self, token_id):
+        token_ref = self._verify_token(token_id)
         return self._validate_v2_token_ref(token_ref)
 
     def _validate_v2_token_ref(self, token_ref):
@@ -552,9 +548,9 @@ class Provider(token.provider.Provider):
                 token_data = self.v2_token_data_helper.format_token(
                     token_ref, roles_ref, catalog_ref)
             return token_data
-        except (exception.ValidationError, exception.TokenNotFound) as e:
+        except exception.ValidationError as e:
             LOG.exception(_('Failed to validate token'))
-            raise exception.Unauthorized(e)
+            raise exception.TokenNotFound(e)
 
     def validate_v3_token(self, token_id):
         try:
@@ -562,7 +558,6 @@ class Provider(token.provider.Provider):
             token_data = self._validate_v3_token_ref(token_ref)
             return token_data
         except (exception.ValidationError,
-                exception.TokenNotFound,
                 exception.UserNotFound):
             LOG.exception(_('Failed to validate token'))
 
@@ -591,8 +586,8 @@ class Provider(token.provider.Provider):
                 expires=token_ref['expires'])
         return token_data
 
-    def validate_token(self, token_id, belongs_to=None):
-        token_ref = self._verify_token(token_id, belongs_to=belongs_to)
+    def validate_token(self, token_id):
+        token_ref = self._verify_token(token_id)
         version = self.get_token_version(token_ref)
         if version == token.provider.V3:
             return self._validate_v3_token_ref(token_ref)

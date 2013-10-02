@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -241,7 +241,20 @@ class Manager(manager.Manager):
         if not roles:
             raise exception.NotFound(tenant_id)
         for role_id in roles:
-            self.remove_role_from_user_and_project(user_id, tenant_id, role_id)
+            self.driver.remove_role_from_user_and_project(user_id, tenant_id,
+                                                          role_id)
+
+    def list_projects_for_user(self, user_id):
+        # NOTE(henry-nash): In order to get a complete list of user projects,
+        # the driver will need to look at group assignments.  To avoid cross
+        # calling between the assignment and identity driver we get the group
+        # list here and pass it in. The rest of the detailed logic of listing
+        # projects for a user is pushed down into the driver to enable
+        # optimization with the various backend technologies (SQL, LDAP etc.).
+
+        group_ids = [x['id'] for
+                     x in self.identity_api.list_groups_for_user(user_id)]
+        return self.driver.list_projects_for_user(user_id, group_ids)
 
     @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
                         expiration_time=CONF.assignment.cache_time)
@@ -302,6 +315,17 @@ class Manager(manager.Manager):
         self.driver.delete_role(role_id)
         self.get_role.invalidate(self, role_id)
 
+    def list_role_assignments_for_role(self, role_id=None):
+        # NOTE(henry-nash): Currently the efficiency of the key driver
+        # implementation (SQL) of list_role_assignments is severely hampered by
+        # the existence of the multiple grant tables - hence there is little
+        # advantage in pushing the logic of this method down into the driver.
+        # Once the single assignment table is implemented, then this situation
+        # will be different, and this method should have its own driver
+        # implementation.
+        return [r for r in self.driver.list_role_assignments()
+                if r['role_id'] == role_id]
+
 
 class Driver(object):
 
@@ -348,20 +372,11 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
-    def get_project_users(self, tenant_id):
-        """Lists all users with a relationship to the specified project.
+    def list_user_ids_for_project(self, tenant_id):
+        """Lists all user IDs with a role assignment in the specified project.
 
-        :returns: a list of user_refs or an empty set.
+        :returns: a list of user_ids or an empty set.
         :raises: keystone.exception.ProjectNotFound
-
-        """
-        raise exception.NotImplemented()
-
-    def get_projects_for_user(self, user_id):
-        """Get the tenants associated with a given user.
-
-        :returns: a list of tenant_id's.
-        :raises: keystone.exception.UserNotFound
 
         """
         raise exception.NotImplemented()
@@ -524,8 +539,13 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
-    def list_user_projects(self, user_id):
+    def list_projects_for_user(self, user_id, group_ids):
         """List all projects associated with a given user.
+
+        :param user_id: the user in question
+        :param group_ids: the groups this user is a member of.  This list is
+                          built in the Manager, so that the driver itself
+                          does not have to call across to identity.
 
         :returns: a list of project_refs or an empty list.
 

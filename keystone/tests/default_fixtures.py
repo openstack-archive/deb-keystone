@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -72,7 +72,7 @@ USERS = [
         'password': 'two2',
         'email': 'two@example.com',
         'enabled': True,
-        'tenant_id': 'baz',
+        'default_project_id': 'baz',
         'tenants': ['baz'],
         'email': 'two@three.com',
     }, {
@@ -82,7 +82,7 @@ USERS = [
         'password': 'bad',
         'email': 'bad@guy.com',
         'enabled': False,
-        'tenant_id': 'baz',
+        'default_project_id': 'baz',
         'tenants': ['baz'],
         'email': 'badguy@goodguy.com',
     }, {

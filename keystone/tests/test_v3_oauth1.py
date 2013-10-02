@@ -26,8 +26,7 @@ from keystone import contrib
 from keystone.contrib import oauth1
 from keystone.contrib.oauth1 import controllers
 from keystone.openstack.common import importutils
-
-import test_v3
+from keystone.tests import test_v3
 
 
 CONF = config.CONF
@@ -148,7 +147,7 @@ class ConsumerCRUDTests(OAuth1Tests):
         consumer_id = consumer.get('id')
         resp = self.get('/OS-OAUTH1/consumers/%(consumer_id)s'
                         % {'consumer_id': consumer_id})
-        self.assertTrue(resp.result.get('consumer').get('id'), consumer_id)
+        self.assertEqual(resp.result.get('consumer').get('id'), consumer_id)
 
     def test_consumer_list(self):
         resp = self.get('/OS-OAUTH1/consumers')
@@ -270,8 +269,8 @@ class AccessTokenCRUDTests(OAuthFlowTests):
                         % {'user_id': self.user_id,
                            'key': self.access_token.key})
         entity = resp.result.get('access_token')
-        self.assertTrue(entity['id'], self.access_token.key)
-        self.assertTrue(entity['consumer_id'], self.consumer.key)
+        self.assertEqual(entity['id'], self.access_token.key)
+        self.assertEqual(entity['consumer_id'], self.consumer.key)
 
     def test_get_access_token_dne(self):
         self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
@@ -295,7 +294,7 @@ class AccessTokenCRUDTests(OAuthFlowTests):
                   'role': self.role_id})
         resp = self.get(url)
         entity = resp.result.get('role')
-        self.assertTrue(entity['id'], self.role_id)
+        self.assertEqual(entity['id'], self.role_id)
 
     def test_get_role_in_access_token_dne(self):
         self.test_oauth_flow()
@@ -342,6 +341,17 @@ class AuthTokenTests(OAuthFlowTests):
                           self.access_token.key)
         self.assertEquals(oauth_section['consumer_id'], self.consumer.key)
 
+        # verify the roles section
+        roles_list = r.result['token']['roles']
+        # we can just verify the 0th role since we are only assigning one role
+        self.assertEquals(roles_list[0]['id'], self.role_id)
+
+        # verify that the token can perform delegated tasks
+        ref = self.new_user_ref(domain_id=self.domain_id)
+        r = self.admin_request(path='/v3/users', headers=headers,
+                               method='POST', body={'user': ref})
+        self.assertValidUserResponse(r, ref)
+
     def test_delete_access_token_also_revokes_token(self):
         self.test_oauth_flow()
 
@@ -355,7 +365,7 @@ class AuthTokenTests(OAuthFlowTests):
         headers = {'X-Subject-Token': self.keystone_token_id,
                    'X-Auth-Token': self.keystone_token_id}
         self.get('/auth/tokens', headers=headers,
-                 expected_status=401)
+                 expected_status=404)
 
     def test_deleting_consumer_also_deletes_tokens(self):
         self.test_oauth_flow()
@@ -376,7 +386,7 @@ class AuthTokenTests(OAuthFlowTests):
         headers = {'X-Subject-Token': self.keystone_token_id,
                    'X-Auth-Token': self.keystone_token_id}
         self.head('/auth/tokens', headers=headers,
-                  expected_status=401)
+                  expected_status=404)
 
     def test_change_user_password_also_deletes_tokens(self):
         self.test_oauth_flow()

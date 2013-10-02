@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,11 +16,10 @@
 
 import webob
 
-from keystone.tests import core as test
-
 from keystone import config
 from keystone import middleware
 from keystone.openstack.common import jsonutils
+from keystone import tests
 
 
 CONF = config.CONF
@@ -44,7 +43,7 @@ def make_response(**kwargs):
     return webob.Response(body)
 
 
-class TokenAuthMiddlewareTest(test.TestCase):
+class TokenAuthMiddlewareTest(tests.TestCase):
     def test_request(self):
         req = make_request()
         req.headers[middleware.AUTH_TOKEN_HEADER] = 'MAGIC'
@@ -53,7 +52,7 @@ class TokenAuthMiddlewareTest(test.TestCase):
         self.assertEqual(context['token_id'], 'MAGIC')
 
 
-class AdminTokenAuthMiddlewareTest(test.TestCase):
+class AdminTokenAuthMiddlewareTest(tests.TestCase):
     def test_request_admin(self):
         req = make_request()
         req.headers[middleware.AUTH_TOKEN_HEADER] = CONF.admin_token
@@ -69,7 +68,7 @@ class AdminTokenAuthMiddlewareTest(test.TestCase):
         self.assertFalse(context['is_admin'])
 
 
-class PostParamsMiddlewareTest(test.TestCase):
+class PostParamsMiddlewareTest(tests.TestCase):
     def test_request_with_params(self):
         req = make_request(body="arg1=one", method='POST')
         middleware.PostParamsMiddleware(None).process_request(req)
@@ -77,7 +76,7 @@ class PostParamsMiddlewareTest(test.TestCase):
         self.assertEqual(params, {"arg1": "one"})
 
 
-class JsonBodyMiddlewareTest(test.TestCase):
+class JsonBodyMiddlewareTest(tests.TestCase):
     def test_request_with_params(self):
         req = make_request(body='{"arg1": "one", "arg2": ["a"]}',
                            content_type='application/json',
@@ -115,7 +114,7 @@ class JsonBodyMiddlewareTest(test.TestCase):
         self.assertEqual(params, {})
 
 
-class XmlBodyMiddlewareTest(test.TestCase):
+class XmlBodyMiddlewareTest(tests.TestCase):
     def test_client_wants_xml_back(self):
         """Clients requesting XML should get what they ask for."""
         body = '{"container": {"attribute": "value"}}'
@@ -150,7 +149,7 @@ class XmlBodyMiddlewareTest(test.TestCase):
             content_type='application/xml',
             method='POST')
         middleware.XmlBodyMiddleware(None).process_request(req)
-        self.assertTrue(req.content_type, 'application/json')
+        self.assertEqual(req.content_type, 'application/json')
         self.assertTrue(jsonutils.loads(req.body))
 
     def test_json_unnaffected(self):

@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -114,12 +114,12 @@ class CrudExtension(wsgi.ExtensionRouter):
         mapper.connect(
             '/users/{user_id}/tenant',
             controller=user_controller,
-            action='update_user_project',
+            action='update_user',
             conditions=dict(method=['PUT']))
         mapper.connect(
             '/users/{user_id}/OS-KSADM/tenant',
             controller=user_controller,
-            action='update_user_project',
+            action='update_user',
             conditions=dict(method=['PUT']))
 
         # COMPAT(diablo): the copy with no OS-KSADM is from diablo

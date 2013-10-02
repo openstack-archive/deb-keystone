@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -20,16 +20,18 @@ import uuid
 
 import memcache
 
-from keystone.tests import core as test
-
 from keystone.common import utils
+from keystone import config
 from keystone import exception
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
+from keystone import tests
+from keystone.tests import test_backend
+from keystone.tests import test_utils
 from keystone import token
 from keystone.token.backends import memcache as token_memcache
 
-import test_backend
+CONF = config.CONF
 
 
 class MemcacheClient(object):
@@ -109,7 +111,7 @@ class MemcacheClient(object):
             pass
 
 
-class MemcacheToken(test.TestCase, test_backend.TokenTests):
+class MemcacheToken(tests.TestCase, test_backend.TokenTests):
     def setUp(self):
         super(MemcacheToken, self).setUp()
         self.load_backends()
@@ -185,3 +187,47 @@ class MemcacheToken(test.TestCase, test_backend.TokenTests):
             exception.UnexpectedError,
             self.token_api.driver._update_user_list_with_cas,
             user_key, token_data)
+
+    def test_token_expire_timezone(self):
+
+        @test_utils.timezone
+        def _create_token(expire_time):
+            token_id = uuid.uuid4().hex
+            user_id = unicode(uuid.uuid4().hex)
+            data = {'id': token_id, 'a': 'b', 'user': {'id': user_id},
+                    'expires': expire_time
+                    }
+            self.token_api.create_token(token_id, data)
+            return data
+
+        for d in ['+0', '-11', '-8', '-5', '+5', '+8', '+14']:
+            test_utils.TZ = 'UTC' + d
+            expire_time = timeutils.utcnow() + \
+                datetime.timedelta(minutes=1)
+            data_in = _create_token(expire_time)
+            data_get = None
+            data_get = self.token_api.get_token(data_in['id'])
+
+            self.assertIsNotNone(data_get, "TZ=%s" % test_utils.TZ)
+            self.assertEquals(data_in['id'], data_get['id'],
+                              "TZ=%s" % test_utils.TZ)
+
+            expire_time_expired = timeutils.utcnow() + \
+                datetime.timedelta(minutes=-1)
+            data_in = _create_token(expire_time_expired)
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_api.get_token, data_in['id'])
+
+
+class MemcacheTokenCacheInvalidation(tests.TestCase,
+                                     test_backend.TokenCacheInvalidation):
+    def setUp(self):
+        super(MemcacheTokenCacheInvalidation, self).setUp()
+        CONF.token.driver = 'keystone.token.backends.memcache.Token'
+        self.load_backends()
+        fake_client = MemcacheClient()
+        self.token_man = token.Manager()
+        self.token_man.driver = token_memcache.Token(client=fake_client)
+        self.token_api = self.token_man
+        self.token_provider_api.driver.token_api = self.token_api
+        self._create_test_data()

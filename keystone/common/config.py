@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -37,8 +37,6 @@ FILE_OPTIONS = {
                    default='http://localhost:%(admin_port)s/'),
         cfg.StrOpt('onready'),
         cfg.StrOpt('auth_admin_prefix', default=''),
-        cfg.StrOpt('policy_file', default='policy.json'),
-        cfg.StrOpt('policy_default_rule', default=None),
         # default max request size is 112k
         cfg.IntOpt('max_request_body_size', default=114688),
         cfg.IntOpt('max_param_size', default=64),
@@ -106,7 +104,6 @@ FILE_OPTIONS = {
         cfg.BoolOpt('cert_required', default=False),
         cfg.IntOpt('key_size', default=1024),
         cfg.IntOpt('valid_days', default=3650),
-        cfg.StrOpt('ca_password', default=None),
         cfg.StrOpt('cert_subject',
                    default='/C=US/ST=Unset/L=Unset/O=Unset/CN=localhost')],
     'signing': [
@@ -121,7 +118,6 @@ FILE_OPTIONS = {
                    default="/etc/keystone/ssl/certs/cakey.pem"),
         cfg.IntOpt('key_size', default=2048),
         cfg.IntOpt('valid_days', default=3650),
-        cfg.StrOpt('ca_password', default=None),
         cfg.StrOpt('cert_subject',
                    default=('/C=US/ST=Unset/L=Unset/O=Unset/'
                             'CN=www.example.com'))],
@@ -180,12 +176,11 @@ FILE_OPTIONS = {
         cfg.StrOpt('user_mail_attribute', default='email'),
         cfg.StrOpt('user_pass_attribute', default='userPassword'),
         cfg.StrOpt('user_enabled_attribute', default='enabled'),
-        cfg.StrOpt('user_domain_id_attribute',
-                   default='businessCategory'),
         cfg.IntOpt('user_enabled_mask', default=0),
         cfg.StrOpt('user_enabled_default', default='True'),
         cfg.ListOpt('user_attribute_ignore',
-                    default='tenant_id,tenants'),
+                    default='default_project_id,tenants'),
+        cfg.StrOpt('user_default_project_id_attribute', default=None),
         cfg.BoolOpt('user_allow_create', default=True),
         cfg.BoolOpt('user_allow_update', default=True),
         cfg.BoolOpt('user_allow_delete', default=True),
@@ -233,8 +228,6 @@ FILE_OPTIONS = {
         cfg.StrOpt('group_name_attribute', default='ou'),
         cfg.StrOpt('group_member_attribute', default='member'),
         cfg.StrOpt('group_desc_attribute', default='description'),
-        cfg.StrOpt('group_domain_id_attribute',
-                   default='businessCategory'),
         cfg.ListOpt('group_attribute_ignore', default=''),
         cfg.BoolOpt('group_allow_create', default=True),
         cfg.BoolOpt('group_allow_update', default=True),

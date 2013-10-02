@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -41,7 +41,7 @@ class Tenant(controller.V2Controller):
         self.assert_admin(context)
         tenant_refs = self.identity_api.list_projects()
         for tenant_ref in tenant_refs:
-            tenant_ref = self._filter_domain_id(tenant_ref)
+            tenant_ref = self.filter_domain_id(tenant_ref)
         params = {
             'limit': context['query_string'].get('limit'),
             'marker': context['query_string'].get('marker'),
@@ -64,11 +64,10 @@ class Tenant(controller.V2Controller):
             raise exception.Unauthorized(e)
 
         user_ref = token_ref['user']
-        tenant_ids = self.identity_api.get_projects_for_user(user_ref['id'])
-        tenant_refs = []
-        for tenant_id in tenant_ids:
-            ref = self.identity_api.get_project(tenant_id)
-            tenant_refs.append(self._filter_domain_id(ref))
+        tenant_refs = (
+            self.assignment_api.list_projects_for_user(user_ref['id']))
+        tenant_refs = [self.filter_domain_id(ref) for ref in tenant_refs
+                       if ref['domain_id'] == DEFAULT_DOMAIN_ID]
         params = {
             'limit': context['query_string'].get('limit'),
             'marker': context['query_string'].get('marker'),
@@ -79,13 +78,13 @@ class Tenant(controller.V2Controller):
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
         ref = self.identity_api.get_project(tenant_id)
-        return {'tenant': self._filter_domain_id(ref)}
+        return {'tenant': self.filter_domain_id(ref)}
 
     def get_project_by_name(self, context, tenant_name):
         self.assert_admin(context)
         ref = self.identity_api.get_project_by_name(
             tenant_name, DEFAULT_DOMAIN_ID)
-        return {'tenant': self._filter_domain_id(ref)}
+        return {'tenant': self.filter_domain_id(ref)}
 
     # CRUD Extension
     def create_project(self, context, tenant):
@@ -100,7 +99,7 @@ class Tenant(controller.V2Controller):
         tenant = self.assignment_api.create_project(
             tenant_ref['id'],
             self._normalize_domain_id(context, tenant_ref))
-        return {'tenant': self._filter_domain_id(tenant)}
+        return {'tenant': self.filter_domain_id(tenant)}
 
     def update_project(self, context, tenant_id, tenant):
         self.assert_admin(context)
@@ -126,9 +125,11 @@ class Tenant(controller.V2Controller):
 
     def get_project_users(self, context, tenant_id, **kw):
         self.assert_admin(context)
-        user_refs = self.identity_api.get_project_users(tenant_id)
-        for user_ref in user_refs:
-            self._filter_domain_id(user_ref)
+        user_refs = []
+        user_ids = self.assignment_api.list_user_ids_for_project(tenant_id)
+        for user_id in user_ids:
+            user_ref = self.identity_api.get_user(user_id)
+            user_refs.append(self.identity_api.v3_to_v2_user(user_ref))
         return {'users': user_refs}
 
     def _format_project_list(self, tenant_refs, **kwargs):
@@ -170,7 +171,7 @@ class User(controller.V2Controller):
     def get_user(self, context, user_id):
         self.assert_admin(context)
         ref = self.identity_api.get_user(user_id)
-        return {'user': self._filter_domain_id(ref)}
+        return {'user': self.identity_api.v3_to_v2_user(ref)}
 
     def get_users(self, context):
         # NOTE(termie): i can't imagine that this really wants all the data
@@ -181,15 +182,12 @@ class User(controller.V2Controller):
 
         self.assert_admin(context)
         user_list = self.identity_api.list_users()
-        for x in user_list:
-            self._filter_domain_id(x)
-        return {'users': user_list}
+        return {'users': self.identity_api.v3_to_v2_user(user_list)}
 
     def get_user_by_name(self, context, user_name):
         self.assert_admin(context)
-        ref = self.identity_api.get_user_by_name(
-            user_name, DEFAULT_DOMAIN_ID)
-        return {'user': self._filter_domain_id(ref)}
+        ref = self.identity_api.get_user_by_name(user_name, DEFAULT_DOMAIN_ID)
+        return {'user': self.identity_api.v3_to_v2_user(ref)}
 
     # CRUD extension
     def create_user(self, context, user):
@@ -203,17 +201,21 @@ class User(controller.V2Controller):
             msg = 'Enabled field must be a boolean'
             raise exception.ValidationError(message=msg)
 
-        default_tenant_id = user.get('tenantId', None)
-        if (default_tenant_id is not None
-                and self.identity_api.get_project(default_tenant_id) is None):
-            raise exception.ProjectNotFound(project_id=default_tenant_id)
+        default_project_id = user.pop('tenantId', None)
+        if default_project_id is not None:
+            # Check to see if the project is valid before moving on.
+            self.assignment_api.get_project(default_project_id)
+            user['default_project_id'] = default_project_id
+
         user_id = uuid.uuid4().hex
         user_ref = self._normalize_domain_id(context, user.copy())
         user_ref['id'] = user_id
-        new_user_ref = self.identity_api.create_user(user_id, user_ref)
-        if default_tenant_id:
-            self.identity_api.add_user_to_project(default_tenant_id, user_id)
-        return {'user': self._filter_domain_id(new_user_ref)}
+        new_user_ref = self.identity_api.v3_to_v2_user(
+            self.identity_api.create_user(user_id, user_ref))
+
+        if default_project_id is not None:
+            self.identity_api.add_user_to_project(default_project_id, user_id)
+        return {'user': new_user_ref}
 
     def update_user(self, context, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
@@ -223,12 +225,66 @@ class User(controller.V2Controller):
             msg = 'Enabled field should be a boolean'
             raise exception.ValidationError(message=msg)
 
-        user_ref = self.identity_api.update_user(user_id, user)
+        default_project_id = user.pop('tenantId', None)
+        if default_project_id is not None:
+            user['default_project_id'] = default_project_id
+
+        old_user_ref = self.identity_api.v3_to_v2_user(
+            self.identity_api.get_user(user_id))
+
+        if ('tenantId' in old_user_ref and
+                old_user_ref['tenantId'] != default_project_id and
+                default_project_id is not None):
+            # Make sure the new project actually exists before we perform the
+            # user update.
+            self.assignment_api.get_project(default_project_id)
+
+        user_ref = self.identity_api.v3_to_v2_user(
+            self.identity_api.update_user(user_id, user))
 
         if user.get('password') or not user.get('enabled', True):
         # If the password was changed or the user was disabled we clear tokens
             self._delete_tokens_for_user(user_id)
-        return {'user': self._filter_domain_id(user_ref)}
+
+        # If 'tenantId' is in either ref, we might need to add or remove the
+        # user from a project.
+        if 'tenantId' in user_ref or 'tenantId' in old_user_ref:
+            if user_ref['tenantId'] != old_user_ref.get('tenantId'):
+                if old_user_ref.get('tenantId'):
+                    try:
+                        member_role_id = config.CONF.member_role_id
+                        self.assignment_api.remove_role_from_user_and_project(
+                            user_id, old_user_ref['tenantId'], member_role_id)
+                    except exception.NotFound:
+                        # NOTE(morganfainberg): This is not a critical error it
+                        # just means that the user cannot be removed from the
+                        # old tenant.  This could occur if roles aren't found
+                        # or if the project is invalid or if there are no roles
+                        # for the user on that project.
+                        msg = _('Unable to remove user %(user)s from '
+                                '%(tenant)s.')
+                        LOG.warning(msg, {'user': user_id,
+                                          'tenant': old_user_ref['tenantId']})
+
+                if user_ref['tenantId']:
+                    try:
+                        self.assignment_api.add_user_to_project(
+                            user_ref['tenantId'], user_id)
+                    except exception.Conflict:
+                        # We are already a member of that tenant
+                        pass
+                    except exception.NotFound:
+                        # NOTE(morganfainberg): Log this and move on. This is
+                        # not the end of the world if we can't add the user to
+                        # the appropriate tenant. Most of the time this means
+                        # that the project is invalid or roles are some how
+                        # incorrect.  This shouldn't prevent the return of the
+                        # new ref.
+                        msg = _('Unable to add user %(user)s to %(tenant)s.')
+                        LOG.warning(msg, {'user': user_id,
+                                          'tenant': user_ref['tenantId']})
+
+        return {'user': user_ref}
 
     def delete_user(self, context, user_id):
         self.assert_admin(context)
@@ -239,20 +295,6 @@ class User(controller.V2Controller):
         return self.update_user(context, user_id, user)
 
     def set_user_password(self, context, user_id, user):
-        return self.update_user(context, user_id, user)
-
-    def update_user_project(self, context, user_id, user):
-        """Update the default tenant."""
-        self.assert_admin(context)
-
-        try:
-            # ensure that we're a member of that tenant
-            self.identity_api.add_user_to_project(
-                user.get('tenantId'), user_id)
-        except exception.Conflict:
-            # we're already a member of that tenant
-            pass
-
         return self.update_user(context, user_id, user)
 
 
@@ -295,6 +337,10 @@ class Role(controller.V2Controller):
 
     def delete_role(self, context, role_id):
         self.assert_admin(context)
+        # The driver will delete any assignments for this role.
+        # We must first, however, revoke any tokens for users that have an
+        # assignment with this role.
+        self._delete_tokens_for_role(role_id)
         self.identity_api.delete_role(role_id)
 
     def get_roles(self, context):
@@ -350,14 +396,18 @@ class Role(controller.V2Controller):
         self.assert_admin(context)
         # Ensure user exists by getting it first.
         self.identity_api.get_user(user_id)
-        tenant_ids = self.identity_api.get_projects_for_user(user_id)
+        tenants = self.assignment_api.list_projects_for_user(user_id)
         o = []
-        for tenant_id in tenant_ids:
+        for tenant in tenants:
+            # As a v2 call, we should limit the response to those projects in
+            # the default domain.
+            if tenant['domain_id'] != DEFAULT_DOMAIN_ID:
+                continue
             role_ids = self.identity_api.get_roles_for_user_and_project(
-                user_id, tenant_id)
+                user_id, tenant['id'])
             for role_id in role_ids:
                 ref = {'roleId': role_id,
-                       'tenantId': tenant_id,
+                       'tenantId': tenant['id'],
                        'userId': user_id}
                 ref['id'] = urllib.urlencode(ref)
                 o.append(ref)
@@ -575,7 +625,7 @@ class ProjectV3(controller.V3Controller):
 
     @controller.filterprotected('enabled', 'name')
     def list_user_projects(self, context, filters, user_id):
-        refs = self.identity_api.list_user_projects(user_id)
+        refs = self.identity_api.list_projects_for_user(user_id)
         return ProjectV3.wrap_collection(context, refs, filters)
 
     @controller.protected()
@@ -812,7 +862,11 @@ class RoleV3(controller.V3Controller):
 
     @controller.protected()
     def delete_role(self, context, role_id):
-        return self.identity_api.delete_role(role_id)
+        # The driver will delete any assignments for this role.
+        # We must first, however, revoke any tokens for users that have an
+        # assignment with this role.
+        self._delete_tokens_for_role(role_id)
+        self.identity_api.delete_role(role_id)
 
     def _require_domain_xor_project(self, domain_id, project_id):
         if (domain_id and project_id) or (not domain_id and not project_id):
@@ -1218,7 +1272,7 @@ class RoleAssignmentV3(controller.V3Controller):
         # to pass the filters into the driver call, so that the list size is
         # kept a minimum.
 
-        refs = self.identity_api.list_role_assignments()
+        refs = self.assignment_api.list_role_assignments()
         formatted_refs = (
             [self._format_entity(x) for x in refs
              if self._filter_inherited(x)])

@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,19 +16,18 @@
 
 import os
 
-from keystone.tests import core as test
-
 from keystone import exception
+from keystone import tests
+from keystone.tests import default_fixtures
+from keystone.tests import test_backend
 
-import default_fixtures
-import test_backend
 
 DEFAULT_CATALOG_TEMPLATES = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
     'default_catalog.templates'))
 
 
-class TestTemplatedCatalog(test.TestCase, test_backend.CatalogTests):
+class TestTemplatedCatalog(tests.TestCase, test_backend.CatalogTests):
 
     DEFAULT_FIXTURE = {
         'RegionOne': {

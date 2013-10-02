@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
-# Copyright (C) 2011 OpenStack LLC.
+# Copyright (C) 2011 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -95,10 +95,12 @@ class User(Model):
         description
         email
         enabled (bool, default True)
+        default_project_id
     """
 
     required_keys = ('id', 'name', 'domain_id')
-    optional_keys = ('password', 'description', 'email', 'enabled')
+    optional_keys = ('password', 'description', 'email', 'enabled',
+                     'default_project_id')
 
 
 class Group(Model):

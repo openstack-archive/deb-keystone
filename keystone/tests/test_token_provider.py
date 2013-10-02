@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2013 OpenStack LLC
+# Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -18,8 +18,10 @@ import datetime
 
 from keystone import exception
 from keystone.openstack.common import timeutils
-from keystone.tests import core as test
+from keystone import tests
+from keystone.tests import default_fixtures
 from keystone import token
+
 
 FUTURE_DELTA = datetime.timedelta(seconds=86400)
 CURRENT_DATE = timeutils.utcnow()
@@ -690,7 +692,7 @@ SAMPLE_MALFORMED_TOKEN = {
 }
 
 
-class TestTokenProvider(test.TestCase):
+class TestTokenProvider(tests.TestCase):
     def setUp(self):
         super(TestTokenProvider, self).setUp()
         self.load_backends()
@@ -746,12 +748,6 @@ class TestTokenProvider(test.TestCase):
                           provider=token.provider.UUID_PROVIDER)
         token.provider.Manager()
 
-        # custom provider should be OK too
-        self.opt_in_group('signing', token_format='CUSTOM')
-        self.opt_in_group('token',
-                          provider=token.provider.PKI_PROVIDER)
-        token.provider.Manager()
-
     def test_default_token_format(self):
         self.assertEqual(token.provider.Manager.get_token_provider(),
                          token.provider.PKI_PROVIDER)
@@ -760,6 +756,15 @@ class TestTokenProvider(test.TestCase):
         self.opt_in_group('signing', token_format='UUID')
         self.assertEqual(token.provider.Manager.get_token_provider(),
                          token.provider.UUID_PROVIDER)
+
+    def test_default_providers_without_token_format(self):
+        self.opt_in_group('token',
+                          provider=token.provider.UUID_PROVIDER)
+        token.provider.Manager()
+
+        self.opt_in_group('token',
+                          provider=token.provider.PKI_PROVIDER)
+        token.provider.Manager()
 
     def test_unsupported_token_format(self):
         self.opt_in_group('signing', token_format='CUSTOM')
@@ -796,13 +801,13 @@ class TestTokenProvider(test.TestCase):
                          'my.package.MyProvider')
 
     def test_provider_token_expiration_validation(self):
-        self.assertRaises(exception.Unauthorized,
+        self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api._is_valid_token,
                           SAMPLE_V2_TOKEN_EXPIRED)
-        self.assertRaises(exception.Unauthorized,
+        self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api._is_valid_token,
                           SAMPLE_V3_TOKEN_EXPIRED)
-        self.assertRaises(exception.Unauthorized,
+        self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api._is_valid_token,
                           SAMPLE_MALFORMED_TOKEN)
         self.assertEqual(
@@ -811,3 +816,12 @@ class TestTokenProvider(test.TestCase):
         self.assertEqual(
             None,
             self.token_provider_api._is_valid_token(SAMPLE_V3_TOKEN_VALID))
+
+    def test_uuid_provider_no_oauth_fails_oauth(self):
+        self.load_fixtures(default_fixtures)
+        self.opt_in_group('token', provider=token.provider.UUID_PROVIDER)
+        driver = token.provider.Manager().driver
+        driver.oauth_api = None
+        self.assertRaises(exception.Forbidden,
+                          driver.issue_v3_token,
+                          self.user_foo['id'], ['oauth1'])

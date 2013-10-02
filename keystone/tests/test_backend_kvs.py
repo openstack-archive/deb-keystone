@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -15,15 +15,17 @@
 # under the License.
 import uuid
 
+from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.tests import core as test
+from keystone import tests
+from keystone.tests import default_fixtures
+from keystone.tests import test_backend
 
-import default_fixtures
-import test_backend
+CONF = config.CONF
 
 
-class KvsIdentity(test.TestCase, test_backend.IdentityTests):
+class KvsIdentity(tests.TestCase, test_backend.IdentityTests):
     def setUp(self):
         super(KvsIdentity, self).setUp()
         identity.CONF.identity.driver = (
@@ -31,9 +33,8 @@ class KvsIdentity(test.TestCase, test_backend.IdentityTests):
         self.load_backends()
         self.load_fixtures(default_fixtures)
 
-    def test_list_user_projects(self):
-        # NOTE(chungg): not implemented
-        self.skipTest('Blocked by bug 1119770')
+    def test_list_projects_for_user_with_grants(self):
+        self.skipTest('kvs backend is now deprecated')
 
     def test_create_duplicate_group_name_in_different_domains(self):
         self.skipTest('Blocked by bug 1119770')
@@ -63,7 +64,7 @@ class KvsIdentity(test.TestCase, test_backend.IdentityTests):
         self.skipTest('Blocked by bug 1119770')
 
 
-class KvsToken(test.TestCase, test_backend.TokenTests):
+class KvsToken(tests.TestCase, test_backend.TokenTests):
     def setUp(self):
         super(KvsToken, self).setUp()
         identity.CONF.identity.driver = (
@@ -71,7 +72,7 @@ class KvsToken(test.TestCase, test_backend.TokenTests):
         self.load_backends()
 
 
-class KvsTrust(test.TestCase, test_backend.TrustTests):
+class KvsTrust(tests.TestCase, test_backend.TrustTests):
     def setUp(self):
         super(KvsTrust, self).setUp()
         identity.CONF.identity.driver = (
@@ -84,7 +85,7 @@ class KvsTrust(test.TestCase, test_backend.TrustTests):
         self.load_fixtures(default_fixtures)
 
 
-class KvsCatalog(test.TestCase, test_backend.CatalogTests):
+class KvsCatalog(tests.TestCase, test_backend.CatalogTests):
     def setUp(self):
         super(KvsCatalog, self).setUp()
         identity.CONF.identity.driver = (
@@ -117,3 +118,13 @@ class KvsCatalog(test.TestCase, test_backend.CatalogTests):
     def test_get_catalog(self):
         catalog_ref = self.catalog_api.get_catalog('foo', 'bar')
         self.assertDictEqual(catalog_ref, self.catalog_foobar)
+
+
+class KvsTokenCacheInvalidation(tests.TestCase,
+                                test_backend.TokenCacheInvalidation):
+    def setUp(self):
+        super(KvsTokenCacheInvalidation, self).setUp()
+        CONF.identity.driver = 'keystone.identity.backends.kvs.Identity'
+        CONF.token.driver = 'keystone.token.backends.kvs.Token'
+        self.load_backends()
+        self._create_test_data()

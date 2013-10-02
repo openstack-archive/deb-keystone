@@ -1,5 +1,5 @@
 ..
-      Copyright 2011-2012 OpenStack, LLC
+      Copyright 2011-2012 OpenStack Foundation
       All Rights Reserved.
 
       Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -45,17 +45,6 @@ Stop the process using ``Control-C``.
 
     If you have not already configured Keystone, it may not start as expected.
 
-Memcached and System Time
-=========================
-
-If using `memcached`_ with Keystone - e.g. using the memcache token
-driver or the ``auth_token`` middleware - ensure that the system time
-of memcached hosts is set to UTC.  Memcached uses the host's system
-time in determining whether a key has expired, whereas Keystone sets
-key expiry in UTC.  The timezone used by Keystone and memcached must
-match if key expiry is to behave as expected.
-
-.. _`memcached`: http://memcached.org/
 
 Configuration Files
 ===================
@@ -98,6 +87,14 @@ order:
 PasteDeploy configuration file is specified by the ``config_file`` parameter in ``[paste_deploy]`` section of the primary configuration file. If the parameter
 is not an absolute path, then Keystone looks for it in the same directories as above. If not specified, WSGI pipeline definitions are loaded from the primary configuration file.
 
+Domain-specific Drivers
+-----------------------
+
+.. WARNING::
+
+    This feature is experimental and unsupported in Havana (with several known
+    issues that will not be fixed). Feedback welcome for Icehouse!
+
 Keystone supports the option (disabled by default) to specify identity driver
 configurations on a domain by domain basis, allowing, for example, a specific
 domain to have its own LDAP or SQL server. This is configured by specifying the
@@ -107,15 +104,16 @@ following options::
  domain_specific_drivers_enabled = True
  domain_config_dir = /etc/keystone/domains
 
-Setting ``domain_specific_drivers_enabled`` to True will enable this feature, causing
-keystone to look in the ``domain_config_dir`` for config files of the form::
+Setting ``domain_specific_drivers_enabled`` to ``True`` will enable this
+feature, causing Keystone to look in the ``domain_config_dir`` for config files
+of the form::
 
  keystone.<domain_name>.conf
 
-Options given in the domain specific configuration file will override those in the
-primary configuration file for the specified domain only. Domains without a specific
-configuration file will continue to use the options from the primary configuration
-file.
+Options given in the domain specific configuration file will override those in
+the primary configuration file for the specified domain only. Domains without a
+specific configuration file will continue to use the options from the primary
+configuration file.
 
 Authentication Plugins
 ----------------------
@@ -329,7 +327,6 @@ The values that specify where to read the certificates are under the
 * ``ca_key`` - Default is ``/etc/keystone/ssl/certs/cakey.pem``
 * ``key_size`` - Default is ``2048``
 * ``valid_days`` - Default is ``3650``
-* ``ca_password``  - Password required to read the ca_file. Default is None
 
 Signing Certificate Issued by External CA
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -342,7 +339,7 @@ the following conditions:
 * private key files must not be protected by a password
 
 When using signing certificate issued by an external CA, you do not need to
-specify ``key_size``, ``valid_days``, ``ca_key`` and ``ca_password`` as they
+specify ``key_size``, ``valid_days`` and ``ca_key`` as they
 will be ignored.
 
 The basic workflow for using a signing certificate issed by an external CA involves:
@@ -576,7 +573,6 @@ When generating SSL certificates the following values are read
 * ``key_size``: Key size to create. Defaults to 1024.
 * ``valid_days``: How long the certificate is valid for. Defaults to 3650 (10 years).
 * ``ca_key``: The private key for the CA. Defaults to ``/etc/keystone/ssl/certs/cakey.pem``.
-* ``ca_password``: The password for the CA private key. Defaults to None.
 * ``cert_subject``: The subject to set in the certificate. Defaults to /C=US/ST=Unset/L=Unset/O=Unset/CN=localhost. When setting the subject it is important to set CN to be the address of the server so client validation will succeed. This generally means having the subject be at least /CN=<keystone ip>
 
 Generating SSL certificates

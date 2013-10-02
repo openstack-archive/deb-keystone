@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -17,10 +17,10 @@
 import copy
 
 from keystone.common import serializer
-from keystone.tests import core as test
+from keystone import tests
 
 
-class XmlSerializerTestCase(test.TestCase):
+class XmlSerializerTestCase(tests.TestCase):
     def assertSerializeDeserialize(self, d, xml, xmlns=None):
         self.assertEqualXML(
             serializer.to_xml(copy.deepcopy(d), xmlns),

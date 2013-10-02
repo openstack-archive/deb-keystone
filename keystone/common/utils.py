@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # Copyright 2011 - 2012 Justin Santa Barbara
@@ -18,12 +18,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import calendar
 import grp
 import hashlib
 import json
 import os
 import pwd
-import time
 
 import passlib.hash
 
@@ -135,7 +135,7 @@ def check_password(password, hashed):
     It extracts the actual salt if this value is then passed as the salt.
 
     """
-    if password is None:
+    if password is None or hashed is None:
         return False
     password_utf8 = trunc_password(password).encode('utf-8')
     return passlib.hash.sha512_crypt.verify(password_utf8, hashed)
@@ -221,7 +221,7 @@ def unixtime(dt_obj):
     :returns: float
 
     """
-    return time.mktime(dt_obj.utctimetuple())
+    return calendar.timegm(dt_obj.utctimetuple())
 
 
 def auth_str_equal(provided, known):

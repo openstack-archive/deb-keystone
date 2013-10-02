@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -63,6 +63,7 @@ class Identity(identity.Driver):
             raise AssertionError('Invalid user / password')
         if not user_id or not password:
             raise AssertionError('Invalid user / password')
+        conn = None
         try:
             conn = self.user.get_connection(self.user._id_to_dn(user_id),
                                             password)
@@ -70,6 +71,9 @@ class Identity(identity.Driver):
                 raise AssertionError('Invalid user / password')
         except Exception:
             raise AssertionError('Invalid user / password')
+        finally:
+            if conn:
+                conn.unbind_s()
         return identity.filter_user(user_ref)
 
     def _get_user(self, user_id):
@@ -89,9 +93,6 @@ class Identity(identity.Driver):
     # CRUD
     def create_user(self, user_id, user):
         user_ref = self.user.create(user)
-        tenant_id = user.get('tenant_id')
-        if tenant_id is not None:
-            self.assignment_api.add_user_to_project(tenant_id, user_id)
         return identity.filter_user(user_ref)
 
     def update_user(self, user_id, user):
@@ -101,20 +102,8 @@ class Identity(identity.Driver):
         if 'name' in user and old_obj.get('name') != user['name']:
             raise exception.Conflict('Cannot change user name')
 
-        if 'tenant_id' in user and \
-                old_obj.get('tenant_id') != user['tenant_id']:
-            if old_obj['tenant_id']:
-                self.project.remove_user(old_obj['tenant_id'],
-                                         self.user._id_to_dn(user_id),
-                                         user_id)
-            if user['tenant_id']:
-                self.project.add_user(user['tenant_id'],
-                                      self.user._id_to_dn(user_id),
-                                      user_id)
-
         user = utils.hash_ldap_user_password(user)
         if self.user.enabled_mask:
-            user['enabled_nomask'] = old_obj['enabled_nomask']
             self.user.mask_enabled_attribute(user)
         self.user.update(user_id, user, old_obj)
         return self.user.get_filtered(user_id)
@@ -205,7 +194,7 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
                                'email': 'mail',
                                'name': 'name',
                                'enabled': 'enabled',
-                               'domain_id': 'domain_id'}
+                               'default_project_id': 'default_project_id'}
     immutable_attrs = ['id']
 
     model = models.User
@@ -219,7 +208,6 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
         obj = super(UserApi, self)._ldap_res_to_model(res)
         if self.enabled_mask != 0:
             enabled = int(obj.get('enabled', self.enabled_default))
-            obj['enabled_nomask'] = enabled
             obj['enabled'] = ((enabled & self.enabled_mask) !=
                               self.enabled_mask)
         return obj
@@ -236,8 +224,11 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
     def create(self, values):
         values = utils.hash_ldap_user_password(values)
         if self.enabled_mask:
+            orig_enabled = values['enabled']
             self.mask_enabled_attribute(values)
         values = super(UserApi, self).create(values)
+        if self.enabled_mask:
+            values['enabled'] = orig_enabled
         return values
 
     def check_password(self, user_id, password):
@@ -261,8 +252,7 @@ class GroupApi(common_ldap.BaseLdap):
     NotFound = exception.GroupNotFound
     options_name = 'group'
     attribute_options_names = {'description': 'desc',
-                               'name': 'name',
-                               'domain_id': 'domain_id'}
+                               'name': 'name'}
     immutable_attrs = ['name']
     model = models.Group
 
@@ -286,19 +276,20 @@ class GroupApi(common_ldap.BaseLdap):
             # TODO(spzala): this is only placeholder for group and domain
             # role support which will be added under bug 1101287
 
-            conn = self.get_connection()
             query = '(objectClass=%s)' % self.object_class
             dn = None
             dn = self._id_to_dn(id)
             if dn:
                 try:
+                    conn = self.get_connection()
                     roles = conn.search_s(dn, ldap.SCOPE_ONELEVEL,
                                           query, ['%s' % '1.1'])
                     for role_dn, _ in roles:
                         conn.delete_s(role_dn)
                 except ldap.NO_SUCH_OBJECT:
                     pass
-
+                finally:
+                    conn.unbind_s()
             super(GroupApi, self).delete(id)
 
     def update(self, id, values):
@@ -317,6 +308,8 @@ class GroupApi(common_ldap.BaseLdap):
             raise exception.Conflict(_(
                 'User %(user_id)s is already a member of group %(group_id)s') %
                 {'user_id': user_id, 'group_id': group_id})
+        finally:
+            conn.unbind_s()
 
     def remove_user(self, user_dn, group_id, user_id):
         conn = self.get_connection()
@@ -328,6 +321,8 @@ class GroupApi(common_ldap.BaseLdap):
                   user_dn)])
         except ldap.NO_SUCH_ATTRIBUTE:
             raise exception.UserNotFound(user_id=user_id)
+        finally:
+            conn.unbind_s()
 
     def list_user_groups(self, user_dn):
         """Return a list of groups for which the user is a member."""
@@ -350,6 +345,8 @@ class GroupApi(common_ldap.BaseLdap):
                                   query, ['%s' % self.member_attribute])
         except ldap.NO_SUCH_OBJECT:
             return []
+        finally:
+            conn.unbind_s()
         users = []
         for dn, member in attrs:
             user_dns = member[self.member_attribute]

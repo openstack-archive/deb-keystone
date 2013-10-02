@@ -128,18 +128,27 @@ def protected(callback=None):
                 action = 'identity:%s' % f.__name__
                 creds = _build_policy_check_credentials(self, action,
                                                         context, kwargs)
+
+                policy_dict = {}
+
                 # Check to see if we need to include the target entity in our
                 # policy checks.  We deduce this by seeing if the class has
                 # specified a get_member() method and that kwargs contains the
                 # appropriate entity id.
-                policy_dict = {}
                 if (hasattr(self, 'get_member_from_driver') and
                         self.get_member_from_driver is not None):
-                            key = '%s_id' % self.member_name
-                            if key in kwargs:
-                                ref = self.get_member_from_driver(kwargs[key])
-                                policy_dict = {'target':
-                                               {self.member_name: ref}}
+                    key = '%s_id' % self.member_name
+                    if key in kwargs:
+                        ref = self.get_member_from_driver(kwargs[key])
+                        policy_dict['target'] = {self.member_name: ref}
+
+                if context.get('subject_token_id') is not None:
+                    token_ref = self.token_api.get_token(
+                        context['subject_token_id'])
+                    policy_dict.setdefault('target', {})
+                    policy_dict['target'].setdefault(self.member_name, {})
+                    policy_dict['target'][self.member_name]['user_id'] = (
+                        token_ref['user_id'])
 
                 # Add in the kwargs, which means that any entity provided as a
                 # parameter for calls like create and update will be included.
@@ -214,8 +223,73 @@ class V2Controller(wsgi.Application):
                                           trust['id'])
 
     def _delete_tokens_for_project(self, project_id):
-        for user_ref in self.identity_api.get_project_users(project_id):
-            self._delete_tokens_for_user(user_ref['id'], project_id=project_id)
+        user_ids = self.assignment_api.list_user_ids_for_project(project_id)
+        for user_id in user_ids:
+            self._delete_tokens_for_user(user_id, project_id=project_id)
+
+    def _delete_tokens_for_role(self, role_id):
+        assignments = self.assignment_api.list_role_assignments_for_role(
+            role_id=role_id)
+
+        # Iterate over the assignments for this role and build the list of
+        # user or user+project IDs for the tokens we need to delete
+        user_ids = set()
+        user_and_project_ids = list()
+        for assignment in assignments:
+            # If we have a project assignment, then record both the user and
+            # project IDs so we can target the right token to delete. If it is
+            # a domain assignment, we might as well kill all the tokens for
+            # the user, since in the vast majority of cases all the tokens
+            # for a user will be within one domain anyway, so not worth
+            # trying to delete tokens for each project in the domain.
+            if 'user_id' in assignment:
+                if 'project_id' in assignment:
+                    user_and_project_ids.append(
+                        (assignment['user_id'], assignment['project_id']))
+                elif 'domain_id' in assignment:
+                    user_ids.add(assignment['user_id'])
+            elif 'group_id' in assignment:
+                # Add in any users for this group, being tolerant of any
+                # cross-driver database integrity errors.
+                try:
+                    users = self.identity_api.list_users_in_group(
+                        assignment['group_id'])
+                except exception.GroupNotFound:
+                    # Ignore it, but log a debug message
+                    if 'project_id' in assignment:
+                        target = _('Project (%s)') % assignment['project_id']
+                    elif 'domain_id' in assignment:
+                        target = _('Domain (%s)') % assignment['domain_id']
+                    else:
+                        target = _('Unknown Target')
+                    msg = (_('Group (%(group)s), referenced in assignment '
+                             'for %(target)s, not found - ignoring.') % {
+                                 'group': assignment['group_id'],
+                                 'target': target})
+                    LOG.debug(msg)
+                    continue
+
+                if 'project_id' in assignment:
+                    for user in users:
+                        user_and_project_ids.append(
+                            (user['id'], assignment['project_id']))
+                elif 'domain_id' in assignment:
+                    for user in users:
+                        user_ids.add(user['id'])
+
+        # Now process the built up lists.  Before issuing calls to delete any
+        # tokens, let's try and minimize the number of calls by pruning out
+        # any user+project deletions where a general token deletion for that
+        # same user is also planned.
+        user_and_project_ids_to_action = []
+        for user_and_project_id in user_and_project_ids:
+            if user_and_project_id[0] not in user_ids:
+                user_and_project_ids_to_action.append(user_and_project_id)
+
+        for user_id in user_ids:
+            self._delete_tokens_for_user(user_id)
+        for user_id, project_id in user_and_project_ids_to_action:
+            self._delete_tokens_for_user(user_id, project_id)
 
     def _require_attribute(self, ref, attr):
         """Ensures the reference contains the specified attribute."""
@@ -233,7 +307,8 @@ class V2Controller(wsgi.Application):
         ref['domain_id'] = DEFAULT_DOMAIN_ID
         return ref
 
-    def _filter_domain_id(self, ref):
+    @staticmethod
+    def filter_domain_id(ref):
         """Remove domain_id since v2 calls are not domain-aware."""
         ref.pop('domain_id', None)
         return ref
@@ -379,7 +454,8 @@ class V3Controller(V2Controller):
             ref['domain_id'] = self._get_domain_id_for_request(context)
         return ref
 
-    def _filter_domain_id(self, ref):
+    @staticmethod
+    def filter_domain_id(ref):
         """Override v2 filter to let domain_id out for v3 calls."""
         return ref
 

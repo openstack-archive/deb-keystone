@@ -14,25 +14,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from keystone.tests import core as test
-
 from keystone import config
 from keystone import exception
+from keystone import tests
 
 
 CONF = config.CONF
 
 
-class ConfigTestCase(test.TestCase):
+class ConfigTestCase(tests.TestCase):
     def test_paste_config(self):
         self.assertEqual(config.find_paste_config(),
-                         test.etcdir('keystone-paste.ini'))
+                         tests.etcdir('keystone-paste.ini'))
         self.opt_in_group('paste_deploy', config_file='XYZ')
         self.assertRaises(exception.PasteConfigNotFound,
                           config.find_paste_config)
         self.opt_in_group('paste_deploy', config_file='')
         self.assertEqual(config.find_paste_config(),
-                         test.etcdir('keystone.conf.sample'))
+                         tests.etcdir('keystone.conf.sample'))
 
     def test_config_default(self):
         self.assertEqual('keystone.auth.plugins.password.Password',

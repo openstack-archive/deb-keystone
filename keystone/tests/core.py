@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -30,6 +30,19 @@ from paste import deploy
 import stubout
 import testtools
 
+
+from keystone.openstack.common import gettextutils
+
+# NOTE(blk-u):
+# gettextutils.install() must run to set _ before importing any modules that
+# contain static translated strings.
+#
+# Configure gettextutils for deferred translation of messages
+# so that error messages in responses can be translated according to the
+# Accept-Language in the request rather than the Keystone server locale.
+gettextutils.install('keystone', lazy=True)
+
+
 from keystone.common import environment
 environment.use_eventlet()
 
@@ -53,6 +66,11 @@ from keystone import policy
 from keystone import token
 from keystone.token import provider as token_provider
 from keystone import trust
+
+# NOTE(dstanek): Tests inheriting from TestCase depend on having the
+#   policy_file command-line option declared before setUp runs. Importing the
+#   oslo policy module automatically declares the option.
+from keystone.openstack.common import policy as common_policy  # noqa
 
 
 LOG = logging.getLogger(__name__)

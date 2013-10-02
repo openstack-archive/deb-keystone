@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012-2013 OpenStack LLC
+# Copyright 2012-2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -115,22 +115,26 @@ class Assignment(assignment.Driver):
     def list_roles(self):
         return self.role.get_all()
 
-    def get_projects_for_user(self, user_id):
+    def list_projects_for_user(self, user_id, group_ids):
+        # NOTE(henry-nash): The LDAP backend is being deprecated, so no
+        # support is provided for projects that the user has a role on solely
+        # by virtue of group membership.
         self.identity_api.get_user(user_id)
         user_dn = self.user._id_to_dn(user_id)
         associations = (self.role.list_project_roles_for_user
                         (user_dn, self.project.tree_dn))
-        return [p['id'] for p in
+        # Since the LDAP backend doesn't store the domain_id in the LDAP
+        # records (and only supports the default domain), we fill in the
+        # domain_id before we return the list.
+        return [self._set_default_domain(x) for x in
                 self.project.get_user_projects(user_dn, associations)]
 
-    def get_project_users(self, tenant_id):
+    def list_user_ids_for_project(self, tenant_id):
         self.get_project(tenant_id)
         tenant_dn = self.project._id_to_dn(tenant_id)
         rolegrants = self.role.get_role_assignments(tenant_dn)
-        users = [self.user.get_filtered(self.user._dn_to_id(user_id))
-                 for user_id in
-                 self.project.get_user_dns(tenant_id, rolegrants)]
-        return self._set_default_domain(users)
+        return [self.user._dn_to_id(user_dn) for user_dn in
+                self.project.get_user_dns(tenant_id, rolegrants)]
 
     def _subrole_id_to_dn(self, role_id, tenant_id):
         if tenant_id is None:
@@ -240,18 +244,20 @@ class Assignment(assignment.Driver):
         if not self.group.subtree_delete_enabled:
             # TODO(spzala): this is only placeholder for group and domain
             # role support which will be added under bug 1101287
-            conn = self.group.get_connection()
             query = '(objectClass=%s)' % self.group.object_class
             dn = None
             dn = self.group._id_to_dn(id)
             if dn:
                 try:
+                    conn = self.group.get_connection()
                     roles = conn.search_s(dn, ldap.SCOPE_ONELEVEL,
                                           query, ['%s' % '1.1'])
                     for role_dn, _ in roles:
                         conn.delete_s(role_dn)
                 except ldap.NO_SUCH_OBJECT:
                     pass
+                finally:
+                    conn.unbind_s()
 
 
 # TODO(termie): turn this into a data object and move logic to driver
@@ -309,6 +315,8 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
             # places, and is not part of the exposed API, it's easier for us to
             # just ignore this instead of raising exception.Conflict.
             pass
+        finally:
+            conn.unbind_s()
 
     def remove_user(self, tenant_id, user_dn, user_id):
         conn = self.get_connection()
@@ -319,6 +327,8 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
                             user_dn)])
         except ldap.NO_SUCH_ATTRIBUTE:
             raise exception.NotFound(user_id)
+        finally:
+            conn.unbind_s()
 
     def get_user_dns(self, tenant_id, rolegrants, role_dn=None):
         tenant = self._ldap_get(tenant_id)
@@ -407,6 +417,8 @@ class RoleApi(common_ldap.BaseLdap):
                 conn.add_s(role_dn, attrs)
             except Exception as inst:
                     raise inst
+        finally:
+            conn.unbind_s()
 
     def delete_user(self, role_dn, user_dn, tenant_dn,
                     user_id, role_id):
@@ -428,6 +440,8 @@ class RoleApi(common_ldap.BaseLdap):
                 raise inst
         except ldap.NO_SUCH_ATTRIBUTE:
             raise exception.UserNotFound(user_id=user_id)
+        finally:
+            conn.unbind_s()
 
     def get_role_assignments(self, tenant_dn):
         conn = self.get_connection()
@@ -437,6 +451,8 @@ class RoleApi(common_ldap.BaseLdap):
             roles = conn.search_s(tenant_dn, ldap.SCOPE_ONELEVEL, query)
         except ldap.NO_SUCH_OBJECT:
             return []
+        finally:
+            conn.unbind_s()
 
         res = []
         for role_dn, attrs in roles:
@@ -471,6 +487,8 @@ class RoleApi(common_ldap.BaseLdap):
                                   query)
         except ldap.NO_SUCH_OBJECT:
             return []
+        finally:
+            conn.unbind_s()
 
         res = []
         for role_dn, _ in roles:
@@ -499,6 +517,8 @@ class RoleApi(common_ldap.BaseLdap):
                     raise inst
         except ldap.NO_SUCH_OBJECT:
             pass
+        finally:
+            conn.unbind_s()
 
     def update(self, role_id, role):
         try:
@@ -519,4 +539,6 @@ class RoleApi(common_ldap.BaseLdap):
                 conn.delete_s(role_dn)
         except ldap.NO_SUCH_OBJECT:
             pass
+        finally:
+            conn.unbind_s()
         super(RoleApi, self).delete(id)

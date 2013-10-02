@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -243,12 +243,15 @@ class BaseLdap(object):
         if self.LDAP_SCOPE == ldap.SCOPE_ONELEVEL:
             return self._id_to_dn_string(id)
         conn = self.get_connection()
-        search_result = conn.search_s(
-            self.tree_dn, self.LDAP_SCOPE,
-            '(&(%(id_attr)s=%(id)s)(objectclass=%(objclass)s))' %
-            {'id_attr': self.id_attr,
-             'id': ldap.filter.escape_filter_chars(str(id)),
-             'objclass': self.object_class})
+        try:
+            search_result = conn.search_s(
+                self.tree_dn, self.LDAP_SCOPE,
+                '(&(%(id_attr)s=%(id)s)(objectclass=%(objclass)s))' %
+                {'id_attr': self.id_attr,
+                 'id': ldap.filter.escape_filter_chars(str(id)),
+                 'objclass': self.object_class})
+        finally:
+            conn.unbind_s()
         if search_result:
             dn, attrs = search_result[0]
             return dn
@@ -312,7 +315,8 @@ class BaseLdap(object):
                 continue
             if v is not None:
                 attr_type = self.attribute_mapping.get(k, k)
-                attrs.append((attr_type, [v]))
+                if attr_type is not None:
+                    attrs.append((attr_type, [v]))
                 extra_attrs = [attr for attr, name
                                in self.extra_attr_mapping.iteritems()
                                if name == k]
@@ -321,8 +325,10 @@ class BaseLdap(object):
 
         if 'groupOfNames' in object_classes and self.use_dumb_member:
             attrs.append(('member', [self.dumb_member]))
-
-        conn.add_s(self._id_to_dn(values['id']), attrs)
+        try:
+            conn.add_s(self._id_to_dn(values['id']), attrs)
+        finally:
+            conn.unbind_s()
         return values
 
     def _ldap_get(self, id, filter=None):
@@ -340,6 +346,8 @@ class BaseLdap(object):
             res = conn.search_s(self.tree_dn, self.LDAP_SCOPE, query, attrs)
         except ldap.NO_SUCH_OBJECT:
             return None
+        finally:
+            conn.unbind_s()
         try:
             return res[0]
         except IndexError:
@@ -356,6 +364,8 @@ class BaseLdap(object):
                                  self.attribute_mapping.values())
         except ldap.NO_SUCH_OBJECT:
             return []
+        finally:
+            conn.unbind_s()
 
     def get(self, id, filter=None):
         res = self._ldap_get(id, filter)
@@ -389,20 +399,29 @@ class BaseLdap(object):
         for k, v in values.iteritems():
             if k == 'id' or k in self.attribute_ignore:
                 continue
-            if k in self.immutable_attrs and old_obj[k] != v:
+
+            # attribute value has not changed
+            if k in old_obj and old_obj[k] == v:
+                continue
+
+            if k in self.immutable_attrs:
                 msg = (_("Cannot change %(option_name)s %(attr)s") %
                        {'option_name': self.options_name, 'attr': k})
                 raise exception.ValidationError(msg)
+
             if v is None:
-                if old_obj[k] is not None:
+                if old_obj.get(k) is not None:
                     modlist.append((ldap.MOD_DELETE,
                                     self.attribute_mapping.get(k, k),
                                     None))
-            elif old_obj[k] != v:
-                if old_obj[k] is None:
-                    op = ldap.MOD_ADD
-                else:
-                    op = ldap.MOD_REPLACE
+                continue
+
+            current_value = old_obj.get(k)
+            if current_value is None:
+                op = ldap.MOD_ADD
+                modlist.append((op, self.attribute_mapping.get(k, k), [v]))
+            elif current_value != v:
+                op = ldap.MOD_REPLACE
                 modlist.append((op, self.attribute_mapping.get(k, k), [v]))
 
         if modlist:
@@ -411,6 +430,8 @@ class BaseLdap(object):
                 conn.modify_s(self._id_to_dn(id), modlist)
             except ldap.NO_SUCH_OBJECT:
                 raise self._not_found(id)
+            finally:
+                conn.unbind_s()
 
         return self.get(id)
 
@@ -424,6 +445,8 @@ class BaseLdap(object):
             conn.delete_s(self._id_to_dn(id))
         except ldap.NO_SUCH_OBJECT:
             raise self._not_found(id)
+        finally:
+            conn.unbind_s()
 
     def deleteTree(self, id):
         conn = self.get_connection()
@@ -435,6 +458,8 @@ class BaseLdap(object):
                               serverctrls=[tree_delete_control])
         except ldap.NO_SUCH_OBJECT:
             raise self._not_found(id)
+        finally:
+            conn.unbind_s()
 
 
 class LdapWrapper(object):
@@ -511,6 +536,10 @@ class LdapWrapper(object):
         LOG.debug(_("LDAP bind: dn=%s"), user)
         return self.conn.simple_bind_s(user, password)
 
+    def unbind_s(self):
+        LOG.debug("LDAP unbind")
+        return self.conn.unbind_s()
+
     def add_s(self, dn, attrs):
         ldap_attrs = [(kind, [py2ldap(x) for x in safe_iter(values)])
                       for kind, values in attrs]
@@ -523,6 +552,12 @@ class LdapWrapper(object):
         return self.conn.add_s(dn, ldap_attrs)
 
     def search_s(self, dn, scope, query, attrlist=None):
+        # NOTE(morganfainberg): Remove "None" singletons from this list, which
+        # allows us to set mapped attributes to "None" as defaults in config.
+        # Without this filtering, the ldap query would raise a TypeError since
+        # attrlist is expected to be an iterable of strings.
+        if attrlist is not None:
+            attrlist = [attr for attr in attrlist if attr is not None]
         LOG.debug(_(
             'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
             'attrs=%(attrlist)s') % {
@@ -651,6 +686,8 @@ class EnabledEmuMixIn(BaseLdap):
             return False
         else:
             return bool(enabled_value)
+        finally:
+            conn.unbind_s()
 
     def _add_enabled(self, object_id):
         if not self._get_enabled(object_id):
@@ -667,6 +704,8 @@ class EnabledEmuMixIn(BaseLdap):
                 if self.use_dumb_member:
                     attr_list[1][1].append(self.dumb_member)
                 conn.add_s(self.enabled_emulation_dn, attr_list)
+            finally:
+                conn.unbind_s()
 
     def _remove_enabled(self, object_id):
         conn = self.get_connection()
@@ -677,6 +716,8 @@ class EnabledEmuMixIn(BaseLdap):
             conn.modify_s(self.enabled_emulation_dn, modlist)
         except (ldap.NO_SUCH_OBJECT, ldap.NO_SUCH_ATTRIBUTE):
             pass
+        finally:
+            conn.unbind_s()
 
     def create(self, values):
         if self.enabled_emulation:

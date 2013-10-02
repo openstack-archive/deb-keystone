@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,14 +16,12 @@
 
 import uuid
 
-from keystone.tests import core as test
-
 from keystone.contrib import s3
-
 from keystone import exception
+from keystone import tests
 
 
-class S3ContribCore(test.TestCase):
+class S3ContribCore(tests.TestCase):
     def setUp(self):
         super(S3ContribCore, self).setUp()
 

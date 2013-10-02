@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2013 OpenStack LLC
+# Copyright 2013 OpenStack Foundation
 # Copyright 2013 IBM Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,9 +21,8 @@ import ldap.modlist
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.tests import core as test
-
-import _ldap_livetest
+from keystone import tests
+from keystone.tests import _ldap_livetest
 
 
 CONF = config.CONF
@@ -40,9 +39,9 @@ def create_object(dn, attrs):
 class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
 
     def _set_config(self):
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_tls_liveldap.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_tls_liveldap.conf')])
 
     def test_tls_certfile_demand_option(self):
         CONF.ldap.use_tls = True

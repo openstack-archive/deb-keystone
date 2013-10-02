@@ -1,4 +1,4 @@
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,20 +16,20 @@ import copy
 import datetime
 import uuid
 
-from keystone.tests import core as test
-
 from keystone import auth
 from keystone import config
 from keystone import exception
+from keystone import identity
 from keystone.openstack.common import timeutils
+from keystone import tests
+from keystone.tests import default_fixtures
 from keystone import token
 from keystone import trust
-
-import default_fixtures
 
 
 CONF = config.CONF
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 def _build_user_auth(token=None, user_id=None, username=None,
@@ -60,7 +60,7 @@ def _build_user_auth(token=None, user_id=None, username=None,
     return auth_json
 
 
-class AuthTest(test.TestCase):
+class AuthTest(tests.TestCase):
     def setUp(self):
         super(AuthTest, self).setUp()
 
@@ -258,7 +258,9 @@ class AuthWithToken(AuthTest):
             self.tenant_bar['id'],
             self.role_member['id'])
         # Now create a group role for this user as well
-        new_group = {'id': uuid.uuid4().hex, 'domain_id': uuid.uuid4().hex,
+        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.identity_api.create_domain(domain1['id'], domain1)
+        new_group = {'id': uuid.uuid4().hex, 'domain_id': domain1['id'],
                      'name': uuid.uuid4().hex}
         self.identity_api.create_group(new_group['id'], new_group)
         self.identity_api.add_user_to_group(self.user_foo['id'],
@@ -400,6 +402,40 @@ class AuthWithToken(AuthTest):
         # the bind information should be carried over from the original token
         bind = scoped_token['access']['token']['bind']
         self.assertEqual(bind['kerberos'], 'FOO')
+
+    def test_deleting_role_revokes_token(self):
+        role_controller = identity.controllers.Role()
+        project1 = {'id': 'Project1', 'name': uuid.uuid4().hex,
+                    'domain_id': DEFAULT_DOMAIN_ID}
+        self.assignment_api.create_project(project1['id'], project1)
+        role_one = {'id': 'role_one', 'name': uuid.uuid4().hex}
+        self.assignment_api.create_role(role_one['id'], role_one)
+        self.identity_api.add_role_to_user_and_project(
+            self.user_foo['id'], project1['id'], role_one['id'])
+        no_context = {}
+
+        # Get a scoped token for the tenant
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_name=project1['name'])
+        token = self.controller.authenticate(no_context, body_dict)
+        # Ensure it is valid
+        token_id = token['access']['token']['id']
+        self.controller.validate_token(
+            dict(is_admin=True, query_string={}),
+            token_id=token_id)
+
+        # Delete the role, which should invalidate the token
+        role_controller.delete_role(
+            dict(is_admin=True, query_string={}), role_one['id'])
+
+        # Check the token is now invalid
+        self.assertRaises(
+            exception.TokenNotFound,
+            self.controller.validate_token,
+            dict(is_admin=True, query_string={}),
+            token_id=token_id)
 
 
 class AuthWithPasswordCredentials(AuthTest):
@@ -843,7 +879,7 @@ class TokenExpirationTest(AuthTest):
         self._maintain_token_expiration()
 
 
-class NonDefaultAuthTest(test.TestCase):
+class NonDefaultAuthTest(tests.TestCase):
 
     def test_add_non_default_auth_method(self):
         self.opt_in_group('auth', methods=['password', 'token', 'custom'])

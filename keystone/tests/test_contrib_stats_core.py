@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -17,13 +17,13 @@
 from keystone.contrib import stats
 
 from keystone import config
-from keystone.tests import core as test
+from keystone import tests
 
 
 CONF = config.CONF
 
 
-class StatsContribCore(test.TestCase):
+class StatsContribCore(tests.TestCase):
     def setUp(self):
         super(StatsContribCore, self).setUp()
         self.stats_middleware = stats.StatsMiddleware(None)

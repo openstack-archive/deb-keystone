@@ -1,4 +1,4 @@
-# Copyright (c) 2013 OpenStack, LLC
+# Copyright (c) 2013 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,17 +14,17 @@
 
 import webob
 
-from keystone.tests import core as test
-
 from keystone import config
 from keystone import exception
 from keystone import middleware
+from keystone import tests
+
 
 CONF = config.CONF
 MAX_REQUEST_BODY_SIZE = CONF.max_request_body_size
 
 
-class TestRequestBodySizeLimiter(test.TestCase):
+class TestRequestBodySizeLimiter(tests.TestCase):
 
     def setUp(self):
         super(TestRequestBodySizeLimiter, self).setUp()

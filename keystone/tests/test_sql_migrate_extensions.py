@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -30,8 +30,7 @@ To run these tests against a live database:
 from keystone.contrib import endpoint_filter
 from keystone.contrib import example
 from keystone.contrib import oauth1
-
-import test_sql_upgrade
+from keystone.tests import test_sql_upgrade
 
 
 class SqlUpgradeExampleExtension(test_sql_upgrade.SqlMigrateBase):

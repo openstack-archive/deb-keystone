@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 # Copyright 2013 IBM Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -27,10 +27,9 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.tests import core as test
-
-import default_fixtures
-import test_backend
+from keystone import tests
+from keystone.tests import default_fixtures
+from keystone.tests import test_backend
 
 
 CONF = config.CONF
@@ -54,9 +53,9 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         return CONF
 
     def _set_config(self):
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_ldap.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_ldap.conf')])
 
     def test_build_tree(self):
         """Regression test for building the tree names
@@ -170,8 +169,11 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
     def test_delete_group_with_user_project_domain_links(self):
         self.skipTest('N/A: LDAP does not support multiple domains')
 
-    def test_list_user_projects(self):
+    def test_list_projects_for_user(self):
         self.skipTest('Blocked by bug 1101287')
+
+    def test_list_projects_for_user_with_grants(self):
+        self.skipTest('Blocked by bug 1221805')
 
     def test_create_duplicate_user_name_in_different_domains(self):
         self.skipTest('Blocked by bug 1101276')
@@ -206,7 +208,10 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         self.skipTest('N/A: LDAP does not support multiple domains')
 
     def test_list_role_assignments_unfiltered(self):
-        self.skipTest('Blocked by bug 1195019')
+        self.skipTest('Blocked by bug 1221805')
+
+    def test_list_role_assignments_bad_role(self):
+        self.skipTest('Blocked by bug 1221805')
 
     def test_multi_group_grants_on_project_domain(self):
         self.skipTest('Blocked by bug 1101287')
@@ -305,8 +310,25 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
                           self.identity_api.get_group,
                           group['id'])
 
+    def test_create_user_none_mapping(self):
+        # When create a user where an attribute maps to None, the entry is
+        # created without that attribute and it doesn't fail with a TypeError.
+        conf = self.get_config(CONF.identity.default_domain_id)
+        conf.ldap.user_attribute_ignore = 'enabled,email,tenants,tenantId'
+        self.reload_backends(CONF.identity.default_domain_id)
 
-class LDAPIdentity(test.TestCase, BaseLDAPIdentity):
+        user = {'id': 'fake1',
+                'name': 'fake1',
+                'password': 'fakepass1',
+                'domain_id': CONF.identity.default_domain_id,
+                'default_project_id': 'maps_to_none',
+                }
+
+        # If this doesn't raise, then the test is successful.
+        self.identity_api.create_user('fake1', user)
+
+
+class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
     def setUp(self):
         super(LDAPIdentity, self).setUp()
         self._set_config()
@@ -571,39 +593,46 @@ class LDAPIdentity(test.TestCase, BaseLDAPIdentity):
 
         user_ref = self.identity_api.create_user('fake1', user)
 
-        self.assertEqual(user_ref['enabled'], 512)
-        # TODO(blk-u): 512 seems wrong, should it be True?
+        # Use assertIs rather than assertTrue because assertIs will assert the
+        # value is a Boolean as expected.
+        self.assertIs(user_ref['enabled'], True)
+        self.assertNotIn('enabled_nomask', user_ref)
 
         enabled_vals = get_enabled_vals()
         self.assertEqual(enabled_vals, [512])
 
         user_ref = self.identity_api.get_user('fake1')
         self.assertIs(user_ref['enabled'], True)
+        self.assertNotIn('enabled_nomask', user_ref)
 
         user['enabled'] = False
         user_ref = self.identity_api.update_user('fake1', user)
         self.assertIs(user_ref['enabled'], False)
+        self.assertNotIn('enabled_nomask', user_ref)
 
         enabled_vals = get_enabled_vals()
         self.assertEqual(enabled_vals, [514])
 
         user_ref = self.identity_api.get_user('fake1')
         self.assertIs(user_ref['enabled'], False)
+        self.assertNotIn('enabled_nomask', user_ref)
 
         user['enabled'] = True
         user_ref = self.identity_api.update_user('fake1', user)
         self.assertIs(user_ref['enabled'], True)
+        self.assertNotIn('enabled_nomask', user_ref)
 
         enabled_vals = get_enabled_vals()
         self.assertEqual(enabled_vals, [512])
 
         user_ref = self.identity_api.get_user('fake1')
         self.assertIs(user_ref['enabled'], True)
+        self.assertNotIn('enabled_nomask', user_ref)
 
     def test_user_api_get_connection_no_user_password(self):
         """Don't bind in case the user and password are blank."""
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf')])
         CONF.ldap.url = "fake://memory"
         user_api = identity.backends.ldap.UserApi(CONF)
         self.stubs.Set(fakeldap, 'FakeLdap',
@@ -690,6 +719,16 @@ class LDAPIdentity(test.TestCase, BaseLDAPIdentity):
         self.assertRaises(exception.DomainNotFound,
                           self.identity_api.get_domain,
                           domain['id'])
+
+    def test_create_domain_case_sensitivity(self):
+        # domains are read-only, so case sensitivity isn't an issue
+        ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex}
+        self.assertRaises(exception.Forbidden,
+                          self.assignment_api.create_domain,
+                          ref['id'],
+                          ref)
 
     def test_cache_layer_domain_crud(self):
         # TODO(morganfainberg): This also needs to be removed when full LDAP
@@ -830,9 +869,9 @@ class LDAPIdentity(test.TestCase, BaseLDAPIdentity):
 class LDAPIdentityEnabledEmulation(LDAPIdentity):
     def setUp(self):
         super(LDAPIdentityEnabledEmulation, self).setUp()
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_ldap.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_ldap.conf')])
         CONF.ldap.user_enabled_emulation = True
         CONF.ldap.tenant_enabled_emulation = True
         self.clear_database()
@@ -901,12 +940,12 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             "Enabled emulation conflicts with enabled mask")
 
 
-class LdapIdentitySqlAssignment(sql.Base, test.TestCase, BaseLDAPIdentity):
+class LdapIdentitySqlAssignment(sql.Base, tests.TestCase, BaseLDAPIdentity):
 
     def _set_config(self):
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_ldap_sql.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_ldap_sql.conf')])
 
     def setUp(self):
         super(LdapIdentitySqlAssignment, self).setUp()
@@ -942,7 +981,7 @@ class LdapIdentitySqlAssignment(sql.Base, test.TestCase, BaseLDAPIdentity):
             'N/A: Not part of SQL backend')
 
 
-class MultiLDAPandSQLIdentity(sql.Base, test.TestCase, BaseLDAPIdentity):
+class MultiLDAPandSQLIdentity(sql.Base, tests.TestCase, BaseLDAPIdentity):
     """Class to test common SQL plus individual LDAP backends.
 
     We define a set of domains and domain-specific backends:
@@ -977,7 +1016,7 @@ class MultiLDAPandSQLIdentity(sql.Base, test.TestCase, BaseLDAPIdentity):
         self.opt_in_group('identity', domain_specific_drivers_enabled=True)
         self.orig_config_dir = (
             config.CONF.identity.domain_config_dir)
-        self.opt_in_group('identity', domain_config_dir=test.TESTSDIR)
+        self.opt_in_group('identity', domain_config_dir=tests.TESTSDIR)
         self._set_domain_configs()
         self.clear_database()
         self.load_fixtures(default_fixtures)
@@ -995,9 +1034,9 @@ class MultiLDAPandSQLIdentity(sql.Base, test.TestCase, BaseLDAPIdentity):
         sql.set_global_engine(None)
 
     def _set_config(self):
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_multi_ldap_sql.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_multi_ldap_sql.conf')])
 
     def _setup_domain_test_data(self):
 
@@ -1025,24 +1064,24 @@ class MultiLDAPandSQLIdentity(sql.Base, test.TestCase, BaseLDAPIdentity):
         # test overrides are included.
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [test.etcdir('keystone.conf.sample'),
-             test.testsdir('test_overrides.conf'),
-             test.testsdir('backend_multi_ldap_sql.conf'),
-             test.testsdir('keystone.Default.conf')],
+            [tests.etcdir('keystone.conf.sample'),
+             tests.testsdir('test_overrides.conf'),
+             tests.testsdir('backend_multi_ldap_sql.conf'),
+             tests.testsdir('keystone.Default.conf')],
             'Default')
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [test.etcdir('keystone.conf.sample'),
-             test.testsdir('test_overrides.conf'),
-             test.testsdir('backend_multi_ldap_sql.conf'),
-             test.testsdir('keystone.domain1.conf')],
+            [tests.etcdir('keystone.conf.sample'),
+             tests.testsdir('test_overrides.conf'),
+             tests.testsdir('backend_multi_ldap_sql.conf'),
+             tests.testsdir('keystone.domain1.conf')],
             'domain1')
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [test.etcdir('keystone.conf.sample'),
-             test.testsdir('test_overrides.conf'),
-             test.testsdir('backend_multi_ldap_sql.conf'),
-             test.testsdir('keystone.domain2.conf')],
+            [tests.etcdir('keystone.conf.sample'),
+             tests.testsdir('test_overrides.conf'),
+             tests.testsdir('backend_multi_ldap_sql.conf'),
+             tests.testsdir('keystone.domain2.conf')],
             'domain2')
 
     def reload_backends(self, domain_id):

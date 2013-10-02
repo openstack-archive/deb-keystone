@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,22 +18,22 @@
 import os
 import ssl
 
-from keystone.tests import core as test
-
 from keystone.common import environment
 from keystone import config
+from keystone import tests
+
 
 CONF = config.CONF
 
-CERTDIR = test.rootdir("examples/pki/certs")
-KEYDIR = test.rootdir("examples/pki/private")
+CERTDIR = tests.rootdir("examples/pki/certs")
+KEYDIR = tests.rootdir("examples/pki/private")
 CERT = os.path.join(CERTDIR, 'ssl_cert.pem')
 KEY = os.path.join(KEYDIR, 'ssl_key.pem')
 CA = os.path.join(CERTDIR, 'cacert.pem')
 CLIENT = os.path.join(CERTDIR, 'middleware.pem')
 
 
-class SSLTestCase(test.TestCase):
+class SSLTestCase(tests.TestCase):
     def setUp(self):
         super(SSLTestCase, self).setUp()
         self.load_backends()

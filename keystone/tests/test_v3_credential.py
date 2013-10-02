@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2013 OpenStack LLC
+# Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -18,7 +18,7 @@ import hashlib
 import json
 import uuid
 
-import test_v3
+from keystone.tests import test_v3
 
 
 class CredentialTestCase(test_v3.RestfulTestCase):

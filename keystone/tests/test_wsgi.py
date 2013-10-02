@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -23,7 +23,7 @@ from keystone.common import wsgi
 from keystone import exception
 from keystone.openstack.common import gettextutils
 from keystone.openstack.common import jsonutils
-from keystone.tests import core as test
+from keystone import tests
 
 
 class FakeApp(wsgi.Application):
@@ -31,7 +31,7 @@ class FakeApp(wsgi.Application):
         return {'a': 'b'}
 
 
-class BaseWSGITest(test.TestCase):
+class BaseWSGITest(tests.TestCase):
     def setUp(self):
         self.app = FakeApp()
         super(BaseWSGITest, self).setUp()
@@ -186,7 +186,7 @@ class MiddlewareTest(BaseWSGITest):
         self.assertEquals("test", app.kwargs["testkey"])
 
 
-class WSGIFunctionTest(test.TestCase):
+class WSGIFunctionTest(tests.TestCase):
     def test_mask_password(self):
         message = ("test = 'password': 'aaaaaa', 'param1': 'value1', "
                    "\"new_password\": 'bbbbbb'")
@@ -219,13 +219,13 @@ class WSGIFunctionTest(test.TestCase):
                          'test = "param1" : "value"')
 
 
-class LocalizedResponseTest(test.TestCase):
+class LocalizedResponseTest(tests.TestCase):
     def setUp(self):
         super(LocalizedResponseTest, self).setUp()
-        gettextutils._AVAILABLE_LANGUAGES = []
+        gettextutils._AVAILABLE_LANGUAGES.clear()
 
     def tearDown(self):
-        gettextutils._AVAILABLE_LANGUAGES = []
+        gettextutils._AVAILABLE_LANGUAGES.clear()
         super(LocalizedResponseTest, self).tearDown()
 
     def _set_expected_languages(self, all_locales=[], avail_locales=None):

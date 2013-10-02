@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -164,7 +164,7 @@ class Manager(manager.Manager):
         self.driver.delete_tokens(user_id, tenant_id, trust_id, consumer_id)
         for token_id in token_list:
             unique_id = self.unique_id(token_id)
-            self._invalidate_individual_token_cache(unique_id, tenant_id)
+            self._invalidate_individual_token_cache(unique_id)
         self.invalidate_revocation_list()
 
     @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
@@ -173,15 +173,12 @@ class Manager(manager.Manager):
         return self.driver.list_revoked_tokens()
 
     def invalidate_revocation_list(self):
-        # NOTE(morganfainberg): we should always be keeping the revoked tokens
-        # list in memory, calling refresh in this case instead of ensures a
-        # cache hit when list_revoked_tokens is called again. This is an
-        # exception to the rule.  Note that ``self`` needs to be passed to
-        # refresh() because of the way the invalidation/refresh methods work on
+        # NOTE(morganfainberg): Note that ``self`` needs to be passed to
+        # invalidate() because of the way the invalidation method works on
         # determining cache-keys.
-        self.list_revoked_tokens.refresh(self)
+        self.list_revoked_tokens.invalidate(self)
 
-    def _invalidate_individual_token_cache(self, token_id, belongs_to=None):
+    def _invalidate_individual_token_cache(self, token_id):
         # NOTE(morganfainberg): invalidate takes the exact same arguments as
         # the normal method, this means we need to pass "self" in (which gets
         # stripped off).
@@ -191,8 +188,7 @@ class Manager(manager.Manager):
         # consulted before accepting a token as valid.  For now we will
         # do the explicit individual token invalidation.
         self._get_token.invalidate(self, token_id)
-        self.token_provider_api.invalidate_individual_token_cache(token_id,
-                                                                  belongs_to)
+        self.token_provider_api.invalidate_individual_token_cache(token_id)
 
 
 class Driver(object):
@@ -268,6 +264,11 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
+        # TODO(henry-nash): The SQL driver already has a more efficient
+        # implementation of this, although this is missing from the other
+        # backends.  These should be completed and then this should become
+        # a virtual method.  This is raised as bug #1227507.
+
         token_list = self.list_tokens(user_id,
                                       tenant_id=tenant_id,
                                       trust_id=trust_id,

@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,18 +16,17 @@
 
 import uuid
 
-from keystone.tests import core as test
-
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import jsonutils
+from keystone import tests
 
 
 CONF = config.CONF
 
 
-class ExceptionTestCase(test.TestCase):
+class ExceptionTestCase(tests.TestCase):
     def assertValidJsonRendering(self, e):
         resp = wsgi.render_exception(e)
         self.assertEqual(resp.status_int, e.code)

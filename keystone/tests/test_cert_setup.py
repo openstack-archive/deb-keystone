@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,18 +18,16 @@
 import os
 import shutil
 
-from keystone.tests import core as test
-
 from keystone.common import openssl
 from keystone import exception
+from keystone import tests
+from keystone.tests import default_fixtures
 from keystone import token
-
-import default_fixtures
 
 
 ROOTDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SSLDIR = "%s/tests/ssl/" % ROOTDIR
-CONF = test.CONF
+CONF = tests.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
@@ -41,7 +39,7 @@ CERTDIR = rootdir("certs")
 KEYDIR = rootdir("private")
 
 
-class CertSetupTestCase(test.TestCase):
+class CertSetupTestCase(tests.TestCase):
 
     def setUp(self):
         super(CertSetupTestCase, self).setUp()

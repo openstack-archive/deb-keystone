@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -22,6 +22,7 @@ import os
 from oslo.config import cfg
 
 from keystone import clean
+from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
@@ -167,8 +168,12 @@ def domains_configured(f):
     def wrapper(self, *args, **kwargs):
         if (not self.domain_configs.configured and
                 CONF.identity.domain_specific_drivers_enabled):
-                    self.domain_configs.setup_domain_drivers(
-                        self.driver, self.assignment_api)
+            LOG.warning(_(
+                'Running an experimental and unsupported configuration '
+                '(domain_specific_drivers_enabled = True); '
+                'this will result in known issues.'))
+            self.domain_configs.setup_domain_drivers(
+                self.driver, self.assignment_api)
         return f(self, *args, **kwargs)
     return wrapper
 
@@ -198,6 +203,45 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.identity.driver)
         self.domain_configs = DomainConfigs()
+
+    @staticmethod
+    def v3_to_v2_user(ref):
+        """Convert a user_ref from v3 to v2 compatible.
+
+        * v2.0 users are not domain aware, and should have domain_id removed
+        * v2.0 users expect the use of tenantId instead of default_project_id
+
+        This method should only be applied to user_refs being returned from the
+        v2.0 controller(s).
+
+        If ref is a list type, we will iterate through each element and do the
+        conversion.
+        """
+
+        def _format_default_project_id(ref):
+            """Convert default_project_id to tenantId for v2 calls."""
+            default_project_id = ref.pop('default_project_id', None)
+            if default_project_id is not None:
+                ref['tenantId'] = default_project_id
+            elif 'tenantId' in ref:
+                # NOTE(morganfainberg): To avoid v2.0 confusion if somehow a
+                # tenantId property sneaks its way into the extra blob on the
+                # user, we remove it here.  If default_project_id is set, we
+                # would override it in either case.
+                del ref['tenantId']
+
+        def _normalize_and_filter_user_properties(ref):
+            """Run through the various filter/normalization methods."""
+            _format_default_project_id(ref)
+            controller.V2Controller.filter_domain_id(ref)
+            return ref
+
+        if isinstance(ref, dict):
+            return _normalize_and_filter_user_properties(ref)
+        elif isinstance(ref, list):
+            return [_normalize_and_filter_user_properties(x) for x in ref]
+        else:
+            raise ValueError(_('Expected dict or list: %s') % type(ref))
 
     # Domain ID normalization methods
 
@@ -233,6 +277,7 @@ class Manager(manager.Manager):
         if driver:
             return driver
         else:
+            self.get_domain(domain_id)
             return self.driver
 
     def _get_domain_conf(self, domain_id):
@@ -422,9 +467,6 @@ class Manager(manager.Manager):
     def list_roles(self):
         return self.assignment_api.list_roles()
 
-    def get_projects_for_user(self, user_id):
-        return self.assignment_api.get_projects_for_user(user_id)
-
     def get_project_users(self, tenant_id):
         return self.assignment_api.get_project_users(tenant_id)
 
@@ -504,17 +546,14 @@ class Manager(manager.Manager):
     def list_domains(self):
         return self.assignment_api.list_domains()
 
-    def list_user_projects(self, user_id):
-        return self.assignment_api.list_user_projects(user_id)
+    def list_projects_for_user(self, user_id):
+        return self.assignment_api.list_projects_for_user(user_id)
 
     def add_user_to_project(self, tenant_id, user_id):
         return self.assignment_api.add_user_to_project(tenant_id, user_id)
 
     def remove_user_from_project(self, tenant_id, user_id):
         return self.assignment_api.remove_user_from_project(tenant_id, user_id)
-
-    def list_role_assignments(self):
-        return self.assignment_api.list_role_assignments()
 
 
 class Driver(object):

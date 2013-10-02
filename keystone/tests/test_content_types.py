@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -20,16 +20,17 @@ import uuid
 from lxml import etree
 import webtest
 
-from keystone.tests import core as test
-
 from keystone.common import extension
 from keystone.common import serializer
+from keystone import config
 from keystone.openstack.common import jsonutils
+from keystone import tests
+from keystone.tests import default_fixtures
 
-import default_fixtures
+CONF = config.CONF
 
 
-class RestfulTestCase(test.TestCase):
+class RestfulTestCase(tests.TestCase):
     """Performs restful tests against the WSGI app over HTTP.
 
     This class launches public & admin WSGI servers for every test, which can
@@ -401,6 +402,15 @@ class CoreApiTests(object):
             token=token)
         self.assertValidAuthenticationResponse(r)
 
+    def test_invalid_token_404(self):
+        token = self.get_scoped_token()
+        self.admin_request(
+            path='/v2.0/tokens/%(token_id)s' % {
+                'token_id': 'invalid',
+            },
+            token=token,
+            expected_status=404)
+
     def test_validate_token_service_role(self):
         self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
             self.user_foo['id'],
@@ -599,13 +609,272 @@ class CoreApiTests(object):
                                  expected_status=400)
         self.assertValidErrorResponse(res)
 
+    def _get_user_id(self, r):
+        """Helper method to return user ID from a response.
+
+        This needs to be overridden by child classes
+        based on their content type.
+
+        """
+        raise NotImplementedError()
+
+    def _get_role_id(self, r):
+        """Helper method to return a role ID from a response.
+
+        This needs to be overridden by child classes
+        based on their content type.
+
+        """
+        raise NotImplementedError()
+
+    def _get_role_name(self, r):
+        """Helper method to return role NAME from a response.
+
+        This needs to be overridden by child classes
+        based on their content type.
+
+        """
+        raise NotImplementedError()
+
+    def _get_project_id(self, r):
+        """Helper method to return project ID from a response.
+
+        This needs to be overridden by child classes
+        based on their content type.
+
+        """
+        raise NotImplementedError()
+
+    def assertNoRoles(self, r):
+        """Helper method to assert No Roles
+
+        This needs to be overridden by child classes
+        based on their content type.
+
+        """
+        raise NotImplementedError()
+
+    def test_update_user_tenant(self):
+        token = self.get_scoped_token()
+
+        # Create a new user
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': uuid.uuid4().hex,
+                    'password': uuid.uuid4().hex,
+                    'tenantId': self.tenant_bar['id'],
+                    'enabled': True,
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        user_id = self._get_user_id(r.result)
+
+        # Check if member_role is in tenant_bar
+        r = self.admin_request(
+            path='/v2.0/tenants/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': self.tenant_bar['id'],
+                'user_id': user_id
+            },
+            token=token,
+            expected_status=200)
+        self.assertEqual(self._get_role_name(r.result), CONF.member_role_name)
+
+        # Create a new tenant
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/tenants',
+            body={
+                'tenant': {
+                    'name': 'test_update_user',
+                    'description': 'A description ...',
+                    'enabled': True,
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        project_id = self._get_project_id(r.result)
+
+        # Update user's tenant
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%(user_id)s' % {
+                'user_id': user_id,
+            },
+            body={
+                'user': {
+                    'tenantId': project_id,
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        # 'member_role' should be in new_tenant
+        r = self.admin_request(
+            path='/v2.0/tenants/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': project_id,
+                'user_id': user_id
+            },
+            token=token,
+            expected_status=200)
+        self.assertEqual(self._get_role_name(r.result), '_member_')
+
+        # 'member_role' should not be in tenant_bar any more
+        r = self.admin_request(
+            path='/v2.0/tenants/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': self.tenant_bar['id'],
+                'user_id': user_id
+            },
+            token=token,
+            expected_status=200)
+        self.assertNoRoles(r.result)
+
+    def test_update_user_with_invalid_tenant(self):
+        token = self.get_scoped_token()
+
+        # Create a new user
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': 'test_invalid_tenant',
+                    'password': uuid.uuid4().hex,
+                    'tenantId': self.tenant_bar['id'],
+                    'enabled': True,
+                },
+            },
+            token=token,
+            expected_status=200)
+        user_id = self._get_user_id(r.result)
+
+        # Update user with an invalid tenant
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%(user_id)s' % {
+                'user_id': user_id,
+            },
+            body={
+                'user': {
+                    'tenantId': 'abcde12345heha',
+                },
+            },
+            token=token,
+            expected_status=404)
+
+    def test_update_user_with_old_tenant(self):
+        token = self.get_scoped_token()
+
+        # Create a new user
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': uuid.uuid4().hex,
+                    'password': uuid.uuid4().hex,
+                    'tenantId': self.tenant_bar['id'],
+                    'enabled': True,
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        user_id = self._get_user_id(r.result)
+
+        # Check if member_role is in tenant_bar
+        r = self.admin_request(
+            path='/v2.0/tenants/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': self.tenant_bar['id'],
+                'user_id': user_id
+            },
+            token=token,
+            expected_status=200)
+        self.assertEqual(self._get_role_name(r.result), CONF.member_role_name)
+
+        # Update user's tenant with old tenant id
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%(user_id)s' % {
+                'user_id': user_id,
+            },
+            body={
+                'user': {
+                    'tenantId': self.tenant_bar['id'],
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        # 'member_role' should still be in tenant_bar
+        r = self.admin_request(
+            path='/v2.0/tenants/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': self.tenant_bar['id'],
+                'user_id': user_id
+            },
+            token=token,
+            expected_status=200)
+        self.assertEqual(self._get_role_name(r.result), '_member_')
+
+    def test_authenticating_a_user_with_no_password(self):
+        token = self.get_scoped_token()
+
+        username = uuid.uuid4().hex
+
+        # create the user
+        self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': username,
+                    'enabled': True,
+                },
+            },
+            token=token)
+
+        # fail to authenticate
+        r = self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
+                'auth': {
+                    'passwordCredentials': {
+                        'username': username,
+                        'password': 'password',
+                    },
+                },
+            },
+            expected_status=401)
+        self.assertValidErrorResponse(r)
+
 
 class JsonTestCase(RestfulTestCase, CoreApiTests):
     content_type = 'json'
 
+    def _get_user_id(self, r):
+        return r['user']['id']
+
+    def _get_role_name(self, r):
+        return r['roles'][0]['name']
+
+    def _get_role_id(self, r):
+        return r['roles'][0]['id']
+
+    def _get_project_id(self, r):
+        return r['tenant']['id']
+
     def _get_token_id(self, r):
         """Applicable only to JSON."""
         return r.result['access']['token']['id']
+
+    def assertNoRoles(self, r):
+        self.assertEqual(r['roles'], [])
 
     def assertValidErrorResponse(self, r):
         self.assertIsNotNone(r.result.get('error'))
@@ -632,6 +901,15 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
 
     def assertValidExtensionResponse(self, r, expected):
         self.assertValidExtension(r.result.get('extension'), expected)
+
+    def assertValidUser(self, user):
+        super(JsonTestCase, self).assertValidUser(user)
+        self.assertNotIn('default_project_id', user)
+        if 'tenantId' in user:
+            # NOTE(morganfainberg): tenantId should never be "None", it gets
+            # filtered out of the object if it is there. This is suspenders
+            # and a belt check to avoid unintended regressions.
+            self.assertIsNotNone(user.get('tenantId'))
 
     def assertValidAuthenticationResponse(self, r,
                                           require_service_catalog=False):
@@ -838,6 +1116,21 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
 class XmlTestCase(RestfulTestCase, CoreApiTests):
     xmlns = 'http://docs.openstack.org/identity/api/v2.0'
     content_type = 'xml'
+
+    def _get_user_id(self, r):
+        return r.get('id')
+
+    def _get_role_name(self, r):
+        return r[0].get('name')
+
+    def _get_role_id(self, r):
+        return r[0].get('id')
+
+    def _get_project_id(self, r):
+        return r.get('id')
+
+    def assertNoRoles(self, r):
+        self.assertEqual(len(r), 0)
 
     def _get_token_id(self, r):
         return r.result.find(self._tag('token')).get('id')

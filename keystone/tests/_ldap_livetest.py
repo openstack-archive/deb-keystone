@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -23,9 +23,8 @@ from keystone.common import ldap as ldap_common
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import ldap as identity_ldap
-from keystone.tests import core as test
-
-import test_backend_ldap
+from keystone import tests
+from keystone.tests import test_backend_ldap
 
 
 CONF = config.CONF
@@ -73,9 +72,9 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
                       'ou': 'UserGroups'})
 
     def _set_config(self):
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_liveldap.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_liveldap.conf')])
 
     def test_build_tree(self):
         """Regression test for building the tree names
@@ -86,7 +85,7 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
         self.assertEquals(user_api.tree_dn, CONF.ldap.user_tree_dn)
 
     def tearDown(self):
-        test.TestCase.tearDown(self)
+        tests.TestCase.tearDown(self)
 
     def test_ldap_dereferencing(self):
         alt_users_ldif = {'objectclass': ['top', 'organizationalUnit'],
@@ -227,3 +226,29 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
 
     def test_create_unicode_user_name(self):
         self.skipTest('Addressed by bug #1172106')
+
+    def test_create_project_case_sensitivity(self):
+        # The attribute used for the live LDAP tests is case insensitive.
+
+        def call_super():
+            super(LiveLDAPIdentity, self).\
+                test_create_project_case_sensitivity()
+
+        self.assertRaises(exception.Conflict, call_super)
+
+    def test_create_user_case_sensitivity(self):
+        # The attribute used for the live LDAP tests is case insensitive.
+
+        def call_super():
+            super(LiveLDAPIdentity, self).test_create_user_case_sensitivity()
+
+        self.assertRaises(exception.Conflict, call_super)
+
+    def test_project_update_missing_attrs_with_a_falsey_value(self):
+        # The description attribute doesn't allow an empty value.
+
+        def call_super():
+            super(LiveLDAPIdentity, self).\
+                test_project_update_missing_attrs_with_a_falsey_value()
+
+        self.assertRaises(ldap.INVALID_SYNTAX, call_super)

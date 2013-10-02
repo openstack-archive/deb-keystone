@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -19,7 +19,6 @@ from keystone import clean
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone import exception
-from keystone import identity
 
 
 @dependency.requires('identity_api')
@@ -52,12 +51,12 @@ class Assignment(kvs.Base, assignment.Driver):
         except exception.NotFound:
             raise exception.ProjectNotFound(project_id=tenant_name)
 
-    def get_project_users(self, tenant_id):
+    def list_user_ids_for_project(self, tenant_id):
         self.get_project(tenant_id)
         user_keys = filter(lambda x: x.startswith("user-"), self.db.keys())
         user_refs = [self.db.get(key) for key in user_keys]
         user_refs = filter(lambda x: tenant_id in x['tenants'], user_refs)
-        return [identity.filter_user(user_ref) for user_ref in user_refs]
+        return [user_ref['id'] for user_ref in user_refs]
 
     def _get_user(self, user_id):
         try:
@@ -101,9 +100,12 @@ class Assignment(kvs.Base, assignment.Driver):
         role_ids = self.db.get('role_list', [])
         return [self.get_role(x) for x in role_ids]
 
-    def get_projects_for_user(self, user_id):
+    def list_projects_for_user(self, user_id, group_ids):
+        # NOTE(henry-nash): The kvs backend is being deprecated, so no
+        # support is provided for projects that the user has a role on solely
+        # by virtue of group membership.
         user_ref = self._get_user(user_id)
-        return user_ref.get('tenants', [])
+        return [self.get_project(x) for x in user_ref.get('tenants', [])]
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
         self.identity_api.get_user(user_id)

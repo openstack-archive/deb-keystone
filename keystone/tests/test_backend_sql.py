@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -21,23 +21,23 @@ import sqlalchemy
 from keystone.common import sql
 from keystone import config
 from keystone import exception
-from keystone.tests import core as test
-
-import default_fixtures
-import test_backend
+from keystone.identity.backends import sql as identity_sql
+from keystone import tests
+from keystone.tests import default_fixtures
+from keystone.tests import test_backend
 
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class SqlTests(test.TestCase, sql.Base):
+class SqlTests(tests.TestCase, sql.Base):
 
     def setUp(self):
         super(SqlTests, self).setUp()
-        self.config([test.etcdir('keystone.conf.sample'),
-                     test.testsdir('test_overrides.conf'),
-                     test.testsdir('backend_sql.conf')])
+        self.config([tests.etcdir('keystone.conf.sample'),
+                     tests.testsdir('test_overrides.conf'),
+                     tests.testsdir('backend_sql.conf')])
 
         self.load_backends()
 
@@ -162,7 +162,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                                               user['id'])
         self.identity_api.delete_user(user['id'])
         self.assertRaises(exception.UserNotFound,
-                          self.identity_api.get_projects_for_user,
+                          self.assignment_api.list_projects_for_user,
                           user['id'])
 
     def test_create_null_user_name(self):
@@ -218,7 +218,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.identity_api.add_user_to_project(self.tenant_bar['id'],
                                               user['id'])
         self.assignment_api.delete_project(self.tenant_bar['id'])
-        tenants = self.identity_api.get_projects_for_user(user['id'])
+        tenants = self.assignment_api.list_projects_for_user(user['id'])
         self.assertEquals(tenants, [])
 
     def test_metadata_removed_on_delete_user(self):
@@ -328,6 +328,24 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
+    def test_sql_user_to_dict_null_default_project_id(self):
+        user_id = uuid.uuid4().hex
+        user = {
+            'id': user_id,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex}
+
+        self.identity_api.create_user(user_id, user)
+        session = self.get_session()
+        query = session.query(identity_sql.User)
+        query = query.filter_by(id=user_id)
+        raw_user_ref = query.one()
+        self.assertIsNone(raw_user_ref.default_project_id)
+        user_ref = raw_user_ref.to_dict()
+        self.assertNotIn('default_project_id', user_ref)
+        session.close()
+
 
 class SqlTrust(SqlTests, test_backend.TrustTests):
     pass
@@ -417,3 +435,9 @@ class SqlPolicy(SqlTests, test_backend.PolicyTests):
 
 class SqlInheritance(SqlTests, test_backend.InheritanceTests):
     pass
+
+
+class SqlTokenCacheInvalidation(SqlTests, test_backend.TokenCacheInvalidation):
+    def setUp(self):
+        super(SqlTokenCacheInvalidation, self).setUp()
+        self._create_test_data()

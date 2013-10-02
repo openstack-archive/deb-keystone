@@ -1,6 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright 2012 OpenStack LLC
+# Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,9 +16,8 @@
 
 import webob
 
-from keystone.tests import core as test
-
 from keystone import middleware
+from keystone import tests
 
 
 class FakeApp(object):
@@ -29,7 +28,7 @@ class FakeApp(object):
         return resp(env, start_response)
 
 
-class UrlMiddlewareTest(test.TestCase):
+class UrlMiddlewareTest(tests.TestCase):
     def setUp(self):
         self.middleware = middleware.NormalizingFilter(FakeApp())
         self.response_status = None
