@@ -204,7 +204,22 @@ def mysql_on_checkout(dbapi_conn, connection_rec, connection_proxy):
         dbapi_conn.cursor().execute('select 1')
     except dbapi_conn.OperationalError as e:
         if e.args[0] in (2006, 2013, 2014, 2045, 2055):
-            logging.warn(_('Got mysql server has gone away: %s'), e)
+            LOG.warn(_('Got mysql server has gone away: %s'), e)
+            raise DisconnectionError("Database server went away")
+        else:
+            raise
+
+
+def db2_on_checkout(engine, dbapi_conn, connection_rec, connection_proxy):
+    """Ensures that DB2 connections checked out of the pool are alive."""
+
+    cursor = dbapi_conn.cursor()
+    try:
+        cursor.execute('select 1 from (values (1)) AS t1')
+    except Exception as e:
+        is_disconnect = engine.dialect.is_disconnect(e, dbapi_conn, cursor)
+        if is_disconnect:
+            LOG.warn(_('Got database server has gone away: %s'), e)
             raise DisconnectionError("Database server went away")
         else:
             raise
@@ -248,6 +263,9 @@ class Base(object):
 
             if engine.name == 'mysql':
                 sql.event.listen(engine, 'checkout', mysql_on_checkout)
+            elif engine.name == 'ibm_db_sa':
+                callback = functools.partial(db2_on_checkout, engine)
+                sql.event.listen(engine, 'checkout', callback)
 
             return engine
 
