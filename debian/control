@@ -75,6 +75,7 @@ Depends: python-d2to1 (>= 0.2.10),
          python-iso8601,
          python-keystoneclient (>= 1:0.2.1),
          python-lxml,
+         python-memcache,
          python-migrate,
          python-mysqldb,
          python-novaclient,
@@ -93,7 +94,7 @@ Depends: python-d2to1 (>= 0.2.10),
          python-webob (>= 1.2.3),
          ${misc:Depends},
          ${python:Depends}
-Recommends: python-ldap, python-memcache
+Recommends: python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
