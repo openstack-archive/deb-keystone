@@ -4,6 +4,8 @@ keystone (2013.2-2) unstable; urgency=low
   * Added missing python-babel depends.
   * Fixes a failed install if the target computer doesn't have a default route
     (lp: #1247342).
+  * CVE-2013-4477: remove role assignment adds role using LDAP assignment
+    (Closes: #728233).
 
  -- Thomas Goirand <zigo@debian.org>  Sun, 03 Nov 2013 16:02:42 +0800
 

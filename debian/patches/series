@@ -1,3 +1,4 @@
 sql_conn.patch
 fixes-keystone-default-catalog.patch
 defines-gettext-function-to-avoid-ftbfs.patch
+CVE-2013-4477-havana.patch
