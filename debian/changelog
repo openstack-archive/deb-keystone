@@ -2,8 +2,10 @@ keystone (2013.2-2) UNRELEASED; urgency=low
 
   * Moved python-memcache to Depends: instead of Recommends:.
   * Added missing python-babel depends.
+  * Fixes a failed install if the target computer doesn't have a default route
+    (lp: #1247342).
 
- -- Thomas Goirand <zigo@debian.org>  Fri, 25 Oct 2013 02:05:54 +0800
+ -- Thomas Goirand <zigo@debian.org>  Sun, 03 Nov 2013 16:02:42 +0800
 
 keystone (2013.2-1) unstable; urgency=low
 
