@@ -1,4 +1,4 @@
-keystone (2013.2-2) UNRELEASED; urgency=low
+keystone (2013.2-2) unstable; urgency=low
 
   * Moved python-memcache to Depends: instead of Recommends:.
   * Added missing python-babel depends.
