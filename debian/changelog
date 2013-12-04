@@ -1,3 +1,10 @@
+keystone (2013.2-3) unstable; urgency=medium
+
+  * Updated German debconf templates, thanks: Chris Leick <c.leick@vollbio.de>
+    (Closes: #730454).
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 04 Dec 2013 16:32:51 +0800
+
 keystone (2013.2-2) unstable; urgency=low
 
   * Moved python-memcache to Depends: instead of Recommends:.
