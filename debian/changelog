@@ -1,3 +1,9 @@
+keystone (2013.2-4) unstable; urgency=low
+
+  * Fixes restart of keystone in logrotate script. (Closes: #731495).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 06 Dec 2013 15:18:07 +0800
+
 keystone (2013.2-3) unstable; urgency=medium
 
   * Updated German debconf templates, thanks: Chris Leick <c.leick@vollbio.de>

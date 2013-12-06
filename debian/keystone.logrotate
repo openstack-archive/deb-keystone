@@ -7,9 +7,9 @@
     create 640 keystone keystone
     postrotate
         if dpkg-vendor --derives-from ubuntu ; then
-            restart keystone >/dev/null 2>&1 || true
+            service keystone restart >/dev/null 2>&1 || true
         else
-            invoke-rc.d restart keystone
+            invoke-rc.d keystone restart
         fi
     endscript
 }
