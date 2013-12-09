@@ -14,6 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from __future__ import absolute_import
+
 import errno
 import os
 import re
@@ -22,12 +24,12 @@ import socket
 import StringIO
 import sys
 import time
+import warnings
 
+import fixtures
+import logging
 from lxml import etree
-import mox
-import nose.exc
 from paste import deploy
-import stubout
 import testtools
 
 
@@ -42,14 +44,11 @@ from keystone.openstack.common import gettextutils
 # Accept-Language in the request rather than the Keystone server locale.
 gettextutils.install('keystone', lazy=True)
 
-
-from keystone.common import environment
-environment.use_eventlet()
-
 from keystone import assignment
 from keystone import catalog
 from keystone.common import cache
 from keystone.common import dependency
+from keystone.common import environment
 from keystone.common import kvs
 from keystone.common import sql
 from keystone.common import utils
@@ -60,7 +59,7 @@ from keystone.contrib import oauth1
 from keystone import credential
 from keystone import exception
 from keystone import identity
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone import policy
 from keystone import token
@@ -73,16 +72,16 @@ from keystone import trust
 from keystone.openstack.common import policy as common_policy  # noqa
 
 
-LOG = logging.getLogger(__name__)
-ROOTDIR = os.path.dirname(os.path.abspath('..'))
+LOG = log.getLogger(__name__)
+TESTSDIR = os.path.dirname(os.path.abspath(__file__))
+ROOTDIR = os.path.normpath(os.path.join(TESTSDIR, '..', '..'))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
-TESTSDIR = os.path.join(ROOTDIR, 'keystone', 'tests')
 ETCDIR = os.path.join(ROOTDIR, 'etc')
 TMPDIR = os.path.join(TESTSDIR, 'tmp')
 
 CONF = config.CONF
 
-cd = os.chdir
+exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 
 
 def rootdir(*p):
@@ -119,7 +118,7 @@ def checkout_vendor(repo, rev):
         if not os.path.exists(revdir):
             utils.git('clone', repo, revdir)
 
-        cd(revdir)
+        os.chdir(revdir)
         utils.git('checkout', '-q', 'master')
         utils.git('pull', '-q')
         utils.git('checkout', '-q', rev)
@@ -129,7 +128,7 @@ def checkout_vendor(repo, rev):
             fd.write('1')
     except environment.subprocess.CalledProcessError:
         LOG.warning(_('Failed to checkout %s'), repo)
-    cd(working_dir)
+    os.chdir(working_dir)
     return revdir
 
 
@@ -243,7 +242,7 @@ class NoModule(object):
         sys.meta_path.insert(0, finder)
 
 
-class TestCase(NoModule, testtools.TestCase):
+class TestCase(testtools.TestCase):
     def __init__(self, *args, **kw):
         super(TestCase, self).__init__(*args, **kw)
         self._paths = []
@@ -260,10 +259,10 @@ class TestCase(NoModule, testtools.TestCase):
                      testsdir('test_overrides.conf')])
         # ensure the cache region instance is setup
         cache.configure_cache_region(cache.REGION)
-        self.mox = mox.Mox()
         self.opt(policy_file=etcdir('policy.json'))
-        self.stubs = stubout.StubOutForTesting()
-        self.stubs.Set(exception, '_FATAL_EXCEPTION_FORMAT_ERRORS', True)
+
+        self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        warnings.filterwarnings('ignore', category=DeprecationWarning)
 
     def config(self, config_files):
         CONF(args=[], project='keystone', default_config_files=config_files)
@@ -271,10 +270,6 @@ class TestCase(NoModule, testtools.TestCase):
     def tearDown(self):
         try:
             timeutils.clear_time_override()
-            self.mox.UnsetStubs()
-            self.stubs.UnsetAll()
-            self.stubs.SmartUnsetAll()
-            self.mox.VerifyAll()
             # NOTE(morganfainberg):  The only way to reconfigure the
             # CacheRegion object on each setUp() call is to remove the
             # .backend property.
@@ -334,12 +329,13 @@ class TestCase(NoModule, testtools.TestCase):
         """
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
-        if hasattr(self, 'identity_api'):
+        if hasattr(self, 'identity_api') and hasattr(self, 'assignment_api'):
             for domain in fixtures.DOMAINS:
                 try:
-                    rv = self.identity_api.create_domain(domain['id'], domain)
+                    rv = self.assignment_api.create_domain(domain['id'],
+                                                           domain)
                 except exception.Conflict:
-                    rv = self.identity_api.get_domain(domain['id'])
+                    rv = self.assignment_api.get_domain(domain['id'])
                 except exception.NotImplemented:
                     rv = domain
                 setattr(self, 'domain_%s' % domain['id'], rv)
@@ -349,15 +345,15 @@ class TestCase(NoModule, testtools.TestCase):
                     rv = self.assignment_api.create_project(
                         tenant['id'], tenant)
                 except exception.Conflict:
-                    rv = self.identity_api.get_project(tenant['id'])
+                    rv = self.assignment_api.get_project(tenant['id'])
                     pass
                 setattr(self, 'tenant_%s' % tenant['id'], rv)
 
             for role in fixtures.ROLES:
                 try:
-                    rv = self.identity_api.create_role(role['id'], role)
+                    rv = self.assignment_api.create_role(role['id'], role)
                 except exception.Conflict:
-                    rv = self.identity_api.get_role(role['id'])
+                    rv = self.assignment_api.get_role(role['id'])
                     pass
                 setattr(self, 'role_%s' % role['id'], rv)
 
@@ -371,8 +367,8 @@ class TestCase(NoModule, testtools.TestCase):
                     pass
                 for tenant_id in tenants:
                     try:
-                        self.identity_api.add_user_to_project(tenant_id,
-                                                              user['id'])
+                        self.assignment_api.add_user_to_project(tenant_id,
+                                                                user['id'])
                     except exception.Conflict:
                         pass
                 setattr(self, 'user_%s' % user['id'], user_copy)
@@ -391,20 +387,6 @@ class TestCase(NoModule, testtools.TestCase):
 
     def appconfig(self, config):
         return deploy.appconfig(self._paste_config(config))
-
-    def serveapp(self, config, name=None, cert=None, key=None, ca=None,
-                 cert_required=None, host="127.0.0.1", port=0):
-        app = self.loadapp(config, name=name)
-        server = environment.Server(app, host, port)
-        if cert is not None and ca is not None and key is not None:
-            server.set_ssl(certfile=cert, keyfile=key, ca_certs=ca,
-                           cert_required=cert_required)
-        server.start(key='socket')
-
-        # Service catalog tests need to know the port we ran on.
-        port = server.socket_info['socket'][1]
-        self.opt(public_port=port, admin_port=port)
-        return server
 
     def client(self, app, *args, **kw):
         return TestClient(app, *args, **kw)
@@ -426,8 +408,8 @@ class TestCase(NoModule, testtools.TestCase):
         self.assertTrue(len(l))
 
     def assertDictEqual(self, d1, d2, msg=None):
-        self.assert_(isinstance(d1, dict), 'First argument is not a dict')
-        self.assert_(isinstance(d2, dict), 'Second argument is not a dict')
+        self.assertTrue(isinstance(d1, dict), 'First argument is not a dict')
+        self.assertTrue(isinstance(d2, dict), 'Second argument is not a dict')
         self.assertEqual(d1, d2, msg)
 
     def assertRaisesRegexp(self, expected_exception, expected_regexp,
@@ -490,7 +472,7 @@ class TestCase(NoModule, testtools.TestCase):
     def assertEqualXML(self, a, b):
         """Parses two XML documents from strings and compares the results.
 
-        This provides easy-to-read failures from nose.
+        This provides easy-to-read failures.
 
         """
         parser = etree.XMLParser(remove_blank_text=True)
@@ -510,13 +492,12 @@ class TestCase(NoModule, testtools.TestCase):
         b = canonical_xml(b)
         self.assertEqual(a.split('\n'), b.split('\n'))
 
-    @staticmethod
-    def skip_if_no_ipv6():
+    def skip_if_no_ipv6(self):
         try:
             s = socket.socket(socket.AF_INET6)
         except socket.error as e:
             if e.errno == errno.EAFNOSUPPORT:
-                raise nose.exc.SkipTest("IPv6 is not enabled in the system")
+                raise self.skipTest("IPv6 is not enabled in the system")
             else:
                 raise
         else:

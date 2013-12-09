@@ -3,7 +3,8 @@
 # admin_token = ADMIN
 
 # The IP address of the network interface to listen on
-# bind_host = 0.0.0.0
+# public_bind_host = 0.0.0.0
+# admin_bind_host = 0.0.0.0
 
 # The port number which the public service listens on
 # public_port = 5000
@@ -63,11 +64,15 @@
 # syslog facility to receive log lines
 # syslog_log_facility = LOG_USER
 
-# If this option is specified, the logging configuration file specified is
-# used and overrides any other logging options specified. Please see the
-# Python logging module documentation for details on logging configuration
-# files.
-# log_config = logging.conf
+# list of logger=LEVEL pairs (list value)
+#default_log_levels=amqp=WARN,amqplib=WARN,boto=WARN,keystone=INFO,qpid=WARN,sqlalchemy=WARN,suds=INFO
+
+# The name of logging configuration file. It does not disable
+# existing loggers, but just appends specified logging
+# configuration to any other existing logging options. Please
+# see the Python logging module documentation for details on
+# logging configuration files. (string value)
+#log_config_append=<None>
 
 # A logging.Formatter log message format string which may use any of the
 # available logging.LogRecord attributes.
@@ -295,10 +300,10 @@
 
 [ssl]
 #enable = True
-#certfile = /etc/keystone/pki/certs/ssl_cert.pem
-#keyfile = /etc/keystone/pki/private/ssl_key.pem
-#ca_certs = /etc/keystone/pki/certs/cacert.pem
-#ca_key = /etc/keystone/pki/private/cakey.pem
+#certfile = /etc/keystone/ssl/certs/keystone.pem
+#keyfile = /etc/keystone/ssl/private/keystonekey.pem
+#ca_certs = /etc/keystone/ssl/certs/ca.pem
+#ca_key = /etc/keystone/ssl/private/cakey.pem
 #key_size = 1024
 #valid_days = 3650
 #cert_required = False
@@ -309,10 +314,10 @@
 # Allowed values are PKI or UUID
 #token_format =
 
-#certfile = /etc/keystone/pki/certs/signing_cert.pem
-#keyfile = /etc/keystone/pki/private/signing_key.pem
-#ca_certs = /etc/keystone/pki/certs/cacert.pem
-#ca_key = /etc/keystone/pki/private/cakey.pem
+#certfile = /etc/keystone/ssl/certs/signing_cert.pem
+#keyfile = /etc/keystone/ssl/private/signing_key.pem
+#ca_certs = /etc/keystone/ssl/certs/ca.pem
+#ca_key = /etc/keystone/ssl/private/cakey.pem
 #key_size = 2048
 #valid_days = 3650
 #cert_subject = /C=US/ST=Unset/L=Unset/O=Unset/CN=www.example.com
@@ -422,6 +427,10 @@ methods = external,password,token,oauth1
 password = keystone.auth.plugins.password.Password
 token = keystone.auth.plugins.token.Token
 oauth1 = keystone.auth.plugins.oauth1.OAuth
+
+[memcache]
+# servers = localhost:11211
+# max_compare_and_set_retry = 16
 
 [paste_deploy]
 # Name of the paste configuration file that defines the available pipelines

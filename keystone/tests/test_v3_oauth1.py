@@ -337,14 +337,14 @@ class AuthTokenTests(OAuthFlowTests):
 
         # now verify the oauth section
         oauth_section = r.result['token']['OS-OAUTH1']
-        self.assertEquals(oauth_section['access_token_id'],
-                          self.access_token.key)
-        self.assertEquals(oauth_section['consumer_id'], self.consumer.key)
+        self.assertEqual(oauth_section['access_token_id'],
+                         self.access_token.key)
+        self.assertEqual(oauth_section['consumer_id'], self.consumer.key)
 
         # verify the roles section
         roles_list = r.result['token']['roles']
         # we can just verify the 0th role since we are only assigning one role
-        self.assertEquals(roles_list[0]['id'], self.role_id)
+        self.assertEqual(roles_list[0]['id'], self.role_id)
 
         # verify that the token can perform delegated tasks
         ref = self.new_user_ref(domain_id=self.domain_id)
@@ -507,9 +507,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         credentials = urlparse.parse_qs(content.result)
         request_key = credentials.get('oauth_token')[0]
 
-        self.identity_api.remove_role_from_user_and_project(self.user_id,
-                                                            self.project_id,
-                                                            self.role_id)
+        self.assignment_api.remove_role_from_user_and_project(self.user_id,
+                                                              self.project_id,
+                                                              self.role_id)
         url = self._authorize_request_token(request_key)
         body = {'roles': [{'id': self.role_id}]}
         self.admin_request(path=url, method='PUT',

@@ -19,6 +19,7 @@ import functools
 import uuid
 
 from keystone.common import dependency
+from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
@@ -28,9 +29,13 @@ LOG = logging.getLogger(__name__)
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
+v2_deprecated = utils.deprecated(what='v2 API',
+                                 as_of=utils.deprecated.ICEHOUSE,
+                                 in_favor_of='v3 API')
+
 
 def _build_policy_check_credentials(self, action, context, kwargs):
-    LOG.debug(_('RBAC: Authorizing %(action)s(%(kwargs)s)') % {
+    LOG.debug(_('RBAC: Authorizing %(action)s(%(kwargs)s)'), {
         'action': action,
         'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
@@ -79,7 +84,7 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         except AttributeError:
             LOG.debug(_('RBAC: Proceeding without tenant'))
         # NOTE(vish): this is pretty inefficient
-        creds['roles'] = [self.identity_api.get_role(role)['name']
+        creds['roles'] = [self.assignment_api.get_role(role)['name']
                           for role in creds.get('roles', [])]
 
     return creds
@@ -184,7 +189,7 @@ def filterprotected(*filters):
                         if item in context['query_string']:
                             target[item] = context['query_string'][item]
 
-                    LOG.debug(_('RBAC: Adding query filter params (%s)') % (
+                    LOG.debug(_('RBAC: Adding query filter params (%s)'), (
                         ', '.join(['%s=%s' % (item, target[item])
                                   for item in target])))
 
@@ -202,9 +207,8 @@ def filterprotected(*filters):
     return _filterprotected
 
 
-@dependency.requires('identity_api', 'policy_api', 'token_api',
-                     'trust_api', 'catalog_api', 'credential_api',
-                     'assignment_api')
+@dependency.requires('assignment_api', 'identity_api', 'policy_api',
+                     'token_api', 'trust_api')
 class V2Controller(wsgi.Application):
     """Base controller class for Identity API v2."""
 
@@ -262,11 +266,10 @@ class V2Controller(wsgi.Application):
                         target = _('Domain (%s)') % assignment['domain_id']
                     else:
                         target = _('Unknown Target')
-                    msg = (_('Group (%(group)s), referenced in assignment '
-                             'for %(target)s, not found - ignoring.') % {
-                                 'group': assignment['group_id'],
-                                 'target': target})
-                    LOG.debug(msg)
+                    msg = _('Group (%(group)s), referenced in assignment '
+                            'for %(target)s, not found - ignoring.')
+                    LOG.debug(msg, {'group': assignment['group_id'],
+                                    'target': target})
                     continue
 
                 if 'project_id' in assignment:
@@ -314,6 +317,7 @@ class V2Controller(wsgi.Application):
         return ref
 
 
+@dependency.requires('identity_api', 'policy_api', 'token_api')
 class V3Controller(V2Controller):
     """Base controller class for Identity API v3.
 

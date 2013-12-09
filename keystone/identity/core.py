@@ -16,15 +16,18 @@
 
 """Main entry point into the Identity service."""
 
+import abc
 import functools
 import os
 
 from oslo.config import cfg
+import six
 
 from keystone import clean
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import manager
+from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone import notifications
@@ -60,7 +63,7 @@ def filter_user(user_ref):
 
 
 class DomainConfigs(dict):
-    """Discover, store and provide access to domain specifc configs.
+    """Discover, store and provide access to domain specific configs.
 
     The setup_domain_drives() call will be made via the wrapper from
     the first call to any driver function handled by this manager. This
@@ -89,9 +92,9 @@ class DomainConfigs(dict):
         try:
             domain_ref = assignment_api.get_domain_by_name(domain_name)
         except exception.DomainNotFound:
-            msg = (_('Invalid domain name (%s) found in config file name')
-                   % domain_name)
-            LOG.warning(msg)
+            LOG.warning(
+                _('Invalid domain name (%s) found in config file name'),
+                domain_name)
 
         if domain_ref:
             # Create a new entry in the domain config dict, which contains
@@ -114,22 +117,22 @@ class DomainConfigs(dict):
 
         conf_dir = CONF.identity.domain_config_dir
         if not os.path.exists(conf_dir):
-            msg = _('Unable to locate domain config directory: %s') % conf_dir
-            LOG.warning(msg)
+            LOG.warning(_('Unable to locate domain config directory: %s'),
+                        conf_dir)
             return
 
         for r, d, f in os.walk(conf_dir):
-            for file in f:
-                if file.startswith('keystone.') and file.endswith('.conf'):
-                    names = file.split('.')
+            for fname in f:
+                if fname.startswith('keystone.') and fname.endswith('.conf'):
+                    names = fname.split('.')
                     if len(names) == 3:
                         self._load_config(assignment_api,
-                                          [os.path.join(r, file)],
+                                          [os.path.join(r, fname)],
                                           names[1])
                     else:
-                        msg = (_('Ignoring file (%s) while scanning domain '
-                                 'config directory') % file)
-                        LOG.debug(msg)
+                        LOG.debug(_('Ignoring file (%s) while scanning domain '
+                                    'config directory'),
+                                  fname)
 
     def get_domain_driver(self, domain_id):
         if domain_id in self:
@@ -191,7 +194,7 @@ class Manager(manager.Manager):
     from with the @domains_configured wrapper in a lazy loading fashion
     to get around the fact that we can't satisfy the assignment api it needs
     from within our __init__() function since the assignment driver is not
-    itself yet intitalized.
+    itself yet initialized.
 
     Each of the identity calls are pre-processed here to choose, based on
     domain, which of the drivers should be called. The non-domain-specific
@@ -277,7 +280,7 @@ class Manager(manager.Manager):
         if driver:
             return driver
         else:
-            self.get_domain(domain_id)
+            self.assignment_api.get_domain(domain_id)
             return self.driver
 
     def _get_domain_conf(self, domain_id):
@@ -371,6 +374,7 @@ class Manager(manager.Manager):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         driver.delete_user(user_id)
 
+    @notifications.created('group')
     @domains_configured
     def create_group(self, group_id, group_ref):
         group = group_ref.copy()
@@ -394,6 +398,7 @@ class Manager(manager.Manager):
             ref = self._set_domain_id(ref, domain_id)
         return ref
 
+    @notifications.updated('group')
     @domains_configured
     def update_group(self, group_id, group, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
@@ -404,6 +409,7 @@ class Manager(manager.Manager):
             ref = self._set_domain_id(ref, domain_id)
         return ref
 
+    @notifications.deleted('group')
     @domains_configured
     def delete_group(self, group_id, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
@@ -448,58 +454,127 @@ class Manager(manager.Manager):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         return driver.check_user_in_group(user_id, group_id)
 
-    # TODO(henry-nash, ayoung) The following cross calls to the assignment
-    # API should be removed, with the controller and tests making the correct
-    # calls direct to assignment.
+    # TODO(morganfainberg): Remove the following deprecated methods once
+    # Icehouse is released.  Maintain identity -> assignment proxy for 1
+    # release.
+    @utils.deprecated('I', in_favor_of='assignment_api.get_domain_by_name',
+                      remove_in=1, what='identity_api.get_domain_by_name')
+    def get_domain_by_name(self, domain_name):
+        return self.assignment_api.get_domain_by_name(domain_name)
 
-    def get_project_by_name(self, tenant_name, domain_id):
-        return self.assignment_api.get_project_by_name(tenant_name, domain_id)
+    @utils.deprecated('I', in_favor_of='assignment_api.get_domain',
+                      remove_in=1, what='identity_api.get_domain')
+    def get_domain(self, domain_id):
+        return self.assignment_api.get_domain(domain_id)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.update_domain',
+                      remove_in=1, what='identity_api.update_domain')
+    def update_domain(self, domain_id, domain):
+        return self.assignment_api.update_domain(domain_id, domain)
+
+    @utils.deprecated('I', in_favor_of='assignment_api.list_domains',
+                      remove_in=1, what='identity_api.list_domains')
+    def list_domains(self):
+        return self.assignment_api.list_domains()
+
+    @utils.deprecated('I', in_favor_of='assignment_api.delete_domain',
+                      remove_in=1, what='identity_api.delete_domain')
+    def delete_domain(self, domain_id):
+        return self.assignment_api.delete_domain(domain_id)
+
+    @utils.deprecated('I', in_favor_of='assignment_api.create_domain',
+                      remove_in=1, what='identity_api.create_domain')
+    def create_domain(self, domain_id, domain):
+        return self.assignment_api.create_domain(domain_id, domain)
+
+    @utils.deprecated('I', in_favor_of='assignment_api.list_projects_for_user',
+                      remove_in=1, what='identity_api.list_projects_for_user')
+    def list_projects_for_user(self, user_id):
+        return self.assignment_api.list_projects_for_user(user_id)
+
+    @utils.deprecated('I', in_favor_of='assignment_api.add_user_to_project',
+                      remove_in=1, what='identity_api.add_user_to_project')
+    def add_user_to_project(self, tenant_id, user_id):
+        return self.assignment_api.add_user_to_project(tenant_id, user_id)
+
+    @utils.deprecated('I',
+                      in_favor_of='assignment_api.remove_user_from_project',
+                      remove_in=1,
+                      what='identity_api.remove_user_from_project')
+    def remove_user_from_project(self, tenant_id, user_id):
+        return self.assignment_api.remove_user_from_project(tenant_id, user_id)
+
+    @utils.deprecated('I', in_favor_of='assignment_api.get_project',
+                      remove_in=1, what='identity_api.get_project')
     def get_project(self, tenant_id):
         return self.assignment_api.get_project(tenant_id)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.list_projects',
+                      remove_in=1, what='identity_api.list_projects')
     def list_projects(self, domain_id=None):
         return self.assignment_api.list_projects(domain_id)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.get_role',
+                      remove_in=1, what='identity_api.get_role')
     def get_role(self, role_id):
         return self.assignment_api.get_role(role_id)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.list_roles',
+                      remove_in=1, what='identity_api.list_roles')
     def list_roles(self):
         return self.assignment_api.list_roles()
 
+    @utils.deprecated('I', in_favor_of='assignment_api.get_project_users',
+                      remove_in=1, what='identity_api.get_project_users')
     def get_project_users(self, tenant_id):
         return self.assignment_api.get_project_users(tenant_id)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.list_projects_for_user',
+                      remove_in=1, what='identity_api.list_projects_for_user')
     def get_roles_for_user_and_project(self, user_id, tenant_id):
         return self.assignment_api.get_roles_for_user_and_project(
             user_id, tenant_id)
 
+    @utils.deprecated(
+        'I', in_favor_of='assignment_api.get_roles_for_user_and_domain',
+        remove_in=1, what='identity_api.get_roles_for_user_and_domain')
     def get_roles_for_user_and_domain(self, user_id, domain_id):
         return (self.assignment_api.get_roles_for_user_and_domain
                 (user_id, domain_id))
 
-    def _subrole_id_to_dn(self, role_id, tenant_id):
-        return self.assignment_api._subrole_id_to_dn(role_id, tenant_id)
-
+    @utils.deprecated(
+        'I', in_favor_of='assignment_api.add_role_to_user_and_project',
+        remove_in=1, what='identity_api.add_role_to_user_and_project')
     def add_role_to_user_and_project(self, user_id,
                                      tenant_id, role_id):
         return (self.assignment_api.add_role_to_user_and_project
                 (user_id, tenant_id, role_id))
 
+    @utils.deprecated('I', in_favor_of='assignment_api.create_role',
+                      remove_in=1, what='identity_api.create_role')
     def create_role(self, role_id, role):
         return self.assignment_api.create_role(role_id, role)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.delete_role',
+                      remove_in=1, what='identity_api.delete_role')
     def delete_role(self, role_id):
         return self.assignment_api.delete_role(role_id)
 
+    @utils.deprecated(
+        'I', in_favor_of='assignment_api.remove_role_from_user_and_project',
+        remove_in=1, what='identity_api.remove_role_from_user_and_project')
     def remove_role_from_user_and_project(self, user_id,
                                           tenant_id, role_id):
         return (self.assignment_api.remove_role_from_user_and_project
                 (user_id, tenant_id, role_id))
 
+    @utils.deprecated('I', in_favor_of='assignment_api.update_role',
+                      remove_in=1, what='identity_api.update_role')
     def update_role(self, role_id, role):
         return self.assignment_api.update_role(role_id, role)
 
+    @utils.deprecated('I', in_favor_of='assignment_api.create_grant',
+                      remove_in=1, what='identity_api.create_grant')
     def create_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
                      inherited_to_projects=False):
@@ -507,6 +582,8 @@ class Manager(manager.Manager):
                 (role_id, user_id, group_id, domain_id, project_id,
                  inherited_to_projects))
 
+    @utils.deprecated('I', in_favor_of='assignment_api.list_grants',
+                      remove_in=1, what='identity_api.list_grants')
     def list_grants(self, user_id=None, group_id=None,
                     domain_id=None, project_id=None,
                     inherited_to_projects=False):
@@ -514,6 +591,8 @@ class Manager(manager.Manager):
                 (user_id, group_id, domain_id, project_id,
                  inherited_to_projects))
 
+    @utils.deprecated('I', in_favor_of='assignment_api.get_grant',
+                      remove_in=1, what='identity_api.get_grant')
     def get_grant(self, role_id, user_id=None, group_id=None,
                   domain_id=None, project_id=None,
                   inherited_to_projects=False):
@@ -521,6 +600,8 @@ class Manager(manager.Manager):
                 (role_id, user_id, group_id, domain_id, project_id,
                  inherited_to_projects))
 
+    @utils.deprecated('I', in_favor_of='assignment_api.delete_grant',
+                      remove_in=1, what='identity_api.delete_grant')
     def delete_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
                      inherited_to_projects=False):
@@ -528,36 +609,12 @@ class Manager(manager.Manager):
                 (role_id, user_id, group_id, domain_id, project_id,
                  inherited_to_projects))
 
-    def create_domain(self, domain_id, domain):
-        return self.assignment_api.create_domain(domain_id, domain)
 
-    def get_domain_by_name(self, domain_name):
-        return self.assignment_api.get_domain_by_name(domain_name)
-
-    def get_domain(self, domain_id):
-        return self.assignment_api.get_domain(domain_id)
-
-    def update_domain(self, domain_id, domain):
-        return self.assignment_api.update_domain(domain_id, domain)
-
-    def delete_domain(self, domain_id):
-        return self.assignment_api.delete_domain(domain_id)
-
-    def list_domains(self):
-        return self.assignment_api.list_domains()
-
-    def list_projects_for_user(self, user_id):
-        return self.assignment_api.list_projects_for_user(user_id)
-
-    def add_user_to_project(self, tenant_id, user_id):
-        return self.assignment_api.add_user_to_project(tenant_id, user_id)
-
-    def remove_user_from_project(self, tenant_id, user_id):
-        return self.assignment_api.remove_user_from_project(tenant_id, user_id)
-
-
+@six.add_metaclass(abc.ABCMeta)
 class Driver(object):
     """Interface description for an Identity driver."""
+
+    @abc.abstractmethod
     def authenticate(self, user_id, password):
         """Authenticate a given user and password.
         :returns: user_ref
@@ -567,6 +624,7 @@ class Driver(object):
 
     # user crud
 
+    @abc.abstractmethod
     def create_user(self, user_id, user):
         """Creates a new user.
 
@@ -575,6 +633,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def list_users(self):
         """List all users in the system.
 
@@ -583,6 +642,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def list_users_in_group(self, group_id):
         """List all users in a group.
 
@@ -591,6 +651,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def get_user(self, user_id):
         """Get a user by ID.
 
@@ -600,6 +661,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def update_user(self, user_id, user):
         """Updates an existing user.
 
@@ -609,6 +671,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def add_user_to_group(self, user_id, group_id):
         """Adds a user to a group.
 
@@ -618,6 +681,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def check_user_in_group(self, user_id, group_id):
         """Checks if a user is a member of a group.
 
@@ -627,6 +691,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def remove_user_from_group(self, user_id, group_id):
         """Removes a user from a group.
 
@@ -635,6 +700,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def delete_user(self, user_id):
         """Deletes an existing user.
 
@@ -643,6 +709,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def get_user_by_name(self, user_name, domain_id):
         """Get a user by name.
 
@@ -654,6 +721,7 @@ class Driver(object):
 
     # group crud
 
+    @abc.abstractmethod
     def create_group(self, group_id, group):
         """Creates a new group.
 
@@ -662,6 +730,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def list_groups(self):
         """List all groups in the system.
 
@@ -670,6 +739,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def list_groups_for_user(self, user_id):
         """List all groups a user is in
 
@@ -678,6 +748,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def get_group(self, group_id):
         """Get a group by ID.
 
@@ -687,6 +758,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def update_group(self, group_id, group):
         """Updates an existing group.
 
@@ -696,6 +768,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def delete_group(self, group_id):
         """Deletes an existing group.
 
@@ -704,6 +777,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def is_domain_aware(self):
         """Indicates if Driver supports domains."""
         raise exception.NotImplemented()

@@ -22,6 +22,7 @@ from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests.fixtures import appserver
 
 
 CONF = config.CONF
@@ -30,7 +31,7 @@ OPENSTACK_REPO = 'https://review.openstack.org/p/openstack'
 KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
 
-class CompatTestCase(tests.TestCase):
+class CompatTestCase(tests.NoModule, tests.TestCase):
     def setUp(self):
         super(CompatTestCase, self).setUp()
 
@@ -42,24 +43,20 @@ class CompatTestCase(tests.TestCase):
 
         # TODO(termie): add an admin user to the fixtures and use that user
         # override the fixtures, for now
-        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
+        self.md_foobar = self.assignment_api.add_role_to_user_and_project(
             self.user_foo['id'],
             self.tenant_bar['id'],
             self.role_admin['id'])
 
-        self.public_server = self.serveapp('keystone', name='main')
-        self.admin_server = self.serveapp('keystone', name='admin')
+        conf = self._paste_config('keystone')
+        fixture = self.useFixture(appserver.AppServer(conf, appserver.MAIN))
+        self.public_server = fixture.server
+        fixture = self.useFixture(appserver.AppServer(conf, appserver.ADMIN))
+        self.admin_server = fixture.server
 
         revdir = tests.checkout_vendor(*self.get_checkout())
         self.add_path(revdir)
         self.clear_module('keystoneclient')
-
-    def tearDown(self):
-        self.public_server.kill()
-        self.admin_server.kill()
-        self.public_server = None
-        self.admin_server = None
-        super(CompatTestCase, self).tearDown()
 
     def _public_url(self):
         public_port = self.public_server.socket_info['socket'][1]
@@ -103,14 +100,14 @@ class KeystoneClientTests(object):
     def test_authenticate_tenant_name_and_tenants(self):
         client = self.get_client()
         tenants = client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
     def test_authenticate_tenant_id_and_tenants(self):
         client = self._client(username=self.user_foo['name'],
                               password=self.user_foo['password'],
                               tenant_id='bar')
         tenants = client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
     def test_authenticate_invalid_tenant_id(self):
         from keystoneclient import exceptions as client_exceptions
@@ -125,14 +122,14 @@ class KeystoneClientTests(object):
         token = client.auth_token
         token_client = self._client(token=token)
         tenants = token_client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
     def test_authenticate_token_tenant_id(self):
         client = self.get_client()
         token = client.auth_token
         token_client = self._client(token=token, tenant_id='bar')
         tenants = token_client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
     def test_authenticate_token_invalid_tenant_id(self):
         from keystoneclient import exceptions as client_exceptions
@@ -155,8 +152,8 @@ class KeystoneClientTests(object):
         token = client.auth_token
         token_client = self._client(token=token, tenant_name='BAR')
         tenants = token_client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
     def test_authenticate_and_delete_token(self):
         from keystoneclient import exceptions as client_exceptions
@@ -165,7 +162,7 @@ class KeystoneClientTests(object):
         token = client.auth_token
         token_client = self._client(token=token)
         tenants = token_client.tenants.list()
-        self.assertEquals(tenants[0].id, self.tenant_bar['id'])
+        self.assertEqual(tenants[0].id, self.tenant_bar['id'])
 
         client.tokens.delete(token_client.auth_token)
 
@@ -254,19 +251,19 @@ class KeystoneClientTests(object):
         tenant = client.tenants.create(tenant_name=tenant_name,
                                        description=tenant_description,
                                        enabled=tenant_enabled)
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         tenant = client.tenants.get(tenant_id=tenant.id)
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         tenant = [t for t in client.tenants.list() if t.id == tenant.id].pop()
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         # update, get, and list a tenant
         tenant_name = 'updated_tenant'
@@ -276,19 +273,19 @@ class KeystoneClientTests(object):
                                        tenant_name=tenant_name,
                                        enabled=tenant_enabled,
                                        description=tenant_description)
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         tenant = client.tenants.get(tenant_id=tenant.id)
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         tenant = [t for t in client.tenants.list() if t.id == tenant.id].pop()
-        self.assertEquals(tenant.name, tenant_name)
-        self.assertEquals(tenant.description, tenant_description)
-        self.assertEquals(tenant.enabled, tenant_enabled)
+        self.assertEqual(tenant.name, tenant_name)
+        self.assertEqual(tenant.description, tenant_description)
+        self.assertEqual(tenant.enabled, tenant_enabled)
 
         # delete, get, and list a tenant
         client.tenants.delete(tenant=tenant.id)
@@ -384,12 +381,12 @@ class KeystoneClientTests(object):
     def test_tenant_list(self):
         client = self.get_client()
         tenants = client.tenants.list()
-        self.assertEquals(len(tenants), 1)
+        self.assertEqual(len(tenants), 1)
 
         # Admin endpoint should return *all* tenants
         client = self.get_client(admin=True)
         tenants = client.tenants.list()
-        self.assertEquals(len(tenants), len(default_fixtures.TENANTS))
+        self.assertEqual(len(tenants), len(default_fixtures.TENANTS))
 
     def test_invalid_password(self):
         from keystoneclient import exceptions as client_exceptions
@@ -536,15 +533,15 @@ class KeystoneClientTests(object):
         user = client.users.create(name=test_username,
                                    password='password',
                                    email='user1@test.com')
-        self.assertEquals(user.name, test_username)
+        self.assertEqual(user.name, test_username)
 
         user = client.users.get(user=user.id)
-        self.assertEquals(user.name, test_username)
+        self.assertEqual(user.name, test_username)
 
         user = client.users.update(user=user,
                                    name=test_username,
                                    email='user2@test.com')
-        self.assertEquals(user.email, 'user2@test.com')
+        self.assertEqual(user.email, 'user2@test.com')
 
         # NOTE(termie): update_enabled doesn't return anything, probably a bug
         client.users.update_enabled(user=user, enabled=False)
@@ -576,7 +573,7 @@ class KeystoneClientTests(object):
                                     password='password',
                                     email='user1@test.com',
                                     tenant_id='bar')
-        self.assertEquals(user2.name, test_username)
+        self.assertEqual(user2.name, test_username)
 
     def test_update_default_tenant_to_existing_value(self):
         client = self.get_client(admin=True)
@@ -679,7 +676,7 @@ class KeystoneClientTests(object):
     def test_role_get(self):
         client = self.get_client(admin=True)
         role = client.roles.get(role=self.role_admin['id'])
-        self.assertEquals(role.id, self.role_admin['id'])
+        self.assertEqual(role.id, self.role_admin['id'])
 
     def test_role_crud(self):
         from keystoneclient import exceptions as client_exceptions
@@ -687,10 +684,10 @@ class KeystoneClientTests(object):
         test_role = 'new_role'
         client = self.get_client(admin=True)
         role = client.roles.create(name=test_role)
-        self.assertEquals(role.name, test_role)
+        self.assertEqual(role.name, test_role)
 
         role = client.roles.get(role=role.id)
-        self.assertEquals(role.name, test_role)
+        self.assertEqual(role.name, test_role)
 
         client.roles.delete(role=role.id)
 
@@ -756,19 +753,19 @@ class KeystoneClientTests(object):
         service = client.services.create(name=service_name,
                                          service_type=service_type,
                                          description=service_desc)
-        self.assertEquals(service_name, service.name)
-        self.assertEquals(service_type, service.type)
-        self.assertEquals(service_desc, service.description)
+        self.assertEqual(service_name, service.name)
+        self.assertEqual(service_type, service.type)
+        self.assertEqual(service_desc, service.description)
 
         service = client.services.get(id=service.id)
-        self.assertEquals(service_name, service.name)
-        self.assertEquals(service_type, service.type)
-        self.assertEquals(service_desc, service.description)
+        self.assertEqual(service_name, service.name)
+        self.assertEqual(service_type, service.type)
+        self.assertEqual(service_desc, service.description)
 
         service = [x for x in client.services.list() if x.id == service.id][0]
-        self.assertEquals(service_name, service.name)
-        self.assertEquals(service_type, service.type)
-        self.assertEquals(service_desc, service.description)
+        self.assertEqual(service_name, service.name)
+        self.assertEqual(service_type, service.type)
+        self.assertEqual(service_desc, service.description)
 
         # update is not supported in API v2...
 
@@ -778,7 +775,7 @@ class KeystoneClientTests(object):
                           client.services.get,
                           id=service.id)
         services = [x for x in client.services.list() if x.id == service.id]
-        self.assertEquals(len(services), 0)
+        self.assertEqual(len(services), 0)
 
     def test_service_delete_404(self):
         from keystoneclient import exceptions as client_exceptions
@@ -865,7 +862,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                                    user=self.user_two['id'],
                                    role=self.role_other['id'])
         user_refs = client.tenants.list_users(tenant=self.tenant_bar['id'])
-        self.assert_(self.user_two['id'] in [x.id for x in user_refs])
+        self.assertTrue(self.user_two['id'] in [x.id for x in user_refs])
         client.roles.remove_user_role(tenant=self.tenant_bar['id'],
                                       user=self.user_two['id'],
                                       role=self.role_other['id'])
@@ -927,8 +924,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
             tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id,
                       'domain_id': DEFAULT_DOMAIN_ID}
             self.assignment_api.create_project(tenant_id, tenant)
-            self.identity_api.add_user_to_project(tenant_id,
-                                                  self.user_foo['id'])
+            self.assignment_api.add_user_to_project(tenant_id,
+                                                    self.user_foo['id'])
 
         tenants = client.tenants.list()
         self.assertEqual(len(tenants), 3)
@@ -954,8 +951,8 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
             tenant = {'name': 'tenant-%s' % tenant_id, 'id': tenant_id,
                       'domain_id': DEFAULT_DOMAIN_ID}
             self.assignment_api.create_project(tenant_id, tenant)
-            self.identity_api.add_user_to_project(tenant_id,
-                                                  self.user_foo['id'])
+            self.assignment_api.add_user_to_project(tenant_id,
+                                                    self.user_foo['id'])
 
         tenants = client.tenants.list()
         self.assertEqual(len(tenants), 3)
@@ -1028,7 +1025,7 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
                     (new_password, self.user_two['password']))
         self.public_server.application(req.environ,
                                        responseobject.start_fake_response)
-        self.assertEquals(403, responseobject.response_status)
+        self.assertEqual(403, responseobject.response_status)
 
         self.user_two['password'] = new_password
         self.assertRaises(client_exceptions.Unauthorized,
@@ -1078,7 +1075,8 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
                                         role_id=self.role_member['id'])
         role_refs = client.roles.get_user_role_refs(
             user_id=self.user_two['id'])
-        self.assert_(self.tenant_baz['id'] in [x.tenantId for x in role_refs])
+        self.assertTrue(self.tenant_baz['id'] in
+                        [x.tenantId for x in role_refs])
 
         # get the "role_refs" so we get the proper id, this is how the clients
         # do it
@@ -1096,8 +1094,8 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
 
         role_refs = client.roles.get_user_role_refs(
             user_id=self.user_two['id'])
-        self.assert_(self.tenant_baz['id'] not in
-                     [x.tenantId for x in role_refs])
+        self.assertTrue(self.tenant_baz['id'] not in
+                        [x.tenantId for x in role_refs])
 
     def test_roles_get_by_user(self):
         client = self.get_client(admin=True)
@@ -1118,13 +1116,13 @@ class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
         user = client.users.create(name=test_username,
                                    password='password',
                                    email='user1@test.com')
-        self.assertEquals(user.name, test_username)
+        self.assertEqual(user.name, test_username)
 
         user = client.users.get(user=user.id)
-        self.assertEquals(user.name, test_username)
+        self.assertEqual(user.name, test_username)
 
         user = client.users.update_email(user=user, email='user2@test.com')
-        self.assertEquals(user.email, 'user2@test.com')
+        self.assertEqual(user.email, 'user2@test.com')
 
         # NOTE(termie): update_enabled doesn't return anything, probably a bug
         client.users.update_enabled(user=user, enabled=False)

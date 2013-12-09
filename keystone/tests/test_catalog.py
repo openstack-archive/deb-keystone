@@ -16,13 +16,13 @@
 
 import uuid
 
-from keystone.tests import test_content_types
+from keystone.tests import rest
 
 
 BASE_URL = 'http://127.0.0.1:35357/v2'
 
 
-class V2CatalogTestCase(test_content_types.RestfulTestCase):
+class V2CatalogTestCase(rest.RestfulTestCase):
     def setUp(self):
         super(V2CatalogTestCase, self).setUp()
         self.service_id = uuid.uuid4().hex
@@ -31,6 +31,13 @@ class V2CatalogTestCase(test_content_types.RestfulTestCase):
         self.catalog_api.create_service(
             self.service_id,
             self.service.copy())
+
+        # TODO(termie): add an admin user to the fixtures and use that user
+        # override the fixtures, for now
+        self.assignment_api.add_role_to_user_and_project(
+            self.user_foo['id'],
+            self.tenant_bar['id'],
+            self.role_admin['id'])
 
     def new_ref(self):
         """Populates a ref with attributes common to all API entities."""

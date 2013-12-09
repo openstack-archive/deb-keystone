@@ -22,6 +22,7 @@ import urlparse
 import uuid
 
 from keystone.common import controller
+from keystone.common import dependency
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import log as logging
@@ -31,7 +32,10 @@ DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 LOG = logging.getLogger(__name__)
 
 
+@dependency.requires('assignment_api', 'identity_api', 'token_api')
 class Tenant(controller.V2Controller):
+
+    @controller.v2_deprecated
     def get_all_projects(self, context, **kw):
         """Gets a list of all tenants for an admin user."""
         if 'name' in context['query_string']:
@@ -39,7 +43,7 @@ class Tenant(controller.V2Controller):
                 context, context['query_string'].get('name'))
 
         self.assert_admin(context)
-        tenant_refs = self.identity_api.list_projects()
+        tenant_refs = self.assignment_api.list_projects()
         for tenant_ref in tenant_refs:
             tenant_ref = self.filter_domain_id(tenant_ref)
         params = {
@@ -48,6 +52,7 @@ class Tenant(controller.V2Controller):
         }
         return self._format_project_list(tenant_refs, **params)
 
+    @controller.v2_deprecated
     def get_projects_for_token(self, context, **kw):
         """Get valid tenants for token based on token used to authenticate.
 
@@ -60,7 +65,7 @@ class Tenant(controller.V2Controller):
         try:
             token_ref = self.token_api.get_token(context['token_id'])
         except exception.NotFound as e:
-            LOG.warning('Authentication failed: %s' % e)
+            LOG.warning(_('Authentication failed: %s'), e)
             raise exception.Unauthorized(e)
 
         user_ref = token_ref['user']
@@ -74,24 +79,27 @@ class Tenant(controller.V2Controller):
         }
         return self._format_project_list(tenant_refs, **params)
 
+    @controller.v2_deprecated
     def get_project(self, context, tenant_id):
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
-        ref = self.identity_api.get_project(tenant_id)
+        ref = self.assignment_api.get_project(tenant_id)
         return {'tenant': self.filter_domain_id(ref)}
 
+    @controller.v2_deprecated
     def get_project_by_name(self, context, tenant_name):
         self.assert_admin(context)
-        ref = self.identity_api.get_project_by_name(
+        ref = self.assignment_api.get_project_by_name(
             tenant_name, DEFAULT_DOMAIN_ID)
         return {'tenant': self.filter_domain_id(ref)}
 
     # CRUD Extension
+    @controller.v2_deprecated
     def create_project(self, context, tenant):
         tenant_ref = self._normalize_dict(tenant)
 
         if 'name' not in tenant_ref or not tenant_ref['name']:
-            msg = 'Name field is required and cannot be empty'
+            msg = _('Name field is required and cannot be empty')
             raise exception.ValidationError(message=msg)
 
         self.assert_admin(context)
@@ -101,6 +109,7 @@ class Tenant(controller.V2Controller):
             self._normalize_domain_id(context, tenant_ref))
         return {'tenant': self.filter_domain_id(tenant)}
 
+    @controller.v2_deprecated
     def update_project(self, context, tenant_id, tenant):
         self.assert_admin(context)
         # Remove domain_id if specified - a v2 api caller should not
@@ -117,12 +126,14 @@ class Tenant(controller.V2Controller):
             tenant_id, clean_tenant)
         return {'tenant': tenant_ref}
 
+    @controller.v2_deprecated
     def delete_project(self, context, tenant_id):
         self.assert_admin(context)
         # Delete all tokens belonging to the users for that project
         self._delete_tokens_for_project(tenant_id)
         self.assignment_api.delete_project(tenant_id)
 
+    @controller.v2_deprecated
     def get_project_users(self, context, tenant_id, **kw):
         self.assert_admin(context)
         user_refs = []
@@ -142,7 +153,7 @@ class Tenant(controller.V2Controller):
                     first_index = marker_index + 1
                     break
             else:
-                msg = 'Marker could not be found'
+                msg = _('Marker could not be found')
                 raise exception.ValidationError(message=msg)
 
         limit = kwargs.get('limit')
@@ -153,7 +164,7 @@ class Tenant(controller.V2Controller):
                 if limit < 0:
                     raise AssertionError()
             except (ValueError, AssertionError):
-                msg = 'Invalid limit value'
+                msg = _('Invalid limit value')
                 raise exception.ValidationError(message=msg)
             last_index = first_index + limit
 
@@ -167,12 +178,16 @@ class Tenant(controller.V2Controller):
         return o
 
 
+@dependency.requires('assignment_api', 'identity_api')
 class User(controller.V2Controller):
+
+    @controller.v2_deprecated
     def get_user(self, context, user_id):
         self.assert_admin(context)
         ref = self.identity_api.get_user(user_id)
         return {'user': self.identity_api.v3_to_v2_user(ref)}
 
+    @controller.v2_deprecated
     def get_users(self, context):
         # NOTE(termie): i can't imagine that this really wants all the data
         #               about every single user in the system...
@@ -184,21 +199,24 @@ class User(controller.V2Controller):
         user_list = self.identity_api.list_users()
         return {'users': self.identity_api.v3_to_v2_user(user_list)}
 
+    @controller.v2_deprecated
     def get_user_by_name(self, context, user_name):
         self.assert_admin(context)
         ref = self.identity_api.get_user_by_name(user_name, DEFAULT_DOMAIN_ID)
         return {'user': self.identity_api.v3_to_v2_user(ref)}
 
     # CRUD extension
+    @controller.v2_deprecated
     def create_user(self, context, user):
+        user = self._normalize_OSKSADM_password_on_request(user)
         user = self._normalize_dict(user)
         self.assert_admin(context)
 
         if 'name' not in user or not user['name']:
-            msg = 'Name field is required and cannot be empty'
+            msg = _('Name field is required and cannot be empty')
             raise exception.ValidationError(message=msg)
         if 'enabled' in user and not isinstance(user['enabled'], bool):
-            msg = 'Enabled field must be a boolean'
+            msg = _('Enabled field must be a boolean')
             raise exception.ValidationError(message=msg)
 
         default_project_id = user.pop('tenantId', None)
@@ -214,15 +232,17 @@ class User(controller.V2Controller):
             self.identity_api.create_user(user_id, user_ref))
 
         if default_project_id is not None:
-            self.identity_api.add_user_to_project(default_project_id, user_id)
+            self.assignment_api.add_user_to_project(default_project_id,
+                                                    user_id)
         return {'user': new_user_ref}
 
+    @controller.v2_deprecated
     def update_user(self, context, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
         self.assert_admin(context)
 
         if 'enabled' in user and not isinstance(user['enabled'], bool):
-            msg = 'Enabled field should be a boolean'
+            msg = _('Enabled field should be a boolean')
             raise exception.ValidationError(message=msg)
 
         default_project_id = user.pop('tenantId', None)
@@ -232,9 +252,15 @@ class User(controller.V2Controller):
         old_user_ref = self.identity_api.v3_to_v2_user(
             self.identity_api.get_user(user_id))
 
-        if ('tenantId' in old_user_ref and
+        # Check whether a tenant is being added or changed for the user.
+        # Catch the case where the tenant is being changed for a user and also
+        # where a user previously had no tenant but a tenant is now being
+        # added for the user.
+        if (('tenantId' in old_user_ref and
                 old_user_ref['tenantId'] != default_project_id and
-                default_project_id is not None):
+                default_project_id is not None) or
+            ('tenantId' not in old_user_ref and
+                default_project_id is not None)):
             # Make sure the new project actually exists before we perform the
             # user update.
             self.assignment_api.get_project(default_project_id)
@@ -286,20 +312,39 @@ class User(controller.V2Controller):
 
         return {'user': user_ref}
 
+    @controller.v2_deprecated
     def delete_user(self, context, user_id):
         self.assert_admin(context)
         self.identity_api.delete_user(user_id)
         self._delete_tokens_for_user(user_id)
 
+    @controller.v2_deprecated
     def set_user_enabled(self, context, user_id, user):
         return self.update_user(context, user_id, user)
 
+    @controller.v2_deprecated
     def set_user_password(self, context, user_id, user):
+        user = self._normalize_OSKSADM_password_on_request(user)
         return self.update_user(context, user_id, user)
 
+    @staticmethod
+    def _normalize_OSKSADM_password_on_request(ref):
+        """Sets the password from the OS-KSADM Admin Extension.
 
+        The OS-KSADM Admin Extension documentation says that
+        `OS-KSADM:password` can be used in place of `password`.
+
+        """
+        if 'OS-KSADM:password' in ref:
+            ref['password'] = ref.pop('OS-KSADM:password')
+        return ref
+
+
+@dependency.requires('assignment_api', 'identity_api')
 class Role(controller.V2Controller):
+
     # COMPAT(essex-3)
+    @controller.v2_deprecated
     def get_user_roles(self, context, user_id, tenant_id=None):
         """Get the roles for a user and tenant pair.
 
@@ -312,41 +357,46 @@ class Role(controller.V2Controller):
             raise exception.NotImplemented(message='User roles not supported: '
                                                    'tenant ID required')
 
-        roles = self.identity_api.get_roles_for_user_and_project(
+        roles = self.assignment_api.get_roles_for_user_and_project(
             user_id, tenant_id)
-        return {'roles': [self.identity_api.get_role(x)
+        return {'roles': [self.assignment_api.get_role(x)
                           for x in roles]}
 
     # CRUD extension
+    @controller.v2_deprecated
     def get_role(self, context, role_id):
         self.assert_admin(context)
-        return {'role': self.identity_api.get_role(role_id)}
+        return {'role': self.assignment_api.get_role(role_id)}
 
+    @controller.v2_deprecated
     def create_role(self, context, role):
         role = self._normalize_dict(role)
         self.assert_admin(context)
 
         if 'name' not in role or not role['name']:
-            msg = 'Name field is required and cannot be empty'
+            msg = _('Name field is required and cannot be empty')
             raise exception.ValidationError(message=msg)
 
         role_id = uuid.uuid4().hex
         role['id'] = role_id
-        role_ref = self.identity_api.create_role(role_id, role)
+        role_ref = self.assignment_api.create_role(role_id, role)
         return {'role': role_ref}
 
+    @controller.v2_deprecated
     def delete_role(self, context, role_id):
         self.assert_admin(context)
         # The driver will delete any assignments for this role.
         # We must first, however, revoke any tokens for users that have an
         # assignment with this role.
         self._delete_tokens_for_role(role_id)
-        self.identity_api.delete_role(role_id)
+        self.assignment_api.delete_role(role_id)
 
+    @controller.v2_deprecated
     def get_roles(self, context):
         self.assert_admin(context)
-        return {'roles': self.identity_api.list_roles()}
+        return {'roles': self.assignment_api.list_roles()}
 
+    @controller.v2_deprecated
     def add_role_to_user(self, context, user_id, role_id, tenant_id=None):
         """Add a role to a user and tenant pair.
 
@@ -359,12 +409,13 @@ class Role(controller.V2Controller):
             raise exception.NotImplemented(message='User roles not supported: '
                                                    'tenant_id required')
 
-        self.identity_api.add_role_to_user_and_project(
+        self.assignment_api.add_role_to_user_and_project(
             user_id, tenant_id, role_id)
 
-        role_ref = self.identity_api.get_role(role_id)
+        role_ref = self.assignment_api.get_role(role_id)
         return {'role': role_ref}
 
+    @controller.v2_deprecated
     def remove_role_from_user(self, context, user_id, role_id, tenant_id=None):
         """Remove a role from a user and tenant pair.
 
@@ -379,11 +430,12 @@ class Role(controller.V2Controller):
 
         # This still has the weird legacy semantics that adding a role to
         # a user also adds them to a tenant, so we must follow up on that
-        self.identity_api.remove_role_from_user_and_project(
+        self.assignment_api.remove_role_from_user_and_project(
             user_id, tenant_id, role_id)
         self._delete_tokens_for_user(user_id)
 
     # COMPAT(diablo): CRUD extension
+    @controller.v2_deprecated
     def get_role_refs(self, context, user_id):
         """Ultimate hack to get around having to make role_refs first-class.
 
@@ -403,7 +455,7 @@ class Role(controller.V2Controller):
             # the default domain.
             if tenant['domain_id'] != DEFAULT_DOMAIN_ID:
                 continue
-            role_ids = self.identity_api.get_roles_for_user_and_project(
+            role_ids = self.assignment_api.get_roles_for_user_and_project(
                 user_id, tenant['id'])
             for role_id in role_ids:
                 ref = {'roleId': role_id,
@@ -414,6 +466,7 @@ class Role(controller.V2Controller):
         return {'roles': o}
 
     # COMPAT(diablo): CRUD extension
+    @controller.v2_deprecated
     def create_role_ref(self, context, user_id, role):
         """This is actually used for adding a user to a tenant.
 
@@ -425,14 +478,15 @@ class Role(controller.V2Controller):
         # TODO(termie): for now we're ignoring the actual role
         tenant_id = role.get('tenantId')
         role_id = role.get('roleId')
-        self.identity_api.add_role_to_user_and_project(
+        self.assignment_api.add_role_to_user_and_project(
             user_id, tenant_id, role_id)
         self._delete_tokens_for_user(user_id)
 
-        role_ref = self.identity_api.get_role(role_id)
+        role_ref = self.assignment_api.get_role(role_id)
         return {'role': role_ref}
 
     # COMPAT(diablo): CRUD extension
+    @controller.v2_deprecated
     def delete_role_ref(self, context, user_id, role_ref_id):
         """This is actually used for deleting a user from a tenant.
 
@@ -449,11 +503,12 @@ class Role(controller.V2Controller):
         role_ref_ref = urlparse.parse_qs(role_ref_id)
         tenant_id = role_ref_ref.get('tenantId')[0]
         role_id = role_ref_ref.get('roleId')[0]
-        self.identity_api.remove_role_from_user_and_project(
+        self.assignment_api.remove_role_from_user_and_project(
             user_id, tenant_id, role_id)
         self._delete_tokens_for_user(user_id)
 
 
+@dependency.requires('assignment_api', 'identity_api')
 class DomainV3(controller.V3Controller):
     collection_name = 'domains'
     member_name = 'domain'
@@ -467,31 +522,31 @@ class DomainV3(controller.V3Controller):
         self._require_attribute(domain, 'name')
 
         ref = self._assign_unique_id(self._normalize_dict(domain))
-        ref = self.identity_api.create_domain(ref['id'], ref)
+        ref = self.assignment_api.create_domain(ref['id'], ref)
         return DomainV3.wrap_member(context, ref)
 
     @controller.filterprotected('enabled', 'name')
     def list_domains(self, context, filters):
-        refs = self.identity_api.list_domains()
+        refs = self.assignment_api.list_domains()
         return DomainV3.wrap_collection(context, refs, filters)
 
     @controller.protected()
     def get_domain(self, context, domain_id):
-        ref = self.identity_api.get_domain(domain_id)
+        ref = self.assignment_api.get_domain(domain_id)
         return DomainV3.wrap_member(context, ref)
 
     @controller.protected()
     def update_domain(self, context, domain_id, domain):
         self._require_matching_id(domain_id, domain)
 
-        ref = self.identity_api.update_domain(domain_id, domain)
+        ref = self.assignment_api.update_domain(domain_id, domain)
 
         # disable owned users & projects when the API user specifically set
         #     enabled=False
         # FIXME(dolph): need a driver call to directly revoke all tokens by
         #               project or domain, regardless of user
         if not domain.get('enabled', True):
-            projects = [x for x in self.identity_api.list_projects()
+            projects = [x for x in self.assignment_api.list_projects()
                         if x.get('domain_id') == domain_id]
             for user in self.identity_api.list_users():
                 # TODO(dolph): disable domain-scoped tokens
@@ -548,7 +603,7 @@ class DomainV3(controller.V3Controller):
         user_refs = self.identity_api.list_users()
         user_ids = [r['id'] for r in user_refs if r['domain_id'] == domain_id]
 
-        proj_refs = self.identity_api.list_projects()
+        proj_refs = self.assignment_api.list_projects()
         proj_ids = [r['id'] for r in proj_refs if r['domain_id'] == domain_id]
 
         # First delete the projects themselves
@@ -581,26 +636,17 @@ class DomainV3(controller.V3Controller):
         # has been previously disabled.  This also prevents a user deleting
         # their own domain since, once it is disabled, they won't be able
         # to get a valid token to issue this delete.
-        ref = self.identity_api.get_domain(domain_id)
+        ref = self.assignment_api.get_domain(domain_id)
         if ref['enabled']:
             raise exception.ForbiddenAction(
                 action='delete a domain that is not disabled')
 
         # OK, we are go for delete!
         self._delete_domain_contents(context, domain_id)
-        return self.identity_api.delete_domain(domain_id)
-
-    def _get_domain_by_name(self, context, domain_name):
-        """Get the domain via its unique name.
-
-        For use by token authentication - not for hooking to the identity
-        router as a public api.
-
-        """
-        ref = self.identity_api.get_domain_by_name(domain_name)
-        return {'domain': ref}
+        return self.assignment_api.delete_domain(domain_id)
 
 
+@dependency.requires('assignment_api', 'credential_api')
 class ProjectV3(controller.V3Controller):
     collection_name = 'projects'
     member_name = 'project'
@@ -620,17 +666,17 @@ class ProjectV3(controller.V3Controller):
 
     @controller.filterprotected('domain_id', 'enabled', 'name')
     def list_projects(self, context, filters):
-        refs = self.identity_api.list_projects()
+        refs = self.assignment_api.list_projects()
         return ProjectV3.wrap_collection(context, refs, filters)
 
     @controller.filterprotected('enabled', 'name')
     def list_user_projects(self, context, filters, user_id):
-        refs = self.identity_api.list_projects_for_user(user_id)
+        refs = self.assignment_api.list_projects_for_user(user_id)
         return ProjectV3.wrap_collection(context, refs, filters)
 
     @controller.protected()
     def get_project(self, context, project_id):
-        ref = self.identity_api.get_project(project_id)
+        ref = self.assignment_api.get_project(project_id)
         return ProjectV3.wrap_member(context, ref)
 
     @controller.protected()
@@ -663,6 +709,7 @@ class ProjectV3(controller.V3Controller):
         return self._delete_project(context, project_id)
 
 
+@dependency.requires('identity_api', 'credential_api')
 class UserV3(controller.V3Controller):
     collection_name = 'users'
     member_name = 'user'
@@ -707,18 +754,21 @@ class UserV3(controller.V3Controller):
             domain_scope=self._get_domain_id_for_request(context))
         return UserV3.wrap_member(context, ref)
 
-    @controller.protected()
-    def update_user(self, context, user_id, user):
+    def _update_user(self, context, user_id, user, domain_scope):
         self._require_matching_id(user_id, user)
         ref = self.identity_api.update_user(
-            user_id, user,
-            domain_scope=self._get_domain_id_for_request(context))
+            user_id, user, domain_scope=domain_scope)
 
         if user.get('password') or not user.get('enabled', True):
             # revoke all tokens owned by this user
             self._delete_tokens_for_user(user_id)
 
         return UserV3.wrap_member(context, ref)
+
+    @controller.protected()
+    def update_user(self, context, user_id, user):
+        domain_scope = self._get_domain_id_for_request(context)
+        return self._update_user(context, user_id, user, domain_scope)
 
     @controller.protected(callback=_check_user_and_group_protection)
     def add_user_to_group(self, context, user_id, group_id):
@@ -761,7 +811,31 @@ class UserV3(controller.V3Controller):
     def delete_user(self, context, user_id):
         return self._delete_user(context, user_id)
 
+    @controller.protected()
+    def change_password(self, context, user_id, user):
+        original_password = user.get('original_password')
+        if original_password is None:
+            raise exception.ValidationError(target='user',
+                                            attribute='original_password')
 
+        password = user.get('password')
+        if password is None:
+            raise exception.ValidationError(target='user',
+                                            attribute='password')
+
+        domain_scope = self._get_domain_id_for_request(context)
+        try:
+            self.identity_api.authenticate(user_id=user_id,
+                                           password=original_password,
+                                           domain_scope=domain_scope)
+        except AssertionError:
+            raise exception.Unauthorized()
+
+        update_dict = {'password': password}
+        self._update_user(context, user_id, update_dict, domain_scope)
+
+
+@dependency.requires('identity_api')
 class GroupV3(controller.V3Controller):
     collection_name = 'groups'
     member_name = 'group'
@@ -827,6 +901,7 @@ class GroupV3(controller.V3Controller):
         return self._delete_group(context, group_id)
 
 
+@dependency.requires('assignment_api', 'identity_api')
 class RoleV3(controller.V3Controller):
     collection_name = 'roles'
     member_name = 'role'
@@ -840,24 +915,24 @@ class RoleV3(controller.V3Controller):
         self._require_attribute(role, 'name')
 
         ref = self._assign_unique_id(self._normalize_dict(role))
-        ref = self.identity_api.create_role(ref['id'], ref)
+        ref = self.assignment_api.create_role(ref['id'], ref)
         return RoleV3.wrap_member(context, ref)
 
     @controller.filterprotected('name')
     def list_roles(self, context, filters):
-        refs = self.identity_api.list_roles()
+        refs = self.assignment_api.list_roles()
         return RoleV3.wrap_collection(context, refs, filters)
 
     @controller.protected()
     def get_role(self, context, role_id):
-        ref = self.identity_api.get_role(role_id)
+        ref = self.assignment_api.get_role(role_id)
         return RoleV3.wrap_member(context, ref)
 
     @controller.protected()
     def update_role(self, context, role_id, role):
         self._require_matching_id(role_id, role)
 
-        ref = self.identity_api.update_role(role_id, role)
+        ref = self.assignment_api.update_role(role_id, role)
         return RoleV3.wrap_member(context, ref)
 
     @controller.protected()
@@ -866,16 +941,16 @@ class RoleV3(controller.V3Controller):
         # We must first, however, revoke any tokens for users that have an
         # assignment with this role.
         self._delete_tokens_for_role(role_id)
-        self.identity_api.delete_role(role_id)
+        self.assignment_api.delete_role(role_id)
 
     def _require_domain_xor_project(self, domain_id, project_id):
         if (domain_id and project_id) or (not domain_id and not project_id):
-            msg = 'Specify a domain or project, not both'
+            msg = _('Specify a domain or project, not both')
             raise exception.ValidationError(msg)
 
     def _require_user_xor_group(self, user_id, group_id):
         if (user_id and group_id) or (not user_id and not group_id):
-            msg = 'Specify a user or group, not both'
+            msg = _('Specify a user or group, not both')
             raise exception.ValidationError(msg)
 
     def _check_if_inherited(self, context):
@@ -895,7 +970,7 @@ class RoleV3(controller.V3Controller):
         """
         ref = {}
         if role_id:
-            ref['role'] = self.identity_api.get_role(role_id)
+            ref['role'] = self.assignment_api.get_role(role_id)
         if user_id:
             ref['user'] = self.identity_api.get_user(user_id)
         else:
@@ -920,7 +995,7 @@ class RoleV3(controller.V3Controller):
         if group_id:
             self.identity_api.get_group(group_id)
 
-        self.identity_api.create_grant(
+        self.assignment_api.create_grant(
             role_id, user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
 
@@ -931,7 +1006,7 @@ class RoleV3(controller.V3Controller):
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
 
-        refs = self.identity_api.list_grants(
+        refs = self.assignment_api.list_grants(
             user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
         return RoleV3.wrap_collection(context, refs)
@@ -948,7 +1023,7 @@ class RoleV3(controller.V3Controller):
         if group_id:
             self.identity_api.get_group(group_id)
 
-        self.identity_api.get_grant(
+        self.assignment_api.get_grant(
             role_id, user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
 
@@ -959,7 +1034,7 @@ class RoleV3(controller.V3Controller):
         self._require_domain_xor_project(domain_id, project_id)
         self._require_user_xor_group(user_id, group_id)
 
-        self.identity_api.delete_grant(
+        self.assignment_api.delete_grant(
             role_id, user_id, group_id, domain_id, project_id,
             self._check_if_inherited(context))
 
@@ -971,6 +1046,7 @@ class RoleV3(controller.V3Controller):
             self._delete_tokens_for_group(group_id)
 
 
+@dependency.requires('assignment_api', 'identity_api')
 class RoleAssignmentV3(controller.V3Controller):
 
     # TODO(henry-nash): The current implementation does not provide a full
@@ -1105,7 +1181,7 @@ class RoleAssignmentV3(controller.V3Controller):
                     target = 'Unknown'
                 LOG.warning(
                     _('Group %(group)s not found for role-assignment - '
-                      '%(target)s with Role: %(role)s') % {
+                      '%(target)s with Role: %(role)s'), {
                           'group': ref['group_id'], 'target': target,
                           'role': ref.get('role_id')})
             return members

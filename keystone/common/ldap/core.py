@@ -17,9 +17,8 @@
 import os.path
 
 import ldap
-from ldap import filter as ldap_filter
+import ldap.filter
 
-from keystone.common.ldap import fakeldap
 from keystone import exception
 from keystone.openstack.common import log as logging
 
@@ -100,6 +99,21 @@ def ldap_scope(scope):
                 'options': ', '.join(LDAP_SCOPES.keys())})
 
 
+_HANDLERS = {}
+
+
+def register_handler(prefix, handler):
+    _HANDLERS[prefix] = handler
+
+
+def get_handler(conn_url):
+    for prefix, handler in _HANDLERS.iteritems():
+        if conn_url.startswith(prefix):
+            return handler
+
+    return LdapWrapper
+
+
 class BaseLdap(object):
     DEFAULT_SUFFIX = "dc=example,dc=com"
     DEFAULT_OU = None
@@ -156,8 +170,9 @@ class BaseLdap(object):
                             or self.DEFAULT_EXTRA_ATTR_MAPPING)
             self.extra_attr_mapping = self._parse_extra_attrs(attr_mapping)
 
-            filter = '%s_filter' % self.options_name
-            self.filter = getattr(conf.ldap, filter) or self.DEFAULT_FILTER
+            ldap_filter = '%s_filter' % self.options_name
+            self.ldap_filter = getattr(conf.ldap,
+                                       ldap_filter) or self.DEFAULT_FILTER
 
             allow_create = '%s_allow_create' % self.options_name
             self.allow_create = getattr(conf.ldap, allow_create)
@@ -197,12 +212,12 @@ class BaseLdap(object):
             except Exception:
                 LOG.warn(_(
                     'Invalid additional attribute mapping: "%s". '
-                    'Format must be <ldap_attribute>:<keystone_attribute>')
-                    % item)
+                    'Format must be <ldap_attribute>:<keystone_attribute>'),
+                    item)
                 continue
             if attr_map not in self.attribute_mapping:
                 LOG.warn(_('Invalid additional attribute mapping: "%(item)s". '
-                           'Value "%(attr_map)s" must use one of %(keys)s.') %
+                           'Value "%(attr_map)s" must use one of %(keys)s.'),
                          {'item': item, 'attr_map': attr_map,
                           'keys': ', '.join(self.attribute_mapping.keys())})
                 continue
@@ -210,16 +225,15 @@ class BaseLdap(object):
         return mapping
 
     def get_connection(self, user=None, password=None):
-        if self.LDAP_URL.startswith('fake://'):
-            conn = fakeldap.FakeLdap(self.LDAP_URL)
-        else:
-            conn = LdapWrapper(self.LDAP_URL,
-                               self.page_size,
-                               alias_dereferencing=self.alias_dereferencing,
-                               use_tls=self.use_tls,
-                               tls_cacertfile=self.tls_cacertfile,
-                               tls_cacertdir=self.tls_cacertdir,
-                               tls_req_cert=self.tls_req_cert)
+        handler = get_handler(self.LDAP_URL)
+
+        conn = handler(self.LDAP_URL,
+                       self.page_size,
+                       alias_dereferencing=self.alias_dereferencing,
+                       use_tls=self.use_tls,
+                       tls_cacertfile=self.tls_cacertfile,
+                       tls_cacertdir=self.tls_cacertdir,
+                       tls_req_cert=self.tls_req_cert)
 
         if user is None:
             user = self.LDAP_USER
@@ -234,21 +248,21 @@ class BaseLdap(object):
 
         return conn
 
-    def _id_to_dn_string(self, id):
+    def _id_to_dn_string(self, object_id):
         return '%s=%s,%s' % (self.id_attr,
-                             ldap.dn.escape_dn_chars(str(id)),
+                             ldap.dn.escape_dn_chars(str(object_id)),
                              self.tree_dn)
 
-    def _id_to_dn(self, id):
+    def _id_to_dn(self, object_id):
         if self.LDAP_SCOPE == ldap.SCOPE_ONELEVEL:
-            return self._id_to_dn_string(id)
+            return self._id_to_dn_string(object_id)
         conn = self.get_connection()
         try:
             search_result = conn.search_s(
                 self.tree_dn, self.LDAP_SCOPE,
                 '(&(%(id_attr)s=%(id)s)(objectclass=%(objclass)s))' %
                 {'id_attr': self.id_attr,
-                 'id': ldap.filter.escape_filter_chars(str(id)),
+                 'id': ldap.filter.escape_filter_chars(str(object_id)),
                  'objclass': self.object_class})
         finally:
             conn.unbind_s()
@@ -256,7 +270,7 @@ class BaseLdap(object):
             dn, attrs = search_result[0]
             return dn
         else:
-            return self._id_to_dn_string(id)
+            return self._id_to_dn_string(object_id)
 
     @staticmethod
     def _dn_to_id(dn):
@@ -331,14 +345,14 @@ class BaseLdap(object):
             conn.unbind_s()
         return values
 
-    def _ldap_get(self, id, filter=None):
+    def _ldap_get(self, object_id, ldap_filter=None):
         conn = self.get_connection()
         query = ('(&(%(id_attr)s=%(id)s)'
                  '%(filter)s'
                  '(objectClass=%(object_class)s))'
                  % {'id_attr': self.id_attr,
-                    'id': ldap.filter.escape_filter_chars(str(id)),
-                    'filter': (filter or self.filter or ''),
+                    'id': ldap.filter.escape_filter_chars(str(object_id)),
+                    'filter': (ldap_filter or self.ldap_filter or ''),
                     'object_class': self.object_class})
         try:
             attrs = list(set((self.attribute_mapping.values() +
@@ -353,10 +367,11 @@ class BaseLdap(object):
         except IndexError:
             return None
 
-    def _ldap_get_all(self, filter=None):
+    def _ldap_get_all(self, ldap_filter=None):
         conn = self.get_connection()
-        query = '(&%s(objectClass=%s))' % (filter or self.filter or '',
-                                           self.object_class)
+        query = '(&%s(objectClass=%s))' % (ldap_filter or
+                                           self.ldap_filter or
+                                           '', self.object_class)
         try:
             return conn.search_s(self.tree_dn,
                                  self.LDAP_SCOPE,
@@ -367,33 +382,33 @@ class BaseLdap(object):
         finally:
             conn.unbind_s()
 
-    def get(self, id, filter=None):
-        res = self._ldap_get(id, filter)
+    def get(self, object_id, ldap_filter=None):
+        res = self._ldap_get(object_id, ldap_filter)
         if res is None:
-            raise self._not_found(id)
+            raise self._not_found(object_id)
         else:
             return self._ldap_res_to_model(res)
 
-    def get_by_name(self, name, filter=None):
+    def get_by_name(self, name, ldap_filter=None):
         query = ('(%s=%s)' % (self.attribute_mapping['name'],
-                              ldap_filter.escape_filter_chars(name)))
+                              ldap.filter.escape_filter_chars(name)))
         res = self.get_all(query)
         try:
             return res[0]
         except IndexError:
             raise self._not_found(name)
 
-    def get_all(self, filter=None):
+    def get_all(self, ldap_filter=None):
         return [self._ldap_res_to_model(x)
-                for x in self._ldap_get_all(filter)]
+                for x in self._ldap_get_all(ldap_filter)]
 
-    def update(self, id, values, old_obj=None):
+    def update(self, object_id, values, old_obj=None):
         if not self.allow_update:
             action = _('LDAP %s update') % self.options_name
             raise exception.ForbiddenAction(action=action)
 
         if old_obj is None:
-            old_obj = self.get(id)
+            old_obj = self.get(object_id)
 
         modlist = []
         for k, v in values.iteritems():
@@ -427,37 +442,37 @@ class BaseLdap(object):
         if modlist:
             conn = self.get_connection()
             try:
-                conn.modify_s(self._id_to_dn(id), modlist)
+                conn.modify_s(self._id_to_dn(object_id), modlist)
             except ldap.NO_SUCH_OBJECT:
-                raise self._not_found(id)
+                raise self._not_found(object_id)
             finally:
                 conn.unbind_s()
 
-        return self.get(id)
+        return self.get(object_id)
 
-    def delete(self, id):
+    def delete(self, object_id):
         if not self.allow_delete:
             action = _('LDAP %s delete') % self.options_name
             raise exception.ForbiddenAction(action=action)
 
         conn = self.get_connection()
         try:
-            conn.delete_s(self._id_to_dn(id))
+            conn.delete_s(self._id_to_dn(object_id))
         except ldap.NO_SUCH_OBJECT:
-            raise self._not_found(id)
+            raise self._not_found(object_id)
         finally:
             conn.unbind_s()
 
-    def deleteTree(self, id):
+    def deleteTree(self, object_id):
         conn = self.get_connection()
         tree_delete_control = ldap.controls.LDAPControl(CONTROL_TREEDELETE,
                                                         0,
                                                         None)
         try:
-            conn.delete_ext_s(self._id_to_dn(id),
+            conn.delete_ext_s(self._id_to_dn(object_id),
                               serverctrls=[tree_delete_control])
         except ldap.NO_SUCH_OBJECT:
-            raise self._not_found(id)
+            raise self._not_found(object_id)
         finally:
             conn.unbind_s()
 
@@ -471,7 +486,7 @@ class LdapWrapper(object):
                   'tls_cacertfile=%(tls_cacertfile)s\n'
                   'tls_cacertdir=%(tls_cacertdir)s\n'
                   'tls_req_cert=%(tls_req_cert)s\n'
-                  'tls_avail=%(tls_avail)s\n') %
+                  'tls_avail=%(tls_avail)s\n'),
                   {'use_tls': use_tls,
                    'tls_cacertfile': tls_cacertfile,
                    'tls_cacertdir': tls_cacertdir,
@@ -547,7 +562,7 @@ class LdapWrapper(object):
                        if kind != 'userPassword'
                        else ['****'])
                       for kind, values in ldap_attrs]
-        LOG.debug(_('LDAP add: dn=%(dn)s, attrs=%(attrs)s') % {
+        LOG.debug(_('LDAP add: dn=%(dn)s, attrs=%(attrs)s'), {
             'dn': dn, 'attrs': sane_attrs})
         return self.conn.add_s(dn, ldap_attrs)
 
@@ -560,7 +575,7 @@ class LdapWrapper(object):
             attrlist = [attr for attr in attrlist if attr is not None]
         LOG.debug(_(
             'LDAP search: dn=%(dn)s, scope=%(scope)s, query=%(query)s, '
-            'attrs=%(attrlist)s') % {
+            'attrs=%(attrlist)s'), {
                 'dn': dn,
                 'scope': scope,
                 'query': query,
@@ -627,7 +642,7 @@ class LdapWrapper(object):
         sane_modlist = [(op, kind, (values if kind != 'userPassword'
                                     else ['****']))
                         for op, kind, values in ldap_modlist]
-        LOG.debug(_('LDAP modify: dn=%(dn)s, modlist=%(modlist)s') % {
+        LOG.debug(_('LDAP modify: dn=%(dn)s, modlist=%(modlist)s'), {
             'dn': dn, 'modlist': sane_modlist})
 
         return self.conn.modify_s(dn, ldap_modlist)
@@ -638,7 +653,7 @@ class LdapWrapper(object):
 
     def delete_ext_s(self, dn, serverctrls):
         LOG.debug(
-            _('LDAP delete_ext: dn=%(dn)s, serverctrls=%(serverctrls)s') % {
+            _('LDAP delete_ext: dn=%(dn)s, serverctrls=%(serverctrls)s'), {
                 'dn': dn, 'serverctrls': serverctrls})
         return self.conn.delete_ext_s(dn, serverctrls)
 
@@ -731,23 +746,23 @@ class EnabledEmuMixIn(BaseLdap):
         else:
             return super(EnabledEmuMixIn, self).create(values)
 
-    def get(self, object_id, filter=None):
-        ref = super(EnabledEmuMixIn, self).get(object_id, filter)
+    def get(self, object_id, ldap_filter=None):
+        ref = super(EnabledEmuMixIn, self).get(object_id, ldap_filter)
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:
             ref['enabled'] = self._get_enabled(object_id)
         return ref
 
-    def get_all(self, filter=None):
+    def get_all(self, ldap_filter=None):
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:
-            # had to copy BaseLdap.get_all here to filter by DN
+            # had to copy BaseLdap.get_all here to ldap_filter by DN
             tenant_list = [self._ldap_res_to_model(x)
-                           for x in self._ldap_get_all(filter)
+                           for x in self._ldap_get_all(ldap_filter)
                            if x[0] != self.enabled_emulation_dn]
             for tenant_ref in tenant_list:
                 tenant_ref['enabled'] = self._get_enabled(tenant_ref['id'])
             return tenant_list
         else:
-            return super(EnabledEmuMixIn, self).get_all(filter)
+            return super(EnabledEmuMixIn, self).get_all(ldap_filter)
 
     def update(self, object_id, values, old_obj=None):
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:

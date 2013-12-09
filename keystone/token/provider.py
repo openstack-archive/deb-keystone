@@ -188,7 +188,7 @@ class Manager(manager.Manager):
                 return None
         except Exception:
             LOG.exception(_('Unexpected error or malformed token determining '
-                            'token expiry: %s') % token)
+                            'token expiry: %s'), token)
 
         # FIXME(morganfainberg): This error message needs to be updated to
         # reflect the token couldn't be found, but this change needs to wait
@@ -317,8 +317,6 @@ class Provider(object):
 
         :param token_id: identity of the token
         :type token_id: string
-        :param belongs_to: project_id token belongs to
-        :type belongs_to: string
         :returns: token data
         :raises: keystone.exception.TokenNotFound
         """

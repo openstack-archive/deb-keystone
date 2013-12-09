@@ -1,5 +1,5 @@
 *.pyc
-*.swp
+*.sw?
 *.egg/
 vendor
 .ksl-venv
@@ -28,3 +28,4 @@ keystone/tests/tmp/
 .project
 .pydevproject
 keystone/locale/*/LC_MESSAGES/*.mo
+.testrepository/

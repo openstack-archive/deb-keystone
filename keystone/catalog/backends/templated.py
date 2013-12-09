@@ -19,6 +19,7 @@ import os.path
 from keystone.catalog.backends import kvs
 from keystone.catalog import core
 from keystone import config
+from keystone import exception
 from keystone.openstack.common import log as logging
 
 
@@ -66,7 +67,7 @@ class TemplatedCatalog(kvs.Catalog):
 
     and is stored in a similar looking hierarchy. Where a value can contain
     values to be interpolated by standard python string interpolation that look
-    like (the % is replaced by a $ due to paste attmepting to interpolate on
+    like (the % is replaced by a $ due to paste attempting to interpolate on
     its own:
 
       http://localhost:$(public_port)s/
@@ -103,7 +104,7 @@ class TemplatedCatalog(kvs.Catalog):
         try:
             self.templates = parse_templates(open(template_file))
         except IOError:
-            LOG.critical(_('Unable to open template file %s') % template_file)
+            LOG.critical(_('Unable to open template file %s'), template_file)
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
@@ -120,3 +121,6 @@ class TemplatedCatalog(kvs.Catalog):
                     o[region][service][k] = core.format_url(v, d)
 
         return o
+
+    def get_v3_catalog(self, user_id, tenant_id, metadata=None):
+        raise exception.NotImplemented()

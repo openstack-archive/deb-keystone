@@ -324,7 +324,7 @@ The values that specify where to read the certificates are under the
 * ``certfile`` - Location of certificate used to verify tokens.  Default is ``/etc/keystone/ssl/certs/signing_cert.pem``
 * ``keyfile`` - Location of private key used to sign tokens.  Default is ``/etc/keystone/ssl/private/signing_key.pem``
 * ``ca_certs`` - Location of certificate for the authority that issued the above certificate. Default is ``/etc/keystone/ssl/certs/ca.pem``
-* ``ca_key`` - Default is ``/etc/keystone/ssl/certs/cakey.pem``
+* ``ca_key`` - Default is ``/etc/keystone/ssl/private/cakey.pem``
 * ``key_size`` - Default is ``2048``
 * ``valid_days`` - Default is ``3650``
 
@@ -620,7 +620,7 @@ Inherited Role Assignment Extension
 
 Keystone provides an optional extension that adds the capability to assign roles to a domain that, rather than
 affect the domain itself, are instead inherited to all projects owned by theat domain.  This extension is disabled by
-default, but can be enabled by including the following in ``keystone.conf``.
+default, but can be enabled by including the following in ``keystone.conf``::
 
     [os_inherit]
     enabled = True
@@ -724,7 +724,7 @@ To test this, you should now be able to start ``keystone-all`` and use the
 Keystone Client to list your tenants (which should successfully return an
 empty list from your new database)::
 
-    $ keystone --token ADMIN --endpoint http://127.0.0.1:35357/v2.0/ tenant-list
+    $ keystone --os-token ADMIN --os-endpoint http://127.0.0.1:35357/v2.0/ tenant-list
     +----+------+---------+
     | id | name | enabled |
     +----+------+---------+
@@ -732,10 +732,10 @@ empty list from your new database)::
 
 .. NOTE::
 
-    We're providing the default SERVICE_TOKEN and SERVICE_ENDPOINT values from
-    ``keystone.conf`` to connect to the Keystone service. If you changed those
-    values, or deployed Keystone to a different endpoint, you will need to
-    change the provided command accordingly.
+    We're providing the default OS_SERVICE_TOKEN and OS_SERVICE_ENDPOINT values
+    from ``keystone.conf`` to connect to the Keystone service. If you changed
+    those values, or deployed Keystone to a different endpoint, you will need
+    to change the provided command accordingly.
 
 Initializing Keystone
 =====================
@@ -773,9 +773,9 @@ Authenticating with a Token
 
 To use Keystone with a token, set the following flags:
 
-* ``--endpoint SERVICE_ENDPOINT``: allows you to specify the Keystone endpoint
+* ``--os-endpoint OS_SERVICE_ENDPOINT``: allows you to specify the Keystone endpoint
   to communicate with. The default endpoint is ``http://localhost:35357/v2.0``
-* ``--token SERVICE_TOKEN``: your service token
+* ``--os-token OS_SERVICE_TOKEN``: your service token
 
 To administer a Keystone endpoint, your token should be either belong to a user
 with the ``admin`` role, or, if you haven't created one yet, should be equal to
@@ -784,8 +784,8 @@ the value defined by ``[DEFAULT] admin_token`` in your ``keystone.conf``.
 You can also set these variables in your environment so that they do not need
 to be passed as arguments each time::
 
-    $ export SERVICE_ENDPOINT=http://localhost:35357/v2.0
-    $ export SERVICE_TOKEN=ADMIN
+    $ export OS_SERVICE_ENDPOINT=http://localhost:35357/v2.0
+    $ export OS_SERVICE_TOKEN=ADMIN
 
 Authenticating with a Password
 ------------------------------
@@ -880,14 +880,14 @@ provide additional (often optional) information. For example, the command
 ``user-list`` and ``tenant-create`` can be invoked as follows::
 
     # Using token auth env variables
-    export SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
-    export SERVICE_TOKEN=secrete_token
+    export OS_SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
+    export OS_SERVICE_TOKEN=secrete_token
     keystone user-list
     keystone tenant-create --name=demo
 
     # Using token auth flags
-    keystone --token=secrete --endpoint=http://127.0.0.1:35357/v2.0/ user-list
-    keystone --token=secrete --endpoint=http://127.0.0.1:35357/v2.0/ tenant-create --name=demo
+    keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ user-list
+    keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ tenant-create --name=demo
 
     # Using user + password + tenant_name env variables
     export OS_USERNAME=admin
@@ -1308,3 +1308,45 @@ tls_cacertfile and tls_cacertdir are set then tls_cacertfile will be
 used and tls_cacertdir is ignored.  Furthermore, valid options for
 tls_req_cert are demand, never, and allow.  These correspond to the
 standard options permitted by the TLS_REQCERT TLS option.
+
+Read Only LDAP
+--------------
+
+Many environments typically have user and group information in directories that
+are accessable by LDAP. This information is for read-only use in a wide array
+of applications. Prior to the Havana release, we could not deploy Keystone with
+read-only directories as backends because Keystone also needed to store
+information such as projects, roles, domains and role assignments into the
+directories in conjunction with reading user and group information.
+
+Keystone now provides an option whereby these read-only
+directories can be easily integrated as it now enables its identity
+entities (which comprises users, groups, and group memberships) to be
+served out of directories while assignments (which comprises projects, roles,
+role assignments, and domains) are to be served from a different Keystone
+backend (i.e. SQL). To enable this option, you must have the following
+``keystone.conf`` options set::
+
+  [identity]
+  driver = keystone.identity.backends.ldap.Identity
+
+  [assignment]
+  driver = keystone.assignment.backends.sql.Assignment
+
+With the above configuration, Keystone will only lookup identity related
+information such users, groups, and group membership from the directory,
+while assignment related information will be provided by the SQL backend.
+Also note that if there is an LDAP Identity, and no assignment backend is
+specified, the assignment backend will default to LDAP. Although this may seem
+counterintuitive, it is provided for backwards compatibility. Nonetheless,
+the explicit option will always override the implicit option, so specifying
+the options as shown above will always be correct.  Finally, it is also
+worth noting that whether or not the LDAP accessible directory is to be
+considered read only is still configured as described in a previous section
+above by setting values such as the following in the ``[ldap]`` configuration
+section::
+
+  [ldap]
+  user_allow_create = False
+  user_allow_update = False
+  user_allow_delete = False

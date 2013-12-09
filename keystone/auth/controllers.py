@@ -14,17 +14,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import json
 
+from keystone.common import cms
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-from keystone import identity
 from keystone.openstack.common import importutils
 from keystone.openstack.common import log as logging
-from keystone import token
-from keystone import trust
+from keystone.openstack.common import timeutils
 
 
 LOG = logging.getLogger(__name__)
@@ -49,12 +49,17 @@ def get_auth_method(method_name):
     return AUTH_METHODS[method_name]
 
 
+@dependency.requires('assignment_api', 'identity_api', 'trust_api')
 class AuthInfo(object):
     """Encapsulation of "auth" request."""
 
+    @staticmethod
+    def create(context, auth=None):
+        auth_info = AuthInfo(context, auth=auth)
+        auth_info._validate_and_normalize_auth_data()
+        return auth_info
+
     def __init__(self, context, auth=None):
-        self.identity_api = identity.Manager()
-        self.trust_api = trust.Manager()
         self.context = context
         self.auth = auth
         self._scope_data = (None, None, None)
@@ -63,7 +68,6 @@ class AuthInfo(object):
         # domain scope: (domain_id, None, None)
         # trust scope: (None, None, trust_ref)
         # unscoped: (None, None, None)
-        self._validate_and_normalize_auth_data()
 
     def _assert_project_is_enabled(self, project_ref):
         # ensure the project is enabled
@@ -93,9 +97,10 @@ class AuthInfo(object):
                                             target='domain')
         try:
             if domain_name:
-                domain_ref = self.identity_api.get_domain_by_name(domain_name)
+                domain_ref = self.assignment_api.get_domain_by_name(
+                    domain_name)
             else:
-                domain_ref = self.identity_api.get_domain(domain_id)
+                domain_ref = self.assignment_api.get_domain(domain_id)
         except exception.DomainNotFound as e:
             LOG.exception(e)
             raise exception.Unauthorized(e)
@@ -115,10 +120,10 @@ class AuthInfo(object):
                     raise exception.ValidationError(attribute='domain',
                                                     target='project')
                 domain_ref = self._lookup_domain(project_info['domain'])
-                project_ref = self.identity_api.get_project_by_name(
+                project_ref = self.assignment_api.get_project_by_name(
                     project_name, domain_ref['id'])
             else:
-                project_ref = self.identity_api.get_project(project_id)
+                project_ref = self.assignment_api.get_project(project_id)
         except exception.ProjectNotFound as e:
             LOG.exception(e)
             raise exception.Unauthorized(e)
@@ -270,11 +275,10 @@ class AuthInfo(object):
         self._scope_data = (domain_id, project_id, trust)
 
 
-@dependency.requires('token_provider_api')
+@dependency.requires('identity_api', 'token_provider_api')
 class Auth(controller.V3Controller):
     def __init__(self, *args, **kw):
         super(Auth, self).__init__(*args, **kw)
-        self.token_controllers_ref = token.controllers.Auth()
         config.setup_authentication()
 
     def authenticate_for_token(self, context, auth=None):
@@ -282,7 +286,7 @@ class Auth(controller.V3Controller):
         include_catalog = 'nocatalog' not in context['query_string']
 
         try:
-            auth_info = AuthInfo(context, auth=auth)
+            auth_info = AuthInfo.create(context, auth=auth)
             auth_context = {'extras': {}, 'method_names': [], 'bind': {}}
             self.authenticate(context, auth_info, auth_context)
             if auth_context.get('access_token_id'):
@@ -318,19 +322,54 @@ class Auth(controller.V3Controller):
         # fill in default_project_id if it is available
         try:
             user_ref = self.identity_api.get_user(auth_context['user_id'])
-            default_project_id = user_ref.get('default_project_id')
-            if default_project_id:
-                auth_info.set_scope(domain_id=None,
-                                    project_id=default_project_id)
         except exception.UserNotFound as e:
             LOG.exception(e)
             raise exception.Unauthorized(e)
+
+        default_project_id = user_ref.get('default_project_id')
+        if not default_project_id:
+            # User has no default project. He shall get an unscoped token.
+            return
+
+        # make sure user's default project is legit before scoping to it
+        try:
+            default_project_ref = self.assignment_api.get_project(
+                default_project_id)
+            default_project_domain_ref = self.assignment_api.get_domain(
+                default_project_ref['domain_id'])
+            if (default_project_ref.get('enabled', True) and
+                    default_project_domain_ref.get('enabled', True)):
+                if self.assignment_api.get_roles_for_user_and_project(
+                        user_ref['id'], default_project_id):
+                    auth_info.set_scope(project_id=default_project_id)
+                else:
+                    msg = _("User %(user_id)s doesn't have access to"
+                            " default project %(project_id)s. The token will"
+                            " be unscoped rather than scoped to the project.")
+                    LOG.warning(msg,
+                                {'user_id': user_ref['id'],
+                                 'project_id': default_project_id})
+            else:
+                msg = _("User %(user_id)s's default project %(project_id)s is"
+                        " disabled. The token will be unscoped rather than"
+                        " scoped to the project.")
+                LOG.warning(msg,
+                            {'user_id': user_ref['id'],
+                             'project_id': default_project_id})
+        except (exception.ProjectNotFound, exception.DomainNotFound):
+            # default project or default project domain doesn't exist,
+            # will issue unscoped token instead
+            msg = _("User %(user_id)s's default project %(project_id)s not"
+                    " found. The token will be unscoped rather than"
+                    " scoped to the project.")
+            LOG.warning(msg, {'user_id': user_ref['id'],
+                              'project_id': default_project_id})
 
     def authenticate(self, context, auth_info, auth_context):
         """Authenticate user."""
 
         # user has been authenticated externally
-        if 'REMOTE_USER' in context:
+        if 'REMOTE_USER' in context['environment']:
             external = get_auth_method('external')
             external.authenticate(context, auth_info, auth_context)
 
@@ -367,12 +406,28 @@ class Auth(controller.V3Controller):
     @controller.protected()
     def validate_token(self, context):
         token_id = context.get('subject_token_id')
-        token_data = self.token_provider_api.validate_v3_token(token_id)
+        include_catalog = 'nocatalog' not in context['query_string']
+        token_data = self.token_provider_api.validate_v3_token(
+            token_id)
+        if not include_catalog and 'catalog' in token_data['token']:
+            del token_data['token']['catalog']
         return render_token_data_response(token_id, token_data)
 
     @controller.protected()
     def revocation_list(self, context, auth=None):
-        return self.token_controllers_ref.revocation_list(context, auth)
+        tokens = self.token_api.list_revoked_tokens()
+
+        for t in tokens:
+            expires = t['expires']
+            if not (expires and isinstance(expires, unicode)):
+                    t['expires'] = timeutils.isotime(expires)
+        data = {'revoked': tokens}
+        json_data = json.dumps(data)
+        signed_text = cms.cms_sign_text(json_data,
+                                        CONF.signing.certfile,
+                                        CONF.signing.keyfile)
+
+        return {'signed': signed_text}
 
 
 #FIXME(gyee): not sure if it belongs here or keystone.common. Park it here

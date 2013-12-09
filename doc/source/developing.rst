@@ -109,7 +109,7 @@ Initial Sample Data
 There is an included script which is helpful in setting up some initial sample
 data for use with keystone::
 
-    $ SERVICE_TOKEN=ADMIN tools/with_venv.sh tools/sample_data.sh
+    $ OS_SERVICE_TOKEN=ADMIN tools/with_venv.sh tools/sample_data.sh
 
 Notice it requires a service token read from an environment variable for
 authentication.  The default value "ADMIN" is from the ``admin_token``
@@ -118,30 +118,50 @@ option in the ``[DEFAULT]`` section in ``etc/keystone.conf``.
 Once run, you can see the sample data that has been created by using the
 `python-keystoneclient`_ command-line interface::
 
-    $ tools/with_venv.sh keystone --token ADMIN --endpoint http://127.0.0.1:35357/v2.0/ user-list
+    $ tools/with_venv.sh keystone --os-token ADMIN --os-endpoint http://127.0.0.1:35357/v2.0/ user-list
 
 Running Tests
 =============
 
-To run the full suites of tests maintained within Keystone, run::
+Before running tests, you should have ``tox`` installed and available in your
+environment (in addition to the other external dependencies in :doc:`setup`)::
 
-    $ ./run_tests.sh
+    $ pip install tox
 
-This shows realtime feedback during test execution, iterates over
-multiple configuration variations, and uses external projects to do
-light integration testing to verify the keystone API against other projects.
+.. NOTE::
+
+    You may need to perform both the above operation and the next inside a
+    python virtualenv, or prefix the above command with ``sudo``, depending on
+    your preference.
+
+To execute the full suite of tests maintained within Keystone, simply run::
+
+    $ tox
+
+This iterates over multiple configuration variations, and uses external
+projects to do light integration testing to verify the Identity API against
+other projects.
+
+.. NOTE::
+
+    The first time you run ``tox``, it will take additional time to build
+    virtualenvs. You can later use the ``-r`` option with ``tox`` to rebuild
+    your virtualenv in a similar manner.
+
+To run tests for one or more specific test environments (for example, the most
+common configuration of Python 2.7 and PEP-8), list the environments with the
+``-e`` option, separated by spaces::
+
+    $ tox -e py27,pep8
+
+See ``tox.ini`` for the full list of available test environments.
 
 Test Structure
 --------------
 
-``./run_test.sh`` uses its python cohort (``run_tests.py``) to iterate
-through the ``keystone/tests`` directory, using Nosetest to collect the tests
-and invoke them using an OpenStack custom test running that displays the tests
-as well as the time taken to run those tests.
-
 Not all of the tests in the tests directory are strictly unit tests. Keystone
-intentionally includes tests that run the service locally and drives the
-entire configuration to achieve basic functional testing.
+intentionally includes tests that run the service locally and drives the entire
+configuration to achieve basic functional testing.
 
 For the functional tests, an in-memory key-value store is used to keep the
 tests fast.

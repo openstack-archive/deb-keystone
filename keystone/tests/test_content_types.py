@@ -14,243 +14,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import io
 import uuid
 
-from lxml import etree
-import webtest
-
 from keystone.common import extension
-from keystone.common import serializer
 from keystone import config
-from keystone.openstack.common import jsonutils
-from keystone import tests
-from keystone.tests import default_fixtures
+from keystone.tests import rest
+
 
 CONF = config.CONF
-
-
-class RestfulTestCase(tests.TestCase):
-    """Performs restful tests against the WSGI app over HTTP.
-
-    This class launches public & admin WSGI servers for every test, which can
-    be accessed by calling ``public_request()`` or ``admin_request()``,
-    respectfully.
-
-    ``restful_request()`` and ``request()`` methods are also exposed if you
-    need to bypass restful conventions or access HTTP details in your test
-    implementation.
-
-    Three new asserts are provided:
-
-    * ``assertResponseSuccessful``: called automatically for every request
-        unless an ``expected_status`` is provided
-    * ``assertResponseStatus``: called instead of ``assertResponseSuccessful``,
-        if an ``expected_status`` is provided
-    * ``assertValidResponseHeaders``: validates that the response headers
-        appear as expected
-
-    Requests are automatically serialized according to the defined
-    ``content_type``. Responses are automatically deserialized as well, and
-    available in the ``response.body`` attribute. The original body content is
-    available in the ``response.raw`` attribute.
-
-    """
-
-    # default content type to test
-    content_type = 'json'
-
-    def setUp(self):
-        super(RestfulTestCase, self).setUp()
-
-        self.load_backends()
-        self.load_fixtures(default_fixtures)
-
-        self.public_app = webtest.TestApp(
-            self.loadapp('keystone', name='main'))
-        self.admin_app = webtest.TestApp(
-            self.loadapp('keystone', name='admin'))
-
-        # TODO(termie): add an admin user to the fixtures and use that user
-        # override the fixtures, for now
-        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
-            self.user_foo['id'],
-            self.tenant_bar['id'],
-            self.role_admin['id'])
-
-    def tearDown(self):
-        """Kill running servers and release references to avoid leaks."""
-        self.public_app = None
-        self.admin_app = None
-        super(RestfulTestCase, self).tearDown()
-
-    def request(self, app, path, body=None, headers=None, token=None,
-                expected_status=None, **kwargs):
-        if headers:
-            headers = dict([(str(k), str(v)) for k, v in headers.iteritems()])
-        else:
-            headers = {}
-
-        if token:
-            headers['X-Auth-Token'] = str(token)
-
-        # setting body this way because of:
-        # https://github.com/Pylons/webtest/issues/71
-        if body:
-            kwargs['body_file'] = io.BytesIO(body)
-
-        # sets environ['REMOTE_ADDR']
-        kwargs.setdefault('remote_addr', 'localhost')
-
-        response = app.request(path, headers=headers,
-                               status=expected_status, **kwargs)
-
-        return response
-
-    def assertResponseSuccessful(self, response):
-        """Asserts that a status code lies inside the 2xx range.
-
-        :param response: :py:class:`httplib.HTTPResponse` to be
-          verified to have a status code between 200 and 299.
-
-        example::
-
-             self.assertResponseSuccessful(response, 203)
-        """
-        self.assertTrue(
-            response.status_code >= 200 and response.status_code <= 299,
-            'Status code %d is outside of the expected range (2xx)\n\n%s' %
-            (response.status, response.body))
-
-    def assertResponseStatus(self, response, expected_status):
-        """Asserts a specific status code on the response.
-
-        :param response: :py:class:`httplib.HTTPResponse`
-        :param assert_status: The specific ``status`` result expected
-
-        example::
-
-            self.assertResponseStatus(response, 203)
-        """
-        self.assertEqual(
-            response.status_code,
-            expected_status,
-            'Status code %s is not %s, as expected)\n\n%s' %
-            (response.status_code, expected_status, response.body))
-
-    def assertValidResponseHeaders(self, response):
-        """Ensures that response headers appear as expected."""
-        self.assertIn('X-Auth-Token', response.headers.get('Vary'))
-
-    def _to_content_type(self, body, headers, content_type=None):
-        """Attempt to encode JSON and XML automatically."""
-        content_type = content_type or self.content_type
-
-        if content_type == 'json':
-            headers['Accept'] = 'application/json'
-            if body:
-                headers['Content-Type'] = 'application/json'
-                return jsonutils.dumps(body)
-        elif content_type == 'xml':
-            headers['Accept'] = 'application/xml'
-            if body:
-                headers['Content-Type'] = 'application/xml'
-                return serializer.to_xml(body)
-
-    def _from_content_type(self, response, content_type=None):
-        """Attempt to decode JSON and XML automatically, if detected."""
-        content_type = content_type or self.content_type
-
-        if response.body is not None and response.body.strip():
-            # if a body is provided, a Content-Type is also expected
-            header = response.headers.get('Content-Type', None)
-            self.assertIn(content_type, header)
-
-            if content_type == 'json':
-                response.result = jsonutils.loads(response.body)
-            elif content_type == 'xml':
-                response.result = etree.fromstring(response.body)
-
-    def restful_request(self, method='GET', headers=None, body=None,
-                        content_type=None, **kwargs):
-        """Serializes/deserializes json/xml as request/response body.
-
-        .. WARNING::
-
-            * Existing Accept header will be overwritten.
-            * Existing Content-Type header will be overwritten.
-
-        """
-        # Initialize headers dictionary
-        headers = {} if not headers else headers
-
-        body = self._to_content_type(body, headers, content_type)
-
-        # Perform the HTTP request/response
-        response = self.request(method=method, headers=headers, body=body,
-                                **kwargs)
-
-        self._from_content_type(response, content_type)
-
-        # we can save some code & improve coverage by always doing this
-        if method != 'HEAD' and response.status_code >= 400:
-            self.assertValidErrorResponse(response)
-
-        # Contains the decoded response.body
-        return response
-
-    def _request(self, convert=True, **kwargs):
-        if convert:
-            response = self.restful_request(**kwargs)
-        else:
-            response = self.request(**kwargs)
-
-        self.assertValidResponseHeaders(response)
-        return response
-
-    def public_request(self, **kwargs):
-        return self._request(app=self.public_app, **kwargs)
-
-    def admin_request(self, **kwargs):
-        return self._request(app=self.admin_app, **kwargs)
-
-    def _get_token(self, body):
-        """Convenience method so that we can test authenticated requests."""
-        r = self.public_request(method='POST', path='/v2.0/tokens', body=body)
-        return self._get_token_id(r)
-
-    def get_unscoped_token(self):
-        """Convenience method so that we can test authenticated requests."""
-        return self._get_token({
-            'auth': {
-                'passwordCredentials': {
-                    'username': self.user_foo['name'],
-                    'password': self.user_foo['password'],
-                },
-            },
-        })
-
-    def get_scoped_token(self, tenant_id=None):
-        """Convenience method so that we can test authenticated requests."""
-        if not tenant_id:
-            tenant_id = self.tenant_bar['id']
-        return self._get_token({
-            'auth': {
-                'passwordCredentials': {
-                    'username': self.user_foo['name'],
-                    'password': self.user_foo['password'],
-                },
-                'tenantId': tenant_id,
-            },
-        })
-
-    def _get_token_id(self, r):
-        """Helper method to return a token ID from a response.
-
-        This needs to be overridden by child classes for on their content type.
-
-        """
-        raise NotImplementedError()
 
 
 class CoreApiTests(object):
@@ -412,7 +183,7 @@ class CoreApiTests(object):
             expected_status=404)
 
     def test_validate_token_service_role(self):
-        self.metadata_foobar = self.identity_api.add_role_to_user_and_project(
+        self.md_foobar = self.assignment_api.add_role_to_user_and_project(
             self.user_foo['id'],
             self.tenant_service['id'],
             self.role_service['id'])
@@ -767,6 +538,38 @@ class CoreApiTests(object):
             token=token,
             expected_status=404)
 
+    def test_update_user_with_invalid_tenant_no_prev_tenant(self):
+        token = self.get_scoped_token()
+
+        # Create a new user
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': 'test_invalid_tenant',
+                    'password': uuid.uuid4().hex,
+                    'enabled': True,
+                },
+            },
+            token=token,
+            expected_status=200)
+        user_id = self._get_user_id(r.result)
+
+        # Update user with an invalid tenant
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%(user_id)s' % {
+                'user_id': user_id,
+            },
+            body={
+                'user': {
+                    'tenantId': 'abcde12345heha',
+                },
+            },
+            token=token,
+            expected_status=404)
+
     def test_update_user_with_old_tenant(self):
         token = self.get_scoped_token()
 
@@ -853,8 +656,148 @@ class CoreApiTests(object):
             expected_status=401)
         self.assertValidErrorResponse(r)
 
+    def test_www_authenticate_header(self):
+        r = self.public_request(
+            path='/v2.0/tenants',
+            expected_status=401)
+        self.assertEqual(r.headers.get('WWW-Authenticate'),
+                         'Keystone uri="%s"' % (
+                             CONF.public_endpoint % CONF))
 
-class JsonTestCase(RestfulTestCase, CoreApiTests):
+
+class LegacyV2UsernameTests(object):
+    """Tests to show the broken username behavior in V2.
+
+    The V2 API is documented to use `username` instead of `name`.  The
+    API forced used to use name and left the username to fall into the
+    `extra` field.
+
+    These tests ensure this behavior works so fixes to `username`/`name`
+    will be backward compatible.
+    """
+
+    def create_user(self, **user_attrs):
+        """Creates a users and returns the response object.
+
+        :param user_attrs: attributes added to the request body (optional)
+        """
+        token = self.get_scoped_token()
+        body = {
+            'user': {
+                'name': uuid.uuid4().hex,
+                'enabled': True,
+            },
+        }
+        body['user'].update(user_attrs)
+
+        return self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            token=token,
+            body=body,
+            expected_status=200)
+
+    def test_create_with_extra_username(self):
+        """The response for creating a user will contain the extra fields."""
+        fake_username = uuid.uuid4().hex
+        r = self.create_user(username=fake_username)
+
+        self.assertValidUserResponse(r)
+
+        user = self.get_user_from_response(r)
+        self.assertEqual(user.get('username'), fake_username)
+
+    def test_get_returns_username_from_extra(self):
+        """The response for getting a user will contain the extra fields."""
+        token = self.get_scoped_token()
+
+        fake_username = uuid.uuid4().hex
+        r = self.create_user(username=fake_username)
+
+        id_ = self.get_user_attribute_from_response(r, 'id')
+        r = self.admin_request(path='/v2.0/users/%s' % id_, token=token)
+
+        self.assertValidUserResponse(r)
+
+        user = self.get_user_from_response(r)
+        self.assertEqual(user.get('username'), fake_username)
+
+    def test_update_returns_new_username_when_adding_username(self):
+        """The response for updating a user will contain the extra fields.
+
+        This is specifically testing for updating a username when a value
+        was not previously set.
+        """
+        token = self.get_scoped_token()
+
+        r = self.create_user()
+
+        id_ = self.get_user_attribute_from_response(r, 'id')
+        name = self.get_user_attribute_from_response(r, 'name')
+        enabled = self.get_user_attribute_from_response(r, 'enabled')
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%s' % id_,
+            token=token,
+            body={
+                'user': {
+                    'name': name,
+                    'username': 'new_username',
+                    'enabled': enabled,
+                },
+            },
+            expected_status=200)
+
+        self.assertValidUserResponse(r)
+
+        user = self.get_user_from_response(r)
+        self.assertEqual(user.get('username'), 'new_username')
+
+    def test_update_returns_new_username_when_updating_username(self):
+        """The response for updating a user will contain the extra fields.
+
+        This tests updating a username that was previously set.
+        """
+        token = self.get_scoped_token()
+
+        r = self.create_user(username='original_username')
+
+        id_ = self.get_user_attribute_from_response(r, 'id')
+        name = self.get_user_attribute_from_response(r, 'name')
+        enabled = self.get_user_attribute_from_response(r, 'enabled')
+        r = self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%s' % id_,
+            token=token,
+            body={
+                'user': {
+                    'name': name,
+                    'username': 'new_username',
+                    'enabled': enabled,
+                },
+            },
+            expected_status=200)
+
+        self.assertValidUserResponse(r)
+
+        user = self.get_user_from_response(r)
+        self.assertEqual(user.get('username'), 'new_username')
+
+
+class RestfulTestCase(rest.RestfulTestCase):
+
+    def setUp(self):
+        super(RestfulTestCase, self).setUp()
+
+        # TODO(termie): add an admin user to the fixtures and use that user
+        # override the fixtures, for now
+        self.assignment_api.add_role_to_user_and_project(
+            self.user_foo['id'],
+            self.tenant_bar['id'],
+            self.role_admin['id'])
+
+
+class JsonTestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
     content_type = 'json'
 
     def _get_user_id(self, r):
@@ -1015,6 +958,12 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
             self.assertIsNotNone(endpoint.get('internalURL'))
             self.assertIsNotNone(endpoint.get('adminURL'))
 
+    def get_user_from_response(self, r):
+        return r.result.get('user')
+
+    def get_user_attribute_from_response(self, r, attribute_name):
+        return r.result['user'][attribute_name]
+
     def test_service_crud_requires_auth(self):
         """Service CRUD should 401 without an X-Auth-Token (bug 1006822)."""
         # values here don't matter because we should 401 before they're checked
@@ -1112,8 +1061,82 @@ class JsonTestCase(RestfulTestCase, CoreApiTests):
             expected_status=400)
         self.assertValidErrorResponse(r)
 
+    def test_authenticating_a_user_with_an_OSKSADM_password(self):
+        token = self.get_scoped_token()
 
-class XmlTestCase(RestfulTestCase, CoreApiTests):
+        username = uuid.uuid4().hex
+        password = uuid.uuid4().hex
+
+        # create the user
+        r = self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            body={
+                'user': {
+                    'name': username,
+                    'OS-KSADM:password': password,
+                    'enabled': True,
+                },
+            },
+            token=token)
+
+        # successfully authenticate
+        self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
+                'auth': {
+                    'passwordCredentials': {
+                        'username': username,
+                        'password': password,
+                    },
+                },
+            },
+            expected_status=200)
+
+        # ensure password doesn't leak
+        user_id = r.result['user']['id']
+        r = self.admin_request(
+            method='GET',
+            path='/v2.0/users/%s' % user_id,
+            token=token,
+            expected_status=200)
+        self.assertNotIn('OS-KSADM:password', r.result['user'])
+
+    def test_updating_a_user_with_an_OSKSADM_password(self):
+        token = self.get_scoped_token()
+
+        user_id = self.user_foo['id']
+        password = uuid.uuid4().hex
+
+        # update the user
+        self.admin_request(
+            method='PUT',
+            path='/v2.0/users/%s/OS-KSADM/password' % user_id,
+            body={
+                'user': {
+                   'password': password,
+                },
+            },
+            token=token,
+            expected_status=200)
+
+        # successfully authenticate
+        self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            body={
+                'auth': {
+                    'passwordCredentials': {
+                        'username': self.user_foo['name'],
+                        'password': password,
+                    },
+                },
+            },
+            expected_status=200)
+
+
+class XmlTestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
     xmlns = 'http://docs.openstack.org/identity/api/v2.0'
     content_type = 'xml'
 
@@ -1293,6 +1316,12 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
             self.assertValidTenant(tenant)
             self.assertIn(tenant.get('enabled'), ['true', 'false'])
 
+    def get_user_from_response(self, r):
+        return r.result
+
+    def get_user_attribute_from_response(self, r, attribute_name):
+        return r.result.get(attribute_name)
+
     def test_authenticate_with_invalid_xml_in_password(self):
         # public_request would auto escape the ampersand
         self.public_request(
@@ -1395,3 +1424,50 @@ class XmlTestCase(RestfulTestCase, CoreApiTests):
             token=token,
             expected_status=400)
         self.assertValidErrorResponse(r)
+
+    def test_authenticating_a_user_with_an_OSKSADM_password(self):
+        token = self.get_scoped_token()
+
+        xmlns = "http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0"
+
+        username = uuid.uuid4().hex
+        password = uuid.uuid4().hex
+
+        # create the user
+        self.admin_request(
+            method='POST',
+            path='/v2.0/users',
+            headers={
+                'Content-Type': 'application/xml'
+            },
+            body="""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <user xmlns="http://docs.openstack.org/identity/api/v2.0"
+                        xmlns:OS-KSADM="%(xmlns)s"
+                        name="%(username)s"
+                        OS-KSADM:password="%(password)s"
+                        enabled="true"/>
+            """ % dict(username=username, password=password, xmlns=xmlns),
+            token=token,
+            expected_status=200,
+            convert=False)
+
+        # successfully authenticate
+        self.public_request(
+            method='POST',
+            path='/v2.0/tokens',
+            headers={
+                'Content-Type': 'application/xml'
+            },
+            body="""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <auth xmlns="http://docs.openstack.org/identity/api/v2.0"
+                        xmlns:OS-KSADM="%(xmlns)s">
+                    <passwordCredentials
+                            username="%(username)s"
+                            password="%(password)s"/>
+                </auth>
+            """ % dict(username=username, password=password, xmlns=xmlns),
+            token=token,
+            expected_status=200,
+            convert=False)

@@ -37,20 +37,25 @@ class ExternalAuthNotApplicable(Exception):
     pass
 
 
-@dependency.requires('token_provider_api')
+@dependency.requires('assignment_api', 'catalog_api', 'identity_api',
+                     'token_api', 'token_provider_api', 'trust_api')
 class Auth(controller.V2Controller):
+
+    @controller.v2_deprecated
     def ca_cert(self, context, auth=None):
         ca_file = open(CONF.signing.ca_certs, 'r')
         data = ca_file.read()
         ca_file.close()
         return data
 
+    @controller.v2_deprecated
     def signing_cert(self, context, auth=None):
         cert_file = open(CONF.signing.certfile, 'r')
         data = cert_file.read()
         cert_file.close()
         return data
 
+    @controller.v2_deprecated
     def authenticate(self, context, auth=None):
         """Authenticate credentials and return a token.
 
@@ -120,7 +125,7 @@ class Auth(controller.V2Controller):
 
         roles_ref = []
         for role_id in metadata_ref.get('roles', []):
-            role_ref = self.identity_api.get_role(role_id)
+            role_ref = self.assignment_api.get_role(role_id)
             roles_ref.append(dict(name=role_ref['name']))
 
         (token_id, token_data) = self.token_provider_api.issue_v2_token(
@@ -279,7 +284,7 @@ class Auth(controller.V2Controller):
 
         Returns auth_token_data, (user_ref, tenant_ref, metadata_ref)
         """
-        if 'REMOTE_USER' not in context:
+        if 'REMOTE_USER' not in context.get('environment', {}):
             raise ExternalAuthNotApplicable()
 
         #NOTE(jamielennox): xml and json differ and get confused about what
@@ -287,7 +292,7 @@ class Auth(controller.V2Controller):
         if not auth:
             auth = {}
 
-        username = context['REMOTE_USER']
+        username = context['environment']['REMOTE_USER']
         try:
             user_ref = self.identity_api.get_user_by_name(
                 username, DEFAULT_DOMAIN_ID)
@@ -303,7 +308,8 @@ class Auth(controller.V2Controller):
         expiry = core.default_expire_time()
         bind = None
         if ('kerberos' in CONF.token.bind and
-                context.get('AUTH_TYPE', '').lower() == 'negotiate'):
+                context['environment'].
+                get('AUTH_TYPE', '').lower() == 'negotiate'):
             bind = {'kerberos': username}
 
         return (user_ref, tenant_ref, metadata_ref, expiry, bind)
@@ -331,7 +337,7 @@ class Auth(controller.V2Controller):
 
         if tenant_name:
             try:
-                tenant_ref = self.identity_api.get_project_by_name(
+                tenant_ref = self.assignment_api.get_project_by_name(
                     tenant_name, DEFAULT_DOMAIN_ID)
                 tenant_id = tenant_ref['id']
             except exception.ProjectNotFound as e:
@@ -350,7 +356,7 @@ class Auth(controller.V2Controller):
         domain_name = auth.get('domainName', None)
         if domain_name:
             try:
-                domain_ref = self.identity_api._get_domain_by_name(
+                domain_ref = self.assignment_api.get_domain_by_name(
                     domain_name)
                 domain_id = domain_ref['id']
             except exception.DomainNotFound as e:
@@ -364,8 +370,8 @@ class Auth(controller.V2Controller):
         role_list = []
         if tenant_id:
             try:
-                tenant_ref = self.identity_api.get_project(tenant_id)
-                role_list = self.identity_api.get_roles_for_user_and_project(
+                tenant_ref = self.assignment_api.get_project(tenant_id)
+                role_list = self.assignment_api.get_roles_for_user_and_project(
                     user_id, tenant_id)
             except exception.ProjectNotFound:
                 pass
@@ -394,6 +400,7 @@ class Auth(controller.V2Controller):
                     _('Token does not belong to specified tenant.'))
         return data
 
+    @controller.v2_deprecated
     @controller.protected()
     def validate_token_head(self, context, token_id):
         """Check that a token is valid.
@@ -406,6 +413,7 @@ class Auth(controller.V2Controller):
         belongs_to = context['query_string'].get('belongsTo')
         self.token_provider_api.check_v2_token(token_id, belongs_to)
 
+    @controller.v2_deprecated
     @controller.protected()
     def validate_token(self, context, token_id):
         """Check that a token is valid.
@@ -418,12 +426,14 @@ class Auth(controller.V2Controller):
         belongs_to = context['query_string'].get('belongsTo')
         return self.token_provider_api.validate_v2_token(token_id, belongs_to)
 
+    @controller.v2_deprecated
     def delete_token(self, context, token_id):
         """Delete a token, effectively invalidating it for authz."""
         # TODO(termie): this stuff should probably be moved to middleware
         self.assert_admin(context)
         self.token_api.delete_token(token_id)
 
+    @controller.v2_deprecated
     @controller.protected()
     def revocation_list(self, context, auth=None):
         tokens = self.token_api.list_revoked_tokens()
@@ -440,6 +450,7 @@ class Auth(controller.V2Controller):
 
         return {'signed': signed_text}
 
+    @controller.v2_deprecated
     def endpoints(self, context, token_id):
         """Return a list of endpoints available to the token."""
         self.assert_admin(context)

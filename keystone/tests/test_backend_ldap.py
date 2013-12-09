@@ -22,13 +22,15 @@ import ldap
 
 from keystone import assignment
 from keystone.common import cache
-from keystone.common.ldap import fakeldap
+from keystone.common import ldap as common_ldap
 from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common.fixture import moxstubout
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests import fakeldap
 from keystone.tests import test_backend
 
 
@@ -38,7 +40,7 @@ CONF = config.CONF
 class BaseLDAPIdentity(test_backend.IdentityTests):
     def _get_domain_fixture(self):
         """Domains in LDAP are read-only, so just return the static one."""
-        return self.identity_api.get_domain(CONF.identity.default_domain_id)
+        return self.assignment_api.get_domain(CONF.identity.default_domain_id)
 
     def clear_database(self):
         for shelf in fakeldap.FakeShelves:
@@ -62,7 +64,7 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         """
         user_api = identity.backends.ldap.UserApi(CONF)
         self.assertTrue(user_api)
-        self.assertEquals(user_api.tree_dn, "ou=Users,%s" % CONF.ldap.suffix)
+        self.assertEqual(user_api.tree_dn, "ou=Users,%s" % CONF.ldap.suffix)
 
     def test_configurable_allowed_user_actions(self):
         user = {'id': 'fake1',
@@ -134,6 +136,12 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         self.skipTest('Blocked by bug 1101287')
 
     def test_get_and_remove_role_grant_by_group_and_project(self):
+        self.skipTest('Blocked by bug 1101287')
+
+    def test_delete_user_grant_no_user(self):
+        self.skipTest('Blocked by bug 1101287')
+
+    def test_delete_group_grant_no_group(self):
         self.skipTest('Blocked by bug 1101287')
 
     def test_get_and_remove_role_grant_by_group_and_domain(self):
@@ -259,8 +267,8 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         self.assertEqual(res[0]['id'], user_1_id, "Expected user 1 id")
 
     def test_list_domains(self):
-        domains = self.identity_api.list_domains()
-        self.assertEquals(
+        domains = self.assignment_api.list_domains()
+        self.assertEqual(
             domains,
             [assignment.DEFAULT_DOMAIN])
 
@@ -273,8 +281,8 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
             'enabled': True,
         }
         self.identity_api.create_user(user['id'], user)
-        self.identity_api.add_user_to_project(self.tenant_baz['id'],
-                                              user['id'])
+        self.assignment_api.add_user_to_project(self.tenant_baz['id'],
+                                                user['id'])
         driver = self.identity_api._select_identity_driver(
             user['domain_id'])
         driver.user.LDAP_USER = None
@@ -327,6 +335,23 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         # If this doesn't raise, then the test is successful.
         self.identity_api.create_user('fake1', user)
 
+    def test_update_user_name(self):
+        """A user's name cannot be changed through the LDAP driver."""
+        self.assertRaises(exception.Conflict,
+                          super(BaseLDAPIdentity, self).test_update_user_name)
+
+    def test_arbitrary_attributes_are_returned_from_create_user(self):
+        self.skipTest("Using arbitrary attributes doesn't work under LDAP")
+
+    def test_arbitrary_attributes_are_returned_from_get_user(self):
+        self.skipTest("Using arbitrary attributes doesn't work under LDAP")
+
+    def test_new_arbitrary_attributes_are_returned_from_update_user(self):
+        self.skipTest("Using arbitrary attributes doesn't work under LDAP")
+
+    def test_updated_arbitrary_attributes_are_returned_from_update_user(self):
+        self.skipTest("Using arbitrary attributes doesn't work under LDAP")
+
 
 class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
     def setUp(self):
@@ -334,13 +359,18 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         self._set_config()
         self.clear_database()
 
+        common_ldap.register_handler('fake://', fakeldap.FakeLdap)
         self.load_backends()
         self.load_fixtures(default_fixtures)
+
+        fixture = self.useFixture(moxstubout.MoxStubout())
+        self.mox = fixture.mox
+        self.stubs = fixture.stubs
 
     def test_configurable_allowed_project_actions(self):
         tenant = {'id': 'fake1', 'name': 'fake1', 'enabled': True}
         self.assignment_api.create_project('fake1', tenant)
-        tenant_ref = self.identity_api.get_project('fake1')
+        tenant_ref = self.assignment_api.get_project('fake1')
         self.assertEqual(tenant_ref['id'], 'fake1')
 
         tenant['enabled'] = False
@@ -348,7 +378,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
 
         self.assignment_api.delete_project('fake1')
         self.assertRaises(exception.ProjectNotFound,
-                          self.identity_api.get_project,
+                          self.assignment_api.get_project,
                           'fake1')
 
     def test_configurable_forbidden_project_actions(self):
@@ -374,16 +404,16 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
 
     def test_configurable_allowed_role_actions(self):
         role = {'id': 'fake1', 'name': 'fake1'}
-        self.identity_api.create_role('fake1', role)
-        role_ref = self.identity_api.get_role('fake1')
+        self.assignment_api.create_role('fake1', role)
+        role_ref = self.assignment_api.get_role('fake1')
         self.assertEqual(role_ref['id'], 'fake1')
 
         role['name'] = 'fake2'
-        self.identity_api.update_role('fake1', role)
+        self.assignment_api.update_role('fake1', role)
 
-        self.identity_api.delete_role('fake1')
+        self.assignment_api.delete_role('fake1')
         self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.get_role,
+                          self.assignment_api.get_role,
                           'fake1')
 
     def test_configurable_forbidden_role_actions(self):
@@ -394,22 +424,22 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
 
         role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.assertRaises(exception.ForbiddenAction,
-                          self.identity_api.create_role,
+                          self.assignment_api.create_role,
                           role['id'],
                           role)
 
         self.role_member['name'] = uuid.uuid4().hex
         self.assertRaises(exception.ForbiddenAction,
-                          self.identity_api.update_role,
+                          self.assignment_api.update_role,
                           self.role_member['id'],
                           self.role_member)
 
         self.assertRaises(exception.ForbiddenAction,
-                          self.identity_api.delete_role,
+                          self.assignment_api.delete_role,
                           self.role_member['id'])
 
     def test_project_filter(self):
-        tenant_ref = self.identity_api.get_project(self.tenant_bar['id'])
+        tenant_ref = self.assignment_api.get_project(self.tenant_bar['id'])
         self.assertDictEqual(tenant_ref, self.tenant_bar)
 
         CONF.ldap.tenant_filter = '(CN=DOES_NOT_MATCH)'
@@ -422,15 +452,15 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_role.invalidate(self.assignment_api,
                                                 self.role_member['id'])
-        self.identity_api.get_role(self.role_member['id'])
+        self.assignment_api.get_role(self.role_member['id'])
         self.assignment_api.get_project.invalidate(self.assignment_api,
                                                    self.tenant_bar['id'])
         self.assertRaises(exception.ProjectNotFound,
-                          self.identity_api.get_project,
+                          self.assignment_api.get_project,
                           self.tenant_bar['id'])
 
     def test_role_filter(self):
-        role_ref = self.identity_api.get_role(self.role_member['id'])
+        role_ref = self.assignment_api.get_role(self.role_member['id'])
         self.assertDictEqual(role_ref, self.role_member)
 
         CONF.ldap.role_filter = '(CN=DOES_NOT_MATCH)'
@@ -444,7 +474,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         self.assignment_api.get_role.invalidate(self.assignment_api,
                                                 self.role_member['id'])
         self.assertRaises(exception.RoleNotFound,
-                          self.identity_api.get_role,
+                          self.assignment_api.get_role,
                           self.role_member['id'])
 
     def test_dumb_member(self):
@@ -474,7 +504,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_project.invalidate(self.assignment_api,
                                                    self.tenant_baz['id'])
-        tenant_ref = self.identity_api.get_project(self.tenant_baz['id'])
+        tenant_ref = self.assignment_api.get_project(self.tenant_baz['id'])
         self.assertEqual(tenant_ref['id'], self.tenant_baz['id'])
         self.assertEqual(tenant_ref['name'], self.tenant_baz['name'])
         self.assertEqual(
@@ -495,7 +525,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_project.invalidate(self.assignment_api,
                                                    self.tenant_baz['id'])
-        tenant_ref = self.identity_api.get_project(self.tenant_baz['id'])
+        tenant_ref = self.assignment_api.get_project(self.tenant_baz['id'])
         self.assertEqual(tenant_ref['id'], self.tenant_baz['id'])
         self.assertEqual(tenant_ref['name'], self.tenant_baz['description'])
         self.assertEqual(tenant_ref['description'], self.tenant_baz['name'])
@@ -516,7 +546,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_project.invalidate(self.assignment_api,
                                                    self.tenant_baz['id'])
-        tenant_ref = self.identity_api.get_project(self.tenant_baz['id'])
+        tenant_ref = self.assignment_api.get_project(self.tenant_baz['id'])
         self.assertEqual(tenant_ref['id'], self.tenant_baz['id'])
         self.assertNotIn('name', tenant_ref)
         self.assertNotIn('description', tenant_ref)
@@ -535,7 +565,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_role.invalidate(self.assignment_api,
                                                 self.role_member['id'])
-        role_ref = self.identity_api.get_role(self.role_member['id'])
+        role_ref = self.assignment_api.get_role(self.role_member['id'])
         self.assertEqual(role_ref['id'], self.role_member['id'])
         self.assertEqual(role_ref['name'], self.role_member['name'])
 
@@ -549,7 +579,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_role.invalidate(self.assignment_api,
                                                 self.role_member['id'])
-        role_ref = self.identity_api.get_role(self.role_member['id'])
+        role_ref = self.assignment_api.get_role(self.role_member['id'])
         self.assertEqual(role_ref['id'], self.role_member['id'])
         self.assertNotIn('name', role_ref)
 
@@ -566,7 +596,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # cache population.
         self.assignment_api.get_role.invalidate(self.assignment_api,
                                                 self.role_member['id'])
-        role_ref = self.identity_api.get_role(self.role_member['id'])
+        role_ref = self.assignment_api.get_role(self.role_member['id'])
         self.assertEqual(role_ref['id'], self.role_member['id'])
         self.assertNotIn('name', role_ref)
 
@@ -637,10 +667,17 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         user_api = identity.backends.ldap.UserApi(CONF)
         self.stubs.Set(fakeldap, 'FakeLdap',
                        self.mox.CreateMock(fakeldap.FakeLdap))
+        common_ldap.register_handler('fake://', fakeldap.FakeLdap)
         # we have to track all calls on 'conn' to make sure that
         # conn.simple_bind_s is not called
         conn = self.mox.CreateMockAnything()
-        conn = fakeldap.FakeLdap(CONF.ldap.url).AndReturn(conn)
+        conn = fakeldap.FakeLdap(CONF.ldap.url,
+                                 0,
+                                 alias_dereferencing=None,
+                                 tls_cacertdir=None,
+                                 tls_cacertfile=None,
+                                 tls_req_cert=2,
+                                 use_tls=False).AndReturn(conn)
         self.mox.ReplayAll()
 
         user_api.get_connection(user=None, password=None)
@@ -687,37 +724,37 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True, 'description': uuid.uuid4().hex}
         self.assertRaises(exception.Forbidden,
-                          self.identity_api.create_domain,
+                          self.assignment_api.create_domain,
                           domain['id'],
                           domain)
         self.assertRaises(exception.Conflict,
-                          self.identity_api.create_domain,
+                          self.assignment_api.create_domain,
                           CONF.identity.default_domain_id,
                           domain)
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.get_domain,
+                          self.assignment_api.get_domain,
                           domain['id'])
 
         domain['description'] = uuid.uuid4().hex
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.update_domain,
+                          self.assignment_api.update_domain,
                           domain['id'],
                           domain)
         self.assertRaises(exception.Forbidden,
-                          self.identity_api.update_domain,
+                          self.assignment_api.update_domain,
                           CONF.identity.default_domain_id,
                           domain)
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.get_domain,
+                          self.assignment_api.get_domain,
                           domain['id'])
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.delete_domain,
+                          self.assignment_api.delete_domain,
                           domain['id'])
         self.assertRaises(exception.Forbidden,
-                          self.identity_api.delete_domain,
+                          self.assignment_api.delete_domain,
                           CONF.identity.default_domain_id)
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.get_domain,
+                          self.assignment_api.get_domain,
                           domain['id'])
 
     def test_create_domain_case_sensitivity(self):
@@ -751,12 +788,12 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
 
         project['description'] = uuid.uuid4().hex
         self.assignment_api.update_project(project['id'], project)
-        project_ref = self.identity_api.get_project(project['id'])
+        project_ref = self.assignment_api.get_project(project['id'])
         self.assertDictEqual(project_ref, project)
 
         self.assignment_api.delete_project(project['id'])
         self.assertRaises(exception.ProjectNotFound,
-                          self.identity_api.get_project,
+                          self.assignment_api.get_project,
                           project['id'])
 
     def test_cache_layer_project_crud(self):
@@ -821,7 +858,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         role_list = []
         for _ in range(2):
             role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-            self.identity_api.create_role(role['id'], role)
+            self.assignment_api.create_role(role['id'], role)
             role_list.append(role)
 
         user1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
@@ -833,11 +870,11 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
                     'domain_id': CONF.identity.default_domain_id}
         self.assignment_api.create_project(project1['id'], project1)
 
-        self.identity_api.add_role_to_user_and_project(
+        self.assignment_api.add_role_to_user_and_project(
             user_id=user1['id'],
             tenant_id=project1['id'],
             role_id=role_list[0]['id'])
-        self.identity_api.add_role_to_user_and_project(
+        self.assignment_api.add_role_to_user_and_project(
             user_id=user1['id'],
             tenant_id=project1['id'],
             role_id=role_list[1]['id'])
@@ -847,23 +884,36 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         # and group roles are combined.  Only directly assigned user
         # roles are available, since group grants are not yet supported
 
-        combined_role_list = self.identity_api.get_roles_for_user_and_project(
-            user1['id'], project1['id'])
-        self.assertEquals(len(combined_role_list), 2)
-        self.assertIn(role_list[0]['id'], combined_role_list)
-        self.assertIn(role_list[1]['id'], combined_role_list)
+        combined_list = self.assignment_api.get_roles_for_user_and_project(
+            user1['id'],
+            project1['id'])
+        self.assertEqual(len(combined_list), 2)
+        self.assertIn(role_list[0]['id'], combined_list)
+        self.assertIn(role_list[1]['id'], combined_list)
 
         # Finally, although domain roles are not implemented, check we can
         # issue the combined get roles call with benign results, since thus is
         # used in token generation
 
-        combined_role_list = self.identity_api.get_roles_for_user_and_domain(
+        combined_role_list = self.assignment_api.get_roles_for_user_and_domain(
             user1['id'], CONF.identity.default_domain_id)
-        self.assertEquals(len(combined_role_list), 0)
+        self.assertEqual(len(combined_role_list), 0)
 
     def test_list_projects_for_alternate_domain(self):
         self.skipTest(
             'N/A: LDAP does not support multiple domains')
+
+    def test_create_grant_no_user(self):
+        # The LDAP assignment backend doesn't implement create_grant.
+        self.assertRaises(
+            exception.NotImplemented,
+            super(BaseLDAPIdentity, self).test_create_grant_no_user)
+
+    def test_create_grant_no_group(self):
+        # The LDAP assignment backend doesn't implement create_grant.
+        self.assertRaises(
+            exception.NotImplemented,
+            super(BaseLDAPIdentity, self).test_create_grant_no_group)
 
 
 class LDAPIdentityEnabledEmulation(LDAPIdentity):
@@ -892,7 +942,7 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             'description': uuid.uuid4().hex}
 
         self.assignment_api.create_project(project['id'], project)
-        project_ref = self.identity_api.get_project(project['id'])
+        project_ref = self.assignment_api.get_project(project['id'])
 
         # self.assignment_api.create_project adds an enabled
         # key with a value of True when LDAPIdentityEnabledEmulation
@@ -902,12 +952,12 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
 
         project['description'] = uuid.uuid4().hex
         self.assignment_api.update_project(project['id'], project)
-        project_ref = self.identity_api.get_project(project['id'])
+        project_ref = self.assignment_api.get_project(project['id'])
         self.assertDictEqual(project_ref, project)
 
         self.assignment_api.delete_project(project['id'])
         self.assertRaises(exception.ProjectNotFound,
-                          self.identity_api.get_project,
+                          self.assignment_api.get_project,
                           project['id'])
 
     def test_user_crud(self):
@@ -969,8 +1019,8 @@ class LdapIdentitySqlAssignment(sql.Base, tests.TestCase, BaseLDAPIdentity):
         pass
 
     def test_list_domains(self):
-        domains = self.identity_api.list_domains()
-        self.assertEquals(domains, [assignment.DEFAULT_DOMAIN])
+        domains = self.assignment_api.list_domains()
+        self.assertEqual(domains, [assignment.DEFAULT_DOMAIN])
 
     def test_project_filter(self):
         self.skipTest(

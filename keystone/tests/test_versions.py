@@ -15,11 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from keystone import tests
+import random
 
 from keystone import config
 from keystone import controllers
+from keystone.openstack.common.fixture import moxstubout
 from keystone.openstack.common import jsonutils
+from keystone import tests
 
 
 CONF = config.CONF
@@ -117,8 +119,11 @@ class VersionTestCase(tests.TestCase):
         self.public_app = self.loadapp('keystone', 'main')
         self.admin_app = self.loadapp('keystone', 'admin')
 
-        self.public_server = self.serveapp('keystone', name='main')
-        self.admin_server = self.serveapp('keystone', name='admin')
+        port = random.randint(10000, 30000)
+        self.opt(public_port=port, admin_port=port)
+
+        fixture = self.useFixture(moxstubout.MoxStubout())
+        self.stubs = fixture.stubs
 
     def _paste_in_port(self, response, port):
         for link in response['links']:
@@ -324,8 +329,11 @@ vnd.openstack.identity-v3+xml"/>
         self.public_app = self.loadapp('keystone', 'main')
         self.admin_app = self.loadapp('keystone', 'admin')
 
-        self.public_server = self.serveapp('keystone', name='main')
-        self.admin_server = self.serveapp('keystone', name='admin')
+        port = random.randint(10000, 30000)
+        self.opt(public_port=port, admin_port=port)
+
+        fixture = self.useFixture(moxstubout.MoxStubout())
+        self.stubs = fixture.stubs
 
     def test_public_versions(self):
         client = self.client(self.public_app)

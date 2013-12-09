@@ -102,11 +102,12 @@ def validate_token_bind(context, token_ref):
 
     for bind_type, identifier in bind.iteritems():
         if bind_type == 'kerberos':
-            if not context.get('AUTH_TYPE', '').lower() == 'negotiate':
+            if not (context['environment'].get('AUTH_TYPE', '').lower()
+                    == 'negotiate'):
                 LOG.info(_("Kerberos credentials required and not present"))
                 raise exception.Unauthorized()
 
-            if not context.get('REMOTE_USER') == identifier:
+            if not context['environment'].get('REMOTE_USER') == identifier:
                 LOG.info(_("Kerberos credentials do not match those in bind"))
                 raise exception.Unauthorized()
 
@@ -214,15 +215,11 @@ class Application(BaseApplication):
         context['headers'] = dict(req.headers.iteritems())
         context['path'] = req.environ['PATH_INFO']
         params = req.environ.get(PARAMS_ENV, {})
-
-        for name in ['REMOTE_USER', 'AUTH_TYPE']:
-            try:
-                context[name] = req.environ[name]
-            except KeyError:
-                try:
-                    del context[name]
-                except KeyError:
-                    pass
+        #authentication and authorization attributes are set as environment
+        #values by the container and processed by the pipeline.  the complete
+        #set is not yet know.
+        context['environment'] = req.environ
+        req.environ = None
 
         params.update(arg_dict)
 
@@ -238,7 +235,7 @@ class Application(BaseApplication):
             result = method(context, **params)
         except exception.Unauthorized as e:
             LOG.warning(
-                _('Authorization failed. %(exception)s from %(remote_addr)s') %
+                _('Authorization failed. %(exception)s from %(remote_addr)s'),
                 {'exception': e, 'remote_addr': req.environ['REMOTE_ADDR']})
             return render_exception(e, user_locale=req.best_match_language())
         except exception.Error as e:
@@ -303,7 +300,7 @@ class Application(BaseApplication):
                 raise exception.Unauthorized()
 
             # NOTE(vish): this is pretty inefficient
-            creds['roles'] = [self.identity_api.get_role(role)['name']
+            creds['roles'] = [self.assignment_api.get_role(role)['name']
                               for role in creds.get('roles', [])]
             # Accept either is_admin or the admin role
             self.policy_api.enforce(creds, 'admin_required', {})
@@ -589,6 +586,13 @@ def render_exception(error, user_locale=None):
         'message': unicode(gettextutils.get_localized_message(error.args[0],
                                                               user_locale)),
     }}
+    headers = []
     if isinstance(error, exception.AuthPluginException):
         body['error']['identity'] = error.authentication
-    return render_response(status=(error.code, error.title), body=body)
+    elif isinstance(error, exception.Unauthorized):
+        headers.append(('WWW-Authenticate',
+                        'Keystone uri="%s"' % (
+                            CONF.public_endpoint % CONF)))
+    return render_response(status=(error.code, error.title),
+                           body=body,
+                           headers=headers)

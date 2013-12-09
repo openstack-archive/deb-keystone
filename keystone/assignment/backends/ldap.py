@@ -33,12 +33,6 @@ from keystone.openstack.common import log as logging
 CONF = config.CONF
 LOG = logging.getLogger(__name__)
 
-DEFAULT_DOMAIN = {
-    'id': CONF.identity.default_domain_id,
-    'name': 'Default',
-    'enabled': True
-}
-
 
 @dependency.requires('identity_api')
 class Assignment(assignment.Driver):
@@ -57,7 +51,6 @@ class Assignment(assignment.Driver):
 
         self.project = ProjectApi(CONF)
         self.role = RoleApi(CONF)
-        self._identity_api = None
 
     def get_project(self, tenant_id):
         return self._set_default_domain(self.project.get(tenant_id))
@@ -184,7 +177,7 @@ class Assignment(assignment.Driver):
 
     def delete_project(self, tenant_id):
         if self.project.subtree_delete_enabled:
-            self.project.deleteTree(id)
+            self.project.deleteTree(tenant_id)
         else:
             tenant_dn = self.project._id_to_dn(tenant_id)
             self.role.roles_delete_subtree_by_project(tenant_dn)
@@ -199,7 +192,7 @@ class Assignment(assignment.Driver):
 
     def update_role(self, role_id, role):
         self.get_role(role_id)
-        self.role.update(role_id, role)
+        return self.role.update(role_id, role)
 
     def create_domain(self, domain_id, domain):
         if domain_id == CONF.identity.default_domain_id:
@@ -209,7 +202,7 @@ class Assignment(assignment.Driver):
 
     def get_domain(self, domain_id):
         self._validate_default_domain_id(domain_id)
-        return DEFAULT_DOMAIN
+        return assignment.DEFAULT_DOMAIN
 
     def update_domain(self, domain_id, domain):
         self._validate_default_domain_id(domain_id)
@@ -246,7 +239,7 @@ class Assignment(assignment.Driver):
             # role support which will be added under bug 1101287
             query = '(objectClass=%s)' % self.group.object_class
             dn = None
-            dn = self.group._id_to_dn(id)
+            dn = self.group._id_to_dn(group_id)
             if dn:
                 try:
                     conn = self.group.get_connection()
@@ -258,6 +251,32 @@ class Assignment(assignment.Driver):
                     pass
                 finally:
                     conn.unbind_s()
+
+    def create_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        raise exception.NotImplemented()
+
+    def get_grant(self, role_id, user_id=None, group_id=None,
+                  domain_id=None, project_id=None,
+                  inherited_to_projects=False):
+        raise exception.NotImplemented()
+
+    def delete_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        raise exception.NotImplemented()
+
+    def list_grants(self, user_id=None, group_id=None,
+                    domain_id=None, project_id=None,
+                    inherited_to_projects=False):
+        raise exception.NotImplemented()
+
+    def get_domain_by_name(self, domain_name):
+        raise exception.NotImplemented()
+
+    def list_role_assignments(self):
+        raise exception.NotImplemented()
 
 
 # TODO(termie): turn this into a data object and move logic to driver
@@ -346,9 +365,9 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
                 res.add(rolegrant.user_dn)
         return list(res)
 
-    def update(self, id, values):
-        old_obj = self.get(id)
-        return super(ProjectApi, self).update(id, values, old_obj)
+    def update(self, project_id, values):
+        old_obj = self.get(project_id)
+        return super(ProjectApi, self).update(project_id, values, old_obj)
 
 
 class UserRoleAssociation(object):
@@ -388,8 +407,8 @@ class RoleApi(common_ldap.BaseLdap):
         self.member_attribute = (getattr(conf.ldap, 'role_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
 
-    def get(self, id, filter=None):
-        model = super(RoleApi, self).get(id, filter)
+    def get(self, role_id, role_filter=None):
+        model = super(RoleApi, self).get(role_id, role_filter)
         return model
 
     def create(self, values):
@@ -426,20 +445,10 @@ class RoleApi(common_ldap.BaseLdap):
         try:
             conn.modify_s(role_dn, [(ldap.MOD_DELETE,
                                      self.member_attribute, user_dn)])
-        except ldap.NO_SUCH_OBJECT:
-            if tenant_dn is None:
-                raise exception.RoleNotFound(role_id=role_id)
-            attrs = [('objectClass', [self.object_class]),
-                     (self.member_attribute, [user_dn])]
-
-            if self.use_dumb_member:
-                attrs[1][1].append(self.dumb_member)
-            try:
-                conn.add_s(role_dn, attrs)
-            except Exception as inst:
-                raise inst
-        except ldap.NO_SUCH_ATTRIBUTE:
-            raise exception.UserNotFound(user_id=user_id)
+        except (ldap.NO_SUCH_OBJECT, ldap.NO_SUCH_ATTRIBUTE):
+            raise exception.RoleNotFound(message=_(
+                'Cannot remove role that has not been granted, %s') %
+                role_id)
         finally:
             conn.unbind_s()
 
@@ -528,10 +537,10 @@ class RoleApi(common_ldap.BaseLdap):
             pass
         return super(RoleApi, self).update(role_id, role)
 
-    def delete(self, id, tenant_dn):
+    def delete(self, role_id, tenant_dn):
         conn = self.get_connection()
         query = '(&(objectClass=%s)(%s=%s))' % (self.object_class,
-                                                self.id_attr, id)
+                                                self.id_attr, role_id)
         try:
             for role_dn, _ in conn.search_s(tenant_dn,
                                             ldap.SCOPE_SUBTREE,
@@ -541,4 +550,4 @@ class RoleApi(common_ldap.BaseLdap):
             pass
         finally:
             conn.unbind_s()
-        super(RoleApi, self).delete(id)
+        super(RoleApi, self).delete(role_id)

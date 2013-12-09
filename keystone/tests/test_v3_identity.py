@@ -16,6 +16,8 @@
 
 import uuid
 
+from testtools import matchers
+
 from keystone.common import controller
 from keystone import exception
 from keystone import tests
@@ -156,7 +158,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         """Call ``PATCH /domains/{domain_id}`` (set enabled=False)."""
         # Create a 2nd set of entities in a 2nd domain
         self.domain2 = self.new_domain_ref()
-        self.identity_api.create_domain(self.domain2['id'], self.domain2)
+        self.assignment_api.create_domain(self.domain2['id'], self.domain2)
 
         self.project2 = self.new_project_ref(
             domain_id=self.domain2['id'])
@@ -167,8 +169,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             project_id=self.project2['id'])
         self.identity_api.create_user(self.user2['id'], self.user2)
 
-        self.identity_api.add_user_to_project(self.project2['id'],
-                                              self.user2['id'])
+        self.assignment_api.add_user_to_project(self.project2['id'],
+                                                self.user2['id'])
 
         # First check a user in that domain can authenticate, via
         # Both v2 and v3
@@ -254,7 +256,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         # Create a 2nd set of entities in a 2nd domain
         self.domain2 = self.new_domain_ref()
-        self.identity_api.create_domain(self.domain2['id'], self.domain2)
+        self.assignment_api.create_domain(self.domain2['id'], self.domain2)
 
         self.project2 = self.new_project_ref(
             domain_id=self.domain2['id'])
@@ -287,10 +289,10 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         # Check all the domain2 relevant entities are gone
         self.assertRaises(exception.DomainNotFound,
-                          self.identity_api.get_domain,
+                          self.assignment_api.get_domain,
                           self.domain2['id'])
         self.assertRaises(exception.ProjectNotFound,
-                          self.identity_api.get_project,
+                          self.assignment_api.get_project,
                           self.project2['id'])
         self.assertRaises(exception.GroupNotFound,
                           self.identity_api.get_group,
@@ -303,9 +305,9 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                           self.credential2['id'])
 
         # ...and that all self.domain entities are still here
-        r = self.identity_api.get_domain(self.domain['id'])
+        r = self.assignment_api.get_domain(self.domain['id'])
         self.assertDictEqual(r, self.domain)
-        r = self.identity_api.get_project(self.project['id'])
+        r = self.assignment_api.get_project(self.project['id'])
         self.assertDictEqual(r, self.project)
         r = self.identity_api.get_group(self.group['id'])
         self.assertDictEqual(r, self.group)
@@ -559,7 +561,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                           self.credential['id'])
         # And the no tokens we remain valid
         tokens = self.token_api.list_tokens(self.user['id'])
-        self.assertEquals(len(tokens), 0)
+        self.assertEqual(len(tokens), 0)
         # But the credential for user2 is unaffected
         r = self.credential_api.get_credential(self.credential2['id'])
         self.assertDictEqual(r, self.credential2)
@@ -1015,9 +1017,9 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             domain_id=self.domain['id'])
         self.assignment_api.create_project(self.project1['id'], self.project1)
         self.role1 = self.new_role_ref()
-        self.identity_api.create_role(self.role1['id'], self.role1)
+        self.assignment_api.create_role(self.role1['id'], self.role1)
         self.role2 = self.new_role_ref()
-        self.identity_api.create_role(self.role2['id'], self.role2)
+        self.assignment_api.create_role(self.role2['id'], self.role2)
 
         # Now add one of each of the four types of assignment
 
@@ -1203,7 +1205,7 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
             role_list.append(role)
 
         domain = self.new_domain_ref()
-        self.identity_api.create_domain(domain['id'], domain)
+        self.assignment_api.create_domain(domain['id'], domain)
         user1 = self.new_user_ref(
             domain_id=domain['id'])
         user1['password'] = uuid.uuid4().hex
@@ -1295,7 +1297,7 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
             role_list.append(role)
 
         domain = self.new_domain_ref()
-        self.identity_api.create_domain(domain['id'], domain)
+        self.assignment_api.create_domain(domain['id'], domain)
         user1 = self.new_user_ref(
             domain_id=domain['id'])
         user1['password'] = uuid.uuid4().hex
@@ -1388,7 +1390,7 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
             role_list.append(role)
 
         domain = self.new_domain_ref()
-        self.identity_api.create_domain(domain['id'], domain)
+        self.assignment_api.create_domain(domain['id'], domain)
         user1 = self.new_user_ref(
             domain_id=domain['id'])
         user1['password'] = uuid.uuid4().hex
@@ -1491,7 +1493,7 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
             role_list.append(role)
 
         domain = self.new_domain_ref()
-        self.identity_api.create_domain(domain['id'], domain)
+        self.assignment_api.create_domain(domain['id'], domain)
         user1 = self.new_user_ref(
             domain_id=domain['id'])
         user1['password'] = uuid.uuid4().hex
@@ -1648,7 +1650,7 @@ class TestV3toV2Methods(tests.TestCase):
         user_list = [self.user1, self.user2, self.user3, self.user4]
         updated_list = self.identity_api.v3_to_v2_user(user_list)
 
-        self.assertEquals(len(updated_list), len(user_list))
+        self.assertEqual(len(updated_list), len(user_list))
 
         for i, ref in enumerate(updated_list):
             # Order should not change.
@@ -1688,3 +1690,72 @@ class TestV3toV2Methods(tests.TestCase):
         updated_ref = controller.V3Controller.filter_domain_id(ref)
         self.assertIs(ref, updated_ref)
         self.assertDictEqual(ref, expected_ref)
+
+
+class UserChangingPasswordsTestCase(test_v3.RestfulTestCase):
+
+    def setUp(self):
+        super(UserChangingPasswordsTestCase, self).setUp()
+        self.user_ref = self.new_user_ref(domain_id=self.domain['id'])
+        self.identity_api.create_user(self.user_ref['id'], self.user_ref)
+        self.token = self.get_request_token(self.user_ref['password'], 201)
+
+    def get_request_token(self, password, expected_status):
+        auth_data = self.build_authentication_request(
+            user_id=self.user_ref['id'],
+            password=password)
+        r = self.post('/auth/tokens',
+                      body=auth_data,
+                      expected_status=expected_status)
+        return r.headers.get('X-Subject-Token')
+
+    def change_password(self, expected_status, **kwargs):
+        """Returns a test response for a change password request."""
+        return self.post('/users/%s/password' % self.user_ref['id'],
+                         body={'user': kwargs},
+                         token=self.token,
+                         expected_status=expected_status)
+
+    def test_changing_password(self):
+        # original password works
+        self.get_request_token(self.user_ref['password'],
+                               expected_status=201)
+
+        # change password
+        new_password = uuid.uuid4().hex
+        self.change_password(password=new_password,
+                             original_password=self.user_ref['password'],
+                             expected_status=204)
+
+        # old password fails
+        self.get_request_token(self.user_ref['password'], expected_status=401)
+
+        # new password works
+        self.get_request_token(new_password, expected_status=201)
+
+    def test_changing_password_with_missing_original_password_fails(self):
+        r = self.change_password(password=uuid.uuid4().hex,
+                                 expected_status=400)
+        self.assertThat(r.result['error']['message'],
+                        matchers.Contains('original_password'))
+
+    def test_changing_password_with_missing_password_fails(self):
+        r = self.change_password(original_password=self.user_ref['password'],
+                                 expected_status=400)
+        self.assertThat(r.result['error']['message'],
+                        matchers.Contains('password'))
+
+    def test_changing_password_with_incorrect_password_fails(self):
+        self.change_password(password=uuid.uuid4().hex,
+                             original_password=uuid.uuid4().hex,
+                             expected_status=401)
+
+    def test_changing_password_with_disabled_user_fails(self):
+        # disable the user account
+        self.user_ref['enabled'] = False
+        self.patch('/users/%s' % self.user_ref['id'],
+                   body={'user': self.user_ref})
+
+        self.change_password(password=uuid.uuid4().hex,
+                             original_password=self.user_ref['password'],
+                             expected_status=401)

@@ -15,6 +15,7 @@
 # under the License.
 
 """SQL backends for the various services."""
+import contextlib
 import functools
 
 import sqlalchemy as sql
@@ -22,7 +23,7 @@ import sqlalchemy.engine.url
 from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.ext import declarative
 import sqlalchemy.orm
-from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlalchemy.orm.attributes import flag_modified, InstrumentedAttribute
 import sqlalchemy.pool
 from sqlalchemy import types as sql_types
 
@@ -58,6 +59,8 @@ Text = sql.Text
 UniqueConstraint = sql.UniqueConstraint
 relationship = sql.orm.relationship
 joinedload = sql.orm.joinedload
+# Suppress flake8's unused import warning for flag_modified:
+flag_modified = flag_modified
 
 
 def initialize_decorator(init):
@@ -204,7 +207,7 @@ def mysql_on_checkout(dbapi_conn, connection_rec, connection_proxy):
         dbapi_conn.cursor().execute('select 1')
     except dbapi_conn.OperationalError as e:
         if e.args[0] in (2006, 2013, 2014, 2045, 2055):
-            LOG.warn(_('Got mysql server has gone away: %s'), e)
+            LOG.warn(_('MySQL server has gone away: %s'), e)
             raise DisconnectionError("Database server went away")
         else:
             raise
@@ -219,7 +222,7 @@ def db2_on_checkout(engine, dbapi_conn, connection_rec, connection_proxy):
     except Exception as e:
         is_disconnect = engine.dialect.is_disconnect(e, dbapi_conn, cursor)
         if is_disconnect:
-            LOG.warn(_('Got database server has gone away: %s'), e)
+            LOG.warn(_('DB2 server has gone away: %s'), e)
             raise DisconnectionError("Database server went away")
         else:
             raise
@@ -238,6 +241,13 @@ class Base(object):
             register_global_engine_callback(self.clear_engine)
         return self._sessionmaker(autocommit=autocommit,
                                   expire_on_commit=expire_on_commit)
+
+    @contextlib.contextmanager
+    def transaction(self, expire_on_commit=False):
+        """Return a SQLAlchemy session in a scoped transaction."""
+        session = self.get_session(expire_on_commit=expire_on_commit)
+        with session.begin():
+            yield session
 
     def get_engine(self, allow_global_engine=True):
         """Return a SQLAlchemy engine.
@@ -298,7 +308,7 @@ class Base(object):
         self._sessionmaker = None
 
 
-def handle_conflicts(type='object'):
+def handle_conflicts(conflict_type='object'):
     """Converts IntegrityError into HTTP 409 Conflict."""
     def decorator(method):
         @functools.wraps(method)
@@ -306,6 +316,7 @@ def handle_conflicts(type='object'):
             try:
                 return method(*args, **kwargs)
             except (IntegrityError, OperationalError) as e:
-                raise exception.Conflict(type=type, details=str(e.orig))
+                raise exception.Conflict(type=conflict_type,
+                                         details=str(e.orig))
         return wrapper
     return decorator

@@ -16,8 +16,11 @@
 
 """Main entry point into the Token service."""
 
+import abc
 import copy
 import datetime
+
+import six
 
 from keystone.common import cache
 from keystone.common import cms
@@ -49,7 +52,7 @@ def default_expire_time():
 def validate_auth_info(self, user_ref, tenant_ref):
     """Validate user and tenant auth info.
 
-    Validate the user and tenant auth into in order to ensure that user and
+    Validate the user and tenant auth info in order to ensure that user and
     tenant information is valid and not disabled.
 
     Consolidate the checks here to ensure consistency between token auth and
@@ -62,31 +65,31 @@ def validate_auth_info(self, user_ref, tenant_ref):
     """
     # If the user is disabled don't allow them to authenticate
     if not user_ref.get('enabled', True):
-        msg = 'User is disabled: %s' % user_ref['id']
+        msg = _('User is disabled: %s') % user_ref['id']
         LOG.warning(msg)
         raise exception.Unauthorized(msg)
 
     # If the user's domain is disabled don't allow them to authenticate
-    user_domain_ref = self.identity_api.get_domain(
+    user_domain_ref = self.assignment_api.get_domain(
         user_ref['domain_id'])
     if user_domain_ref and not user_domain_ref.get('enabled', True):
-        msg = 'Domain is disabled: %s' % user_domain_ref['id']
+        msg = _('Domain is disabled: %s') % user_domain_ref['id']
         LOG.warning(msg)
         raise exception.Unauthorized(msg)
 
     if tenant_ref:
         # If the project is disabled don't allow them to authenticate
         if not tenant_ref.get('enabled', True):
-            msg = 'Tenant is disabled: %s' % tenant_ref['id']
+            msg = _('Tenant is disabled: %s') % tenant_ref['id']
             LOG.warning(msg)
             raise exception.Unauthorized(msg)
 
         # If the project's domain is disabled don't allow them to authenticate
-        project_domain_ref = self.identity_api.get_domain(
+        project_domain_ref = self.assignment_api.get_domain(
             tenant_ref['domain_id'])
         if (project_domain_ref and
                 not project_domain_ref.get('enabled', True)):
-            msg = 'Domain is disabled: %s' % project_domain_ref['id']
+            msg = _('Domain is disabled: %s') % project_domain_ref['id']
             LOG.warning(msg)
             raise exception.Unauthorized(msg)
 
@@ -191,9 +194,11 @@ class Manager(manager.Manager):
         self.token_provider_api.invalidate_individual_token_cache(token_id)
 
 
+@six.add_metaclass(abc.ABCMeta)
 class Driver(object):
     """Interface description for a Token driver."""
 
+    @abc.abstractmethod
     def get_token(self, token_id):
         """Get a token by id.
 
@@ -205,6 +210,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def create_token(self, token_id, data):
         """Create a token by id and data.
 
@@ -228,6 +234,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def delete_token(self, token_id):
         """Deletes a token by id.
 
@@ -239,6 +246,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
                       consumer_id=None):
         """Deletes tokens by user.
@@ -264,11 +272,6 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        # TODO(henry-nash): The SQL driver already has a more efficient
-        # implementation of this, although this is missing from the other
-        # backends.  These should be completed and then this should become
-        # a virtual method.  This is raised as bug #1227507.
-
         token_list = self.list_tokens(user_id,
                                       tenant_id=tenant_id,
                                       trust_id=trust_id,
@@ -280,6 +283,7 @@ class Driver(object):
             except exception.NotFound:
                 pass
 
+    @abc.abstractmethod
     def list_tokens(self, user_id, tenant_id=None, trust_id=None,
                     consumer_id=None):
         """Returns a list of current token_id's for a user
@@ -301,6 +305,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def list_revoked_tokens(self):
         """Returns a list of all revoked tokens
 
@@ -309,6 +314,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
+    @abc.abstractmethod
     def flush_expired_tokens(self):
         """Archive or delete tokens that have expired.
         """

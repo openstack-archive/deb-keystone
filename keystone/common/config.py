@@ -27,7 +27,14 @@ _DEFAULT_AUTH_METHODS = ['external', 'password', 'token']
 FILE_OPTIONS = {
     '': [
         cfg.StrOpt('admin_token', secret=True, default='ADMIN'),
-        cfg.StrOpt('bind_host', default='0.0.0.0'),
+        cfg.StrOpt('public_bind_host',
+                   default='0.0.0.0',
+                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
+                                                      group='DEFAULT')]),
+        cfg.StrOpt('admin_bind_host',
+                   default='0.0.0.0',
+                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
+                                                      group='DEFAULT')]),
         cfg.IntOpt('compute_port', default=8774),
         cfg.IntOpt('admin_port', default=35357),
         cfg.IntOpt('public_port', default=5000),
@@ -36,7 +43,6 @@ FILE_OPTIONS = {
         cfg.StrOpt('admin_endpoint',
                    default='http://localhost:%(admin_port)s/'),
         cfg.StrOpt('onready'),
-        cfg.StrOpt('auth_admin_prefix', default=''),
         # default max request size is 112k
         cfg.IntOpt('max_request_body_size', default=114688),
         cfg.IntOpt('max_param_size', default=64),
@@ -100,7 +106,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('ca_certs',
                    default="/etc/keystone/ssl/certs/ca.pem"),
         cfg.StrOpt('ca_key',
-                   default="/etc/keystone/ssl/certs/cakey.pem"),
+                   default="/etc/keystone/ssl/private/cakey.pem"),
         cfg.BoolOpt('cert_required', default=False),
         cfg.IntOpt('key_size', default=1024),
         cfg.IntOpt('valid_days', default=3650),
@@ -115,7 +121,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('ca_certs',
                    default="/etc/keystone/ssl/certs/ca.pem"),
         cfg.StrOpt('ca_key',
-                   default="/etc/keystone/ssl/certs/cakey.pem"),
+                   default="/etc/keystone/ssl/private/cakey.pem"),
         cfg.IntOpt('key_size', default=2048),
         cfg.IntOpt('valid_days', default=3650),
         cfg.StrOpt('cert_subject',
@@ -250,7 +256,7 @@ FILE_OPTIONS = {
                    default='keystone.auth.plugins.token.Token'),
         #deals with REMOTE_USER authentication
         cfg.StrOpt('external',
-                   default='keystone.auth.plugins.external.ExternalDefault')],
+                   default='keystone.auth.plugins.external.Default')],
     'paste_deploy': [
         cfg.StrOpt('config_file', default=None)],
     'memcache': [
