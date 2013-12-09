@@ -1,3 +1,9 @@
+keystone (2014.1~b1-1) experimental; urgency=low
+
+  * New upstream release (Icehouse beta 1).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 09 Dec 2013 22:26:07 +0800
+
 keystone (2013.2-4) unstable; urgency=low
 
   * Fixes restart of keystone in logrotate script. (Closes: #731495).
