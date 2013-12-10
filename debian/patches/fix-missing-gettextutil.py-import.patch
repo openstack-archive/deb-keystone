@@ -10,7 +10,7 @@ Last-Update: 2012-12-10
  from keystone import exception
  from keystone.openstack.common import log as logging
 -
-+from keystone.openstack.common import gettextutils
++from keystone.openstack.common.gettextutils import _
  
  CONF = config.CONF
  
