@@ -76,7 +76,7 @@ Depends: python-babel (>= 1.3),
          python-d2to1 (>= 0.2.10),
          python-dateutil,
          python-dogpile.cache,
-         python-eventlet (>= 0.13.0)
+         python-eventlet (>= 0.13.0),
          python-greenlet (>= 0.3.2),
          python-httplib2,
          python-iso8601 (>= 0.1.8),
