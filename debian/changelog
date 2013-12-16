@@ -1,6 +1,8 @@
 keystone (2013.2.1-1) unstable; urgency=high
 
   * New upstream release (Closes: #731981) This fixes CVE-2013-6391.
+  * Refreshed sql_conn.patch.
+  * Removed CVE-2013-4477-havana.patch now applied upstream.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 16 Dec 2013 16:46:48 +0800
 

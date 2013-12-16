@@ -4,9 +4,9 @@ Forwarded: not-needed
 
 Index: keystone/etc/keystone.conf.sample
 ===================================================================
---- keystone.orig/etc/keystone.conf.sample	2013-09-12 10:07:04.000000000 +0800
-+++ keystone/etc/keystone.conf.sample	2013-09-12 10:07:06.000000000 +0800
-@@ -84,7 +84,7 @@
+--- keystone.orig/etc/keystone.conf.sample	2013-12-16 16:45:17.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2013-12-16 16:48:40.000000000 +0800
+@@ -140,7 +140,7 @@
  
  [sql]
  # The SQLAlchemy connection string used to connect to the database
