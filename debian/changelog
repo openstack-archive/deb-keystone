@@ -2,6 +2,8 @@ keystone (2013.2.1-2) UNRELEASED; urgency=low
 
   * Adds a cut -d" " -f1 when detecting the local interface connected to the
     default gateway, so that it works with more than one default gateway.
+  * Updated es.po debconf translation thanks to Matias A. Bellone
+    <matiasbellone+debian@gmail.com> (Closes: #732538).
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 20 Dec 2013 22:00:34 +0800
 
