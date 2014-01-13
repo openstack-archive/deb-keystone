@@ -5,6 +5,9 @@ keystone (2013.2.1-2) UNRELEASED; urgency=low
   * Updated es.po debconf translation thanks to Matias A. Bellone
     <matiasbellone+debian@gmail.com> (Closes: #732538).
 
+  [gustavo panizzo]
+  * Patch to improve performance (lp: #1251123).
+
  -- Thomas Goirand <zigo@debian.org>  Fri, 20 Dec 2013 22:00:34 +0800
 
 keystone (2013.2.1-1) unstable; urgency=high
