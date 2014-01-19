@@ -1,0 +1,725 @@
+Description: Replaces oauth2 by authlib
+ This patch replaces the old, unmaintained python-oauth2 library by the better
+ suited oauthlib in keystone oAuth modules.
+ .
+ The library switch comes with two notable changes in terms of use:
+ .
+ * the client must set the callback uri to 'oob' (out-of-band)
+   explicitly when requesting a Request Token
+ .
+ * the requested_project_id header is not included in the signature
+   anymore, in compliance with the oAuth1 spec.
+Author: Matthieu Huin <mhu@enovance.com>
+Origin: upstream, https://review.openstack.org/#/c/64427/
+Bug-Ubuntu: https://launchpad.net/bugs/1240382
+Reviewed-By: Thomas Goirand <zigo@debian.org>
+Last-Update: 2013-01-19
+
+--- keystone-2013.2.1.orig/requirements.txt
++++ keystone-2013.2.1/requirements.txt
+@@ -16,5 +16,5 @@ iso8601>=0.1.8
+ python-keystoneclient>=0.3.2
+ oslo.config>=1.2.0
+ Babel>=1.3
+-oauth2
++oauthlib
+ dogpile.cache>=0.5.0
+--- keystone-2013.2.1.orig/keystone/tests/test_v3_oauth1.py
++++ keystone-2013.2.1/keystone/tests/test_v3_oauth1.py
+@@ -60,50 +60,43 @@ class OAuth1Tests(test_v3.RestfulTestCas
+             body={'consumer': ref})
+         return resp.result.get('consumer')
+ 
+-    def _oauth_request(self, consumer, token=None, **kw):
+-        return oauth1.Request.from_consumer_and_token(consumer=consumer,
+-                                                      token=token,
+-                                                      **kw)
+-
+     def _create_request_token(self, consumer, project_id):
+-        params = {'requested_project_id': project_id}
+-        headers = {'Content-Type': 'application/json'}
+-        url = '/OS-OAUTH1/request_token'
+-        oreq = self._oauth_request(
+-            consumer=consumer,
+-            http_url=self.base_url + url,
+-            http_method='POST',
+-            parameters=params)
+-        hmac = oauth1.SignatureMethod_HMAC_SHA1()
+-        oreq.sign_request(hmac, consumer, None)
+-        headers.update(oreq.to_header())
+-        headers.update(params)
+-        return url, headers
++        endpoint = '/OS-OAUTH1/request_token'
++        client = oauth1.Client(consumer['key'],
++                               client_secret=consumer['secret'],
++                               signature_method=oauth1.SIG_HMAC,
++                               callback_uri="oob")
++        headers = {'requested_project_id': project_id}
++        url, headers, body = client.sign(self.base_url + endpoint,
++                                         http_method='POST',
++                                         headers=headers)
++        return endpoint, headers
+ 
+     def _create_access_token(self, consumer, token):
+-        headers = {'Content-Type': 'application/json'}
+-        url = '/OS-OAUTH1/access_token'
+-        oreq = self._oauth_request(
+-            consumer=consumer, token=token,
+-            http_method='POST',
+-            http_url=self.base_url + url)
+-        hmac = oauth1.SignatureMethod_HMAC_SHA1()
+-        oreq.sign_request(hmac, consumer, token)
+-        headers.update(oreq.to_header())
+-        return url, headers
++        endpoint = '/OS-OAUTH1/access_token'
++        client = oauth1.Client(consumer['key'],
++                               client_secret=consumer['secret'],
++                               resource_owner_key=token.key,
++                               resource_owner_secret=token.secret,
++                               signature_method=oauth1.SIG_HMAC,
++                               verifier=token.verifier)
++        url, headers, body = client.sign(self.base_url + endpoint,
++                                         http_method='POST')
++        headers.update({'Content-Type': 'application/json'})
++        return endpoint, headers
+ 
+     def _get_oauth_token(self, consumer, token):
+-        headers = {'Content-Type': 'application/json'}
+-        body = {'auth': {'identity': {'methods': ['oauth1'], 'oauth1': {}}}}
+-        url = '/auth/tokens'
+-        oreq = self._oauth_request(
+-            consumer=consumer, token=token,
+-            http_method='POST',
+-            http_url=self.base_url + url)
+-        hmac = oauth1.SignatureMethod_HMAC_SHA1()
+-        oreq.sign_request(hmac, consumer, token)
+-        headers.update(oreq.to_header())
+-        return url, headers, body
++        client = oauth1.Client(consumer['key'],
++                               client_secret=consumer['secret'],
++                               resource_owner_key=token.key,
++                               resource_owner_secret=token.secret,
++                               signature_method=oauth1.SIG_HMAC)
++        endpoint = '/auth/tokens'
++        url, headers, body = client.sign(self.base_url + endpoint,
++                                         http_method='POST')
++        headers.update({'Content-Type': 'application/json'})
++        ref = {'auth': {'identity': {'oauth1': {}, 'methods': ['oauth1']}}}
++        return endpoint, headers, ref
+ 
+     def _authorize_request_token(self, request_id):
+         return '/OS-OAUTH1/authorize/%s' % (request_id)
+@@ -214,8 +207,8 @@ class OAuthFlowTests(OAuth1Tests):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        self.consumer = oauth1.Consumer(consumer_id, consumer_secret)
+-        self.assertIsNotNone(self.consumer.key)
++        self.consumer = {'key': consumer_id, 'secret': consumer_secret}
++        self.assertIsNotNone(self.consumer['secret'])
+ 
+         url, headers = self._create_request_token(self.consumer,
+                                                   self.project_id)
+@@ -270,7 +263,7 @@ class AccessTokenCRUDTests(OAuthFlowTest
+                            'key': self.access_token.key})
+         entity = resp.result.get('access_token')
+         self.assertEqual(entity['id'], self.access_token.key)
+-        self.assertEqual(entity['consumer_id'], self.consumer.key)
++        self.assertEqual(entity['consumer_id'], self.consumer['key'])
+ 
+     def test_get_access_token_dne(self):
+         self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
+@@ -339,7 +332,7 @@ class AuthTokenTests(OAuthFlowTests):
+         oauth_section = r.result['token']['OS-OAUTH1']
+         self.assertEquals(oauth_section['access_token_id'],
+                           self.access_token.key)
+-        self.assertEquals(oauth_section['consumer_id'], self.consumer.key)
++        self.assertEquals(oauth_section['consumer_id'], self.consumer['key'])
+ 
+         # verify the roles section
+         roles_list = r.result['token']['roles']
+@@ -371,7 +364,7 @@ class AuthTokenTests(OAuthFlowTests):
+         self.test_oauth_flow()
+ 
+         # Delete consumer
+-        consumer_id = self.consumer.key
++        consumer_id = self.consumer['key']
+         resp = self.delete('/OS-OAUTH1/consumers/%(consumer_id)s'
+                            % {'consumer_id': consumer_id})
+         self.assertResponseStatus(resp, 204)
+@@ -442,7 +435,7 @@ class AuthTokenTests(OAuthFlowTests):
+     def test_list_keystone_tokens_by_consumer(self):
+         self.test_oauth_flow()
+         tokens = self.token_api.list_tokens(self.user_id,
+-                                            consumer_id=self.consumer.key)
++                                            consumer_id=self.consumer['key'])
+         keystone_token_uuid = cms.cms_hash_token(self.keystone_token_id)
+         self.assertTrue(len(tokens) > 0)
+         self.assertTrue(keystone_token_uuid in tokens)
+@@ -453,20 +446,18 @@ class MaliciousOAuth1Tests(OAuth1Tests):
+     def test_bad_consumer_secret(self):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+-        consumer = oauth1.Consumer(consumer_id, "bad_secret")
+-        url, headers = self._create_request_token(consumer,
+-                                                  self.project_id)
+-        self.post(url, headers=headers, expected_status=500)
++        consumer = {'key': consumer_id, 'secret': uuid.uuid4().hex}
++        url, headers = self._create_request_token(consumer, self.project_id)
++        self.post(url, headers=headers, expected_status=401)
+ 
+     def test_bad_request_token_key(self):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        consumer = oauth1.Consumer(consumer_id, consumer_secret)
+-        url, headers = self._create_request_token(consumer,
+-                                                  self.project_id)
++        consumer = {'key': consumer_id, 'secret': consumer_secret}
++        url, headers = self._create_request_token(consumer, self.project_id)
+         self.post(url, headers=headers)
+-        url = self._authorize_request_token("bad_key")
++        url = self._authorize_request_token(uuid.uuid4().hex)
+         body = {'roles': [{'id': self.role_id}]}
+         self.put(url, body=body, expected_status=404)
+ 
+@@ -474,10 +465,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        consumer = oauth1.Consumer(consumer_id, consumer_secret)
++        consumer = {'key': consumer_id, 'secret': consumer_secret}
+ 
+-        url, headers = self._create_request_token(consumer,
+-                                                  self.project_id)
++        url, headers = self._create_request_token(consumer, self.project_id)
+         content = self.post(url, headers=headers)
+         credentials = urlparse.parse_qs(content.result)
+         request_key = credentials.get('oauth_token')[0]
+@@ -490,26 +480,23 @@ class MaliciousOAuth1Tests(OAuth1Tests):
+         verifier = resp.result['token']['oauth_verifier']
+         self.assertIsNotNone(verifier)
+ 
+-        request_token.set_verifier("bad verifier")
+-        url, headers = self._create_access_token(consumer,
+-                                                 request_token)
++        request_token.set_verifier(uuid.uuid4().hex)
++        url, headers = self._create_access_token(consumer, request_token)
+         self.post(url, headers=headers, expected_status=401)
+ 
+     def test_bad_authorizing_roles(self):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        consumer = oauth1.Consumer(consumer_id, consumer_secret)
++        consumer = {'key': consumer_id, 'secret': consumer_secret}
+ 
+-        url, headers = self._create_request_token(consumer,
+-                                                  self.project_id)
++        url, headers = self._create_request_token(consumer, self.project_id)
+         content = self.post(url, headers=headers)
+         credentials = urlparse.parse_qs(content.result)
+         request_key = credentials.get('oauth_token')[0]
+ 
+-        self.identity_api.remove_role_from_user_and_project(self.user_id,
+-                                                            self.project_id,
+-                                                            self.role_id)
++        self.identity_api.remove_role_from_user_and_project(
++            self.user_id, self.project_id, self.role_id)
+         url = self._authorize_request_token(request_key)
+         body = {'roles': [{'id': self.role_id}]}
+         self.admin_request(path=url, method='PUT',
+@@ -521,8 +508,8 @@ class MaliciousOAuth1Tests(OAuth1Tests):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        self.consumer = oauth1.Consumer(consumer_id, consumer_secret)
+-        self.assertIsNotNone(self.consumer.key)
++        self.consumer = {'key': consumer_id, 'secret': consumer_secret}
++        self.assertIsNotNone(self.consumer['key'])
+ 
+         url, headers = self._create_request_token(self.consumer,
+                                                   self.project_id)
+@@ -542,8 +529,8 @@ class MaliciousOAuth1Tests(OAuth1Tests):
+         consumer = self._create_single_consumer()
+         consumer_id = consumer.get('id')
+         consumer_secret = consumer.get('secret')
+-        self.consumer = oauth1.Consumer(consumer_id, consumer_secret)
+-        self.assertIsNotNone(self.consumer.key)
++        self.consumer = {'key': consumer_id, 'secret': consumer_secret}
++        self.assertIsNotNone(self.consumer['key'])
+ 
+         url, headers = self._create_request_token(self.consumer,
+                                                   self.project_id)
+--- keystone-2013.2.1.orig/keystone/auth/plugins/oauth1.py
++++ keystone-2013.2.1/keystone/auth/plugins/oauth1.py
+@@ -18,6 +18,7 @@ from keystone import auth
+ from keystone.common import dependency
+ from keystone.contrib import oauth1
+ from keystone.contrib.oauth1 import core as oauth
++from keystone.contrib.oauth1 import validator
+ from keystone import exception
+ from keystone.openstack.common import log as logging
+ from keystone.openstack.common import timeutils
+@@ -36,7 +37,6 @@ class OAuth(auth.AuthMethodHandler):
+         """Turn a signed request with an access key into a keystone token."""
+         headers = context['headers']
+         oauth_headers = oauth.get_oauth_headers(headers)
+-        consumer_id = oauth_headers.get('oauth_consumer_key')
+         access_token_id = oauth_headers.get('oauth_token')
+ 
+         if not access_token_id:
+@@ -44,7 +44,6 @@ class OAuth(auth.AuthMethodHandler):
+                 attribute='oauth_token', target='request')
+ 
+         acc_token = self.oauth_api.get_access_token(access_token_id)
+-        consumer = self.oauth_api.get_consumer_with_secret(consumer_id)
+ 
+         expires_at = acc_token['expires_at']
+         if expires_at:
+@@ -54,27 +53,19 @@ class OAuth(auth.AuthMethodHandler):
+             if now > expires:
+                 raise exception.Unauthorized(_('Access token is expired'))
+ 
+-        consumer_obj = oauth1.Consumer(key=consumer['id'],
+-                                       secret=consumer['secret'])
+-        acc_token_obj = oauth1.Token(key=acc_token['id'],
+-                                     secret=acc_token['access_secret'])
+-
+         url = oauth.rebuild_url(context['path'])
+-        oauth_request = oauth1.Request.from_request(
++        access_verifier = oauth.ResourceEndpoint(
++            request_validator=validator.OAuthValidator(),
++            token_generator=oauth.token_generator)
++        result, request = access_verifier.validate_protected_resource_request(
++            url,
+             http_method='POST',
+-            http_url=url,
+-            headers=context['headers'],
+-            query_string=context['query_string'])
+-        oauth_server = oauth1.Server()
+-        oauth_server.add_signature_method(oauth1.SignatureMethod_HMAC_SHA1())
+-        params = oauth_server.verify_request(oauth_request,
+-                                             consumer_obj,
+-                                             token=acc_token_obj)
+-
+-        if len(params) != 0:
+-            msg = _('There should not be any non-oauth parameters')
+-            raise exception.Unauthorized(message=msg)
+-
++            body=context['query_string'],
++            headers=headers,
++        )
++        if not result:
++            msg = _('Could not validate the access token')
++            raise exception.Unauthorized(msg)
+         auth_context['user_id'] = acc_token['authorizing_user_id']
+         auth_context['access_token_id'] = access_token_id
+         auth_context['project_id'] = acc_token['project_id']
+--- keystone-2013.2.1.orig/keystone/contrib/oauth1/controllers.py
++++ keystone-2013.2.1/keystone/contrib/oauth1/controllers.py
+@@ -21,6 +21,7 @@ from keystone.common import dependency
+ from keystone.common import wsgi
+ from keystone import config
+ from keystone.contrib.oauth1 import core as oauth1
++from keystone.contrib.oauth1 import validator
+ from keystone import exception
+ from keystone.openstack.common import jsonutils
+ from keystone.openstack.common import timeutils
+@@ -177,26 +178,21 @@ class OAuthControllerV3(controller.V3Con
+             raise exception.ValidationError(
+                 attribute='requested_project_id', target='request')
+ 
+-        consumer_ref = self.oauth_api.get_consumer_with_secret(consumer_id)
+-        consumer = oauth1.Consumer(key=consumer_ref['id'],
+-                                   secret=consumer_ref['secret'])
+-
+         url = oauth1.rebuild_url(context['path'])
+-        oauth_request = oauth1.Request.from_request(
++
++        req_headers = {'Requested-Project-Id': requested_project_id}
++        req_headers.update(headers)
++        request_verifier = oauth1.RequestTokenEndpoint(
++            request_validator=validator.OAuthValidator(),
++            token_generator=oauth1.token_generator)
++        h, b, s = request_verifier.create_request_token_response(
++            url,
+             http_method='POST',
+-            http_url=url,
+-            headers=context['headers'],
+-            query_string=context['query_string'],
+-            parameters={'requested_project_id': requested_project_id})
+-        oauth_server = oauth1.Server()
+-        oauth_server.add_signature_method(oauth1.SignatureMethod_HMAC_SHA1())
+-        params = oauth_server.verify_request(oauth_request,
+-                                             consumer,
+-                                             token=None)
+-
+-        project_params = params['requested_project_id']
+-        if project_params != requested_project_id:
+-            msg = _('Non-oauth parameter - project, do not match')
++            body=context['query_string'],
++            headers=req_headers)
++
++        if (not b) or int(s) > 399:
++            msg = _('Invalid signature')
+             raise exception.Unauthorized(message=msg)
+ 
+         request_token_duration = CONF.oauth1.request_token_duration
+@@ -236,7 +232,6 @@ class OAuthControllerV3(controller.V3Con
+             raise exception.ValidationError(
+                 attribute='oauth_verifier', target='request')
+ 
+-        consumer = self.oauth_api.get_consumer_with_secret(consumer_id)
+         req_token = self.oauth_api.get_request_token(
+             request_token_id)
+ 
+@@ -248,24 +243,16 @@ class OAuthControllerV3(controller.V3Con
+             if now > expires:
+                 raise exception.Unauthorized(_('Request token is expired'))
+ 
+-        consumer_obj = oauth1.Consumer(key=consumer['id'],
+-                                       secret=consumer['secret'])
+-        req_token_obj = oauth1.Token(key=req_token['id'],
+-                                     secret=req_token['request_secret'])
+-        req_token_obj.set_verifier(oauth_verifier)
+-
+         url = oauth1.rebuild_url(context['path'])
+-        oauth_request = oauth1.Request.from_request(
+-            http_method='POST',
+-            http_url=url,
+-            headers=context['headers'],
+-            query_string=context['query_string'])
+-        oauth_server = oauth1.Server()
+-        oauth_server.add_signature_method(oauth1.SignatureMethod_HMAC_SHA1())
+-        params = oauth_server.verify_request(oauth_request,
+-                                             consumer_obj,
+-                                             token=req_token_obj)
+ 
++        access_verifier = oauth1.AccessTokenEndpoint(
++            request_validator=validator.OAuthValidator(),
++            token_generator=oauth1.token_generator)
++        h, b, s = access_verifier.create_access_token_response(
++            http_method='POST',
++            body=context['query_string'],
++            headers=headers)
++        params = oauth1.extract_non_oauth_params(b)
+         if len(params) != 0:
+             msg = _('There should not be any non-oauth parameters')
+             raise exception.Unauthorized(message=msg)
+--- keystone-2013.2.1.orig/keystone/contrib/oauth1/core.py
++++ keystone-2013.2.1/keystone/contrib/oauth1/core.py
+@@ -18,7 +18,9 @@
+ 
+ from __future__ import absolute_import
+ 
+-import oauth2 as oauth
++import oauthlib.common
++from oauthlib import oauth1
++import uuid
+ 
+ from keystone.common import dependency
+ from keystone.common import extension
+@@ -27,19 +29,33 @@ from keystone import config
+ from keystone import exception
+ 
+ 
+-Consumer = oauth.Consumer
+-Request = oauth.Request
+-Server = oauth.Server
+-SignatureMethod = oauth.SignatureMethod
+-SignatureMethod_HMAC_SHA1 = oauth.SignatureMethod_HMAC_SHA1
+-SignatureMethod_PLAINTEXT = oauth.SignatureMethod_PLAINTEXT
+-Token = oauth.Token
+-Client = oauth.Client
++RequestValidator = oauth1.RequestValidator
++Client = oauth1.Client
++AccessTokenEndpoint = oauth1.AccessTokenEndpoint
++ResourceEndpoint = oauth1.ResourceEndpoint
++AuthorizationEndpoint = oauth1.AuthorizationEndpoint
++SIG_HMAC = oauth1.SIGNATURE_HMAC
++RequestTokenEndpoint = oauth1.RequestTokenEndpoint
++oRequest = oauthlib.common.Request
++
++
++class Token(object):
++    def __init__(self, key, secret):
++        self.key = key
++        self.secret = secret
++        self.verifier = None
++
++    def set_verifier(self, verifier):
++        self.verifier = verifier
+ 
+ 
+ CONF = config.CONF
+ 
+ 
++def token_generator(*args, **kwargs):
++    return uuid.uuid4().hex
++
++
+ EXTENSION_DATA = {
+     'name': 'OpenStack OAUTH1 API',
+     'namespace': 'http://docs.openstack.org/identity/api/ext/'
+@@ -113,13 +129,14 @@ def get_oauth_headers(headers):
+         # to split the rest of the headers.
+ 
+         auth_header = headers['Authorization']
+-        # Check that the authorization header is OAuth.
+-        if auth_header[:6] == 'OAuth ':
+-            auth_header = auth_header[6:]
+-            # Get the parameters from the header.
+-            header_params = oauth.Request._split_header(auth_header)
+-            parameters.update(header_params)
+-            return parameters
++        params = oauth1.rfc5849.utils.parse_authorization_header(auth_header)
++        parameters.update(dict(params))
++        return parameters
++
++
++def extract_non_oauth_params(query_string):
++    params = oauthlib.common.extract_params(query_string)
++    return dict([(k, v) for k, v in params if not k.startswith('oauth_')])
+ 
+ 
+ @dependency.provider('oauth_api')
+--- /dev/null
++++ keystone-2013.2.1/keystone/contrib/oauth1/validator.py
+@@ -0,0 +1,184 @@
++# vim: tabstop=4 shiftwidth=4 softtabstop=4
++
++# Copyright 2014 OpenStack Foundation
++#
++# Licensed under the Apache License, Version 2.0 (the "License"); you may
++# not use this file except in compliance with the License. You may obtain
++# a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++# License for the specific language governing permissions and limitations
++# under the License.
++
++"""oAuthlib request validator."""
++
++from keystone.common import dependency
++from keystone.contrib.oauth1 import core as oauth1
++from keystone import exception
++from keystone.openstack.common import log
++
++
++METHOD_NAME = 'oauth_validator'
++LOG = log.getLogger(__name__)
++
++
++@dependency.requires('oauth_api')
++class OAuthValidator(oauth1.RequestValidator):
++
++    def __init__(self):
++        self.oauth_api = oauth1.Manager()
++
++    #TODO(mhu) set as option probably ?
++    @property
++    def enforce_ssl(self):
++        return False
++
++    @property
++    def safe_characters(self):
++        #oauth tokens are generated from a uuid hex value
++        return set("abcdef0123456789")
++
++    def _check_token(self, token):
++        # generic token verification when they're obtained from a uuid hex
++        return (set(token) <= self.safe_characters and
++                len(token) == 32)
++
++    def check_client_key(self, client_key):
++        return self._check_token(client_key)
++
++    def check_request_token(self, request_token):
++        return self._check_token(request_token)
++
++    def check_access_token(self, access_token):
++        return self._check_token(access_token)
++
++    def check_nonce(self, nonce):
++        # Assuming length is not a concern
++        return set(nonce) <= self.safe_characters
++
++    def check_verifier(self, verifier):
++        try:
++            return 1000 <= int(verifier) <= 9999
++        except ValueError:
++            return False
++
++    def get_client_secret(self, client_key, request):
++        client = self.oauth_api.get_consumer_with_secret(client_key)
++        return client['secret']
++
++    def get_request_token_secret(self, client_key, token, request):
++        token_ref = self.oauth_api.get_request_token(token)
++        return token_ref['request_secret']
++
++    def get_access_token_secret(self, client_key, token, request):
++        access_token = self.oauth_api.get_access_token(token)
++        return access_token['access_secret']
++
++    def get_default_realms(self, client_key, request):
++        # realms weren't implemented with the previous library
++        return []
++
++    def get_realms(self, token, request):
++        return []
++
++    def get_redirect_uri(self, token, request):
++        # OOB (out of band) is supposed to be the default value to use
++        return 'oob'
++
++    def get_rsa_key(self, client_key, request):
++        # HMAC signing is used, so return a dummy value
++        return ''
++
++    def invalidate_request_token(self, client_key, request_token, request):
++        # this method is invoked when an access token is generated out of a
++        # request token, to make sure that request token cannot be consumed
++        # anymore. This is done in the backend, so we do nothing here.
++        pass
++
++    def validate_client_key(self, client_key, request):
++        try:
++            return self.oauth_api.get_consumer(client_key) is not None
++        except exception.NotFound:
++            return False
++
++    def validate_request_token(self, client_key, token, request):
++        try:
++            return self.oauth_api.get_request_token(token) is not None
++        except exception.NotFound:
++            return False
++
++    def validate_access_token(self, client_key, token, request):
++        try:
++            return self.oauth_api.get_access_token(token) is not None
++        except exception.NotFound:
++            return False
++
++    def validate_timestamp_and_nonce(self,
++                                     client_key,
++                                     timestamp,
++                                     nonce,
++                                     request,
++                                     request_token=None,
++                                     access_token=None):
++        return True
++
++    def validate_redirect_uri(self, client_key, redirect_uri, request):
++        # we expect OOB, we don't really care
++        return True
++
++    def validate_requested_realms(self, client_key, realms, request):
++        # realms are not used
++        return True
++
++    def validate_realms(self,
++                        client_key,
++                        token,
++                        request,
++                        uri=None,
++                        realms=None):
++        return True
++
++    def validate_verifier(self, client_key, token, verifier, request):
++        try:
++            req_token = self.oauth_api.get_request_token(token)
++            return req_token['verifier'] == verifier
++        except exception.NotFound:
++            return False
++
++    def verify_request_token(self, token, request):
++        # there aren't strong expectations on the request token format
++        return isinstance(token, basestring)
++
++    def verify_realms(self, token, realms, request):
++        return True
++
++    # The following save_XXX methods are called to create tokens. I chose to
++    # keep the original logic, but the comments below show how that could be
++    # implemented. The real implementation logic is in the backend.
++    def save_access_token(self, token, request):
++        pass
++#        token_duration = CONF.oauth1.request_token_duration
++#        request_token_id = request.client_key
++#        self.oauth_api.create_access_token(request_token_id,
++#                                           token_duration,
++#                                           token["oauth_token"],
++#                                           token["oauth_token_secret"])
++
++    def save_request_token(self, token, request):
++        pass
++#        project_id = request.headers.get('Requested-Project-Id')
++#        token_duration = CONF.oauth1.request_token_duration
++#        self.oauth_api.create_request_token(request.client_key,
++#                                            project_id,
++#                                            token_duration,
++#                                            token["oauth_token"],
++#                                            token["oauth_token_secret"])
++
++    def save_verifier(self, token, verifier, request):
++        # keep the old logic for this, as it is done in two steps and requires
++        # information that the request validator has no access to
++        pass
+--- keystone-2013.2.1.orig/keystone/contrib/oauth1/backends/sql.py
++++ keystone-2013.2.1/keystone/contrib/oauth1/backends/sql.py
+@@ -165,7 +165,12 @@ class OAuth1(sql.Base):
+             session.flush()
+         return core.filter_consumer(consumer_ref.to_dict())
+ 
+-    def create_request_token(self, consumer_id, project_id, token_duration):
++    def create_request_token(self, consumer_id, project_id, token_duration,
++                             request_token_id=None, request_token_secret=None):
++        if request_token_id is None:
++            request_token_id = uuid.uuid4().hex
++        if request_token_secret is None:
++            request_token_secret = uuid.uuid4().hex
+         expiry_date = None
+         if token_duration:
+             now = timeutils.utcnow()
+@@ -173,9 +178,8 @@ class OAuth1(sql.Base):
+             expiry_date = timeutils.isotime(future, subsecond=True)
+ 
+         ref = {}
+-        request_token_id = uuid.uuid4().hex
+         ref['id'] = request_token_id
+-        ref['request_secret'] = uuid.uuid4().hex
++        ref['request_secret'] = request_token_secret
+         ref['verifier'] = None
+         ref['authorizing_user_id'] = None
+         ref['requested_project_id'] = project_id
+@@ -219,7 +223,12 @@ class OAuth1(sql.Base):
+             session.flush()
+         return token_ref.to_dict()
+ 
+-    def create_access_token(self, request_token_id, token_duration):
++    def create_access_token(self, request_token_id, token_duration,
++                            access_token_id=None, access_token_secret=None):
++        if access_token_id is None:
++            access_token_id = uuid.uuid4().hex
++        if access_token_secret is None:
++            access_token_secret = uuid.uuid4().hex
+         session = self.get_session()
+         with session.begin():
+             req_token_ref = self._get_request_token(session, request_token_id)
+@@ -233,9 +242,8 @@ class OAuth1(sql.Base):
+ 
+             # add Access Token
+             ref = {}
+-            access_token_id = uuid.uuid4().hex
+             ref['id'] = access_token_id
+-            ref['access_secret'] = uuid.uuid4().hex
++            ref['access_secret'] = access_token_secret
+             ref['authorizing_user_id'] = token_dict['authorizing_user_id']
+             ref['project_id'] = token_dict['requested_project_id']
+             ref['role_ids'] = token_dict['role_ids']
