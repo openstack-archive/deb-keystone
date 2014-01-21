@@ -11,7 +11,7 @@ include /usr/share/openstack-pkg-tools/pkgos.make
 export OSLO_PACKAGE_VERSION=$(VERSION)
 
 %:
-	dh $@ --with python2
+	dh $@ --with python2,sphinxdoc
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
@@ -41,7 +41,9 @@ override_dh_auto_build:
 	/usr/share/openstack-pkg-tools/pkgos_insert_include pkgos_func keystone.postinst
 
 ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
-	python setup.py build_sphinx
+	sphinx-build -b html doc/source doc/build/html
+	sphinx-build -b man doc/source doc/build/man
+	#python setup.py build_sphinx
 else
 	mkdir -p $(CURDIR)/doc/build/html
 	mkdir -p $(CURDIR)/doc/build/man
