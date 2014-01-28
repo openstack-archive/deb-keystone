@@ -36,20 +36,20 @@ TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 
 class RestfulTestCase(rest.RestfulTestCase):
-    _config_file_list = [tests.etcdir('keystone.conf.sample'),
-                         tests.testsdir('test_overrides.conf'),
-                         tests.testsdir('backend_sql.conf'),
-                         tests.testsdir('backend_sql_disk.conf')]
+    _config_file_list = [tests.dirs.etc('keystone.conf.sample'),
+                         tests.dirs.tests('test_overrides.conf'),
+                         tests.dirs.tests('backend_sql.conf'),
+                         tests.dirs.tests('backend_sql_disk.conf')]
 
     #override this to sepcify the complete list of configuration files
     def config_files(self):
         return self._config_file_list
 
     def setup_database(self):
-        tests.setup_test_database()
+        tests.setup_database()
 
     def teardown_database(self):
-        tests.teardown_test_database()
+        tests.teardown_database()
 
     def generate_paste_config(self):
         new_paste_file = None
@@ -73,6 +73,7 @@ class RestfulTestCase(rest.RestfulTestCase):
 
         """
         new_paste_file = self.generate_paste_config()
+        self.addCleanup(self.remove_generated_paste_config)
         if new_paste_file:
             app_conf = 'config:%s' % (new_paste_file)
 
@@ -80,15 +81,13 @@ class RestfulTestCase(rest.RestfulTestCase):
 
         self.empty_context = {'environment': {}}
 
-    def tearDown(self):
-        self.teardown_database()
-        self.remove_generated_paste_config()
-        # need to reset the plug-ins
-        auth.controllers.AUTH_METHODS = {}
         #drop the policy rules
-        CONF.reset()
-        rules.reset()
-        super(RestfulTestCase, self).tearDown()
+        self.addCleanup(rules.reset)
+
+        # need to reset the plug-ins
+        self.addCleanup(setattr, auth.controllers, 'AUTH_METHODS', {})
+
+        self.addCleanup(self.teardown_database)
 
     def load_backends(self):
         self.config(self.config_files())
@@ -149,6 +148,13 @@ class RestfulTestCase(rest.RestfulTestCase):
             self.default_domain_user_id, self.project_id,
             self.role_id)
 
+        self.region_id = uuid.uuid4().hex
+        self.region = self.new_region_ref()
+        self.region['id'] = self.region_id
+        self.catalog_api.create_region(
+            self.region_id,
+            self.region.copy())
+
         self.service_id = uuid.uuid4().hex
         self.service = self.new_service_ref()
         self.service['id'] = self.service_id
@@ -170,6 +176,14 @@ class RestfulTestCase(rest.RestfulTestCase):
             'name': uuid.uuid4().hex,
             'description': uuid.uuid4().hex,
             'enabled': True}
+
+    def new_region_ref(self):
+        ref = self.new_ref()
+        # Region doesn't have name or enabled.
+        del ref['name']
+        del ref['enabled']
+        ref['parent_region_id'] = None
+        return ref
 
     def new_service_ref(self):
         ref = self.new_ref()
@@ -446,7 +460,7 @@ class RestfulTestCase(rest.RestfulTestCase):
         If a reference is provided, the entity will also be compared against
         the reference.
         """
-        if keys_to_check:
+        if keys_to_check is not None:
             keys = keys_to_check
         else:
             keys = ['name', 'description', 'enabled']
@@ -595,6 +609,40 @@ class RestfulTestCase(rest.RestfulTestCase):
         self.assertCloseEnoughForGovernmentWork(a_issued_at, b_issued_at)
 
         return self.assertDictEqual(normalize(a), normalize(b))
+
+    # region validation
+
+    def assertValidRegionListResponse(self, resp, *args, **kwargs):
+        #NOTE(jaypipes): I have to pass in a blank keys_to_check parameter
+        #                below otherwise the base assertValidEntity method
+        #                tries to find a "name" and an "enabled" key in the
+        #                returned ref dicts. The issue is, I don't understand
+        #                how the service and endpoint entity assertions below
+        #                actually work (they don't raise assertions), since
+        #                AFAICT, the service and endpoint tables don't have
+        #                a "name" column either... :(
+        return self.assertValidListResponse(
+            resp,
+            'regions',
+            self.assertValidRegion,
+            keys_to_check=[],
+            *args,
+            **kwargs)
+
+    def assertValidRegionResponse(self, resp, *args, **kwargs):
+        return self.assertValidResponse(
+            resp,
+            'region',
+            self.assertValidRegion,
+            keys_to_check=[],
+            *args,
+            **kwargs)
+
+    def assertValidRegion(self, entity, ref=None):
+        self.assertIsNotNone(entity.get('description'))
+        if ref:
+            self.assertEqual(ref['description'], entity['description'])
+        return entity
 
     # service validation
 
@@ -921,7 +969,7 @@ class RestfulTestCase(rest.RestfulTestCase):
         return self.assertValidListResponse(
             resp,
             'trusts',
-            self.assertValidTrust,
+            self.assertValidTrustSummary,
             *args,
             **kwargs)
 
@@ -933,7 +981,10 @@ class RestfulTestCase(rest.RestfulTestCase):
             *args,
             **kwargs)
 
-    def assertValidTrust(self, entity, ref=None):
+    def assertValidTrustSummary(self, entity, ref=None):
+        return self.assertValidTrust(entity, ref, summary=True)
+
+    def assertValidTrust(self, entity, ref=None, summary=False):
         self.assertIsNotNone(entity.get('trustor_user_id'))
         self.assertIsNotNone(entity.get('trustee_user_id'))
 
@@ -941,21 +992,23 @@ class RestfulTestCase(rest.RestfulTestCase):
         if entity['expires_at'] is not None:
             self.assertValidISO8601ExtendedFormatDatetime(entity['expires_at'])
 
-        # always disallow project xor project_id (neither or both is allowed)
-        has_roles = bool(entity.get('roles'))
-        has_project = bool(entity.get('project_id'))
-        self.assertFalse(has_roles ^ has_project)
+        if summary:
+            # Trust list contains no roles, but getting a specific
+            # trust by ID provides the detailed reponse containing roles
+            self.assertNotIn('roles', entity)
+            self.assertIn('project_id', entity)
+        else:
+            for role in entity['roles']:
+                self.assertIsNotNone(role)
+                self.assertValidEntity(role)
+                self.assertValidRole(role)
 
-        for role in entity['roles']:
-            self.assertIsNotNone(role)
-            self.assertValidEntity(role)
-            self.assertValidRole(role)
+            self.assertValidListLinks(entity.get('roles_links'))
 
-        self.assertValidListLinks(entity.get('roles_links'))
-
-        # these were used during dev and shouldn't land in final impl
-        self.assertNotIn('role_ids', entity)
-        self.assertNotIn('role_names', entity)
+            # always disallow role xor project_id (neither or both is allowed)
+            has_roles = bool(entity.get('roles'))
+            has_project = bool(entity.get('project_id'))
+            self.assertFalse(has_roles ^ has_project)
 
         if ref:
             self.assertEqual(ref['trustor_user_id'], entity['trustor_user_id'])
@@ -1043,8 +1096,11 @@ class RestfulTestCase(rest.RestfulTestCase):
             auth_data['scope'] = self.build_auth_scope(**kwargs)
         return {'auth': auth_data}
 
-    def build_external_auth_request(self, remote_user, auth_data=None):
+    def build_external_auth_request(self, remote_user,
+                                    remote_domain=None, auth_data=None):
         context = {'environment': {'REMOTE_USER': remote_user}}
+        if remote_domain:
+            context['environment']['REMOTE_DOMAIN'] = remote_domain
         if not auth_data:
             auth_data = self.build_authentication_request()['auth']
         no_context = None

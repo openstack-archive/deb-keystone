@@ -26,11 +26,11 @@ from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 
 
 CONF = config.CONF
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
 @dependency.requires('assignment_api')
@@ -343,7 +343,7 @@ class GroupApi(common_ldap.BaseLdap):
             conn.unbind_s()
         users = []
         for dn, member in attrs:
-            user_dns = member[self.member_attribute]
+            user_dns = member.get(self.member_attribute, [])
             for user_dn in user_dns:
                 if self.use_dumb_member and user_dn == self.dumb_member:
                     continue

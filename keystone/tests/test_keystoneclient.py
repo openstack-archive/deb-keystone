@@ -14,10 +14,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os
 import uuid
 import webob
 
+from keystone.common import sql
 from keystone import config
+from keystone.openstack.common.db.sqlalchemy import session
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 from keystone import tests
@@ -32,13 +35,25 @@ KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
 
 class CompatTestCase(tests.NoModule, tests.TestCase):
+
+    def config(self, config_files):
+        super(CompatTestCase, self).config(config_files)
+
+        # FIXME(morganfainberg): Since we are running tests through the
+        # controllers and some internal api drivers are SQL-only, the correct
+        # approach is to ensure we have the correct backing store. The
+        # credential api makes some very SQL specific assumptions that should
+        # be addressed allowing for non-SQL based testing to occur.
+        self.load_backends()
+        self.engine = session.get_engine()
+        self.addCleanup(session.cleanup)
+        self.addCleanup(sql.ModelBase.metadata.drop_all,
+                        bind=self.engine)
+        sql.ModelBase.metadata.create_all(bind=self.engine)
+
     def setUp(self):
         super(CompatTestCase, self).setUp()
 
-        # The backends should be loaded and initialized before the servers are
-        # started because the servers use the backends.
-
-        self.load_backends()
         self.load_fixtures(default_fixtures)
 
         # TODO(termie): add an admin user to the fixtures and use that user
@@ -51,10 +66,15 @@ class CompatTestCase(tests.NoModule, tests.TestCase):
         conf = self._paste_config('keystone')
         fixture = self.useFixture(appserver.AppServer(conf, appserver.MAIN))
         self.public_server = fixture.server
+        self.addCleanup(delattr, self, 'public_server')
         fixture = self.useFixture(appserver.AppServer(conf, appserver.ADMIN))
         self.admin_server = fixture.server
+        self.addCleanup(delattr, self, 'admin_server')
 
-        revdir = tests.checkout_vendor(*self.get_checkout())
+        if isinstance(self.checkout_info, str):
+            revdir = self.checkout_info
+        else:
+            revdir = tests.checkout_vendor(*self.checkout_info)
         self.add_path(revdir)
         self.clear_module('keystoneclient')
 
@@ -851,11 +871,6 @@ class KeystoneClientTests(object):
         # TODO(ja): MEMBERSHIP CRUD
         # TODO(ja): determine what else todo
 
-
-class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
-    def get_checkout(self):
-        return KEYSTONECLIENT_REPO, 'master'
-
     def test_tenant_add_and_remove_user(self):
         client = self.get_client(admin=True)
         client.roles.add_user_role(tenant=self.tenant_bar['id'],
@@ -1064,113 +1079,20 @@ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
         client.tenants.list()
 
 
-class KcEssex3TestCase(CompatTestCase, KeystoneClientTests):
-    def get_checkout(self):
-        return KEYSTONECLIENT_REPO, 'essex-3'
-
-    def test_tenant_add_and_remove_user(self):
-        client = self.get_client(admin=True)
-        client.roles.add_user_to_tenant(tenant_id=self.tenant_bar['id'],
-                                        user_id=self.user_two['id'],
-                                        role_id=self.role_member['id'])
-        role_refs = client.roles.get_user_role_refs(
-            user_id=self.user_two['id'])
-        self.assertTrue(self.tenant_baz['id'] in
-                        [x.tenantId for x in role_refs])
-
-        # get the "role_refs" so we get the proper id, this is how the clients
-        # do it
-        roleref_refs = client.roles.get_user_role_refs(
-            user_id=self.user_two['id'])
-        for roleref_ref in roleref_refs:
-            if (roleref_ref.roleId == self.role_member['id']
-                    and roleref_ref.tenantId == self.tenant_baz['id']):
-                # use python's scope fall through to leave roleref_ref set
-                break
-
-        client.roles.remove_user_from_tenant(tenant_id=self.tenant_bar['id'],
-                                             user_id=self.user_two['id'],
-                                             role_id=roleref_ref.id)
-
-        role_refs = client.roles.get_user_role_refs(
-            user_id=self.user_two['id'])
-        self.assertTrue(self.tenant_baz['id'] not in
-                        [x.tenantId for x in role_refs])
-
-    def test_roles_get_by_user(self):
-        client = self.get_client(admin=True)
-        roles = client.roles.get_user_role_refs(user_id='foo')
-        self.assertTrue(len(roles) > 0)
-
-    def test_role_list_404(self):
-        self.skipTest('N/A')
-
-    def test_authenticate_and_delete_token(self):
-        self.skipTest('N/A')
-
-    def test_user_create_update_delete(self):
-        from keystoneclient import exceptions as client_exceptions
-
-        test_username = 'new_user'
-        client = self.get_client(admin=True)
-        user = client.users.create(name=test_username,
-                                   password='password',
-                                   email='user1@test.com')
-        self.assertEqual(user.name, test_username)
-
-        user = client.users.get(user=user.id)
-        self.assertEqual(user.name, test_username)
-
-        user = client.users.update_email(user=user, email='user2@test.com')
-        self.assertEqual(user.email, 'user2@test.com')
-
-        # NOTE(termie): update_enabled doesn't return anything, probably a bug
-        client.users.update_enabled(user=user, enabled=False)
-        user = client.users.get(user.id)
-        self.assertFalse(user.enabled)
-
-        self.assertRaises(client_exceptions.Unauthorized,
-                          self._client,
-                          username=test_username,
-                          password='password')
-        client.users.update_enabled(user, True)
-
-        user = client.users.update_password(user=user, password='password2')
-
-        self._client(username=test_username,
-                     password='password2')
-
-        user = client.users.update_tenant(user=user, tenant='bar')
-        # TODO(ja): once keystonelight supports default tenant
-        #           when you login without specifying tenant, the
-        #           token should be scoped to tenant 'bar'
-
-        client.users.delete(user.id)
-        self.assertRaises(client_exceptions.NotFound, client.users.get,
-                          user.id)
-
-    def test_user_update_404(self):
-        self.skipTest('N/A')
-
-    def test_endpoint_create_404(self):
-        self.skipTest('N/A')
-
-    def test_endpoint_delete_404(self):
-        self.skipTest('N/A')
-
-    def test_policy_crud(self):
-        self.skipTest('N/A due to lack of endpoint CRUD')
-
-    def test_disable_tenant_invalidates_token(self):
-        self.skipTest('N/A')
-
-    def test_delete_tenant_invalidates_token(self):
-        self.skipTest('N/A')
+class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
+    checkout_info = (KEYSTONECLIENT_REPO, 'master')
 
 
-class Kc11TestCase(CompatTestCase, KeystoneClientTests):
-    def get_checkout(self):
-        return KEYSTONECLIENT_REPO, '0.1.1'
+class KcOptTestCase(KcMasterTestCase):
+    # Set KSCTEST_PATH to the keystoneclient directory, then run this test.
+    #
+    # For example, to test your local keystoneclient,
+    #
+    # KSCTEST_PATH=/opt/stack/python-keystoneclient \
+    #  tox -e py27 test_keystoneclient.KcOptTestCase
 
-    def test_policy_crud(self):
-        self.skipTest('N/A')
+    def setUp(self):
+        self.checkout_info = os.environ.get('KSCTEST_PATH')
+        if not self.checkout_info:
+            self.skip('Set KSCTEST_PATH env to test with local client')
+        super(KcOptTestCase, self).setUp()

@@ -91,18 +91,22 @@ class Endpoint(controller.V2Controller):
 
         # according to the v2 spec publicurl is mandatory
         self._require_attribute(endpoint, 'publicurl')
+        # service_id is necessary
+        self._require_attribute(endpoint, 'service_id')
 
         legacy_endpoint_ref = endpoint.copy()
 
         urls = {}
         for i in INTERFACES:
             # remove all urls so they aren't persisted them more than once
-            if endpoint.get('%surl' % i) is not None:
+            url = '%surl' % i
+            if endpoint.get(url):
                 # valid urls need to be persisted
-                urls[i] = endpoint.pop('%surl' % i)
-            elif '%surl' % i in endpoint:
-                # null urls can be discarded
-                endpoint.pop('%surl' % i)
+                urls[i] = endpoint.pop(url)
+            elif url in endpoint:
+                # null or empty urls can be discarded
+                endpoint.pop(url)
+                legacy_endpoint_ref.pop(url)
 
         legacy_endpoint_id = uuid.uuid4().hex
         for interface, url in urls.iteritems():
@@ -130,6 +134,43 @@ class Endpoint(controller.V2Controller):
 
         if not deleted_at_least_one:
             raise exception.EndpointNotFound(endpoint_id=endpoint_id)
+
+
+@dependency.requires('catalog_api')
+class RegionV3(controller.V3Controller):
+    collection_name = 'regions'
+    member_name = 'region'
+
+    def __init__(self):
+        super(RegionV3, self).__init__()
+        self.get_member_from_driver = self.catalog_api.get_region
+
+    @controller.protected()
+    def create_region(self, context, region):
+        ref = self._assign_unique_id(self._normalize_dict(region))
+
+        ref = self.catalog_api.create_region(ref['id'], ref)
+        return RegionV3.wrap_member(context, ref)
+
+    def list_regions(self, context):
+        refs = self.catalog_api.list_regions()
+        return RegionV3.wrap_collection(context, refs)
+
+    @controller.protected()
+    def get_region(self, context, region_id):
+        ref = self.catalog_api.get_region(region_id)
+        return RegionV3.wrap_member(context, ref)
+
+    @controller.protected()
+    def update_region(self, context, region_id, region):
+        self._require_matching_id(region_id, region)
+
+        ref = self.catalog_api.update_region(region_id, region)
+        return RegionV3.wrap_member(context, ref)
+
+    @controller.protected()
+    def delete_region(self, context, region_id):
+        return self.catalog_api.delete_region(region_id)
 
 
 @dependency.requires('catalog_api')

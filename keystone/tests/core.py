@@ -16,21 +16,20 @@
 
 from __future__ import absolute_import
 
-import errno
+import functools
 import os
 import re
 import shutil
 import socket
-import StringIO
 import sys
 import time
 import warnings
 
 import fixtures
 import logging
-from lxml import etree
 from paste import deploy
 import testtools
+from testtools import testcase
 
 
 from keystone.openstack.common import gettextutils
@@ -44,27 +43,26 @@ from keystone.openstack.common import gettextutils
 # Accept-Language in the request rather than the Keystone server locale.
 gettextutils.install('keystone', lazy=True)
 
-from keystone import assignment
-from keystone import catalog
+# NOTE(ayoung)
+# environment.use_eventlet must run before any of the code that will
+# call the eventlet monkeypatching.
+from keystone.common import environment
+environment.use_eventlet()
+
 from keystone.common import cache
 from keystone.common import dependency
-from keystone.common import environment
 from keystone.common import kvs
+from keystone.common.kvs import core as kvs_core
 from keystone.common import sql
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
-from keystone.contrib import endpoint_filter
-from keystone.contrib import oauth1
-from keystone import credential
 from keystone import exception
-from keystone import identity
+from keystone import notifications
+from keystone.openstack.common.db.sqlalchemy import session
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
-from keystone import policy
-from keystone import token
-from keystone.token import provider as token_provider
-from keystone import trust
+from keystone import service
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
 #   policy_file command-line option declared before setUp runs. Importing the
@@ -84,20 +82,33 @@ CONF = config.CONF
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 
 
-def rootdir(*p):
-    return os.path.join(ROOTDIR, *p)
+class dirs:
+    @staticmethod
+    def root(*p):
+        return os.path.join(ROOTDIR, *p)
+
+    @staticmethod
+    def etc(*p):
+        return os.path.join(ETCDIR, *p)
+
+    @staticmethod
+    def tests(*p):
+        return os.path.join(TESTSDIR, *p)
+
+    @staticmethod
+    def tmp(*p):
+        return os.path.join(TMPDIR, *p)
 
 
-def etcdir(*p):
-    return os.path.join(ETCDIR, *p)
+# keystone.common.sql.initialize() for testing.
+def _initialize_sql_session():
+    db_file = dirs.tmp('test.db')
+    session.set_defaults(
+        sql_connection="sqlite:///" + db_file,
+        sqlite_db=db_file)
 
 
-def testsdir(*p):
-    return os.path.join(TESTSDIR, *p)
-
-
-def tmpdir(*p):
-    return os.path.join(TMPDIR, *p)
+_initialize_sql_session()
 
 
 def checkout_vendor(repo, rev):
@@ -132,9 +143,9 @@ def checkout_vendor(repo, rev):
     return revdir
 
 
-def setup_test_database():
-    db = tmpdir('test.db')
-    pristine = tmpdir('test.db.pristine')
+def setup_database():
+    db = dirs.tmp('test.db')
+    pristine = dirs.tmp('test.db.pristine')
 
     try:
         if os.path.exists(db):
@@ -151,13 +162,13 @@ def setup_test_database():
 def generate_paste_config(extension_name):
     # Generate a file, based on keystone-paste.ini, that is named:
     # extension_name.ini, and includes extension_name in the pipeline
-    with open(etcdir('keystone-paste.ini'), 'r') as f:
+    with open(dirs.etc('keystone-paste.ini'), 'r') as f:
         contents = f.read()
 
     new_contents = contents.replace(' service_v3',
                                     ' %s service_v3' % (extension_name))
 
-    new_paste_file = tmpdir(extension_name + '.ini')
+    new_paste_file = dirs.tmp(extension_name + '.ini')
     with open(new_paste_file, 'w') as f:
         f.write(new_contents)
 
@@ -166,12 +177,47 @@ def generate_paste_config(extension_name):
 
 def remove_generated_paste_config(extension_name):
     # Remove the generated paste config file, named extension_name.ini
-    paste_file_to_remove = tmpdir(extension_name + '.ini')
+    paste_file_to_remove = dirs.tmp(extension_name + '.ini')
     os.remove(paste_file_to_remove)
 
 
-def teardown_test_database():
-    sql.core.set_global_engine(None)
+def teardown_database():
+    session.cleanup()
+
+
+def skip_if_cache_disabled(*sections):
+    """This decorator is used to skip a test if caching is disabled either
+    globally or for the specific section.
+
+    In the code fragment::
+
+        @skip_if_cache_is_disabled('assignment', 'token')
+        def test_method(*args):
+            ...
+
+    The method test_method would be skipped if caching is disabled globally via
+    the `enabled` option in the `cache` section of the configuration or if
+    the `caching` option is set to false in either `assignment` or `token`
+    sections of the configuration.  This decorator can be used with no
+    arguments to only check global caching.
+
+    If a specified configuration section does not define the `caching` option,
+    this decorator makes the same assumption as the `should_cache_fn` in
+    keystone.common.cache that caching should be enabled.
+    """
+    def wrapper(f):
+        @functools.wraps(f)
+        def inner(*args, **kwargs):
+            if not CONF.cache.enabled:
+                raise testcase.TestSkipped('Cache globally disabled.')
+            for s in sections:
+                conf_sec = getattr(CONF, s, None)
+                if conf_sec is not None:
+                    if not getattr(conf_sec, 'caching', True):
+                        raise testcase.TestSkipped('%s caching disabled.' % s)
+            return f(*args, **kwargs)
+        return inner
+    return wrapper
 
 
 class TestClient(object):
@@ -207,16 +253,18 @@ class TestClient(object):
 class NoModule(object):
     """A mixin class to provide support for unloading/disabling modules."""
 
-    def __init__(self, *args, **kw):
-        super(NoModule, self).__init__(*args, **kw)
-        self._finders = []
-        self._cleared_modules = {}
+    def setUp(self):
+        super(NoModule, self).setUp()
 
-    def tearDown(self):
-        super(NoModule, self).tearDown()
-        for finder in self._finders:
-            sys.meta_path.remove(finder)
-        sys.modules.update(self._cleared_modules)
+        self._finders = []
+
+        def cleanup_finders():
+            for finder in self._finders:
+                sys.meta_path.remove(finder)
+        self.addCleanup(cleanup_finders)
+
+        self._cleared_modules = {}
+        self.addCleanup(sys.modules.update, self._cleared_modules)
 
     def clear_module(self, module):
         cleared_modules = {}
@@ -243,9 +291,17 @@ class NoModule(object):
 
 
 class TestCase(testtools.TestCase):
-    def __init__(self, *args, **kw):
-        super(TestCase, self).__init__(*args, **kw)
+    def setUp(self):
+        super(TestCase, self).setUp()
+
         self._paths = []
+
+        def _cleanup_paths():
+            for path in self._paths:
+                if path in sys.path:
+                    sys.path.remove(path)
+        self.addCleanup(_cleanup_paths)
+
         self._memo = {}
         self._overrides = []
         self._group_overrides = {}
@@ -253,39 +309,37 @@ class TestCase(testtools.TestCase):
         # show complete diffs on failure
         self.maxDiff = None
 
-    def setUp(self):
-        super(TestCase, self).setUp()
-        self.config([etcdir('keystone.conf.sample'),
-                     testsdir('test_overrides.conf')])
+        self.addCleanup(CONF.reset)
+
+        self.config([dirs.etc('keystone.conf.sample'),
+                     dirs.tests('test_overrides.conf')])
+
+        self.opt(policy_file=dirs.etc('policy.json'))
+
+        # NOTE(morganfainberg):  The only way to reconfigure the
+        # CacheRegion object on each setUp() call is to remove the
+        # .backend property.
+        self.addCleanup(delattr, cache.REGION, 'backend')
+
         # ensure the cache region instance is setup
         cache.configure_cache_region(cache.REGION)
-        self.opt(policy_file=etcdir('policy.json'))
 
         self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
         warnings.filterwarnings('ignore', category=DeprecationWarning)
 
+        # Clear the registry of providers so that providers from previous
+        # tests aren't used.
+        self.addCleanup(dependency.reset)
+
+        self.addCleanup(kvs.INMEMDB.clear)
+
+        self.addCleanup(timeutils.clear_time_override)
+
+        # Ensure Notification subscriotions and resource types are empty
+        self.addCleanup(notifications.SUBSCRIBERS.clear)
+
     def config(self, config_files):
         CONF(args=[], project='keystone', default_config_files=config_files)
-
-    def tearDown(self):
-        try:
-            timeutils.clear_time_override()
-            # NOTE(morganfainberg):  The only way to reconfigure the
-            # CacheRegion object on each setUp() call is to remove the
-            # .backend property.
-            del cache.REGION.backend
-            super(TestCase, self).tearDown()
-        finally:
-            for path in self._paths:
-                if path in sys.path:
-                    sys.path.remove(path)
-
-            # Clear the registry of providers so that providers from previous
-            # tests aren't used.
-            dependency.reset()
-
-            kvs.INMEMDB.clear()
-            CONF.reset()
 
     def opt_in_group(self, group, **kw):
         for k, v in kw.iteritems():
@@ -303,22 +357,23 @@ class TestCase(testtools.TestCase):
         # only call load_backends once.
         dependency.reset()
 
-        # NOTE(blk-u): identity must be before assignment to ensure that the
-        # identity driver is available to the assignment manager because the
-        # assignment manager gets the default assignment driver from the
-        # identity driver.
-        for manager in [identity, assignment, catalog, credential,
-                        endpoint_filter, policy, token, token_provider,
-                        trust, oauth1]:
-            # manager.__name__ is like keystone.xxx[.yyy],
-            # converted to xxx[_yyy]
-            manager_name = ('%s_api' %
-                            manager.__name__.replace('keystone.', '').
-                            replace('.', '_'))
+        # TODO(morganfainberg): Shouldn't need to clear the registry here, but
+        # some tests call load_backends multiple times.  Since it is not
+        # possible to re-configure a backend, we need to clear the list.  This
+        # should eventually be removed once testing has been cleaned up.
+        kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
 
-            setattr(self, manager_name, manager.Manager())
+        drivers = service.load_backends()
+
+        # TODO(stevemar): currently, load oauth1 driver as well, eventually
+        # we need to have this as optional.
+        from keystone.contrib import oauth1
+        drivers['oauth1_api'] = oauth1.Manager()
 
         dependency.resolve_future_dependencies()
+
+        for manager_name, manager in drivers.iteritems():
+            setattr(self, manager_name, manager)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -385,9 +440,6 @@ class TestCase(testtools.TestCase):
     def loadapp(self, config, name='main'):
         return deploy.loadapp(self._paste_config(config), name=name)
 
-    def appconfig(self, config):
-        return deploy.appconfig(self._paste_config(config))
-
     def client(self, app, *args, **kw):
         return TestClient(app, *args, **kw)
 
@@ -421,10 +473,17 @@ class TestCase(testtools.TestCase):
         except expected_exception as exc_value:
             if isinstance(expected_regexp, basestring):
                 expected_regexp = re.compile(expected_regexp)
-            if not expected_regexp.search(str(exc_value)):
-                raise self.failureException(
-                    '"%s" does not match "%s"' %
-                    (expected_regexp.pattern, str(exc_value)))
+
+            if isinstance(exc_value.args[0], gettextutils.Message):
+                if not expected_regexp.search(unicode(exc_value)):
+                    raise self.failureException(
+                        '"%s" does not match "%s"' %
+                        (expected_regexp.pattern, unicode(exc_value)))
+            else:
+                if not expected_regexp.search(str(exc_value)):
+                    raise self.failureException(
+                        '"%s" does not match "%s"' %
+                        (expected_regexp.pattern, str(exc_value)))
         else:
             if hasattr(expected_exception, '__name__'):
                 excName = expected_exception.__name__
@@ -469,36 +528,75 @@ class TestCase(testtools.TestCase):
 
         self.fail(self._formatMessage(msg, standardMsg))
 
-    def assertEqualXML(self, a, b):
-        """Parses two XML documents from strings and compares the results.
-
-        This provides easy-to-read failures.
-
-        """
-        parser = etree.XMLParser(remove_blank_text=True)
-
-        def canonical_xml(s):
-            s = s.strip()
-
-            fp = StringIO.StringIO()
-            dom = etree.fromstring(s, parser)
-            dom.getroottree().write_c14n(fp)
-            s = fp.getvalue()
-
-            dom = etree.fromstring(s, parser)
-            return etree.tostring(dom, pretty_print=True)
-
-        a = canonical_xml(a)
-        b = canonical_xml(b)
-        self.assertEqual(a.split('\n'), b.split('\n'))
+    @property
+    def ipv6_enabled(self):
+        if socket.has_ipv6:
+            sock = None
+            try:
+                sock = socket.socket(socket.AF_INET6)
+                # NOTE(Mouad): Try to bind to IPv6 loopback ip address.
+                sock.bind(("::1", 0))
+                return True
+            except socket.error:
+                pass
+            finally:
+                if sock:
+                    sock.close()
+        return False
 
     def skip_if_no_ipv6(self):
-        try:
-            s = socket.socket(socket.AF_INET6)
-        except socket.error as e:
-            if e.errno == errno.EAFNOSUPPORT:
-                raise self.skipTest("IPv6 is not enabled in the system")
-            else:
-                raise
+        if not self.ipv6_enabled:
+            raise self.skipTest("IPv6 is not enabled in the system")
+
+    def assertSetEqual(self, set1, set2, msg=None):
+        # TODO(morganfainberg): Remove this and self._assertSetEqual once
+        # support for python 2.6 is no longer needed.
+        if (sys.version_info < (2, 7)):
+            return self._assertSetEqual(set1, set2, msg=None)
         else:
-            s.close()
+            # use the native assertSetEqual
+            return super(TestCase, self).assertSetEqual(set1, set2, msg=msg)
+
+    def _assertSetEqual(self, set1, set2, msg=None):
+        """A set-specific equality assertion.
+
+        Args:
+            set1: The first set to compare.
+            set2: The second set to compare.
+            msg: Optional message to use on failure instead of a list of
+                    differences.
+
+        assertSetEqual uses ducktyping to support different types of sets, and
+        is optimized for sets specifically (parameters must support a
+        difference method).
+        """
+        try:
+            difference1 = set1.difference(set2)
+        except TypeError as e:
+            self.fail('invalid type when attempting set difference: %s' % e)
+        except AttributeError as e:
+            self.fail('first argument does not support set difference: %s' % e)
+
+        try:
+            difference2 = set2.difference(set1)
+        except TypeError as e:
+            self.fail('invalid type when attempting set difference: %s' % e)
+        except AttributeError as e:
+            self.fail('second argument does not support set difference: %s' %
+                      e)
+
+        if not (difference1 or difference2):
+            return
+
+        lines = []
+        if difference1:
+            lines.append('Items in the first set but not the second:')
+            for item in difference1:
+                lines.append(repr(item))
+        if difference2:
+            lines.append('Items in the second set but not the first:')
+            for item in difference2:
+                lines.append(repr(item))
+
+        standardMsg = '\n'.join(lines)
+        self.fail(self._formatMessage(msg, standardMsg))

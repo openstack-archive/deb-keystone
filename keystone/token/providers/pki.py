@@ -22,16 +22,16 @@ from keystone.common import cms
 from keystone.common import environment
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import log as logging
-from keystone.token.providers import uuid
+from keystone.openstack.common import log
+from keystone.token.providers import common
 
 
 CONF = config.CONF
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
-class Provider(uuid.Provider):
+class Provider(common.BaseProvider):
     def _get_token_id(self, token_data):
         try:
             token_id = cms.cms_sign_token(json.dumps(token_data),

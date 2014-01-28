@@ -24,6 +24,7 @@ from oslo.config import cfg
 import pbr.version
 
 from keystone.common import openssl
+from keystone.common import sql
 from keystone.common.sql import migration
 from keystone.common import utils
 from keystone import config
@@ -210,10 +211,13 @@ command_opt = cfg.SubCommandOpt('command',
 
 def main(argv=None, config_files=None):
     CONF.register_cli_opt(command_opt)
+
+    sql.initialize()
+
     CONF(args=argv[1:],
          project='keystone',
          version=pbr.version.VersionInfo('keystone').version_string(),
          usage='%(prog)s [' + '|'.join([cmd.name for cmd in CMDS]) + ']',
          default_config_files=config_files)
-    config.setup_logging(CONF)
+    config.setup_logging()
     CONF.command.cmd_class.main()

@@ -32,7 +32,8 @@ class TestExtensionCase(test_v3.RestfulTestCase):
     def setup_database(self):
         self.conf_files = super(TestExtensionCase, self).config_files()
         self.conf_files.append(
-            tests.testsdir('test_associate_project_endpoint_extension.conf'))
+            tests.dirs.tests('test_associate_project_endpoint_extension.conf'))
+        self.addCleanup(self.conf_files.pop)
         super(TestExtensionCase, self).setup_database()
         package_name = "%s.%s.migrate_repo" % (contrib.__name__,
                                                self.EXTENSION_NAME)
@@ -49,10 +50,6 @@ class TestExtensionCase(test_v3.RestfulTestCase):
             '/endpoints/%(endpoint_id)s' % {
             'project_id': self.default_domain_project_id,
             'endpoint_id': self.endpoint_id})
-
-    def tearDown(self):
-        super(TestExtensionCase, self).tearDown()
-        self.conf_files.pop()
 
 
 class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):

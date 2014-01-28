@@ -95,7 +95,7 @@ class TestAuthInfo(test_v3.RestfulTestCase):
 class TestPKITokenAPIs(test_v3.RestfulTestCase):
     def config_files(self):
         conf_files = super(TestPKITokenAPIs, self).config_files()
-        conf_files.append(tests.testsdir('test_pki_token_provider.conf'))
+        conf_files.append(tests.dirs.tests('test_pki_token_provider.conf'))
         return conf_files
 
     def setUp(self):
@@ -340,7 +340,7 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase):
 class TestUUIDTokenAPIs(TestPKITokenAPIs):
     def config_files(self):
         conf_files = super(TestUUIDTokenAPIs, self).config_files()
-        conf_files.append(tests.testsdir('test_uuid_token_provider.conf'))
+        conf_files.append(tests.dirs.tests('test_uuid_token_provider.conf'))
         return conf_files
 
     def test_v3_token_id(self):
@@ -363,12 +363,13 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
     """Test token revoke using v3 Identity API by token owner and admin."""
     def setUp(self):
         """Setup for Test Cases.
-        One domain A
-        Two users userNormalA and userAdminA
+        Two domains, domainA and domainB
+        Two users in domainA, userNormalA and userAdminA
+        One user in domainB, userAdminB
 
         """
         super(TestTokenRevokeSelfAndAdmin, self).setUp()
-
+        # DomainA setup
         self.domainA = self.new_domain_ref()
         self.assignment_api.create_domain(self.domainA['id'], self.domainA)
 
@@ -393,7 +394,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.orig_policy_file = CONF.policy_file
         from keystone.policy.backends import rules
         rules.reset()
-        self.opt(policy_file=tests.etcdir('policy.v3cloudsample.json'))
+        self.opt(policy_file=tests.dirs.etc('policy.v3cloudsample.json'))
 
     def test_user_revokes_own_token(self):
         r = self.post(
@@ -434,7 +435,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.head('/auth/tokens', headers=headers, expected_status=404,
                   token=adminA_token)
 
-    def test_admin_revokes_user_token(self):
+    def test_adminA_revokes_userA_token(self):
         r = self.post(
             '/auth/tokens',
             body=self.build_authentication_request(
@@ -469,6 +470,39 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         # valid X-Auth-Token and invalid X-Subject-Token (404)
         self.head('/auth/tokens', headers=headers, expected_status=404,
                   token=adminA_token)
+
+    def test_adminB_fails_revoking_userA_token(self):
+        # DomainB setup
+        self.domainB = self.new_domain_ref()
+        self.assignment_api.create_domain(self.domainB['id'], self.domainB)
+        self.userAdminB = self.new_user_ref(domain_id=self.domainB['id'])
+        self.userAdminB['password'] = uuid.uuid4().hex
+        self.identity_api.create_user(self.userAdminB['id'], self.userAdminB)
+        self.assignment_api.create_grant(self.role1['id'],
+                                         user_id=self.userAdminB['id'],
+                                         domain_id=self.domainB['id'])
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.userNormalA['id'],
+                password=self.userNormalA['password'],
+                user_domain_id=self.domainA['id']))
+
+        user_token = r.headers.get('X-Subject-Token')
+        headers = {'X-Subject-Token': user_token}
+
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.userAdminB['id'],
+                password=self.userAdminB['password'],
+                domain_name=self.domainB['name']))
+        adminB_token = r.headers.get('X-Subject-Token')
+
+        self.head('/auth/tokens', headers=headers, expected_status=403,
+                  token=adminB_token)
+        self.delete('/auth/tokens', headers=headers, expected_status=403,
+                    token=adminB_token)
 
 
 class TestTokenRevoking(test_v3.RestfulTestCase):
@@ -611,6 +645,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test deleting a user grant revokes token.
 
         Test Plan:
+
         - Get a token for user1, scoped to ProjectA
         - Delete the grant user1 has on ProjectA
         - Check token is no longer valid
@@ -642,6 +677,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test deleting a role revokes token.
 
         Test Plan:
+
         - Add some additional test data, namely:
             - A third project (project C)
             - Three additional users - user4 owned by domainB and user5 and 6
@@ -771,6 +807,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test user-domain role assignment maintains existing token.
 
         Test Plan:
+
         - Get a token for user1, scoped to ProjectA
         - Create a grant for user1 on DomainB
         - Check token is still valid
@@ -863,6 +900,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test deleting a group grant revokes tokens.
 
         Test Plan:
+
         - Get a token for user1, scoped to ProjectA
         - Get a token for user2, scoped to ProjectA
         - Get a token for user3, scoped to ProjectA
@@ -924,6 +962,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test domain-group role assignment maintains existing token.
 
         Test Plan:
+
         - Get a token for user1, scoped to ProjectA
         - Create a grant for group1 on DomainB
         - Check token is still longer valid
@@ -955,6 +994,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
         """Test add/removal to/from group revokes token.
 
         Test Plan:
+
         - Get a token for user1, scoped to ProjectA
         - Get a token for user2, scoped to ProjectA
         - Remove user1 from group1
@@ -1079,7 +1119,7 @@ class TestTokenRevoking(test_v3.RestfulTestCase):
 class TestAuthExternalDisabled(test_v3.RestfulTestCase):
     def config_files(self):
         cfg_list = self._config_file_list[:]
-        cfg_list.append(tests.testsdir('auth_plugin_external_disabled.conf'))
+        cfg_list.append(tests.dirs.tests('auth_plugin_external_disabled.conf'))
         return cfg_list
 
     def test_remote_user_disabled(self):
@@ -1094,12 +1134,42 @@ class TestAuthExternalDisabled(test_v3.RestfulTestCase):
                           auth_context)
 
 
-class TestAuthExternalDomain(test_v3.RestfulTestCase):
+class TestAuthExternalLegacyDefaultDomain(test_v3.RestfulTestCase):
     content_type = 'json'
 
     def config_files(self):
         cfg_list = self._config_file_list[:]
-        cfg_list.append(tests.testsdir('auth_plugin_external_domain.conf'))
+        cfg_list.append(
+            tests.dirs.tests('auth_plugin_external_default_legacy.conf'))
+        return cfg_list
+
+    def test_remote_user_no_realm(self):
+        CONF.auth.methods = 'external'
+        api = auth.controllers.Auth()
+        context, auth_info, auth_context = self.build_external_auth_request(
+            self.default_domain_user['name'])
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(auth_context['user_id'],
+                         self.default_domain_user['id'])
+
+    def test_remote_user_no_domain(self):
+        api = auth.controllers.Auth()
+        context, auth_info, auth_context = self.build_external_auth_request(
+            self.user['name'])
+        self.assertRaises(exception.Unauthorized,
+                          api.authenticate,
+                          context,
+                          auth_info,
+                          auth_context)
+
+
+class TestAuthExternalLegacyDomain(test_v3.RestfulTestCase):
+    content_type = 'json'
+
+    def config_files(self):
+        cfg_list = self._config_file_list[:]
+        cfg_list.append(
+            tests.dirs.tests('auth_plugin_external_domain_legacy.conf'))
         return cfg_list
 
     def test_remote_user_with_realm(self):
@@ -1138,6 +1208,61 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         auth_data = self.build_authentication_request()
         remote_user = '%s@%s' % (self.user['name'], self.domain['name'])
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
+                                             'AUTH_TYPE': 'Negotiate'})
+        r = self.post('/auth/tokens', body=auth_data)
+        token = self.assertValidUnscopedTokenResponse(r)
+        self.assertEqual(token['bind']['kerberos'], self.user['name'])
+
+
+class TestAuthExternalDomain(test_v3.RestfulTestCase):
+    content_type = 'json'
+
+    def config_files(self):
+        cfg_list = self._config_file_list[:]
+        cfg_list.append(tests.dirs.tests('auth_plugin_external_domain.conf'))
+        return cfg_list
+
+    def test_remote_user_with_realm(self):
+        api = auth.controllers.Auth()
+        remote_user = self.user['name']
+        remote_domain = self.domain['name']
+        context, auth_info, auth_context = self.build_external_auth_request(
+            remote_user, remote_domain=remote_domain)
+
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(auth_context['user_id'], self.user['id'])
+
+        # Now test to make sure the user name can, itself, contain the
+        # '@' character.
+        user = {'name': 'myname@mydivision'}
+        self.identity_api.update_user(self.user['id'], user)
+        remote_user = user["name"]
+        context, auth_info, auth_context = self.build_external_auth_request(
+            remote_user, remote_domain=remote_domain)
+
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(auth_context['user_id'], self.user['id'])
+
+    def test_project_id_scoped_with_remote_user(self):
+        CONF.token.bind = ['kerberos']
+        auth_data = self.build_authentication_request(
+            project_id=self.project['id'])
+        remote_user = self.user['name']
+        remote_domain = self.domain['name']
+        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
+                                             'REMOTE_DOMAIN': remote_domain,
+                                             'AUTH_TYPE': 'Negotiate'})
+        r = self.post('/auth/tokens', body=auth_data)
+        token = self.assertValidProjectScopedTokenResponse(r)
+        self.assertEqual(token['bind']['kerberos'], self.user['name'])
+
+    def test_unscoped_bind_with_remote_user(self):
+        CONF.token.bind = ['kerberos']
+        auth_data = self.build_authentication_request()
+        remote_user = self.user['name']
+        remote_domain = self.domain['name']
+        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
+                                             'REMOTE_DOMAIN': remote_domain,
                                              'AUTH_TYPE': 'Negotiate'})
         r = self.post('/auth/tokens', body=auth_data)
         token = self.assertValidUnscopedTokenResponse(r)
@@ -1260,6 +1385,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         """Test correct roles are returned in scoped token.
 
         Test Plan:
+
         - Create a domain, with 1 project, 2 users (user1 and user2)
           and 2 groups (group1 and group2)
         - Make user1 a member of group1, user2 a member of group2
@@ -1605,6 +1731,15 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         api = auth.controllers.Auth()
         context, auth_info, auth_context = self.build_external_auth_request(
             self.default_domain_user['name'])
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(auth_context['user_id'],
+                         self.default_domain_user['id'])
+        # Now test to make sure the user name can, itself, contain the
+        # '@' character.
+        user = {'name': 'myname@mydivision'}
+        self.identity_api.update_user(self.default_domain_user['id'], user)
+        context, auth_info, auth_context = self.build_external_auth_request(
+            user["name"])
         api.authenticate(context, auth_info, auth_context)
         self.assertEqual(auth_context['user_id'],
                          self.default_domain_user['id'])
@@ -2216,10 +2351,16 @@ class TestTrustAuth(TestAuthInfo):
             r = self.post('/OS-TRUST/trusts', body={'trust': ref})
             self.assertValidTrustResponse(r, ref)
 
+        r = self.get('/OS-TRUST/trusts', expected_status=200)
+        trusts = r.result['trusts']
+        self.assertEqual(len(trusts), 3)
+        self.assertValidTrustListResponse(r)
+
         r = self.get('/OS-TRUST/trusts?trustor_user_id=%s' %
                      self.user_id, expected_status=200)
         trusts = r.result['trusts']
         self.assertEqual(len(trusts), 3)
+        self.assertValidTrustListResponse(r)
 
         r = self.get('/OS-TRUST/trusts?trustee_user_id=%s' %
                      self.user_id, expected_status=200)
@@ -2260,3 +2401,40 @@ class TestTrustAuth(TestAuthInfo):
         self.get('/OS-TRUST/trusts?trustor_user_id=%s' %
                  self.user_id, expected_status=401,
                  token=trust_token)
+
+    def test_trustee_can_do_role_ops(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            role_ids=[self.role_id])
+        del ref['id']
+
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'])
+
+        r = self.get(
+            '/OS-TRUST/trusts/%(trust_id)s/roles' % {
+                'trust_id': trust['id']},
+            auth=auth_data)
+        self.assertValidRoleListResponse(r, self.role)
+
+        self.head(
+            '/OS-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
+                'trust_id': trust['id'],
+                'role_id': self.role['id']},
+            auth=auth_data,
+            expected_status=204)
+
+        r = self.get(
+            '/OS-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
+                'trust_id': trust['id'],
+                'role_id': self.role['id']},
+            auth=auth_data,
+            expected_status=200)
+        self.assertValidRoleResponse(r, self.role)

@@ -30,7 +30,8 @@ import shelve
 import ldap
 
 from keystone.common import utils
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
+from six import moves
 
 
 SCOPE_NAMES = {
@@ -40,7 +41,7 @@ SCOPE_NAMES = {
 }
 
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
 def _process_attr(attr_name, value_or_values):
@@ -89,7 +90,7 @@ def _paren_groups(source):
     count = 0
     start = 0
     result = []
-    for pos in xrange(len(source)):
+    for pos in moves.range(len(source)):
         if source[pos] == '(':
             if count == 0:
                 start = pos
@@ -158,7 +159,7 @@ class FakeLdap(object):
     __prefix = 'ldap:'
 
     def __init__(self, url, *args, **kwargs):
-        LOG.debug(_('FakeLdap initialize url=%s'), url)
+        LOG.debug('initialize url=%s', url)
         if url.startswith('fake://memory'):
             if url not in FakeShelves:
                 FakeShelves[url] = FakeShelve()
@@ -170,27 +171,25 @@ class FakeLdap(object):
         """This method is ignored, but provided for compatibility."""
         if server_fail:
             raise ldap.SERVER_DOWN
-        LOG.debug(_('FakeLdap bind dn=%s'), dn)
+        LOG.debug('bind dn=%s', dn)
         if dn == 'cn=Admin' and password == 'password':
             return
 
         try:
             attrs = self.db['%s%s' % (self.__prefix, dn)]
         except KeyError:
-            LOG.debug(_('FakeLdap bind fail: dn=%s not found'), dn)
+            LOG.debug('bind fail: dn=%s not found', dn)
             raise ldap.NO_SUCH_OBJECT
 
         db_password = None
         try:
             db_password = attrs['userPassword'][0]
         except (KeyError, IndexError):
-            LOG.debug(_('FakeLdap bind fail: password for dn=%s not found'),
-                      dn)
+            LOG.debug('bind fail: password for dn=%s not found', dn)
             raise ldap.INAPPROPRIATE_AUTH
 
         if not utils.ldap_check_password(password, db_password):
-            LOG.debug(_('FakeLdap bind fail: password for dn=%s does'
-                      ' not match'), dn)
+            LOG.debug('bind fail: password for dn=%s does not match', dn)
             raise ldap.INVALID_CREDENTIALS
 
     def unbind_s(self):
@@ -209,11 +208,10 @@ class FakeLdap(object):
                 raise TypeError('must be string, not None. attrs=%s' % attrs)
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug(_('FakeLdap add item: dn=%(dn)s, attrs=%(attrs)s'), {
+        LOG.debug('add item: dn=%(dn)s, attrs=%(attrs)s', {
             'dn': dn, 'attrs': attrs})
         if key in self.db:
-            LOG.debug(_('FakeLdap add item failed: dn=%s is'
-                      ' already in store.'), dn)
+            LOG.debug('add item failed: dn=%s is already in store.', dn)
             raise ldap.ALREADY_EXISTS(dn)
 
         self.db[key] = dict([(k, _process_attr(k, v))
@@ -226,11 +224,11 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug(_('FakeLdap delete item: dn=%s'), dn)
+        LOG.debug('delete item: dn=%s', dn)
         try:
             del self.db[key]
         except KeyError:
-            LOG.debug(_('FakeLdap delete item failed: dn=%s not found.'), dn)
+            LOG.debug('delete item failed: dn=%s not found.', dn)
             raise ldap.NO_SUCH_OBJECT
         self.db.sync()
 
@@ -240,11 +238,11 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug(_('FakeLdap delete item: dn=%s'), dn)
+        LOG.debug('delete item: dn=%s', dn)
         try:
             del self.db[key]
         except KeyError:
-            LOG.debug(_('FakeLdap delete item failed: dn=%s not found.'), dn)
+            LOG.debug('delete item failed: dn=%s not found.', dn)
             raise ldap.NO_SUCH_OBJECT
         self.db.sync()
 
@@ -259,12 +257,12 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         key = '%s%s' % (self.__prefix, dn)
-        LOG.debug(_('FakeLdap modify item: dn=%(dn)s attrs=%(attrs)s'), {
+        LOG.debug('modify item: dn=%(dn)s attrs=%(attrs)s', {
             'dn': dn, 'attrs': attrs})
         try:
             entry = self.db[key]
         except KeyError:
-            LOG.debug(_('FakeLdap modify item failed: dn=%s not found.'), dn)
+            LOG.debug('modify item failed: dn=%s not found.', dn)
             raise ldap.NO_SUCH_OBJECT
 
         for cmd, k, v in attrs:
@@ -279,9 +277,9 @@ class FakeLdap(object):
                 values[:] = _process_attr(k, v)
             elif cmd == ldap.MOD_DELETE:
                 if v is None:
-                    if len(values) == 0:
-                        LOG.debug(_('FakeLdap modify item failed: '
-                                  'item has no attribute "%s" to delete'), k)
+                    if not values:
+                        LOG.debug('modify item failed: '
+                                  'item has no attribute "%s" to delete', k)
                         raise ldap.NO_SUCH_ATTRIBUTE
                     values[:] = []
                 else:
@@ -289,16 +287,15 @@ class FakeLdap(object):
                         try:
                             values.remove(val)
                         except ValueError:
-                            LOG.debug(_('FakeLdap modify item failed: '
+                            LOG.debug('modify item failed: '
                                       'item has no attribute "%(k)s" with '
-                                      'value "%(v)s" to delete'), {
+                                      'value "%(v)s" to delete', {
                                           'k': k, 'v': val})
                             raise ldap.NO_SUCH_ATTRIBUTE
             else:
-                LOG.debug(_('FakeLdap modify item failed: unknown'
-                          ' command %s'), cmd)
-                raise NotImplementedError(_('modify_s action %s not'
-                                            ' implemented') % cmd)
+                LOG.debug('modify item failed: unknown command %s', cmd)
+                raise NotImplementedError('modify_s action %s not'
+                                          ' implemented' % cmd)
         self.db[key] = entry
         self.db.sync()
 
@@ -316,14 +313,13 @@ class FakeLdap(object):
             raise ldap.SERVER_DOWN
 
         LOG.debug(
-            _('FakeLdap search at dn=%(dn)s scope=%(scope)s query=%(query)s'),
+            'search at dn=%(dn)s scope=%(scope)s query=%(query)s',
             {'dn': dn, 'scope': SCOPE_NAMES.get(scope, scope), 'query': query})
         if scope == ldap.SCOPE_BASE:
             try:
                 item_dict = self.db['%s%s' % (self.__prefix, dn)]
             except KeyError:
-                LOG.debug(_('FakeLdap search fail: dn not found for'
-                            ' SCOPE_BASE'))
+                LOG.debug('search fail: dn not found for SCOPE_BASE')
                 raise ldap.NO_SUCH_OBJECT
             results = [(dn, item_dict)]
         elif scope == ldap.SCOPE_SUBTREE:
@@ -335,8 +331,8 @@ class FakeLdap(object):
                        for k, v in self.db.iteritems()
                        if re.match('%s\w+=[^,]+,%s' % (self.__prefix, dn), k)]
         else:
-            LOG.debug('FakeLdap search fail: unknown scope %s', scope)
-            raise NotImplementedError(_('Search scope %s not implemented.')
+            LOG.debug('search fail: unknown scope %s', scope)
+            raise NotImplementedError('Search scope %s not implemented.'
                                       % scope)
 
         objects = []
@@ -351,5 +347,5 @@ class FakeLdap(object):
                               if not fields or k in fields])
                 objects.append((dn, attrs))
 
-        LOG.debug('FakeLdap search result: %s', objects)
+        LOG.debug('search result: %s', objects)
         return objects

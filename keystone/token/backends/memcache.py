@@ -23,14 +23,14 @@ from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import jsonutils
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone import token
 
 
 CONF = config.CONF
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
 class Token(token.Driver):
@@ -44,7 +44,7 @@ class Token(token.Driver):
         return self._memcache_client or self._get_memcache_client()
 
     def _get_memcache_client(self):
-        memcache_servers = CONF.memcache.servers.split(',')
+        memcache_servers = CONF.memcache.servers
         # NOTE(morganfainberg): The memcache client library for python is NOT
         # thread safe and should not be passed between threads. This is highly
         # specific to the cas() (compare and set) methods and the caching of
@@ -187,8 +187,8 @@ class Token(token.Driver):
             consumer_id=consumer_id,
         )
 
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
-                    consumer_id=None):
+    def _list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                     consumer_id=None):
         tokens = []
         user_key = self._prefix_user_id(user_id)
         user_record = self.client.get(user_key) or ""

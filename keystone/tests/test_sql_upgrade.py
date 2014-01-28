@@ -38,12 +38,12 @@ import uuid
 from migrate.versioning import api as versioning_api
 import sqlalchemy
 
-from keystone.common import sql
 from keystone.common.sql import migration
 from keystone.common import utils
 from keystone import config
 from keystone import credential
 from keystone import exception
+from keystone.openstack.common.db.sqlalchemy import session
 from keystone import tests
 from keystone.tests import default_fixtures
 
@@ -57,9 +57,9 @@ class SqlMigrateBase(tests.TestCase):
         self.metadata = sqlalchemy.MetaData()
         self.metadata.bind = self.engine
 
-    _config_file_list = [tests.etcdir('keystone.conf.sample'),
-                         tests.testsdir('test_overrides.conf'),
-                         tests.testsdir('backend_sql.conf')]
+    _config_file_list = [tests.dirs.etc('keystone.conf.sample'),
+                         tests.dirs.tests('test_overrides.conf'),
+                         tests.dirs.tests('backend_sql.conf')]
 
     #override this to specify the complete list of configuration files
     def config_files(self):
@@ -72,13 +72,10 @@ class SqlMigrateBase(tests.TestCase):
         super(SqlMigrateBase, self).setUp()
 
         self.config(self.config_files())
-        self.base = sql.Base()
 
         # create and share a single sqlalchemy engine for testing
-        self.engine = self.base.get_engine(allow_global_engine=False)
-        sql.core.set_global_engine(self.engine)
-        self.Session = self.base.get_sessionmaker(engine=self.engine,
-                                                  autocommit=False)
+        self.engine = session.get_engine()
+        self.Session = session.get_maker(self.engine, autocommit=False)
 
         self.initialize_sql()
         self.repo_path = migration.find_migrate_repo(self.repo_package())
@@ -95,7 +92,7 @@ class SqlMigrateBase(tests.TestCase):
                                  autoload=True)
         self.downgrade(0)
         table.drop(self.engine, checkfirst=True)
-        sql.core.set_global_engine(None)
+        session.cleanup()
         super(SqlMigrateBase, self).tearDown()
 
     def select_table(self, name):
@@ -1339,6 +1336,21 @@ class SqlUpgradeTests(SqlMigrateBase):
         else:
             self.assertEqual(len(index_data), 0)
 
+    def test_revoked_token_index(self):
+        self.upgrade(35)
+        table = sqlalchemy.Table('token', self.metadata, autoload=True)
+        index_data = [(idx.name, idx.columns.keys())
+                      for idx in table.indexes]
+        self.assertIn(('ix_token_expires_valid', ['expires', 'valid']),
+                      index_data)
+
+    def test_dropped_valid_index(self):
+        self.upgrade(36)
+        table = sqlalchemy.Table('token', self.metadata, autoload=True)
+        index_data = [(idx.name, idx.columns.keys())
+                      for idx in table.indexes]
+        self.assertNotIn(('ix_token_valid', ['valid']), index_data)
+
     def test_migrate_ec2_credential(self):
         user = {
             'id': 'foo',
@@ -1661,6 +1673,14 @@ class SqlUpgradeTests(SqlMigrateBase):
                          new_json_data['default_project_id'])
         self.assertEqual(user1['default_project_id'],
                          new_json_data['tenant_id'])
+
+    def test_region_migration(self):
+        self.upgrade(36)
+        self.assertTableDoesNotExist('region')
+        self.upgrade(37)
+        self.assertTableExists('region')
+        self.downgrade(36)
+        self.assertTableDoesNotExist('region')
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):

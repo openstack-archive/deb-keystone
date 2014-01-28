@@ -114,7 +114,11 @@ class MemcacheClient(object):
 class MemcacheToken(tests.TestCase, test_backend.TokenTests):
     def setUp(self):
         super(MemcacheToken, self).setUp()
+        # Use the memcache backend for the token driver.
+        self.opt_in_group('token',
+                          driver='keystone.token.backends.memcache.Token')
         self.load_backends()
+        # Override the memcache client with the "dummy" client.
         fake_client = MemcacheClient()
         self.token_man = token.Manager()
         self.token_man.driver = token_memcache.Token(client=fake_client)
@@ -149,7 +153,7 @@ class MemcacheToken(tests.TestCase, test_backend.TokenTests):
         expired_token_id = uuid.uuid4().hex
         user_id = unicode(uuid.uuid4().hex)
 
-        expire_delta = datetime.timedelta(seconds=86400)
+        expire_delta = datetime.timedelta(seconds=CONF.token.expiration)
 
         valid_data = {'id': valid_token_id, 'a': 'b',
                       'user': {'id': user_id}}
@@ -160,7 +164,7 @@ class MemcacheToken(tests.TestCase, test_backend.TokenTests):
         self.token_api.create_token(valid_token_id, valid_data)
         self.token_api.create_token(expired_token_id, expired_data)
         # NOTE(morganfainberg): Directly access the data cache since we need to
-        # get expired tokens as well as valid tokens. token_api.list_tokens()
+        # get expired tokens as well as valid tokens. token_api._list_tokens()
         # will not return any expired tokens in the list.
         user_key = self.token_api.driver._prefix_user_id(user_id)
         user_record = self.token_api.driver.client.get(user_key)

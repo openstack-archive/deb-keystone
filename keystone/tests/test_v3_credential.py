@@ -18,10 +18,36 @@ import hashlib
 import json
 import uuid
 
+from keystoneclient.contrib.ec2 import utils as ec2_utils
+
+from keystone import exception
 from keystone.tests import test_v3
 
 
-class CredentialTestCase(test_v3.RestfulTestCase):
+class CredentialBaseTestCase(test_v3.RestfulTestCase):
+    def _create_dict_blob_credential(self):
+        blob = {"access": uuid.uuid4().hex,
+                "secret": uuid.uuid4().hex}
+        credential_id = hashlib.sha256(blob['access']).hexdigest()
+        credential = self.new_credential_ref(
+            user_id=self.user['id'],
+            project_id=self.project_id)
+        credential['id'] = credential_id
+
+        # Store the blob as a dict *not* JSON ref bug #1259584
+        # This means we can test the dict->json workaround, added
+        # as part of the bugfix for backwards compatibility works.
+        credential['blob'] = blob
+        credential['type'] = 'ec2'
+        # Create direct via the DB API to avoid validation failure
+        self.credential_api.create_credential(
+            credential_id,
+            credential)
+        expected_blob = json.dumps(blob)
+        return expected_blob, credential_id
+
+
+class CredentialTestCase(CredentialBaseTestCase):
     """Test credential CRUD."""
     def setUp(self):
 
@@ -35,6 +61,22 @@ class CredentialTestCase(test_v3.RestfulTestCase):
         self.credential_api.create_credential(
             self.credential_id,
             self.credential)
+
+    def test_credential_api_delete_credentials_for_project(self):
+        self.credential_api.delete_credentials_for_project(self.project_id)
+        # Test that the credential that we created in .setUp no longer exists
+        # once we delete all credentials for self.project_id
+        self.assertRaises(exception.CredentialNotFound,
+                          self.credential_api.get_credential,
+                          credential_id=self.credential_id)
+
+    def test_credential_api_delete_credentials_for_user(self):
+        self.credential_api.delete_credentials_for_user(self.user_id)
+        # Test that the credential that we created in .setUp no longer exists
+        # once we delete all credentials for self.user_id
+        self.assertRaises(exception.CredentialNotFound,
+                          self.credential_api.get_credential,
+                          credential_id=self.credential_id)
 
     def test_list_credentials(self):
         """Call ``GET /credentials``."""
@@ -100,6 +142,27 @@ class CredentialTestCase(test_v3.RestfulTestCase):
             '/credentials',
             body={'credential': ref}, expected_status=409)
 
+    def test_get_ec2_dict_blob(self):
+        """Ensure non-JSON blob data is correctly converted."""
+        expected_blob, credential_id = self._create_dict_blob_credential()
+
+        r = self.get(
+            '/credentials/%(credential_id)s' % {
+                'credential_id': credential_id})
+        self.assertEqual(expected_blob, r.result['credential']['blob'])
+
+    def test_list_ec2_dict_blob(self):
+        """Ensure non-JSON blob data is correctly converted."""
+        expected_blob, credential_id = self._create_dict_blob_credential()
+
+        list_r = self.get('/credentials')
+        list_creds = list_r.result['credentials']
+        list_ids = [r['id'] for r in list_creds]
+        self.assertIn(credential_id, list_ids)
+        for r in list_creds:
+            if r['id'] == credential_id:
+                self.assertEqual(expected_blob, r['blob'])
+
     def test_create_non_ec2_credential(self):
         """Call ``POST /credentials`` for creating non-ec2 credential."""
         ref = self.new_credential_ref(user_id=self.user['id'])
@@ -128,3 +191,134 @@ class CredentialTestCase(test_v3.RestfulTestCase):
             '/credentials',
             body={'credential': ref}, expected_status=400)
         self.assertValidErrorResponse(response)
+
+
+class TestCredentialTrustScoped(test_v3.RestfulTestCase):
+    """Test credential with trust scoped token."""
+    def setUp(self):
+        self.opt_in_group('trust', enabled=True)
+        super(TestCredentialTrustScoped, self).setUp()
+
+        self.trustee_user_id = uuid.uuid4().hex
+        self.trustee_user = self.new_user_ref(domain_id=self.domain_id)
+        self.trustee_user['id'] = self.trustee_user_id
+        self.identity_api.create_user(self.trustee_user_id, self.trustee_user)
+
+    def test_trust_scoped_ec2_credential(self):
+        """Call ``POST /credentials`` for creating ec2 credential."""
+        # Create the trust
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        # Get a trust scoped token
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        self.assertValidProjectTrustScopedTokenResponse(r, self.user)
+        trust_id = r.result['token']['OS-TRUST:trust']['id']
+        token_id = r.headers.get('X-Subject-Token')
+
+        # Create the credential with the trust scoped token
+        ref = self.new_credential_ref(user_id=self.user['id'])
+        blob = {"access": uuid.uuid4().hex,
+                "secret": uuid.uuid4().hex}
+        ref['blob'] = json.dumps(blob)
+        ref['type'] = 'ec2'
+        r = self.post(
+            '/credentials',
+            body={'credential': ref},
+            token=token_id)
+
+        # We expect the response blob to contain the trust_id
+        ret_ref = ref.copy()
+        ret_blob = blob.copy()
+        ret_blob['trust_id'] = trust_id
+        ret_ref['blob'] = json.dumps(ret_blob)
+        self.assertValidCredentialResponse(r, ref=ret_ref)
+
+        # Assert credential id is same as hash of access key id for
+        # ec2 credentials
+        self.assertEqual(r.result['credential']['id'],
+                         hashlib.sha256(blob['access']).hexdigest())
+
+        # Create second ec2 credential with the same access key id and check
+        # for conflict.
+        self.post(
+            '/credentials',
+            body={'credential': ref},
+            token=token_id,
+            expected_status=409)
+
+
+class TestCredentialEc2(CredentialBaseTestCase):
+    """Test v3 credential compatibility with ec2tokens."""
+    def setUp(self):
+        super(TestCredentialEc2, self).setUp()
+
+    def _validate_signature(self, access, secret):
+        """Test signature validation with the access/secret provided."""
+        signer = ec2_utils.Ec2Signer(secret)
+        params = {'SignatureMethod': 'HmacSHA256',
+                  'SignatureVersion': '2',
+                  'AWSAccessKeyId': access}
+        request = {'host': 'foo',
+                   'verb': 'GET',
+                   'path': '/bar',
+                   'params': params}
+        signature = signer.generate(request)
+
+        # Now make a request to validate the signed dummy request via the
+        # ec2tokens API.  This proves the v3 ec2 credentials actually work.
+        sig_ref = {'access': access,
+                   'signature': signature,
+                   'host': 'foo',
+                   'verb': 'GET',
+                   'path': '/bar',
+                   'params': params}
+        r = self.post(
+            '/ec2tokens',
+            body={'ec2Credentials': sig_ref},
+            expected_status=200)
+        # FIXME(shardy): ec2tokens is available via both v3 and v2
+        # paths, but it returns a v2 token in both cases, so we can
+        # only do a sanity assertion here for now.
+        self.assertIsNotNone(r.result['access']['token']['id'])
+
+    def test_ec2_credential_signature_validate(self):
+        """Test signature validation with a v3 ec2 credential."""
+        ref = self.new_credential_ref(
+            user_id=self.user['id'],
+            project_id=self.project_id)
+        blob = {"access": uuid.uuid4().hex,
+                "secret": uuid.uuid4().hex}
+        ref['blob'] = json.dumps(blob)
+        ref['type'] = 'ec2'
+        r = self.post(
+            '/credentials',
+            body={'credential': ref})
+        self.assertValidCredentialResponse(r, ref)
+        # Assert credential id is same as hash of access key id
+        self.assertEqual(r.result['credential']['id'],
+                         hashlib.sha256(blob['access']).hexdigest())
+
+        cred_blob = json.loads(r.result['credential']['blob'])
+        self.assertEqual(blob, cred_blob)
+        self._validate_signature(access=cred_blob['access'],
+                                 secret=cred_blob['secret'])
+
+    def test_ec2_credential_signature_validate_legacy(self):
+        """Test signature validation with a legacy v3 ec2 credential."""
+        cred_json, credential_id = self._create_dict_blob_credential()
+        cred_blob = json.loads(cred_json)
+        self._validate_signature(access=cred_blob['access'],
+                                 secret=cred_blob['secret'])

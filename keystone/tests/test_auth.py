@@ -16,10 +16,10 @@ import copy
 import datetime
 import uuid
 
+from keystone import assignment
 from keystone import auth
 from keystone import config
 from keystone import exception
-from keystone import identity
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -64,7 +64,6 @@ class AuthTest(tests.TestCase):
     def setUp(self):
         super(AuthTest, self).setUp()
 
-        CONF.identity.driver = 'keystone.identity.backends.kvs.Identity'
         self.load_backends()
         self.load_fixtures(default_fixtures)
 
@@ -409,7 +408,7 @@ class AuthWithToken(AuthTest):
         self.assertEqual(bind['kerberos'], 'FOO')
 
     def test_deleting_role_revokes_token(self):
-        role_controller = identity.controllers.Role()
+        role_controller = assignment.controllers.Role()
         project1 = {'id': 'Project1', 'name': uuid.uuid4().hex,
                     'domain_id': DEFAULT_DOMAIN_ID}
         self.assignment_api.create_project(project1['id'], project1)
@@ -617,7 +616,7 @@ class AuthWithTrust(AuthTest):
         self.create_trust(expires_at=expires_at)
 
     def create_trust(self, expires_at=None, impersonation=True):
-        username = self.trustor['name'],
+        username = self.trustor['name']
         password = 'foo2'
         body_dict = _build_user_auth(username=username, password=password)
         self.unscoped_token = self.controller.authenticate({}, body_dict)
@@ -787,7 +786,7 @@ class AuthWithTrust(AuthTest):
                          " only get the two roles specified in the trust.")
 
     def assert_token_count_for_trust(self, expected_value):
-        tokens = self.trust_controller.token_api.list_tokens(
+        tokens = self.trust_controller.token_api._list_tokens(
             self.trustee['id'], trust_id=self.new_trust['id'])
         token_count = len(tokens)
         self.assertEqual(token_count, expected_value)
@@ -796,7 +795,7 @@ class AuthWithTrust(AuthTest):
         self.assert_token_count_for_trust(0)
         self.fetch_v2_token_from_trust()
         self.assert_token_count_for_trust(1)
-        self.trust_controller._delete_tokens_for_user(self.trustee['id'])
+        self.token_api.delete_tokens_for_user(self.trustee['id'])
         self.assert_token_count_for_trust(0)
 
     def test_token_from_trust_cant_get_another_token(self):
@@ -812,12 +811,12 @@ class AuthWithTrust(AuthTest):
         context = {'token_id': self.unscoped_token['access']['token']['id']}
         self.fetch_v2_token_from_trust()
         trust_id = self.new_trust['id']
-        tokens = self.token_api.list_tokens(self.trustor['id'],
-                                            trust_id=trust_id)
+        tokens = self.token_api._list_tokens(self.trustor['id'],
+                                             trust_id=trust_id)
         self.assertEqual(len(tokens), 1)
         self.trust_controller.delete_trust(context, trust_id=trust_id)
-        tokens = self.token_api.list_tokens(self.trustor['id'],
-                                            trust_id=trust_id)
+        tokens = self.token_api._list_tokens(self.trustor['id'],
+                                             trust_id=trust_id)
         self.assertEqual(len(tokens), 0)
 
     def test_token_from_trust_with_no_role_fails(self):

@@ -22,9 +22,12 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
+from keystone.openstack.common.db.sqlalchemy import session
+from keystone.openstack.common.fixture import moxstubout
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests import test_backend
+from keystone.token.backends import sql as token_sql
 
 
 CONF = config.CONF
@@ -35,27 +38,24 @@ class SqlTests(tests.TestCase, sql.Base):
 
     def setUp(self):
         super(SqlTests, self).setUp()
-        self.config([tests.etcdir('keystone.conf.sample'),
-                     tests.testsdir('test_overrides.conf'),
-                     tests.testsdir('backend_sql.conf')])
+        self.config([tests.dirs.etc('keystone.conf.sample'),
+                     tests.dirs.tests('test_overrides.conf'),
+                     tests.dirs.tests('backend_sql.conf')])
 
         self.load_backends()
 
         # create tables and keep an engine reference for cleanup.
         # this must be done after the models are loaded by the managers.
-        self.engine = self.get_engine()
+        self.engine = session.get_engine()
+        self.addCleanup(session.cleanup)
+
         sql.ModelBase.metadata.create_all(bind=self.engine)
+        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
 
         # populate the engine with tables & fixtures
         self.load_fixtures(default_fixtures)
         #defaulted by the data load
         self.user_foo['enabled'] = True
-
-    def tearDown(self):
-        sql.ModelBase.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
-        sql.set_global_engine(None)
-        super(SqlTests, self).tearDown()
 
 
 class SqlModels(SqlTests):
@@ -352,7 +352,56 @@ class SqlTrust(SqlTests, test_backend.TrustTests):
 
 
 class SqlToken(SqlTests, test_backend.TokenTests):
-    pass
+    def test_token_revocation_list_uses_right_columns(self):
+        # This query used to be heavy with too many columns. We want
+        # to make sure it is only running with the minimum columns
+        # necessary.
+        fixture = self.useFixture(moxstubout.MoxStubout())
+        self.mox = fixture.mox
+        tok = token_sql.Token()
+        session = tok.get_session()
+        q = session.query(token_sql.TokenModel.id,
+                          token_sql.TokenModel.expires)
+        self.mox.StubOutWithMock(session, 'query')
+        session.query(token_sql.TokenModel.id,
+                      token_sql.TokenModel.expires).AndReturn(q)
+        self.mox.StubOutWithMock(tok, 'get_session')
+        tok.get_session().AndReturn(session)
+        self.mox.ReplayAll()
+        tok.list_revoked_tokens()
+
+    def test_flush_expired_tokens_batch(self):
+        # This test simply executes the code under test to verify
+        # that the code is legal.  It is not possible to test
+        # whether records are deleted in batches using sqlite,
+        # because the limit function does not seem to affect
+        # delete subqueries; these are, however, legal.
+        # After several failed attempts of using mox, it would
+        # seem that the use of mock objects for testing
+        # the target code does not seem possible, because of
+        # the unique way the SQLAlchemy Query class's filter
+        # method works.
+        fixture = self.useFixture(moxstubout.MoxStubout())
+        self.mox = fixture.mox
+        tok = token_sql.Token()
+        self.mox.StubOutWithMock(tok, 'token_flush_batch_size')
+        # Just need a batch larger than 0; note that the code
+        # path with batch_size = 0 is covered by test_backend,
+        # where all backends' flush_expired_tokens methods
+        # are tested.
+        tok.token_flush_batch_size('sqlite').AndReturn(1)
+        self.mox.ReplayAll()
+        tok.flush_expired_tokens()
+
+    def test_token_flush_batch_size_default(self):
+        tok = token_sql.Token()
+        sqlite_batch = tok.token_flush_batch_size('sqlite')
+        self.assertEqual(sqlite_batch, 0)
+
+    def test_token_flush_batch_size_db2(self):
+        tok = token_sql.Token()
+        db2_batch = tok.token_flush_batch_size('ibm_db_sa')
+        self.assertEqual(db2_batch, 100)
 
 
 class SqlCatalog(SqlTests, test_backend.CatalogTests):

@@ -120,6 +120,10 @@ Once run, you can see the sample data that has been created by using the
 
     $ tools/with_venv.sh keystone --os-token ADMIN --os-endpoint http://127.0.0.1:35357/v2.0/ user-list
 
+
+Testing
+-------
+
 Running Tests
 =============
 
@@ -156,8 +160,23 @@ common configuration of Python 2.7 and PEP-8), list the environments with the
 
 See ``tox.ini`` for the full list of available test environments.
 
+Running with PDB
+~~~~~~~~~~~~~~~~
+
+Using PDB breakpoints with tox and testr normally doesn't work since the tests
+just fail with a BdbQuit exception rather than stopping at the breakpoint.
+
+To run with PDB breakpoints during testing, use the ``debug`` tox environment
+rather than ``py27``. Here's an example, passing the name of a test since
+you'll normally only want to run the test that hits your breakpoint::
+
+    $ tox -e debug keystone.tests.test_auth.AuthWithToken.test_belongs_to
+
+For reference, the ``debug`` tox environment implements the instructions
+here: https://wiki.openstack.org/wiki/Testr#Debugging_.28pdb.29_Tests
+
 Test Structure
---------------
+==============
 
 Not all of the tests in the tests directory are strictly unit tests. Keystone
 intentionally includes tests that run the service locally and drives the entire
@@ -186,7 +205,7 @@ of python-keystoneclient, and then verifying it against a temporarily running
 local instance to explicitly verify basic functional testing across the API.
 
 Testing Schema Migrations
--------------------------
+=========================
 
 The application of schema migrations can be tested using SQLAlchemy Migrate’s
 built-in test runner, one migration at a time.
@@ -209,7 +228,7 @@ of your data during migration.
 
 
 Writing Tests
--------------
+=============
 
 To add tests covering all drivers, update the relevant base test class
 (``test_backend.py``, ``test_legacy_compat.py``, and
@@ -221,7 +240,7 @@ configuration of the test class in ``setUp()``.
 
 
 Further Testing
----------------
+===============
 
 devstack_ is the *best* way to quickly deploy keystone with the rest of the
 OpenStack universe and should be critical step in your development workflow!
@@ -235,8 +254,9 @@ You may also be interested in either the
 .. _OpenStack Integration Testing Project: https://github.com/openstack/tempest
 
 
-LDAP
-----
+LDAP Tests
+==========
+
 LDAP has a fake backend that performs rudimentary operations.  If you
 are building more significant LDAP functionality, you should test against
 a live LDAP server.  Devstack has an option to set up a directory server for
@@ -260,14 +280,14 @@ development environment, there's a couple of things you need to do.
 1. Build the message files. Run the following command in your keystone
    directory::
 
- $ python setup.py compile_catalog
+   $ python setup.py compile_catalog
 
 This will generate .mo files like keystone/locale/[lang]/LC_MESSAGES/[lang].mo
 
 2. When running Keystone, set the ``KEYSTONE_LOCALEDIR`` environment variable
    to the keystone/locale directory. For example::
 
-  $ KEYSTONE_LOCALEDIR=/opt/stack/keystone/keystone/locale keystone-all
+   $ KEYSTONE_LOCALEDIR=/opt/stack/keystone/keystone/locale keystone-all
 
 Now you can get a translated error response::
 
@@ -361,16 +381,94 @@ Example (using the above cacheable_function)::
 .. _`dogpile.cache`: http://dogpilecache.readthedocs.org/
 
 
+dogpile.cache based Key-Value-Store (KVS)
+-----------------------------------------
+The ``dogpile.cache`` based KVS system has been designed to allow for flexible stores for the
+backend of the KVS system. The implementation allows for the use of any normal ``dogpile.cache``
+cache backends to be used as a store. All interfacing to the KVS system happens via the
+``KeyValueStore`` object located at ``keystone.common.kvs.KeyValueStore``.
+
+To utilize the KVS system an instantiation of the ``KeyValueStore`` class is needed. To accquire
+a KeyValueStore instantiation use the ``keystone.common.kvs.get_key_value_store`` factory
+function. This factory will either create a new ``KeyValueStore`` object or retrieve the
+already instantiated ``KeyValueStore`` object by the name passed as an argument. The object must
+be configured before use. The KVS object will only be retrievable with the
+``get_key_value_store`` function while there is an active reference outside of the registry.
+Once all references have been removed the object is gone (the registry uses a ``weakref`` to
+match the object to the name).
+
+Example Instantiation and Configuration::
+
+    kvs_store = kvs.get_key_value_store('TestKVSRegion')
+    kvs_store.configure('openstack.kvs.Memory', ...)
+
+Any keyword arguments passed to the configure method that are not defined as part of the
+KeyValueStore object configuration are passed to the backend for further configuration (e.g.
+memcache servers, lock_timeout, etc).
+
+The memcached backend uses the Keystone manager mechanism to support the use of any of the
+provided dogpile.cache memcached backends (``BMemcached``, ``pylibmc``, and basic ``Memcached``).
+By default the standard Memcache backend is used.  Currently the Memcache URLs come from the
+``servers`` option in the ``[memcache]`` configuration section of the Keystone config.
+
+Example configuring the KVS system to use memcached and a specific dogpile.cache memcached backend::
+
+    kvs_store = kvs.get_key_value_store('TestKVSRegion')
+    kvs_store.configure('openstack.kvs.Memcached', dogpile_cache_backend='MemcachedBackend')
+
+Once a KVS object has been instantiated the method of interacting is the same as most memcache
+implementations::
+
+    kvs_store = kvs.get_key_value_store('TestKVSRegion')
+    kvs_store.configure(...)
+    # Set a Value
+    kvs_store.set(<Key>, <Value>)
+    # Retrieve a value:
+    retrieved_value = kvs_store.get(<key>)
+    # Delete a key/value pair:
+    kvs_store.delete(<key>)
+    # multi-get:
+    kvs_store.get_multi([<key>, <key>, ...])
+    # multi-set:
+    kvs_store.set_multi(dict(<key>=<value>, <key>=<value>, ...))
+    # multi-delete
+    kvs_store.delete_multi([<key>, <key>, ...])
+
+
+There is a global configuration option to be aware of (that can be set in the ``[kvs]`` section of
+the Keystone configuration file): ``enable_key_mangler`` can be set top false, disabling the use of
+key_manglers (modification of the key when saving to the backend to help prevent
+collisions or exceeding key size limits with memcached).
+
+.. NOTE::
+    The ``enable_key_mangler`` option in the ``[kvs]`` section of the Keystone configuration file
+    is not the same option (and does not affect the cache-layer key manglers) from the option in the
+    ``[cache]`` section of the configuration file. Similarly the ``[cache]`` section options
+    relating to key manglers has no bearing on the ``[kvs]`` objects.
+
+.. WARNING::
+    Setting the ``enable_key_mangler`` option to False can have detrimental effects on the
+    KeyValueStore backend. It is recommended that this value is not set to False except for
+    debugging issues with the ``dogpile.cache`` backend itself.
+
+Any backends that are to be used with the ``KeyValueStore`` system need to be registered with
+dogpile. For in-tree/provided backends, the registration should occur in
+``keystone/common/kvs/__init__.py``. For backends that are developed out of tree, the location
+should be added to the ``backends`` option in the ``[kvs]`` section of the Keystone configuration::
+
+    [kvs]
+    backends = backend_module1.backend_class1,backend_module2.backend_class2
+
+All registered backends will receive the "short name" of "openstack.kvs.<class name>" for use in the
+``configure`` method on the ``KeyValueStore`` object.  The ``<class name>`` of a backend must be
+globally unique.
+
+
 Building the Documentation
-==========================
+--------------------------
 
-The documentation is all generated with Sphinx from within the docs directory.
-To generate the full set of HTML documentation::
+The documentation is generated with Sphinx uning the tox command.  To create HTML docs and man pages::
 
-    cd docs
-    make autodoc
-    make html
-    make man
+    $ tox -e docs
 
-the results are in the docs/build/html and docs/build/man directories
-respectively.
+The results are in the docs/build/html and docs/build/man directories respectively.

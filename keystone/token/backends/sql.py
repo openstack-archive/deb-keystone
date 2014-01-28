@@ -33,7 +33,7 @@ class TokenModel(sql.ModelBase, sql.DictBase):
     trust_id = sql.Column(sql.String(64))
     __table_args__ = (
         sql.Index('ix_token_expires', 'expires'),
-        sql.Index('ix_token_valid', 'valid')
+        sql.Index('ix_token_expires_valid', 'expires', 'valid')
     )
 
 
@@ -60,7 +60,6 @@ class Token(sql.Base, token.Driver):
         session = self.get_session()
         with session.begin():
             session.add(token_ref)
-            session.flush()
         return token_ref.to_dict()
 
     def delete_token(self, token_id):
@@ -70,7 +69,6 @@ class Token(sql.Base, token.Driver):
             if not token_ref or not token_ref.valid:
                 raise exception.TokenNotFound(token_id=token_id)
             token_ref.valid = False
-            session.flush()
 
     def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
                       consumer_id=None):
@@ -104,8 +102,6 @@ class Token(sql.Base, token.Driver):
                         continue
 
                 token_ref.valid = False
-
-            session.flush()
 
     def _tenant_matches(self, tenant_id, token_ref_dict):
         return ((tenant_id is None) or
@@ -165,11 +161,10 @@ class Token(sql.Base, token.Driver):
                 token_ref_dict = token_ref.to_dict()
                 if self._consumer_matches(consumer_id, token_ref_dict):
                     tokens.append(token_ref_dict['id'])
-            session.flush()
         return tokens
 
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
-                    consumer_id=None):
+    def _list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                     consumer_id=None):
         if trust_id:
             return self._list_tokens_for_trust(trust_id)
         if consumer_id:
@@ -181,22 +176,52 @@ class Token(sql.Base, token.Driver):
         session = self.get_session()
         tokens = []
         now = timeutils.utcnow()
-        query = session.query(TokenModel)
+        query = session.query(TokenModel.id, TokenModel.expires)
         query = query.filter(TokenModel.expires > now)
         token_references = query.filter_by(valid=False)
         for token_ref in token_references:
             record = {
-                'id': token_ref['id'],
-                'expires': token_ref['expires'],
+                'id': token_ref[0],
+                'expires': token_ref[1],
             }
             tokens.append(record)
         return tokens
 
+    def token_flush_batch_size(self, dialect):
+        batch_size = 0
+        if dialect == 'ibm_db_sa':
+            # This functionality is limited to DB2, because
+            # it is necessary to prevent the tranaction log
+            # from filling up, whereas at least some of the
+            # other supported databases do not support update
+            # queries with LIMIT subqueries nor do they appear
+            # to require the use of such queries when deleting
+            # large numbers of records at once.
+            batch_size = 100
+            # Limit of 100 is known to not fill a transaction log
+            # of default maximum size while not significantly
+            # impacting the performance of large token purges on
+            # systems where the maximum transaction log size has
+            # been increased beyond the default.
+        return batch_size
+
     def flush_expired_tokens(self):
         session = self.get_session()
-
-        query = session.query(TokenModel)
-        query = query.filter(TokenModel.expires < timeutils.utcnow())
-        query.delete(synchronize_session=False)
+        dialect = session.bind.dialect.name
+        batch_size = self.token_flush_batch_size(dialect)
+        if batch_size > 0:
+            query = session.query(TokenModel.id)
+            query = query.filter(TokenModel.expires < timeutils.utcnow())
+            query = query.limit(batch_size).subquery()
+            delete_query = (session.query(TokenModel).
+                            filter(TokenModel.id.in_(query)))
+            while True:
+                rowcount = delete_query.delete(synchronize_session=False)
+                if rowcount == 0:
+                    break
+        else:
+            query = session.query(TokenModel)
+            query = query.filter(TokenModel.expires < timeutils.utcnow())
+            query.delete(synchronize_session=False)
 
         session.flush()

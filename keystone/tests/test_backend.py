@@ -17,7 +17,11 @@
 import copy
 import datetime
 import hashlib
+import mock
 import uuid
+
+from six import moves
+from testtools import matchers
 
 from keystone.catalog import core
 from keystone import config
@@ -25,7 +29,8 @@ from keystone import exception
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
-
+from keystone.tests import test_utils
+from keystone.token import provider
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
@@ -456,6 +461,7 @@ class IdentityTests(object):
         """Test for unfiltered listing role assignments.
 
         Test Plan:
+
         - Create a domain, with a user, group & project
         - Find how many role assignments already exist (from default
           fixtures)
@@ -561,6 +567,7 @@ class IdentityTests(object):
         """Test for get role by user and project, user was added into a group.
 
         Test Plan:
+
         - Create a user, a project & a group, add this user to group
         - Create roles and grant them to user and project
         - Check the role list get by the user and project was as expected
@@ -624,6 +631,7 @@ class IdentityTests(object):
         """Test for getting roles for user on a domain.
 
         Test Plan:
+
         - Create a domain, with 2 users
         - Check no roles yet exit
         - Give user1 two roles on the domain, user2 one role
@@ -680,6 +688,7 @@ class IdentityTests(object):
         """Test errors raised when getting roles for user on a domain.
 
         Test Plan:
+
         - Check non-existing user gives UserNotFound
         - Check non-existing domain gives DomainNotFound
 
@@ -1285,6 +1294,7 @@ class IdentityTests(object):
         """Test multiple group roles for user on project and domain.
 
         Test Plan:
+
         - Create 6 roles
         - Create a domain, with a project, user and two groups
         - Make the user a member of both groups
@@ -1569,6 +1579,28 @@ class IdentityTests(object):
             self.user_foo['id'])
         self.assertNotIn(self.tenant_baz, tenants)
 
+    def test_remove_user_from_project_race_delete_role(self):
+        self.assignment_api.add_user_to_project(self.tenant_baz['id'],
+                                                self.user_foo['id'])
+        self.assignment_api.add_role_to_user_and_project(
+            tenant_id=self.tenant_baz['id'],
+            user_id=self.user_foo['id'],
+            role_id=self.role_other['id'])
+
+        # Mock a race condition, delete a role after
+        # get_roles_for_user_and_project() is called in
+        # remove_user_from_project().
+        roles = self.assignment_api.get_roles_for_user_and_project(
+            self.user_foo['id'], self.tenant_baz['id'])
+        self.assignment_api.delete_role(self.role_other['id'])
+        self.assignment_api.get_roles_for_user_and_project = mock.Mock(
+            return_value=roles)
+        self.assignment_api.remove_user_from_project(self.tenant_baz['id'],
+                                                     self.user_foo['id'])
+        tenants = self.assignment_api.list_projects_for_user(
+            self.user_foo['id'])
+        self.assertNotIn(self.tenant_baz, tenants)
+
     def test_remove_user_from_project_404(self):
         self.assertRaises(exception.ProjectNotFound,
                           self.assignment_api.remove_user_from_project,
@@ -1670,6 +1702,16 @@ class IdentityTests(object):
         ref['name'] = ref['name'].upper()
         self.assignment_api.create_project(ref['id'], ref)
 
+    def test_create_project_with_no_enabled_field(self):
+        ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex.lower(),
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.assignment_api.create_project(ref['id'], ref)
+
+        project = self.assignment_api.get_project(ref['id'])
+        self.assertIs(project['enabled'], True)
+
     def test_create_project_long_name_fails(self):
         tenant = {'id': 'fake1', 'name': 'a' * 65,
                   'domain_id': DEFAULT_DOMAIN_ID}
@@ -1764,6 +1806,38 @@ class IdentityTests(object):
                           self.identity_api.create_user,
                           'fake1',
                           user)
+
+    def test_create_user_missed_password(self):
+        user = {'id': 'fake1', 'name': 'fake1',
+                'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_user('fake1', user)
+        self.identity_api.get_user('fake1')
+        # Make sure  the user is not allowed to login
+        # with a password that  is empty string or None
+        self.assertRaises(AssertionError,
+                          self.identity_api.authenticate,
+                          user_id='fake1',
+                          password='')
+        self.assertRaises(AssertionError,
+                          self.identity_api.authenticate,
+                          user_id='fake1',
+                          password=None)
+
+    def test_create_user_none_password(self):
+        user = {'id': 'fake1', 'name': 'fake1', 'password': None,
+                'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_user('fake1', user)
+        self.identity_api.get_user('fake1')
+        # Make sure  the user is not allowed to login
+        # with a password that  is empty string or None
+        self.assertRaises(AssertionError,
+                          self.identity_api.authenticate,
+                          user_id='fake1',
+                          password='')
+        self.assertRaises(AssertionError,
+                          self.identity_api.authenticate,
+                          user_id='fake1',
+                          password=None)
 
     def test_create_user_invalid_name_fails(self):
         user = {'id': 'fake1', 'name': None,
@@ -2166,6 +2240,11 @@ class IdentityTests(object):
         new_group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
                      'name': uuid.uuid4().hex}
         self.identity_api.create_group(new_group['id'], new_group)
+        # Make sure we get an empty list back on a new group, not an error.
+        user_refs = self.identity_api.list_users_in_group(new_group['id'])
+        self.assertEqual(user_refs, [])
+        # Make sure we get the correct users back once they have been added
+        # to the group.
         new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
                     'password': uuid.uuid4().hex, 'enabled': True,
                     'domain_id': domain['id']}
@@ -2427,7 +2506,19 @@ class IdentityTests(object):
         domain_ref = self.assignment_api.get_domain(domain['id'])
         self.assertDictEqual(domain_ref, domain)
 
+        # Ensure an 'enabled' domain cannot be deleted
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.delete_domain,
+                          domain_id=domain['id'])
+
+        # Disable the domain
+        domain['enabled'] = False
+        self.assignment_api.update_domain(domain['id'], domain)
+
+        # Delete the domain
         self.assignment_api.delete_domain(domain['id'])
+
+        # Make sure the domain no longer exists
         self.assertRaises(exception.DomainNotFound,
                           self.assignment_api.get_domain,
                           domain['id'])
@@ -2571,6 +2662,7 @@ class IdentityTests(object):
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
         self.assertEqual(len(user_projects), 3)
 
+    @tests.skip_if_cache_disabled('assignment')
     def test_cache_layer_domain_crud(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2596,6 +2688,11 @@ class IdentityTests(object):
         self.assignment_api.update_domain(domain_id, domain_ref)
         self.assertDictContainsSubset(
             domain_ref, self.assignment_api.get_domain(domain_id))
+        # Make sure domain is 'disabled', bypass assignment api manager
+        domain_ref_disabled = domain_ref.copy()
+        domain_ref_disabled['enabled'] = False
+        self.assignment_api.driver.update_domain(domain_id,
+                                                 domain_ref_disabled)
         # Delete domain, bypassing assignment api manager
         self.assignment_api.driver.delete_domain(domain_id)
         # Verify get_domain still returns the domain
@@ -2610,6 +2707,9 @@ class IdentityTests(object):
         # Recreate Domain
         self.assignment_api.create_domain(domain_id, domain)
         self.assignment_api.get_domain(domain_id)
+        # Make sure domain is 'disabled', bypass assignment api manager
+        domain['enabled'] = False
+        self.assignment_api.driver.update_domain(domain_id, domain)
         # Delete domain
         self.assignment_api.delete_domain(domain_id)
         # verify DomainNotFound raised
@@ -2617,6 +2717,7 @@ class IdentityTests(object):
                           self.assignment_api.get_domain,
                           domain_id)
 
+    @tests.skip_if_cache_disabled('assignment')
     def test_cache_layer_project_crud(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2669,6 +2770,7 @@ class IdentityTests(object):
                           self.assignment_api.get_project,
                           project_id)
 
+    @tests.skip_if_cache_disabled('assignment')
     def test_cache_layer_role_crud(self):
         role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         role_id = role['id']
@@ -2808,34 +2910,56 @@ class TokenTests(object):
         self.assertRaises(exception.TokenNotFound,
                           self.token_api.delete_token, token_id)
 
-    def create_token_sample_data(self, tenant_id=None, trust_id=None,
-                                 user_id="testuserid"):
-        token_id = self._create_token_id()
+    def create_token_sample_data(self, token_id=None, tenant_id=None,
+                                 trust_id=None, user_id=None, expires=None):
+        if token_id is None:
+            token_id = self._create_token_id()
+        if user_id is None:
+            user_id = 'testuserid'
+        # FIXME(morganfainberg): These tokens look nothing like "Real" tokens.
+        # This should be updated when token_api is updated to merge in the
+        # issue_token logic from the providers (token issuance should be a
+        # pipeline).  The fix should be in implementation of blueprint:
+        # token-issuance-pipeline
         data = {'id': token_id, 'a': 'b',
                 'user': {'id': user_id}}
         if tenant_id is not None:
             data['tenant'] = {'id': tenant_id, 'name': tenant_id}
         if tenant_id is NULL_OBJECT:
             data['tenant'] = None
+        if expires is not None:
+            data['expires'] = expires
         if trust_id is not None:
             data['trust_id'] = trust_id
+            data.setdefault('access', {}).setdefault('trust', {})
+            # Testuserid2 is used here since a trustee will be different in
+            # the cases of impersonation and therefore should not match the
+            # token's user_id.
+            data['access']['trust']['trustee_user_id'] = 'testuserid2'
+        data['token_version'] = provider.V2
+        # Issue token stores a copy of all token data at token['token_data'].
+        # This emulates that assumption as part of the test.
+        data['token_data'] = copy.deepcopy(data)
         new_token = self.token_api.create_token(token_id, data)
-        return new_token['id']
+        return new_token['id'], data
 
     def test_delete_tokens(self):
-        tokens = self.token_api.list_tokens('testuserid')
+        tokens = self.token_api._list_tokens('testuserid')
         self.assertEqual(len(tokens), 0)
-        token_id1 = self.create_token_sample_data('testtenantid')
-        token_id2 = self.create_token_sample_data('testtenantid')
-        token_id3 = self.create_token_sample_data(tenant_id='testtenantid',
-                                                  user_id="testuserid1")
-        tokens = self.token_api.list_tokens('testuserid')
+        token_id1, data = self.create_token_sample_data(
+            tenant_id='testtenantid')
+        token_id2, data = self.create_token_sample_data(
+            tenant_id='testtenantid')
+        token_id3, data = self.create_token_sample_data(
+            tenant_id='testtenantid',
+            user_id='testuserid1')
+        tokens = self.token_api._list_tokens('testuserid')
         self.assertEqual(len(tokens), 2)
         self.assertIn(token_id2, tokens)
         self.assertIn(token_id1, tokens)
         self.token_api.delete_tokens(user_id='testuserid',
                                      tenant_id='testtenantid')
-        tokens = self.token_api.list_tokens('testuserid')
+        tokens = self.token_api._list_tokens('testuserid')
         self.assertEqual(len(tokens), 0)
         self.assertRaises(exception.TokenNotFound,
                           self.token_api.get_token, token_id1)
@@ -2845,14 +2969,16 @@ class TokenTests(object):
         self.token_api.get_token(token_id3)
 
     def test_delete_tokens_trust(self):
-        tokens = self.token_api.list_tokens(user_id='testuserid')
+        tokens = self.token_api._list_tokens(user_id='testuserid')
         self.assertEqual(len(tokens), 0)
-        token_id1 = self.create_token_sample_data(tenant_id='testtenantid',
-                                                  trust_id='testtrustid')
-        token_id2 = self.create_token_sample_data(tenant_id='testtenantid',
-                                                  user_id="testuserid1",
-                                                  trust_id="testtrustid1")
-        tokens = self.token_api.list_tokens('testuserid')
+        token_id1, data = self.create_token_sample_data(
+            tenant_id='testtenantid',
+            trust_id='testtrustid')
+        token_id2, data = self.create_token_sample_data(
+            tenant_id='testtenantid',
+            user_id='testuserid1',
+            trust_id='testtrustid1')
+        tokens = self.token_api._list_tokens('testuserid')
         self.assertEqual(len(tokens), 1)
         self.assertIn(token_id1, tokens)
         self.token_api.delete_tokens(user_id='testuserid',
@@ -2862,52 +2988,60 @@ class TokenTests(object):
                           self.token_api.get_token, token_id1)
         self.token_api.get_token(token_id2)
 
-    def test_token_list(self):
-        tokens = self.token_api.list_tokens('testuserid')
+    def _test_token_list(self, token_list_fn):
+        tokens = token_list_fn('testuserid')
         self.assertEqual(len(tokens), 0)
-        token_id1 = self.create_token_sample_data()
-        tokens = self.token_api.list_tokens('testuserid')
+        token_id1, data = self.create_token_sample_data()
+        tokens = token_list_fn('testuserid')
         self.assertEqual(len(tokens), 1)
         self.assertIn(token_id1, tokens)
-        token_id2 = self.create_token_sample_data()
-        tokens = self.token_api.list_tokens('testuserid')
+        token_id2, data = self.create_token_sample_data()
+        tokens = token_list_fn('testuserid')
         self.assertEqual(len(tokens), 2)
         self.assertIn(token_id2, tokens)
         self.assertIn(token_id1, tokens)
         self.token_api.delete_token(token_id1)
-        tokens = self.token_api.list_tokens('testuserid')
+        tokens = token_list_fn('testuserid')
         self.assertIn(token_id2, tokens)
         self.assertNotIn(token_id1, tokens)
         self.token_api.delete_token(token_id2)
-        tokens = self.token_api.list_tokens('testuserid')
+        tokens = token_list_fn('testuserid')
         self.assertNotIn(token_id2, tokens)
         self.assertNotIn(token_id1, tokens)
 
         # tenant-specific tokens
         tenant1 = uuid.uuid4().hex
         tenant2 = uuid.uuid4().hex
-        token_id3 = self.create_token_sample_data(tenant_id=tenant1)
-        token_id4 = self.create_token_sample_data(tenant_id=tenant2)
+        token_id3, data = self.create_token_sample_data(tenant_id=tenant1)
+        token_id4, data = self.create_token_sample_data(tenant_id=tenant2)
         # test for existing but empty tenant (LP:1078497)
-        token_id5 = self.create_token_sample_data(tenant_id=NULL_OBJECT)
-        tokens = self.token_api.list_tokens('testuserid')
+        token_id5, data = self.create_token_sample_data(tenant_id=NULL_OBJECT)
+        tokens = token_list_fn('testuserid')
         self.assertEqual(len(tokens), 3)
         self.assertNotIn(token_id1, tokens)
         self.assertNotIn(token_id2, tokens)
         self.assertIn(token_id3, tokens)
         self.assertIn(token_id4, tokens)
         self.assertIn(token_id5, tokens)
-        tokens = self.token_api.list_tokens('testuserid', tenant2)
+        tokens = token_list_fn('testuserid', tenant2)
         self.assertEqual(len(tokens), 1)
         self.assertNotIn(token_id1, tokens)
         self.assertNotIn(token_id2, tokens)
         self.assertNotIn(token_id3, tokens)
         self.assertIn(token_id4, tokens)
 
+    def test_token_list(self):
+        self._test_token_list(self.token_api._list_tokens)
+
+    def test_token_list_deprecated_public_interface(self):
+        # TODO(morganfainberg): Remove once token_api.list_tokens is removed
+        # (post Icehouse release)
+        self._test_token_list(self.token_api.list_tokens)
+
     def test_token_list_trust(self):
         trust_id = uuid.uuid4().hex
-        token_id5 = self.create_token_sample_data(trust_id=trust_id)
-        tokens = self.token_api.list_tokens('testuserid', trust_id=trust_id)
+        token_id5, data = self.create_token_sample_data(trust_id=trust_id)
+        tokens = self.token_api._list_tokens('testuserid', trust_id=trust_id)
         self.assertEqual(len(tokens), 1)
         self.assertIn(token_id5, tokens)
 
@@ -2982,7 +3116,7 @@ class TokenTests(object):
 
     def test_list_revoked_tokens_for_multiple_tokens(self):
         self.check_list_revoked_tokens([self.delete_token()
-                                        for x in xrange(2)])
+                                        for x in moves.range(2)])
 
     def test_flush_expired_token(self):
         token_id = uuid.uuid4().hex
@@ -3006,10 +3140,11 @@ class TokenTests(object):
         self.assertDictEqual(data_ref, data)
 
         self.token_api.flush_expired_tokens()
-        tokens = self.token_api.list_tokens('testuserid')
+        tokens = self.token_api._list_tokens('testuserid')
         self.assertEqual(len(tokens), 1)
         self.assertIn(token_id, tokens)
 
+    @tests.skip_if_cache_disabled('token')
     def test_revocation_list_cache(self):
         expire_time = timeutils.utcnow() + datetime.timedelta(minutes=10)
         token_id = uuid.uuid4().hex
@@ -3070,6 +3205,45 @@ class TokenTests(object):
         self.assertIn(token_id, revoked_ids)
         for t in self.token_api.list_revoked_tokens():
             self.assertIn('expires', t)
+
+    def test_create_unicode_token_id(self):
+        token_id = unicode(self._create_token_id())
+        self.create_token_sample_data(token_id=token_id)
+        self.token_api.get_token(token_id)
+
+    def test_create_unicode_user_id(self):
+        user_id = unicode(uuid.uuid4().hex)
+        token_id, data = self.create_token_sample_data(user_id=user_id)
+        self.token_api.get_token(token_id)
+
+    def test_list_tokens_unicode_user_id(self):
+        user_id = unicode(uuid.uuid4().hex)
+        self.token_api.list_tokens(user_id)
+
+    def test_token_expire_timezone(self):
+
+        @test_utils.timezone
+        def _create_token(expire_time):
+            token_id = uuid.uuid4().hex
+            user_id = unicode(uuid.uuid4().hex)
+            return self.create_token_sample_data(token_id=token_id,
+                                                 user_id=user_id,
+                                                 expires=expire_time)
+
+        for d in ['+0', '-11', '-8', '-5', '+5', '+8', '+14']:
+            test_utils.TZ = 'UTC' + d
+            expire_time = timeutils.utcnow() + datetime.timedelta(minutes=1)
+            token_id, data_in = _create_token(expire_time)
+            data_get = self.token_api.get_token(token_id)
+
+            self.assertEqual(data_in['id'], data_get['id'],
+                             'TZ=%s' % test_utils.TZ)
+
+            expire_time_expired = (
+                timeutils.utcnow() + datetime.timedelta(minutes=-1))
+            token_id, data_in = _create_token(expire_time_expired)
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_api.get_token, data_in['id'])
 
 
 class TokenCacheInvalidation(object):
@@ -3264,6 +3438,80 @@ class CommonHelperTests(tests.TestCase):
 
 
 class CatalogTests(object):
+    def test_region_crud(self):
+        # create
+        region_id = uuid.uuid4().hex
+        new_region = {
+            'id': region_id,
+            'description': uuid.uuid4().hex,
+        }
+        res = self.catalog_api.create_region(
+            region_id,
+            new_region.copy())
+        # Ensure that we don't need to have a
+        # parent_region_id in the original supplied
+        # ref dict, but that it will be returned from
+        # the endpoint, with None value.
+        expected_region = new_region.copy()
+        expected_region['parent_region_id'] = None
+        self.assertDictEqual(res, expected_region)
+
+        # Test adding another region with the one above
+        # as its parent. We will check below whether deleting
+        # the parent successfully deletes any child regions.
+        parent_region_id = region_id
+        region_id = uuid.uuid4().hex
+        new_region = {
+            'id': region_id,
+            'description': uuid.uuid4().hex,
+            'parent_region_id': parent_region_id
+        }
+        self.catalog_api.create_region(
+            region_id,
+            new_region.copy())
+
+        # list
+        regions = self.catalog_api.list_regions()
+        self.assertThat(regions, matchers.HasLength(2))
+        region_ids = [x['id'] for x in regions]
+        self.assertIn(parent_region_id, region_ids)
+        self.assertIn(region_id, region_ids)
+
+        # delete
+        self.catalog_api.delete_region(parent_region_id)
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.delete_region,
+                          parent_region_id)
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.get_region,
+                          parent_region_id)
+        # Ensure the child is also gone...
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.get_region,
+                          region_id)
+
+    def test_get_region_404(self):
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.get_region,
+                          uuid.uuid4().hex)
+
+    def test_delete_region_404(self):
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.delete_region,
+                          uuid.uuid4().hex)
+
+    def test_create_region_invalid_parent_region_404(self):
+        region_id = uuid.uuid4().hex
+        new_region = {
+            'id': region_id,
+            'description': uuid.uuid4().hex,
+            'parent_region_id': 'nonexisting'
+        }
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.create_region,
+                          region_id,
+                          new_region)
+
     def test_service_crud(self):
         # create
         service_id = uuid.uuid4().hex
@@ -3459,6 +3707,7 @@ class InheritanceTests(object):
         """Test inherited user roles.
 
         Test Plan:
+
         - Enable OS-INHERIT extension
         - Create 3 roles
         - Create a domain, with a project and a user
@@ -3534,6 +3783,7 @@ class InheritanceTests(object):
         """Test inherited group roles.
 
         Test Plan:
+
         - Enable OS-INHERIT extension
         - Create 4 roles
         - Create a domain, with a project, user and two groups
@@ -3617,6 +3867,7 @@ class InheritanceTests(object):
         """Test inherited group roles.
 
         Test Plan:
+
         - Enable OS-INHERIT extension
         - Create a domain, with two projects and a user
         - Assign an inherited user role on the domain, as well as a direct
@@ -3656,6 +3907,7 @@ class InheritanceTests(object):
         """Test inherited group roles.
 
         Test Plan:
+
         - Enable OS-INHERIT extension
         - Create two domains, each with two projects
         - Create a user and group

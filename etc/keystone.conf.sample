@@ -1,5 +1,8 @@
 [DEFAULT]
-# A "shared secret" between keystone and other openstack services
+# A "shared secret" that can be used to bootstrap Keystone. This "token" does
+# not represent a user, and carries no explicit authorization. To disable in
+# production (highly recommended), remove AdminTokenAuthMiddleware from your
+# paste application pipelines (for example, in keystone-paste.ini).
 # admin_token = ADMIN
 
 # The IP address of the network interface to listen on
@@ -43,6 +46,12 @@
 
 # similar to max_param_size, but provides an exception for token values
 # max_token_size = 8192
+
+# the filename to use with sqlite
+# sqlite_db = keystone.db
+
+# If true, use synchronous mode for sqlite
+# sqlite_synchronous = True
 
 # === Logging Options ===
 # Print debugging output
@@ -145,10 +154,47 @@
 
 [sql]
 # The SQLAlchemy connection string used to connect to the database
+# DEPRECATED: use connection in the [database] section instead.
 # connection = sqlite:///keystone.db
 
 # the timeout before idle sql connections are reaped
+# DEPRECATED: use idle_timeout in the [database] section instead.
 # idle_timeout = 200
+
+[database]
+# The SQLAlchemy connection string used to connect to the database
+# connection = sqlite:///keystone.db
+
+# The SQLAlchemy connection string used to connect to the slave database
+# Note that Keystone does not use this option.
+# slave_connection =
+
+# timeout before idle sql connections are reaped
+# idle_timeout = 3600
+
+# Minimum number of SQL connections to keep open in a pool
+# min_pool_size = 1
+
+# Maximum number of SQL connections to keep open in a pool
+# max_pool_size =
+
+# maximum db connection retries during startup. (setting -1 implies an infinite retry count)
+# max_retries = 10
+
+# interval between retries of opening a sql connection
+# retry_interval = 10
+
+# If set, use this value for max_overflow with sqlalchemy
+# max_overflow =
+
+# Verbosity of SQL debugging information. 0=None, 100=Everything
+# connection_debug = 0
+
+# Add python stack traces to SQL as comment strings
+# connection_trace = False
+
+# If set, use this value for pool_timeout with sqlalchemy
+# pool_timeout =
 
 [identity]
 # driver = keystone.identity.backends.sql.Identity
@@ -210,7 +256,7 @@
 # provider =
 
 # Amount of time a token should remain valid (in seconds)
-# expiration = 86400
+# expiration = 3600
 
 # External auth mechanisms that should add bind information to token.
 # eg kerberos, x509
@@ -423,7 +469,7 @@
 
 [auth]
 methods = external,password,token,oauth1
-#external = keystone.auth.plugins.external.ExternalDefault
+#external = keystone.auth.plugins.external.DefaultDomain
 password = keystone.auth.plugins.password.Password
 token = keystone.auth.plugins.token.Token
 oauth1 = keystone.auth.plugins.oauth1.OAuth
@@ -431,6 +477,14 @@ oauth1 = keystone.auth.plugins.oauth1.OAuth
 [memcache]
 # servers = localhost:11211
 # max_compare_and_set_retry = 16
+
+[kvs]
+# backends =
+# config_prefix = keystone.kvs
+# enable_key_mangler = True
+#
+# KeyValueStore lock timeout in seconds
+# default_lock_timeout = 5
 
 [paste_deploy]
 # Name of the paste configuration file that defines the available pipelines

@@ -15,9 +15,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
 import StringIO
 import tempfile
 import urllib2
+
+from testtools import matchers
 
 from keystone import config
 from keystone import exception
@@ -33,16 +36,12 @@ CONF = config.CONF
 class PolicyFileTestCase(tests.TestCase):
     def setUp(self):
         super(PolicyFileTestCase, self).setUp()
-        self.orig_policy_file = CONF.policy_file
+
         rules.reset()
+        self.addCleanup(rules.reset)
         _unused, self.tmpfilename = tempfile.mkstemp()
         self.opt(policy_file=self.tmpfilename)
         self.target = {}
-
-    def tearDown(self):
-        super(PolicyFileTestCase, self).tearDown()
-        rules.reset()
-        self.opt(policy_file=self.orig_policy_file)
 
     def test_modified_policy_reloads(self):
         action = "example:test"
@@ -62,6 +61,7 @@ class PolicyTestCase(tests.TestCase):
     def setUp(self):
         super(PolicyTestCase, self).setUp()
         rules.reset()
+        self.addCleanup(rules.reset)
         # NOTE(vish): preload rules to circumvent reloading from file
         rules.init()
         self.rules = {
@@ -90,10 +90,6 @@ class PolicyTestCase(tests.TestCase):
             dict((k, common_policy.parse_rule(v))
                  for k, v in self.rules.items()))
         rules._ENFORCER.set_rules(these_rules)
-
-    def tearDown(self):
-        rules.reset()
-        super(PolicyTestCase, self).tearDown()
 
     def test_enforce_nonexistent_action_throws(self):
         action = "example:noexist"
@@ -162,6 +158,7 @@ class DefaultPolicyTestCase(tests.TestCase):
     def setUp(self):
         super(DefaultPolicyTestCase, self).setUp()
         rules.reset()
+        self.addCleanup(rules.reset)
         rules.init()
 
         self.rules = {
@@ -178,6 +175,8 @@ class DefaultPolicyTestCase(tests.TestCase):
         # Oslo policy as we shoudn't have to reload the rules if they have
         # already been set using set_rules().
         self._old_load_rules = rules._ENFORCER.load_rules
+        self.addCleanup(setattr, rules._ENFORCER, 'load_rules',
+                        self._old_load_rules)
         setattr(rules._ENFORCER, 'load_rules', lambda *args, **kwargs: None)
 
     def _set_rules(self, default_rule):
@@ -185,11 +184,6 @@ class DefaultPolicyTestCase(tests.TestCase):
             dict((k, common_policy.parse_rule(v))
                  for k, v in self.rules.items()), default_rule)
         rules._ENFORCER.set_rules(these_rules)
-
-    def tearDown(self):
-        super(DefaultPolicyTestCase, self).tearDown()
-        rules._ENFORCER.load_rules = self._old_load_rules
-        rules.reset()
 
     def test_policy_called(self):
         self.assertRaises(exception.ForbiddenAction, rules.enforce,
@@ -208,3 +202,18 @@ class DefaultPolicyTestCase(tests.TestCase):
         self._set_rules(new_default_rule)
         self.assertRaises(exception.ForbiddenAction, rules.enforce,
                           self.credentials, "example:noexist", {})
+
+
+class PolicyJsonTestCase(tests.TestCase):
+
+    def _load_entries(self, filename):
+        return set(json.load(file(filename)))
+
+    def test_json_examples_have_matching_entries(self):
+        policy_keys = self._load_entries(tests.dirs.etc('policy.json'))
+        cloud_policy_keys = self._load_entries(
+            tests.dirs.etc('policy.v3cloudsample.json'))
+
+        diffs = set(policy_keys).difference(set(cloud_policy_keys))
+
+        self.assertThat(diffs, matchers.Equals(set()))

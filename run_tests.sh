@@ -22,8 +22,6 @@ function usage {
   echo ""
   echo "  -V, --virtual-env        Always use virtualenv.  Install automatically if not present"
   echo "  -N, --no-virtual-env     Don't use virtualenv.  Run tests in local environment"
-  echo "  -r, --recreate-db        Recreate the test database (deprecated, as this is now the default)."
-  echo "  -n, --no-recreate-db     Don't recreate the test database."
   echo "  -x, --stop               Stop running tests after the first error or failure."
   echo "  -f, --force              Force a clean re-build of the virtual environment. Useful when dependencies have been added."
   echo "  -u, --update             Update the virtual environment with any newer package versions"
@@ -44,8 +42,7 @@ function process_option {
     -h|--help) usage;;
     -V|--virtual-env) always_venv=1; never_venv=0;;
     -N|--no-virtual-env) always_venv=0; never_venv=1;;
-    -r|--recreate-db) recreate_db=1;;
-    -n|--no-recreate-db) recreate_db=0;;
+    -x|--stop) failfast=1;;
     -f|--force) force=1;;
     -u|--update) update=1;;
     -p|--pep8) just_flake8=1;;
@@ -62,6 +59,7 @@ with_venv=tools/with_venv.sh
 always_venv=0
 never_venv=0
 force=0
+failfast=0
 testrargs=
 testropts=--subunit
 wrapper=""
@@ -69,7 +67,6 @@ just_flake8=0
 short_flake8=0
 no_flake8=0
 coverage=0
-recreate_db=1
 update=0
 
 for arg in "$@"; do
@@ -83,17 +80,12 @@ if [ $coverage -eq 1 ]; then
     TESTRTESTS="$TESTRTESTS --coverage"
 fi
 
-function cleanup_test_db {
-  # Default test settings will leave around some test*.db files
-  # TODO(termie): this could probably be moved into keystone/tests/__init__.py
-  #               but there have been some issues with creating that
-  #               file for some users
-  rm -f keystone/tests/*.db
-}
-
 function run_tests {
   set -e
   echo ${wrapper}
+  if [ $failfast -eq 1 ]; then
+      testrargs="$testrargs -- --failfast"
+  fi
   ${wrapper} $TESTRTESTS --testr-args="$testropts $testrargs" | \
       ${wrapper} subunit-2to1 | \
       ${wrapper} tools/colorizer.py
@@ -111,11 +103,6 @@ function run_flake8 {
   echo ${wrapper} flake8 $FLAGS | tee pep8.txt
   ${wrapper} flake8 $FLAGS | tee pep8.txt
 }
-
-echo "This script is now deprecated.  Please use tox instead."
-echo "Checkout http://tox.readthedocs.org/en/latest/ for information on tox."
-echo "[press enter to continue]"
-read
 
 if [ $never_venv -eq 0 ]
 then
@@ -162,10 +149,6 @@ if [ $short_flake8 -eq 1 ]; then
      exit
 fi
 
-
-if [ $recreate_db -eq 1 ]; then
-    cleanup_test_db
-fi
 
 run_tests
 

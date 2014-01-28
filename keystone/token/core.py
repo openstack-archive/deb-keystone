@@ -28,12 +28,13 @@ from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
+from keystone.openstack.common import versionutils
 
 
 CONF = config.CONF
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 SHOULD_CACHE = cache.should_cache_fn('token')
 
 
@@ -94,7 +95,8 @@ def validate_auth_info(self, user_ref, tenant_ref):
             raise exception.Unauthorized(msg)
 
 
-@dependency.requires('token_provider_api')
+@dependency.requires('assignment_api', 'identity_api', 'token_provider_api',
+                     'trust_api')
 @dependency.provider('token_api')
 class Manager(manager.Manager):
     """Default pivot point for the Token backend.
@@ -127,6 +129,11 @@ class Manager(manager.Manager):
             raise exception.TokenNotFound(token_id=token_id)
 
     def get_token(self, token_id):
+        if not token_id:
+            # NOTE(morganfainberg): There are cases when the
+            # context['token_id'] will in-fact be None. This also saves
+            # a round-trip to the backend if we don't have a token_id.
+            raise exception.TokenNotFound(token_id='')
         unique_id = self.unique_id(token_id)
         token_ref = self._get_token(unique_id)
         # NOTE(morganfainberg): Lift expired checking to the manager, there is
@@ -162,8 +169,8 @@ class Manager(manager.Manager):
 
     def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
                       consumer_id=None):
-        token_list = self.driver.list_tokens(user_id, tenant_id, trust_id,
-                                             consumer_id)
+        token_list = self.driver._list_tokens(user_id, tenant_id, trust_id,
+                                              consumer_id)
         self.driver.delete_tokens(user_id, tenant_id, trust_id, consumer_id)
         for token_id in token_list:
             unique_id = self.unique_id(token_id)
@@ -181,6 +188,53 @@ class Manager(manager.Manager):
         # determining cache-keys.
         self.list_revoked_tokens.invalidate(self)
 
+    def delete_tokens_for_domain(self, domain_id):
+        """Delete all tokens for a given domain."""
+        projects = self.assignment_api.list_projects()
+        for project in projects:
+            if project['domain_id'] == domain_id:
+                for user_id in self.assignment_api.list_user_ids_for_project(
+                        project['id']):
+                    self.delete_tokens_for_user(user_id, project['id'])
+        # TODO(morganfainberg): implement deletion of domain_scoped tokens.
+
+    def delete_tokens_for_user(self, user_id, project_id=None):
+        """Delete all tokens for a given user or user-project combination.
+
+        This method adds in the extra logic for handling trust-scoped token
+        revocations in a single call instead of needing to explicitly handle
+        trusts in the caller's logic.
+        """
+        self.delete_tokens(user_id, tenant_id=project_id)
+        for trust in self.trust_api.list_trusts_for_trustee(user_id):
+            # Ensure we revoke tokens associated to the trust / project
+            # user_id combination.
+            self.delete_tokens(user_id, trust_id=trust['id'],
+                               tenant_id=project_id)
+        for trust in self.trust_api.list_trusts_for_trustor(user_id):
+            # Ensure we revoke tokens associated to the trust / project /
+            # user_id combination where the user_id is the trustor.
+
+            # NOTE(morganfainberg): This revocation is a bit coarse, but it
+            # covers a number of cases such as disabling of the trustor user,
+            # deletion of the trustor user (for any number of reasons). It
+            # might make sense to refine this and be more surgical on the
+            # deletions (e.g. don't revoke tokens for the trusts when the
+            # trustor changes password). For now, to maintain previous
+            # functionality, this will continue to be a bit overzealous on
+            # revocations.
+            self.delete_tokens(trust['trustee_user_id'], trust_id=trust['id'],
+                               tenant_id=project_id)
+
+    def delete_tokens_for_users(self, user_ids, project_id=None):
+        """Delete all tokens for a list of user_ids.
+
+        :param user_ids: list of user identifiers
+        :param project_id: optional project identifier
+        """
+        for user_id in user_ids:
+            self.delete_tokens_for_user(user_id, project_id=project_id)
+
     def _invalidate_individual_token_cache(self, token_id):
         # NOTE(morganfainberg): invalidate takes the exact same arguments as
         # the normal method, this means we need to pass "self" in (which gets
@@ -192,6 +246,31 @@ class Manager(manager.Manager):
         # do the explicit individual token invalidation.
         self._get_token.invalidate(self, token_id)
         self.token_provider_api.invalidate_individual_token_cache(token_id)
+
+    @versionutils.deprecated(versionutils.deprecated.ICEHOUSE, remove_in=+1)
+    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                    consumer_id=None):
+        """Returns a list of current token_id's for a user
+
+        This is effectively a private method only used by the ``delete_tokens``
+        method and should not be called by anything outside of the
+        ``token_api`` manager or the token driver itself.
+
+        :param user_id: identity of the user
+        :type user_id: string
+        :param tenant_id: identity of the tenant
+        :type tenant_id: string
+        :param trust_id: identity of the trust
+        :type trust_id: string
+        :param consumer_id: identity of the consumer
+        :type consumer_id: string
+        :returns: list of token_id's
+
+        """
+        return self.driver._list_tokens(user_id,
+                                        tenant_id=tenant_id,
+                                        trust_id=trust_id,
+                                        consumer_id=consumer_id)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -272,10 +351,10 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        token_list = self.list_tokens(user_id,
-                                      tenant_id=tenant_id,
-                                      trust_id=trust_id,
-                                      consumer_id=consumer_id)
+        token_list = self._list_tokens(user_id,
+                                       tenant_id=tenant_id,
+                                       trust_id=trust_id,
+                                       consumer_id=consumer_id)
 
         for token in token_list:
             try:
@@ -284,8 +363,8 @@ class Driver(object):
                 pass
 
     @abc.abstractmethod
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
-                    consumer_id=None):
+    def _list_tokens(self, user_id, tenant_id=None, trust_id=None,
+                     consumer_id=None):
         """Returns a list of current token_id's for a user
 
         This is effectively a private method only used by the ``delete_tokens``

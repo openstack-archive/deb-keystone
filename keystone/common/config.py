@@ -16,8 +16,6 @@
 
 from oslo.config import cfg
 
-from keystone.openstack.common import log as logging
-
 
 _DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)8s [%(name)s] %(message)s"
 _DEFAULT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -71,7 +69,7 @@ FILE_OPTIONS = {
     'token': [
         cfg.ListOpt('bind', default=[]),
         cfg.StrOpt('enforce_token_bind', default='permissive'),
-        cfg.IntOpt('expiration', default=86400),
+        cfg.IntOpt('expiration', default=3600),
         cfg.StrOpt('provider', default=None),
         cfg.StrOpt('driver',
                    default='keystone.token.backends.sql.Token'),
@@ -127,10 +125,6 @@ FILE_OPTIONS = {
         cfg.StrOpt('cert_subject',
                    default=('/C=US/ST=Unset/L=Unset/O=Unset/'
                             'CN=www.example.com'))],
-    'sql': [
-        cfg.StrOpt('connection', secret=True,
-                   default='sqlite:///keystone.db'),
-        cfg.IntOpt('idle_timeout', default=200)],
     'assignment': [
         # assignment has no default for backward compatibility reasons.
         # If assignment driver is not specified, the identity driver chooses
@@ -185,7 +179,7 @@ FILE_OPTIONS = {
         cfg.IntOpt('user_enabled_mask', default=0),
         cfg.StrOpt('user_enabled_default', default='True'),
         cfg.ListOpt('user_attribute_ignore',
-                    default='default_project_id,tenants'),
+                    default=['default_project_id', 'tenants']),
         cfg.StrOpt('user_default_project_id_attribute', default=None),
         cfg.BoolOpt('user_allow_create', default=True),
         cfg.BoolOpt('user_allow_update', default=True),
@@ -193,7 +187,7 @@ FILE_OPTIONS = {
         cfg.BoolOpt('user_enabled_emulation', default=False),
         cfg.StrOpt('user_enabled_emulation_dn', default=None),
         cfg.ListOpt('user_additional_attribute_mapping',
-                    default=None),
+                    default=[]),
 
         cfg.StrOpt('tenant_tree_dn', default=None),
         cfg.StrOpt('tenant_filter', default=None),
@@ -205,14 +199,14 @@ FILE_OPTIONS = {
         cfg.StrOpt('tenant_enabled_attribute', default='enabled'),
         cfg.StrOpt('tenant_domain_id_attribute',
                    default='businessCategory'),
-        cfg.ListOpt('tenant_attribute_ignore', default=''),
+        cfg.ListOpt('tenant_attribute_ignore', default=[]),
         cfg.BoolOpt('tenant_allow_create', default=True),
         cfg.BoolOpt('tenant_allow_update', default=True),
         cfg.BoolOpt('tenant_allow_delete', default=True),
         cfg.BoolOpt('tenant_enabled_emulation', default=False),
         cfg.StrOpt('tenant_enabled_emulation_dn', default=None),
         cfg.ListOpt('tenant_additional_attribute_mapping',
-                    default=None),
+                    default=[]),
 
         cfg.StrOpt('role_tree_dn', default=None),
         cfg.StrOpt('role_filter', default=None),
@@ -220,12 +214,12 @@ FILE_OPTIONS = {
         cfg.StrOpt('role_id_attribute', default='cn'),
         cfg.StrOpt('role_name_attribute', default='ou'),
         cfg.StrOpt('role_member_attribute', default='roleOccupant'),
-        cfg.ListOpt('role_attribute_ignore', default=''),
+        cfg.ListOpt('role_attribute_ignore', default=[]),
         cfg.BoolOpt('role_allow_create', default=True),
         cfg.BoolOpt('role_allow_update', default=True),
         cfg.BoolOpt('role_allow_delete', default=True),
         cfg.ListOpt('role_additional_attribute_mapping',
-                    default=None),
+                    default=[]),
 
         cfg.StrOpt('group_tree_dn', default=None),
         cfg.StrOpt('group_filter', default=None),
@@ -234,12 +228,12 @@ FILE_OPTIONS = {
         cfg.StrOpt('group_name_attribute', default='ou'),
         cfg.StrOpt('group_member_attribute', default='member'),
         cfg.StrOpt('group_desc_attribute', default='description'),
-        cfg.ListOpt('group_attribute_ignore', default=''),
+        cfg.ListOpt('group_attribute_ignore', default=[]),
         cfg.BoolOpt('group_allow_create', default=True),
         cfg.BoolOpt('group_allow_update', default=True),
         cfg.BoolOpt('group_allow_delete', default=True),
         cfg.ListOpt('group_additional_attribute_mapping',
-                    default=None),
+                    default=[]),
 
         cfg.StrOpt('tls_cacertfile', default=None),
         cfg.StrOpt('tls_cacertdir', default=None),
@@ -256,33 +250,25 @@ FILE_OPTIONS = {
                    default='keystone.auth.plugins.token.Token'),
         #deals with REMOTE_USER authentication
         cfg.StrOpt('external',
-                   default='keystone.auth.plugins.external.Default')],
+                   default='keystone.auth.plugins.external.DefaultDomain')],
     'paste_deploy': [
         cfg.StrOpt('config_file', default=None)],
     'memcache': [
-        cfg.StrOpt('servers', default='localhost:11211'),
+        cfg.ListOpt('servers', default=['localhost:11211']),
         cfg.IntOpt('max_compare_and_set_retry', default=16)],
     'catalog': [
         cfg.StrOpt('template_file',
                    default='default_catalog.templates'),
         cfg.StrOpt('driver',
-                   default='keystone.catalog.backends.sql.Catalog')]}
+                   default='keystone.catalog.backends.sql.Catalog')],
+    'kvs': [
+        cfg.ListOpt('backends', default=[]),
+        cfg.StrOpt('config_prefix', default='keystone.kvs'),
+        cfg.BoolOpt('enable_key_mangler', default=True),
+        cfg.IntOpt('default_lock_timeout', default=5)]}
 
 
 CONF = cfg.CONF
-
-
-def setup_logging(conf, product_name='keystone'):
-    """Sets up the logging options for a log with supplied name
-
-    :param conf: a cfg.ConfOpts object
-    """
-    # NOTE(ldbragst): This method will be removed along with other
-    # refactoring in favor of using the
-    # keystone/openstack/common/log.py implementation. This just ensures
-    # that in the time between introduction and refactoring, we still have
-    # a working logging implementation.
-    logging.setup(product_name)
 
 
 def setup_authentication(conf=None):

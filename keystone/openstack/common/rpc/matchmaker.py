@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 #    Copyright 2011 Cloudscaling Group, Inc
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -92,7 +90,7 @@ class MatchMakerBase(object):
         """Acknowledge that a key.host is alive.
 
         Used internally for updating heartbeats, but may also be used
-        publically to acknowledge a system is alive (i.e. rpc message
+        publicly to acknowledge a system is alive (i.e. rpc message
         successfully sent to host)
         """
         pass
@@ -174,7 +172,7 @@ class HeartbeatMatchMakerBase(MatchMakerBase):
         """Acknowledge that a host.topic is alive.
 
         Used internally for updating heartbeats, but may also be used
-        publically to acknowledge a system is alive (i.e. rpc message
+        publicly to acknowledge a system is alive (i.e. rpc message
         successfully sent to host)
         """
         raise NotImplementedError("Must implement ack_alive")

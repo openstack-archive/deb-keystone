@@ -18,10 +18,8 @@ fixtures>=0.3.14
 # mock object framework
 mock>=1.0
 mox>=0.5.3
-# Optional KVS feature encryption testing
-pycrypto>=2.6
 # required to build documentation
-sphinx>=1.1.2
+sphinx>=1.1.2,<1.2
 # test wsgi apps without starting an http server
 WebTest>=2.0
 
@@ -37,8 +35,6 @@ httplib2
 # replaces httplib2 in keystoneclient >=0.2.1
 requests>=1.1
 keyring>=1.6.1,<2.0
-
-netifaces>=0.5
 
 # For documentation
 oslo.sphinx

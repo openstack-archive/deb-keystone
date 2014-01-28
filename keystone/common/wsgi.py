@@ -23,20 +23,22 @@
 import re
 
 import routes.middleware
+import six
 import webob.dec
 import webob.exc
 
 from keystone.common import config
+from keystone.common import dependency
 from keystone.common import utils
 from keystone import exception
 from keystone.openstack.common import gettextutils
 from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 
 
 CONF = config.CONF
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 # Environment variable used to pass the request context
 CONTEXT_ENV = 'openstack.context'
@@ -48,30 +50,6 @@ PARAMS_ENV = 'openstack.params'
 
 _RE_PASS = re.compile(r'([\'"].*?password[\'"]\s*:\s*u?[\'"]).*?([\'"])',
                       re.DOTALL)
-
-
-def mask_password(message, is_unicode=False, secret="***"):
-    """Replace password with 'secret' in message.
-
-    :param message: The string which include security information.
-    :param is_unicode: Is unicode string ?
-    :param secret: substitution string default to "***".
-    :returns: The string
-
-    For example:
-       >>> mask_password('"password" : "aaaaa"')
-       '"password" : "***"'
-       >>> mask_password("'original_password' : 'aaaaa'")
-       "'original_password' : '***'"
-       >>> mask_password("u'original_password' :   u'aaaaa'")
-       "u'original_password' :   u'***'"
-    """
-    if is_unicode:
-        message = unicode(message)
-    # Match the group 1,2 and replace all others with 'secret'
-    secret = r"\g<1>" + secret + r"\g<2>"
-    result = _RE_PASS.sub(secret, message)
-    return result
 
 
 def validate_token_bind(context, token_ref):
@@ -201,6 +179,7 @@ class BaseApplication(object):
         raise NotImplementedError('You must implement __call__')
 
 
+@dependency.requires('assignment_api', 'policy_api', 'token_api')
 class Application(BaseApplication):
     @webob.dec.wsgify(RequestClass=Request)
     def __call__(self, req):
@@ -305,6 +284,26 @@ class Application(BaseApplication):
             # Accept either is_admin or the admin role
             self.policy_api.enforce(creds, 'admin_required', {})
 
+    def _require_attribute(self, ref, attr):
+        """Ensures the reference contains the specified attribute."""
+        if ref.get(attr) is None or ref.get(attr) == '':
+            msg = '%s field is required and cannot be empty' % attr
+            raise exception.ValidationError(message=msg)
+
+    def _get_trust_id_for_request(self, context):
+        """Get the trust_id for a call.
+
+        Retrieve the trust_id from the token
+        Returns None if token is is not trust scoped
+        """
+        try:
+            token_ref = self.token_api.get_token(context['token_id'])
+        except exception.TokenNotFound:
+            LOG.warning(_('Invalid token in _get_trust_id_for_request'))
+            raise exception.Unauthorized()
+
+        return token_ref.get('trust_id')
+
 
 class Middleware(Application):
     """Base WSGI middleware.
@@ -397,12 +396,12 @@ class Debug(Middleware):
         if not hasattr(LOG, 'isEnabledFor') or LOG.isEnabledFor(LOG.debug):
             LOG.debug('%s %s %s', ('*' * 20), 'REQUEST ENVIRON', ('*' * 20))
             for key, value in req.environ.items():
-                LOG.debug('%s = %s', key, mask_password(value,
-                                                        is_unicode=True))
+                LOG.debug('%s = %s', key,
+                          log.mask_password(value))
             LOG.debug('')
             LOG.debug('%s %s %s', ('*' * 20), 'REQUEST BODY', ('*' * 20))
             for line in req.body_file:
-                LOG.debug(mask_password(line))
+                LOG.debug('%s', log.mask_password(line))
             LOG.debug('')
 
         resp = req.get_response(self.application)
@@ -452,11 +451,6 @@ class Router(object):
           mapper.connect(None, '/v1.0/{path_info:.*}', controller=BlogApp())
 
         """
-        # if we're only running in debug, bump routes' internal logging up a
-        # notch, as it's very spammy
-        if CONF.debug:
-            logging.getLogger('routes.middleware')
-
         self.map = mapper
         self._router = routes.middleware.RoutesMiddleware(self._dispatch,
                                                           self.map)
@@ -580,11 +574,18 @@ def render_response(body=None, status=None, headers=None):
 
 def render_exception(error, user_locale=None):
     """Forms a WSGI response based on the current error."""
+
+    error_message = error.args[0]
+    message = gettextutils.translate(error_message, desired_locale=user_locale)
+    if message is error_message:
+        # translate() didn't do anything because it wasn't a Message,
+        # convert to a string.
+        message = six.text_type(message)
+
     body = {'error': {
         'code': error.code,
         'title': error.title,
-        'message': unicode(gettextutils.get_localized_message(error.args[0],
-                                                              user_locale)),
+        'message': message,
     }}
     headers = []
     if isinstance(error, exception.AuthPluginException):

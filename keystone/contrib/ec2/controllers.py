@@ -44,6 +44,8 @@ from keystone.common import utils
 from keystone import exception
 from keystone import token
 
+from keystone.openstack.common import jsonutils
+
 
 @dependency.requires('assignment_api', 'catalog_api', 'credential_api',
                      'identity_api', 'token_api', 'token_provider_api')
@@ -99,13 +101,17 @@ class Ec2Controller(controller.V2Controller):
 
         # TODO(termie): don't create new tokens every time
         # TODO(termie): this is copied from TokenController.authenticate
-        token_id = uuid.uuid4().hex
         tenant_ref = self.assignment_api.get_project(creds_ref['tenant_id'])
         user_ref = self.identity_api.get_user(creds_ref['user_id'])
         metadata_ref = {}
         metadata_ref['roles'] = (
             self.assignment_api.get_roles_for_user_and_project(
                 user_ref['id'], tenant_ref['id']))
+
+        trust_id = creds_ref.get('trust_id')
+        if trust_id:
+            metadata_ref['trust_id'] = trust_id
+            metadata_ref['trustee_user_id'] = user_ref['id']
 
         # Validate that the auth info is valid and nothing is disabled
         token.validate_auth_info(self, user_ref, tenant_ref)
@@ -147,12 +153,14 @@ class Ec2Controller(controller.V2Controller):
 
         self._assert_valid_user_id(user_id)
         self._assert_valid_project_id(tenant_id)
+        trust_id = self._get_trust_id_for_request(context)
         blob = {'access': uuid.uuid4().hex,
-                'secret': uuid.uuid4().hex}
+                'secret': uuid.uuid4().hex,
+                'trust_id': trust_id}
         credential_id = utils.hash_access_key(blob['access'])
         cred_ref = {'user_id': user_id,
                     'project_id': tenant_id,
-                    'blob': blob,
+                    'blob': jsonutils.dumps(blob),
                     'id': credential_id,
                     'type': 'ec2'}
         self.credential_api.create_credential(credential_id, cred_ref)
@@ -209,12 +217,19 @@ class Ec2Controller(controller.V2Controller):
         return self.credential_api.delete_credential(ec2_credential_id)
 
     def _convert_v3_to_ec2_credential(self, credential):
-
-        blob = credential['blob']
+        # Prior to bug #1259584 fix, blob was stored unserialized
+        # but it should be stored as a json string for compatibility
+        # with the v3 credentials API.  Fall back to the old behavior
+        # for backwards compatibility with existing DB contents
+        try:
+            blob = jsonutils.loads(credential['blob'])
+        except TypeError:
+            blob = credential['blob']
         return {'user_id': credential.get('user_id'),
                 'tenant_id': credential.get('project_id'),
                 'access': blob.get('access'),
-                'secret': blob.get('secret')}
+                'secret': blob.get('secret'),
+                'trust_id': blob.get('trust_id')}
 
     def _get_credentials(self, credential_id):
         """Return credentials from an ID.

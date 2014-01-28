@@ -23,11 +23,11 @@ from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import importutils
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 CONF = config.CONF
 
@@ -275,8 +275,23 @@ class AuthInfo(object):
         self._scope_data = (domain_id, project_id, trust)
 
 
-@dependency.requires('identity_api', 'token_provider_api')
+@dependency.requires('assignment_api', 'identity_api', 'token_api',
+                     'token_provider_api')
 class Auth(controller.V3Controller):
+
+    # Note(atiwari): From V3 auth controller code we are
+    # calling protection() wrappers, so we need to setup
+    # the member_name and  collection_name attributes of
+    # auth controller code.
+    # In the absence of these attributes, default 'entity'
+    # string will be used to represent the target which is
+    # generic. Policy can be defined using 'entity' but it
+    # would not reflect the exact entity that is in context.
+    # We are defining collection_name = 'tokens' and
+    # member_name = 'token' to facilitate policy decisions.
+    collection_name = 'tokens'
+    member_name = 'token'
+
     def __init__(self, *args, **kw):
         super(Auth, self).__init__(*args, **kw)
         config.setup_authentication()
@@ -385,7 +400,7 @@ class Auth(controller.V3Controller):
                 auth_response['methods'].append(method_name)
                 auth_response[method_name] = resp
 
-        if len(auth_response["methods"]) > 0:
+        if auth_response["methods"]:
             # authentication continuation required
             raise exception.AdditionalAuthRequired(auth_response)
 

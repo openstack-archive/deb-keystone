@@ -24,12 +24,12 @@ from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
 
 
 CONF = config.CONF
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
 @dependency.provider('credential_api')
@@ -95,3 +95,28 @@ class Driver(object):
 
         """
         raise exception.NotImplemented()
+
+    @abc.abstractmethod
+    def delete_credentials_for_project(self, project_id):
+        """Deletes all credentials for a project."""
+        self._delete_credentials(lambda cr: cr['project_id'] == project_id)
+
+    @abc.abstractmethod
+    def delete_credentials_for_user(self, user_id):
+        """Deletes all credentials for a user."""
+        self._delete_credentials(lambda cr: cr['user_id'] == user_id)
+
+    def _delete_credentials(self, match_fn):
+        """Do the actual credential deletion work (default implementation).
+
+        :param match_fn: function that takes a credential dict as the
+                         parameter and returns true or false if the
+                         identifier matches the credential dict.
+        """
+        for cr in self.list_credentials():
+            if match_fn(cr):
+                try:
+                    self.credential_api.delete_credential(cr['id'])
+                except exception.CredentialNotFound:
+                    LOG.debug(_('Deletion of credential is not required: %s'),
+                              cr['id'])

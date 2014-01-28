@@ -26,14 +26,20 @@ from keystone.openstack.common import gettextutils
 # contain static translated strings.
 gettextutils.install('keystone')
 
+from keystone.common import dependency
 from keystone.common import environment
+from keystone.common import sql
 from keystone import config
 from keystone.openstack.common import log
+from keystone import service
 
 
 CONF = config.CONF
+
+sql.initialize()
+
 CONF(project='keystone')
-config.setup_logging(CONF)
+config.setup_logging()
 
 environment.use_stdlib()
 name = os.path.basename(__file__)
@@ -41,8 +47,13 @@ name = os.path.basename(__file__)
 if CONF.debug:
     CONF.log_opt_values(log.getLogger(CONF.prog), logging.DEBUG)
 
+
+drivers = service.load_backends()
+
 # NOTE(ldbragst): 'application' is required in this context by WSGI spec.
 # The following is a reference to Python Paste Deploy documentation
 # http://pythonpaste.org/deploy/
 application = deploy.loadapp('config:%s' % config.find_paste_config(),
                              name=name)
+
+dependency.resolve_future_dependencies()

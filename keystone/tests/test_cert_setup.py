@@ -25,18 +25,13 @@ from keystone.tests import default_fixtures
 from keystone import token
 
 
-ROOTDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SSLDIR = "%s/tests/ssl/" % ROOTDIR
+SSLDIR = tests.dirs.tests('ssl')
 CONF = tests.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-def rootdir(*p):
-    return os.path.join(SSLDIR, *p)
-
-
-CERTDIR = rootdir("certs")
-KEYDIR = rootdir("private")
+CERTDIR = os.path.join(SSLDIR, 'certs')
+KEYDIR = os.path.join(SSLDIR, 'private')
 
 
 class CertSetupTestCase(tests.TestCase):
@@ -57,6 +52,14 @@ class CertSetupTestCase(tests.TestCase):
         self.load_backends()
         self.load_fixtures(default_fixtures)
         self.controller = token.controllers.Auth()
+
+        def cleanup_ssldir():
+            try:
+                shutil.rmtree(SSLDIR)
+            except OSError:
+                pass
+
+        self.addCleanup(cleanup_ssldir)
 
     def test_can_handle_missing_certs(self):
         self.opt_in_group('signing', certfile='invalid')
@@ -90,10 +93,3 @@ class CertSetupTestCase(tests.TestCase):
         self.assertTrue(os.path.exists(CONF.ssl.ca_certs))
         self.assertTrue(os.path.exists(CONF.ssl.certfile))
         self.assertTrue(os.path.exists(CONF.ssl.keyfile))
-
-    def tearDown(self):
-        try:
-            shutil.rmtree(rootdir(SSLDIR))
-        except OSError:
-            pass
-        super(CertSetupTestCase, self).tearDown()

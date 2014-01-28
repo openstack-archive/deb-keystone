@@ -71,6 +71,7 @@ following sections:
 * ``[ssl]`` - SSL configuration
 * ``[auth]`` - Authentication plugin configuration
 * ``[os_inherit]`` - Inherited Role Assignment extension
+* ``[endpoint_filter]`` - Endpoint Filtering extension configuration
 * ``[paste_deploy]`` - Pointer to the PasteDeploy configuration file
 
 The Keystone primary configuration file is expected to be named ``keystone.conf``.
@@ -129,7 +130,8 @@ file. It is up to the plugin to register its own configuration options.
 Keystone provides three authentication methods by default. ``password`` handles password
 authentication and ``token`` handles token authentication.  ``external`` is used in conjunction
 with authentication performed by a container web server that sets the ``REMOTE_USER``
-environment variable.
+environment variable. For more details, refer to :doc:`External Authentication
+<external-auth>`.
 
 How to Implement an Authentication Plugin
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -174,7 +176,8 @@ agree on the ``user_id`` in the ``auth_context``.
 The ``REMOTE_USER`` environment variable is only set from a containing webserver.  However,
 to ensure that a user must go through other authentication mechanisms, even if this variable
 is set, remove ``external`` from the list of plugins specified in ``methods``.  This effectively
-disables external authentication.
+disables external authentication.  For more details, refer to :doc:`External
+Authentication <external-auth>`.
 
 
 Token Provider
@@ -197,6 +200,32 @@ Conversely, if ``provider`` is ``keystone.token.providers.uuid.Provider``,
 For a customized provider, ``token_format`` must not set to ``PKI`` or
 ``UUID``.
 
+PKI or UUID?
+^^^^^^^^^^^^
+
+UUID-based tokens are randomly generated opaque strings that are issued and
+validated by the identity service. They must be persisted by the identity
+service in order to be later validated, and revoking them is simply a matter of
+deleting them from the token persistence backend.
+
+PKI-based tokens are Cryptographic Message Syntax (CMS) strings that can be
+verified offline using keystone's public signing key. The only reason for them
+to be persisted by the identity service is to later build token revocation
+lists (explicit lists of tokens that have been revoked), otherwise they are
+theoretically ephemeral. PKI tokens should therefore have much better scaling
+characteristics (decentralized validation). They are base-64 encoded (and are
+therefore not URL-friendly without encoding) and may be too long to fit in
+either headers or URLs if they contain extensive service catalogs or other
+additional attributes.
+
+.. WARNING::
+    Both UUID- and PKI-based tokens are bearer tokens, meaning that they must
+    be protected from unnecessary disclosure to prevent unauthorized access.
+
+The current architectural approaches for both UUID- and PKI-based tokens have
+pain points exposed by environments under heavy load (search bugs and
+blueprints for the latest details and potential solutions), although PKI tokens
+became the default configuration option in the Grizzly release.
 
 Caching Layer
 -------------
@@ -687,6 +716,13 @@ OAuth1.0a
    :maxdepth: 1
 
    extensions/oauth1-configuration.rst
+
+Endpoint Filtering
+------------------
+.. toctree::
+   :maxdepth: 1
+
+   extensions/endpoint_filter-configuration.rst
 
 .. _`prepare your deployment`:
 

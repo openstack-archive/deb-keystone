@@ -14,12 +14,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import six
+
 from keystone.common import config
-from keystone.openstack.common import log as logging
+from keystone.openstack.common import log
+from keystone.openstack.common import strutils
 
 
 CONF = config.CONF
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 # Tests use this to make exception message format errors fatal
 _FATAL_EXCEPTION_FORMAT_ERRORS = False
@@ -56,7 +59,20 @@ class Error(StandardError):
 
         """
         if not message:
-            message = self.message_format % kwargs
+            try:
+                message = self.message_format % kwargs
+            except UnicodeDecodeError:
+                try:
+                    kwargs = dict([(k, strutils.safe_decode(v)) for k, v in
+                                   six.iteritems(kwargs)])
+                except UnicodeDecodeError:
+                    # NOTE(jamielennox): This is the complete failure case
+                    # at least by showing the template we have some idea
+                    # of where the error is coming from
+                    message = self.message_format
+                else:
+                    message = self.message_format % kwargs
+
         return message
 
 
@@ -171,6 +187,10 @@ class PolicyNotFound(NotFound):
 
 class RoleNotFound(NotFound):
     message_format = _("Could not find role, %(role_id)s.")
+
+
+class RegionNotFound(NotFound):
+    message_format = _("Could not find region, %(region_id)s.")
 
 
 class ServiceNotFound(NotFound):
