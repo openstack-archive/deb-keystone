@@ -1,15 +1,14 @@
 Description: Fix missing gettextutil import
 Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
-Last-Update: 2012-12-10
+Last-Update: 2014-01-29
 
---- keystone-2014.1~b1.orig/keystone/common/utils.py
-+++ keystone-2014.1~b1/keystone/common/utils.py
-@@ -32,7 +32,7 @@ from keystone.common import config
- from keystone.common import environment
- from keystone import exception
- from keystone.openstack.common import log as logging
--
+--- keystone-2014.1~b2.orig/keystone/common/utils.py
++++ keystone-2014.1~b2/keystone/common/utils.py
+@@ -33,6 +33,7 @@ from keystone import exception
+ from keystone.openstack.common import log
+ from six import moves
+ 
 +from keystone.openstack.common.gettextutils import _
  
  CONF = config.CONF

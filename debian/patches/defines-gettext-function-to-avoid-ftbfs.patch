@@ -3,9 +3,11 @@ Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
 Last-Update: 2013-09-13
 
---- keystone-2013.2~b3.orig/keystone/exception.py
-+++ keystone-2013.2~b3/keystone/exception.py
-@@ -24,6 +24,8 @@ LOG = logging.getLogger(__name__)
+Index: keystone/keystone/exception.py
+===================================================================
+--- keystone.orig/keystone/exception.py	2014-01-29 00:33:35.000000000 +0800
++++ keystone/keystone/exception.py	2014-01-29 00:42:29.000000000 +0800
+@@ -27,6 +27,8 @@
  # Tests use this to make exception message format errors fatal
  _FATAL_EXCEPTION_FORMAT_ERRORS = False
  
