@@ -47,7 +47,7 @@ Last-Update: <YYYY-MM-DD>
              headers=req_headers)
 -
 +        if len(u) > 3:
-+            _, h, b, s = u
++            discardme, h, b, s = u
 +        else:
 +            h, b, s = u
          if (not b) or int(s) > 399:
@@ -63,7 +63,7 @@ Last-Update: <YYYY-MM-DD>
              body=context['query_string'],
              headers=headers)
 +        if len(u) > 3:
-+            _, h, b, s = u
++            discardme, h, b, s = u
 +        else:
 +            h, b, s = u
          params = oauth1.extract_non_oauth_params(b)
