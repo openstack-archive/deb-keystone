@@ -1,0 +1,45 @@
+Description: <short summary of the patch>
+ TODO: Put a short summary on the line above and replace this paragraph
+ with a longer explanation of this change. Complete the meta-information
+ with other relevant fields (see below for details). To make it easier, the
+ information below has been extracted from the changelog. Adjust it or drop
+ it.
+ .
+ keystone (2013.2.1-2) UNRELEASED; urgency=low
+ .
+   * Adds a cut -d" " -f1 when detecting the local interface connected to the
+     default gateway, so that it works with more than one default gateway.
+   * Updated es.po debconf translation thanks to Matias A. Bellone
+     <matiasbellone+debian@gmail.com> (Closes: #732538).
+   * Backported patch to replace oauth2 by oauthlib.
+   * Changed dependency from oauth2 to oauthlib.
+ .
+   [gustavo panizzo]
+   * Patch to improve performance (lp: #1251123).
+Author: Thomas Goirand <zigo@debian.org>
+Bug-Debian: http://bugs.debian.org/732538
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1251123
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- keystone-2013.2.1.orig/keystone/contrib/oauth1/controllers.py
++++ keystone-2013.2.1/keystone/contrib/oauth1/controllers.py
+@@ -252,6 +252,7 @@ class OAuthControllerV3(controller.V3Con
+             request_validator=validator.OAuthValidator(),
+             token_generator=oauth1.token_generator)
+         u = access_verifier.create_access_token_response(
++            url,
+             http_method='POST',
+             body=context['query_string'],
+             headers=headers)
