@@ -13,7 +13,7 @@ Author: Matthieu Huin <mhu@enovance.com>
 Origin: upstream, https://review.openstack.org/#/c/64427/
 Bug-Ubuntu: https://launchpad.net/bugs/1240382
 Reviewed-By: Thomas Goirand <zigo@debian.org>
-Last-Update: 2013-01-19
+Last-Update: 2014-02-04
 
 --- keystone-2013.2.1.orig/requirements.txt
 +++ keystone-2013.2.1/requirements.txt
@@ -326,7 +326,7 @@ Last-Update: 2013-01-19
  from keystone import exception
  from keystone.openstack.common import jsonutils
  from keystone.openstack.common import timeutils
-@@ -177,26 +178,21 @@ class OAuthControllerV3(controller.V3Con
+@@ -177,26 +178,24 @@ class OAuthControllerV3(controller.V3Con
              raise exception.ValidationError(
                  attribute='requested_project_id', target='request')
  
@@ -342,7 +342,7 @@ Last-Update: 2013-01-19
 +        request_verifier = oauth1.RequestTokenEndpoint(
 +            request_validator=validator.OAuthValidator(),
 +            token_generator=oauth1.token_generator)
-+        h, b, s = request_verifier.create_request_token_response(
++        u = request_verifier.create_request_token_response(
 +            url,
              http_method='POST',
 -            http_url=url,
@@ -360,13 +360,16 @@ Last-Update: 2013-01-19
 -            msg = _('Non-oauth parameter - project, do not match')
 +            body=context['query_string'],
 +            headers=req_headers)
-+
++        if len(u) > 3:
++            discardme, h, b, s = u
++        else:
++            h, b, s = u
 +        if (not b) or int(s) > 399:
 +            msg = _('Invalid signature')
              raise exception.Unauthorized(message=msg)
  
          request_token_duration = CONF.oauth1.request_token_duration
-@@ -236,7 +232,6 @@ class OAuthControllerV3(controller.V3Con
+@@ -236,7 +235,6 @@ class OAuthControllerV3(controller.V3Con
              raise exception.ValidationError(
                  attribute='oauth_verifier', target='request')
  
@@ -374,7 +377,7 @@ Last-Update: 2013-01-19
          req_token = self.oauth_api.get_request_token(
              request_token_id)
  
-@@ -248,24 +243,16 @@ class OAuthControllerV3(controller.V3Con
+@@ -248,24 +246,21 @@ class OAuthControllerV3(controller.V3Con
              if now > expires:
                  raise exception.Unauthorized(_('Request token is expired'))
  
@@ -399,10 +402,15 @@ Last-Update: 2013-01-19
 +        access_verifier = oauth1.AccessTokenEndpoint(
 +            request_validator=validator.OAuthValidator(),
 +            token_generator=oauth1.token_generator)
-+        h, b, s = access_verifier.create_access_token_response(
++        u = access_verifier.create_access_token_response(
++            url,
 +            http_method='POST',
 +            body=context['query_string'],
 +            headers=headers)
++        if len(u) > 3:
++            discardme, h, b, s = u
++        else:
++            h, b, s = u
 +        params = oauth1.extract_non_oauth_params(b)
          if len(params) != 0:
              msg = _('There should not be any non-oauth parameters')
