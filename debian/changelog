@@ -1,3 +1,9 @@
+keystone (2013.2.2-1) unstable; urgency=medium
+
+  * New upstream point release.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 14 Feb 2014 09:57:43 +0800
+
 keystone (2013.2.1-2) unstable; urgency=medium
 
   * Adds a cut -d" " -f1 when detecting the local interface connected to the
