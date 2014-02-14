@@ -1,3 +1,10 @@
+keystone (2013.2.2-2) unstable; urgency=medium
+
+  * Now using --os-token and --os-endpoint instead of --token and --endpoint
+    which seems to be not working anymore.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 14 Feb 2014 16:20:52 +0000
+
 keystone (2013.2.2-1) unstable; urgency=medium
 
   * New upstream point release.

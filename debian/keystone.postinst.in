@@ -42,9 +42,9 @@ keystone_create_endpoint_postinst () {
 			db_get keystone/region-name
 			REGION_NAME=${RET}
 			if [ -n "${REGION_NAME}" ] ; then
-				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
+				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
 					--name=keystone --type=identity --description="Keystone Identity Service")
-				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --token ${AUTH_TOKEN} --endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
+				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
 					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
 					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
 					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 \
