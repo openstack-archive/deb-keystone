@@ -2,10 +2,42 @@ keystone (2014.1~b2-1) experimental; urgency=low
 
   * New upstream release (Icehouse beta 1).
   * Refresh patches.
-  * Removed CVE-2013-4477 applied upstream.
   * Reviewed (build-)dependencies.
 
- -- Thomas Goirand <zigo@debian.org>  Mon, 09 Dec 2013 22:26:07 +0800
+ -- Thomas Goirand <zigo@debian.org>  Mon, 17 Feb 2014 15:27:56 +0800
+
+keystone (2013.2.2-1) unstable; urgency=medium
+
+  * New upstream point release.
+  * Refreshed patches.
+  * Remove patches applied upstream:
+
+Limit_calls_to_memcache_backend_as_user_token_index_increases_in_size.patch
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 14 Feb 2014 09:57:43 +0800
+
+keystone (2013.2.1-2) unstable; urgency=medium
+
+  * Adds a cut -d" " -f1 when detecting the local interface connected to the
+    default gateway, so that it works with more than one default gateway.
+  * Updated es.po debconf translation thanks to Matias A. Bellone
+    <matiasbellone+debian@gmail.com> (Closes: #732538).
+  * Backported patch to replace oauth2 by oauthlib.
+  * Changed dependency from oauth2 to oauthlib.
+
+  [gustavo panizzo]
+  * Patch to improve performance (lp: #1251123).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 20 Dec 2013 22:00:34 +0800
+
+keystone (2013.2.1-1) unstable; urgency=high
+
+  * New upstream release (Closes: #731981) This fixes CVE-2013-6391.
+  * Refreshed sql_conn.patch.
+  * Removed CVE-2013-4477-havana.patch now applied upstream.
+  * (build-)depends on python-iso8601 >= 0.1.8 instead of 0.1.4.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 16 Dec 2013 16:46:48 +0800
 
 keystone (2013.2-4) unstable; urgency=low
 
