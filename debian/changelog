@@ -1,3 +1,9 @@
+keystone (2013.2.2-3) UNRELEASED; urgency=medium
+
+  * Trying to build with SQLA 0.9.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 24 Feb 2014 09:39:47 +0000
+
 keystone (2013.2.2-2) unstable; urgency=medium
 
   * Now using --os-token and --os-endpoint instead of --token and --endpoint
