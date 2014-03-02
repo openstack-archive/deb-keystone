@@ -2,3 +2,4 @@ sql_conn.patch
 fixes-keystone-default-catalog.patch
 defines-gettext-function-to-avoid-ftbfs.patch
 Replaces_python-oauth2_by_oauthlib.patch
+SQLAlchemy_0.9_Change_to_support_more_strict_dialect_checking.patch

@@ -1,6 +1,7 @@
 keystone (2013.2.2-3) UNRELEASED; urgency=medium
 
-  * Trying to build with SQLA 0.9.
+  * Rebuild with SQLA 0.9.
+  * Adds SQLAlchemy_0.9_Change_to_support_more_strict_dialect_checking.patch.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 24 Feb 2014 09:39:47 +0000
 
