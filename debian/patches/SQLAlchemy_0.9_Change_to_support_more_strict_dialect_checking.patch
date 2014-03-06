@@ -1,17 +1,15 @@
-From: Morgan Fainberg <m@metacloud.com>
+Description: SQLAlchemy Change to support more strict dialect checking
+ SQLAlchemy Change to support more strict dialect checking
+ .
+ Update a couple DELETE operations within the test_sql_upgrade test case to
+ support the more strict dialect checking that occurs in 0.9.3 of SQLAlchemy
+ for "additional arguments".
+Author: Morgan Fainberg <m@metacloud.com>
+Origin: upstream, https://review.openstack.org/77392
 Date: Sun, 2 Mar 2014 05:31:54 +0000 (-0800)
-Subject: SQLAlchemy Change to support more strict dialect checking
 X-Git-Url: https://review.openstack.org/gitweb?p=openstack%2Fkeystone.git;a=commitdiff_plain;h=181c3c1dcc2e6ab6cd0a6c59d3b0ef9610a6d893
-
-SQLAlchemy Change to support more strict dialect checking
-
-Update a couple DELETE operations within the test_sql_upgrade test
-case to support the more strict dialect checking that occurs in
-0.9.3 of SQLAlchemy for "additional arguments".
-
 Closes-Bug: #1286717
 Change-Id: I82b57257a8b49d798d813c65e76757021676ba90
----
 
 diff --git a/keystone/tests/test_sql_upgrade.py b/keystone/tests/test_sql_upgrade.py
 index e5def4c..99f5a3b 100644
