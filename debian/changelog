@@ -1,4 +1,4 @@
-keystone (2013.2.2-3) UNRELEASED; urgency=medium
+keystone (2013.2.2-3) unstable; urgency=medium
 
   * Rebuild with SQLA 0.9.
   * Adds SQLAlchemy_0.9_Change_to_support_more_strict_dialect_checking.patch.
