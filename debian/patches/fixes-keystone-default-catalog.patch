@@ -7,10 +7,10 @@ Last-Update: 2013-02-03
 
 Index: keystone/etc/default_catalog.templates
 ===================================================================
---- keystone.orig/etc/default_catalog.templates	2013-09-12 10:07:04.000000000 +0800
-+++ keystone/etc/default_catalog.templates	2013-09-12 10:07:12.000000000 +0800
+--- keystone.orig/etc/default_catalog.templates	2014-03-09 13:19:36.000000000 +0800
++++ keystone/etc/default_catalog.templates	2014-03-09 13:26:48.000000000 +0800
 @@ -1,27 +1,27 @@
- # config for TemplatedCatalog, using camelCase because I don't want to do
+ # config for templated.Catalog, using camelCase because I don't want to do
  # translations for keystone compat
 -catalog.RegionOne.identity.publicURL = http://localhost:$(public_port)s/v2.0
 -catalog.RegionOne.identity.adminURL = http://localhost:$(admin_port)s/v2.0

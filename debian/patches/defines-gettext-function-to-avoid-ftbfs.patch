@@ -5,14 +5,14 @@ Last-Update: 2013-09-13
 
 Index: keystone/keystone/exception.py
 ===================================================================
---- keystone.orig/keystone/exception.py	2014-01-29 00:33:35.000000000 +0800
-+++ keystone/keystone/exception.py	2014-01-29 00:42:29.000000000 +0800
-@@ -27,6 +27,8 @@
+--- keystone.orig/keystone/exception.py	2014-03-09 13:19:36.000000000 +0800
++++ keystone/keystone/exception.py	2014-03-09 13:26:54.000000000 +0800
+@@ -25,6 +25,8 @@
  # Tests use this to make exception message format errors fatal
  _FATAL_EXCEPTION_FORMAT_ERRORS = False
  
 +def _(a):
 + return a
  
- class Error(StandardError):
+ class Error(Exception):
      """Base error class.

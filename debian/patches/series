@@ -1,5 +1,5 @@
-sql_conn.patch
 fixes-keystone-default-catalog.patch
 defines-gettext-function-to-avoid-ftbfs.patch
 fix-missing-gettextutil.py-import.patch
-fixes-webob-requirements.txt
+fix-sqla-version-in-requirements.txt
+fixes-default-connection.patch
