@@ -6,6 +6,9 @@ pysqlite
 # Optional backend: Memcache
 python-memcached>=1.48
 
+# Optional dogpile backend: MongoDB
+pymongo>=2.4
+
 # Optional backend: LDAP
 # authenticate against an existing LDAP server
 python-ldap==2.3.13
@@ -23,18 +26,23 @@ sphinx>=1.1.2,<1.2
 # test wsgi apps without starting an http server
 WebTest>=2.0
 
-extras
 discover
-python-subunit
-testrepository>=0.0.17
-testtools>=0.9.32
+python-subunit>=0.0.18
+testrepository>=0.0.18
+testtools>=0.9.34
+testscenarios>=0.4
 
 # for python-keystoneclient
 # keystoneclient <0.2.1
-httplib2
+httplib2>=0.7.5
 # replaces httplib2 in keystoneclient >=0.2.1
 requests>=1.1
-keyring>=1.6.1,<2.0
+keyring>=1.6.1,<2.0,>=2.1
 
 # For documentation
-oslo.sphinx
+oslosphinx
+
+# Used only by oslo
+kombu>=2.4.8
+lockfile>=0.8
+stevedore>=0.14

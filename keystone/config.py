@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -22,11 +20,35 @@ from keystone import exception
 from keystone.openstack.common import log
 
 
-config.configure()
 CONF = config.CONF
 
 setup_authentication = config.setup_authentication
 configure = config.configure
+
+
+def set_default_for_default_log_levels():
+    """Set the default for the default_log_levels option for keystone.
+
+    Keystone uses some packages that other OpenStack services don't use that do
+    logging. This will set the default_log_levels default level for those
+    packages.
+
+    This function needs to be called before CONF().
+
+    """
+
+    extra_log_level_defaults = [
+        'dogpile=INFO',
+        'routes=INFO',
+    ]
+
+    def find_default_log_levels_opt():
+        for opt in log.log_opts:
+            if opt.dest == 'default_log_levels':
+                return opt
+
+    opt = find_default_log_levels_opt()
+    opt.default.extend(extra_log_level_defaults)
 
 
 def setup_logging():

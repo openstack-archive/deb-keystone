@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -30,7 +28,6 @@ from keystone.openstack.common import versionutils
 
 
 CONF = config.CONF
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 LOG = log.getLogger(__name__)
 
 
@@ -99,7 +96,7 @@ class User(controller.V2Controller):
     def get_user(self, context, user_id):
         self.assert_admin(context)
         ref = self.identity_api.get_user(user_id)
-        return {'user': self.identity_api.v3_to_v2_user(ref)}
+        return {'user': self.v3_to_v2_user(ref)}
 
     @controller.v2_deprecated
     def get_users(self, context):
@@ -111,18 +108,20 @@ class User(controller.V2Controller):
 
         self.assert_admin(context)
         user_list = self.identity_api.list_users()
-        return {'users': self.identity_api.v3_to_v2_user(user_list)}
+        return {'users': self.v3_to_v2_user(user_list)}
 
     @controller.v2_deprecated
     def get_user_by_name(self, context, user_name):
         self.assert_admin(context)
-        ref = self.identity_api.get_user_by_name(user_name, DEFAULT_DOMAIN_ID)
-        return {'user': self.identity_api.v3_to_v2_user(ref)}
+        ref = self.identity_api.get_user_by_name(
+            user_name, CONF.identity.default_domain_id)
+        return {'user': self.v3_to_v2_user(ref)}
 
     # CRUD extension
     @controller.v2_deprecated
     def create_user(self, context, user):
         user = self._normalize_OSKSADM_password_on_request(user)
+        user = self.normalize_username_in_request(user)
         user = self._normalize_dict(user)
         self.assert_admin(context)
 
@@ -142,7 +141,7 @@ class User(controller.V2Controller):
         user_id = uuid.uuid4().hex
         user_ref = self._normalize_domain_id(context, user.copy())
         user_ref['id'] = user_id
-        new_user_ref = self.identity_api.v3_to_v2_user(
+        new_user_ref = self.v3_to_v2_user(
             self.identity_api.create_user(user_id, user_ref))
 
         if default_project_id is not None:
@@ -153,6 +152,7 @@ class User(controller.V2Controller):
     @controller.v2_deprecated
     def update_user(self, context, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
+        user = self.normalize_username_in_request(user)
         self.assert_admin(context)
 
         if 'enabled' in user and not isinstance(user['enabled'], bool):
@@ -163,7 +163,7 @@ class User(controller.V2Controller):
         if default_project_id is not None:
             user['default_project_id'] = default_project_id
 
-        old_user_ref = self.identity_api.v3_to_v2_user(
+        old_user_ref = self.v3_to_v2_user(
             self.identity_api.get_user(user_id))
 
         # Check whether a tenant is being added or changed for the user.
@@ -179,7 +179,7 @@ class User(controller.V2Controller):
             # user update.
             self.assignment_api.get_project(default_project_id)
 
-        user_ref = self.identity_api.v3_to_v2_user(
+        user_ref = self.v3_to_v2_user(
             self.identity_api.update_user(user_id, user))
 
         # If 'tenantId' is in either ref, we might need to add or remove the
@@ -276,16 +276,20 @@ class UserV3(controller.V3Controller):
 
     @controller.filterprotected('domain_id', 'email', 'enabled', 'name')
     def list_users(self, context, filters):
+        hints = UserV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_users(
-            domain_scope=self._get_domain_id_for_request(context))
-        return UserV3.wrap_collection(context, refs, filters)
+            domain_scope=self._get_domain_id_for_request(context),
+            hints=hints)
+        return UserV3.wrap_collection(context, refs, hints=hints)
 
     @controller.filterprotected('domain_id', 'email', 'enabled', 'name')
     def list_users_in_group(self, context, filters, group_id):
+        hints = UserV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_users_in_group(
             group_id,
-            domain_scope=self._get_domain_id_for_request(context))
-        return UserV3.wrap_collection(context, refs, filters)
+            domain_scope=self._get_domain_id_for_request(context),
+            hints=hints)
+        return UserV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_user(self, context, user_id):
@@ -346,14 +350,10 @@ class UserV3(controller.V3Controller):
 
         domain_scope = self._get_domain_id_for_request(context)
         try:
-            self.identity_api.authenticate(user_id=user_id,
-                                           password=original_password,
-                                           domain_scope=domain_scope)
+            self.identity_api.change_password(
+                context, user_id, original_password, password, domain_scope)
         except AssertionError:
             raise exception.Unauthorized()
-
-        update_dict = {'password': password}
-        self._update_user(context, user_id, update_dict, domain_scope)
 
 
 @dependency.requires('identity_api')
@@ -376,16 +376,20 @@ class GroupV3(controller.V3Controller):
 
     @controller.filterprotected('domain_id', 'name')
     def list_groups(self, context, filters):
+        hints = GroupV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_groups(
-            domain_scope=self._get_domain_id_for_request(context))
-        return GroupV3.wrap_collection(context, refs, filters)
+            domain_scope=self._get_domain_id_for_request(context),
+            hints=hints)
+        return GroupV3.wrap_collection(context, refs, hints=hints)
 
     @controller.filterprotected('name')
     def list_groups_for_user(self, context, filters, user_id):
+        hints = GroupV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_groups_for_user(
             user_id,
-            domain_scope=self._get_domain_id_for_request(context))
-        return GroupV3.wrap_collection(context, refs, filters)
+            domain_scope=self._get_domain_id_for_request(context),
+            hints=hints)
+        return GroupV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_group(self, context, group_id):

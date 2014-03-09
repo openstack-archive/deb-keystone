@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -79,7 +77,7 @@ class UserAuthInfo(object):
         if not user_id and not user_name:
             raise exception.ValidationError(attribute='id or name',
                                             target='user')
-        self.password = user_info.get('password', None)
+        self.password = user_info.get('password')
         try:
             if user_name:
                 if 'domain' not in user_info:
@@ -104,6 +102,9 @@ class UserAuthInfo(object):
 
 @dependency.requires('identity_api')
 class Password(auth.AuthMethodHandler):
+
+    method = METHOD_NAME
+
     def authenticate(self, context, auth_payload, user_context):
         """Try to authenticate against the identity backend."""
         user_info = UserAuthInfo.create(auth_payload)
@@ -112,6 +113,7 @@ class Password(auth.AuthMethodHandler):
         # all we care is password matches
         try:
             self.identity_api.authenticate(
+                context,
                 user_id=user_info.user_id,
                 password=user_info.password,
                 domain_scope=user_info.domain_id)

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012-2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,7 +19,7 @@ import ldap as ldap
 
 from keystone import assignment
 from keystone import clean
-from keystone.common import dependency
+from keystone.common import driver_hints
 from keystone.common import ldap as common_ldap
 from keystone.common import models
 from keystone import config
@@ -34,7 +32,6 @@ CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 
-@dependency.requires('identity_api')
 class Assignment(assignment.Driver):
     def __init__(self):
         super(Assignment, self).__init__()
@@ -55,16 +52,20 @@ class Assignment(assignment.Driver):
     def get_project(self, tenant_id):
         return self._set_default_domain(self.project.get(tenant_id))
 
-    def list_projects(self, domain_id=None):
-        # We don't support multiple domains within this driver, so ignore
-        # any domain passed.
+    def list_projects(self, hints):
         return self._set_default_domain(self.project.get_all())
+
+    def list_projects_in_domain(self, domain_id):
+        # We don't support multiple domains within this driver, so ignore
+        # any domain specified
+        return self.list_projects(driver_hints.Hints())
 
     def get_project_by_name(self, tenant_name, domain_id):
         self._validate_default_domain_id(domain_id)
         return self._set_default_domain(self.project.get_by_name(tenant_name))
 
     def create_project(self, tenant_id, tenant):
+        self.project.check_allow_create()
         tenant = self._validate_default_domain(tenant)
         tenant['name'] = clean.project_name(tenant['name'])
         data = tenant.copy()
@@ -75,6 +76,7 @@ class Assignment(assignment.Driver):
         return self._set_default_domain(self.project.create(data))
 
     def update_project(self, tenant_id, tenant):
+        self.project.check_allow_update()
         tenant = self._validate_default_domain(tenant)
         if 'name' in tenant:
             tenant['name'] = clean.project_name(tenant['name'])
@@ -84,7 +86,6 @@ class Assignment(assignment.Driver):
                       domain_id=None, group_id=None):
 
         def _get_roles_for_just_user_and_project(user_id, tenant_id):
-            self.identity_api.get_user(user_id)
             self.get_project(tenant_id)
             return [self.role._dn_to_id(a.role_dn)
                     for a in self.role.get_role_assignments
@@ -92,7 +93,6 @@ class Assignment(assignment.Driver):
                     if self.user._dn_to_id(a.user_dn) == user_id]
 
         def _get_roles_for_group_and_project(group_id, project_id):
-            self.identity_api.get_group(group_id)
             self.get_project(project_id)
             group_dn = self.group._id_to_dn(group_id)
             # NOTE(marcos-fermin-lobo): In Active Directory, for functions
@@ -107,7 +107,7 @@ class Assignment(assignment.Driver):
                     if a.user_dn.upper() == group_dn.upper()]
 
         if domain_id is not None:
-            msg = 'Domain metadata not supported by LDAP'
+            msg = _('Domain metadata not supported by LDAP')
             raise exception.NotImplemented(message=msg)
         if group_id is None and user_id is None:
             return {}
@@ -127,14 +127,13 @@ class Assignment(assignment.Driver):
     def get_role(self, role_id):
         return self.role.get(role_id)
 
-    def list_roles(self):
+    def list_roles(self, hints):
         return self.role.get_all()
 
-    def list_projects_for_user(self, user_id, group_ids):
+    def list_projects_for_user(self, user_id, group_ids, hints):
         # NOTE(henry-nash): The LDAP backend is being deprecated, so no
         # support is provided for projects that the user has a role on solely
         # by virtue of group membership.
-        self.identity_api.get_user(user_id)
         user_dn = self.user._id_to_dn(user_id)
         associations = (self.role.list_project_roles_for_user
                         (user_dn, self.project.tree_dn))
@@ -143,6 +142,15 @@ class Assignment(assignment.Driver):
         # domain_id before we return the list.
         return [self._set_default_domain(x) for x in
                 self.project.get_user_projects(user_dn, associations)]
+
+    def get_roles_for_groups(self, group_ids, project_id=None, domain_id=None):
+        raise exception.NotImplemented()
+
+    def list_projects_for_groups(self, group_ids):
+        raise exception.NotImplemented()
+
+    def list_domains_for_groups(self, group_ids):
+        raise exception.NotImplemented()
 
     def list_user_ids_for_project(self, tenant_id):
         self.get_project(tenant_id)
@@ -160,7 +168,6 @@ class Assignment(assignment.Driver):
                                  self.project._id_to_dn(tenant_id))
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
-        self.identity_api.get_user(user_id)
         self.get_project(tenant_id)
         self.get_role(role_id)
         user_dn = self.user._id_to_dn(user_id)
@@ -172,7 +179,6 @@ class Assignment(assignment.Driver):
                                    tenant_dn=tenant_dn)
 
     def _add_role_to_group_and_project(self, group_id, tenant_id, role_id):
-        self.identity_api.get_group(group_id)
         self.get_project(tenant_id)
         self.get_role(role_id)
         group_dn = self.group._id_to_dn(group_id)
@@ -183,16 +189,14 @@ class Assignment(assignment.Driver):
                                     role_dn=role_dn,
                                     tenant_dn=tenant_dn)
 
-    def _create_metadata(self, user_id, tenant_id, metadata):
-        return {}
-
     def create_role(self, role_id, role):
+        self.role.check_allow_create()
         try:
             self.get_role(role_id)
         except exception.NotFound:
             pass
         else:
-            msg = 'Duplicate ID, %s.' % role_id
+            msg = _('Duplicate ID, %s.') % role_id
             raise exception.Conflict(type='role', details=msg)
 
         try:
@@ -200,15 +204,17 @@ class Assignment(assignment.Driver):
         except exception.NotFound:
             pass
         else:
-            msg = 'Duplicate name, %s.' % role['name']
+            msg = _('Duplicate name, %s.') % role['name']
             raise exception.Conflict(type='role', details=msg)
 
         return self.role.create(role)
 
     def delete_role(self, role_id):
+        self.role.check_allow_delete()
         return self.role.delete(role_id, self.project.tree_dn)
 
     def delete_project(self, tenant_id):
+        self.project.check_allow_delete()
         if self.project.subtree_delete_enabled:
             self.project.deleteTree(tenant_id)
         else:
@@ -232,29 +238,30 @@ class Assignment(assignment.Driver):
                                      group_id, role_id)
 
     def update_role(self, role_id, role):
+        self.role.check_allow_update()
         self.get_role(role_id)
         return self.role.update(role_id, role)
 
     def create_domain(self, domain_id, domain):
         if domain_id == CONF.identity.default_domain_id:
-            msg = 'Duplicate ID, %s.' % domain_id
+            msg = _('Duplicate ID, %s.') % domain_id
             raise exception.Conflict(type='domain', details=msg)
-        raise exception.Forbidden('Domains are read-only against LDAP')
+        raise exception.Forbidden(_('Domains are read-only against LDAP'))
 
     def get_domain(self, domain_id):
         self._validate_default_domain_id(domain_id)
-        return assignment.DEFAULT_DOMAIN
+        return assignment.calc_default_domain()
 
     def update_domain(self, domain_id, domain):
         self._validate_default_domain_id(domain_id)
-        raise exception.Forbidden('Domains are read-only against LDAP')
+        raise exception.Forbidden(_('Domains are read-only against LDAP'))
 
     def delete_domain(self, domain_id):
         self._validate_default_domain_id(domain_id)
-        raise exception.Forbidden('Domains are read-only against LDAP')
+        raise exception.Forbidden(_('Domains are read-only against LDAP'))
 
-    def list_domains(self):
-        return [assignment.DEFAULT_DOMAIN]
+    def list_domains(self, hints):
+        return [assignment.calc_default_domain()]
 
 #Bulk actions on User From identity
     def delete_user(self, user_id):
@@ -344,11 +351,6 @@ class Assignment(assignment.Driver):
     def delete_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
                      inherited_to_projects=False):
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
-
         self.get_role(role_id)
 
         if domain_id:
@@ -392,7 +394,10 @@ class Assignment(assignment.Driver):
                                             inherited_to_projects)]
 
     def get_domain_by_name(self, domain_name):
-        raise exception.NotImplemented()
+        default_domain = assignment.calc_default_domain()
+        if domain_name != default_domain['name']:
+            raise exception.DomainNotFound(domain_id=domain_name)
+        return default_domain
 
     def list_role_assignments(self):
         role_assignments = []
@@ -545,8 +550,9 @@ class RoleApi(common_ldap.BaseLdap):
             conn.modify_s(role_dn, [(ldap.MOD_ADD,
                                      self.member_attribute, user_dn)])
         except ldap.TYPE_OR_VALUE_EXISTS:
-            msg = ('User %s already has role %s in tenant %s'
-                   % (user_id, role_id, tenant_id))
+            msg = (_('User %(user_id)s already has role %(role_id)s in '
+                     'tenant %(tenant_id)s') %
+                   dict(user_id=user_id, role_id=role_id, tenant_id=tenant_id))
             raise exception.Conflict(type='role grant', details=msg)
         except ldap.NO_SUCH_OBJECT:
             if tenant_id is None or self.get(role_id) is None:
@@ -657,7 +663,7 @@ class RoleApi(common_ldap.BaseLdap):
     def update(self, role_id, role):
         try:
             old_name = self.get_by_name(role['name'])
-            raise exception.Conflict('Cannot duplicate name %s' % old_name)
+            raise exception.Conflict(_('Cannot duplicate name %s') % old_name)
         except exception.NotFound:
             pass
         return super(RoleApi, self).update(role_id, role)

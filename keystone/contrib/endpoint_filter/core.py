@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -30,12 +28,12 @@ CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 extension_data = {
-    'name': 'Openstack Keystone Endpoint Filter API',
+    'name': 'OpenStack Keystone Endpoint Filter API',
     'namespace': 'http://docs.openstack.org/identity/api/ext/'
                  'OS-EP-FILTER/v1.0',
     'alias': 'OS-EP-FILTER',
     'updated': '2013-07-23T12:00:0-00:00',
-    'description': 'Openstack Keystone Endpoint Filter API.',
+    'description': 'OpenStack Keystone Endpoint Filter API.',
     'links': [
         {
             'rel': 'describedby',

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2014 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,6 +13,8 @@
 # under the License.
 
 """oAuthlib request validator."""
+
+import six
 
 from keystone.common import dependency
 from keystone.contrib.oauth1 import core as oauth1
@@ -151,7 +151,7 @@ class OAuthValidator(oauth1.RequestValidator):
 
     def verify_request_token(self, token, request):
         # there aren't strong expectations on the request token format
-        return isinstance(token, basestring)
+        return isinstance(token, six.string_types)
 
     def verify_realms(self, token, realms, request):
         return True

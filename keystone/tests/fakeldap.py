@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # All Rights Reserved.
@@ -26,6 +24,7 @@ library to work with nova.
 
 import re
 import shelve
+import six
 
 import ldap
 
@@ -40,6 +39,8 @@ SCOPE_NAMES = {
     ldap.SCOPE_SUBTREE: 'SCOPE_SUBTREE',
 }
 
+#http://msdn.microsoft.com/en-us/library/windows/desktop/aa366991(v=vs.85).aspx
+CONTROL_TREEDELETE = '1.2.840.113556.1.4.805'
 
 LOG = log.getLogger(__name__)
 
@@ -237,9 +238,16 @@ class FakeLdap(object):
         if server_fail:
             raise ldap.SERVER_DOWN
 
-        key = '%s%s' % (self.__prefix, dn)
-        LOG.debug('delete item: dn=%s', dn)
         try:
+            if CONTROL_TREEDELETE in [c.controlType for c in serverctrls]:
+                LOG.debug('FakeLdap subtree_delete item: dn=%s', dn)
+                children = [k for k, v in six.iteritems(self.db)
+                            if re.match('%s.*,%s' % (self.__prefix, dn), k)]
+                for c in children:
+                    del self.db[c]
+
+            LOG.debug(_('FakeLdap delete item: dn=%s'), dn)
+            key = '%s%s' % (self.__prefix, dn)
             del self.db[key]
         except KeyError:
             LOG.debug('delete item failed: dn=%s not found.', dn)
@@ -324,11 +332,11 @@ class FakeLdap(object):
             results = [(dn, item_dict)]
         elif scope == ldap.SCOPE_SUBTREE:
             results = [(k[len(self.__prefix):], v)
-                       for k, v in self.db.iteritems()
+                       for k, v in six.iteritems(self.db)
                        if re.match('%s.*,%s' % (self.__prefix, dn), k)]
         elif scope == ldap.SCOPE_ONELEVEL:
             results = [(k[len(self.__prefix):], v)
-                       for k, v in self.db.iteritems()
+                       for k, v in six.iteritems(self.db)
                        if re.match('%s\w+=[^,]+,%s' % (self.__prefix, dn), k)]
         else:
             LOG.debug('search fail: unknown scope %s', scope)
@@ -343,7 +351,7 @@ class FakeLdap(object):
             match_attrs[id_attr] = [id_val]
             if not query or _match_query(query, match_attrs):
                 # filter the attributes by fields
-                attrs = dict([(k, v) for k, v in attrs.iteritems()
+                attrs = dict([(k, v) for k, v in six.iteritems(attrs)
                               if not fields or k in fields])
                 objects.append((dn, attrs))
 

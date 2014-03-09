@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,22 +17,20 @@ from keystone.common import manager
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-from keystone import identity
 from keystone.openstack.common import log
-from keystone import policy
-from keystone import token
+from keystone.openstack.common import versionutils
 
 
 CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 extension_data = {
-    'name': 'Openstack Keystone Stats API',
+    'name': 'OpenStack Keystone Stats API',
     'namespace': 'http://docs.openstack.org/identity/api/ext/'
                  'OS-STATS/v1.0',
     'alias': 'OS-STATS',
     'updated': '2013-07-07T12:00:0-00:00',
-    'description': 'Openstack Keystone Stats API.',
+    'description': 'OpenStack Keystone Stats API.',
     'links': [
         {
             'rel': 'describedby',
@@ -94,10 +90,7 @@ class StatsExtension(wsgi.ExtensionRouter):
 
 class StatsController(wsgi.Application):
     def __init__(self):
-        self.identity_api = identity.Manager()
-        self.policy_api = policy.Manager()
         self.stats_api = Manager()
-        self.token_api = token.Manager()
         super(StatsController, self).__init__()
 
     def get_stats(self, context):
@@ -134,6 +127,11 @@ class StatsMiddleware(wsgi.Middleware):
 
     response_attributes = ['status_int']
 
+    @versionutils.deprecated(
+        what='keystone.contrib.stats.core.StatsMiddleware',
+        as_of=versionutils.deprecated.ICEHOUSE,
+        in_favor_of='external tooling',
+        remove_in=+2)
     def __init__(self, *args, **kwargs):
         self.stats_api = Manager()
         return super(StatsMiddleware, self).__init__(*args, **kwargs)

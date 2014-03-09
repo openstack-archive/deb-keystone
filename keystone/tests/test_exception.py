@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,6 +13,8 @@
 # under the License.
 
 import uuid
+
+import six
 
 from keystone.common import wsgi
 from keystone import config
@@ -60,14 +60,14 @@ class ExceptionTestCase(tests.TestCase):
         attribute = uuid.uuid4().hex
         e = exception.ValidationError(target=target, attribute=attribute)
         self.assertValidJsonRendering(e)
-        self.assertIn(target, unicode(e))
-        self.assertIn(attribute, unicode(e))
+        self.assertIn(target, six.text_type(e))
+        self.assertIn(attribute, six.text_type(e))
 
     def test_not_found(self):
         target = uuid.uuid4().hex
         e = exception.NotFound(target=target)
         self.assertValidJsonRendering(e)
-        self.assertIn(target, unicode(e))
+        self.assertIn(target, six.text_type(e))
 
     def test_403_title(self):
         e = exception.Forbidden()
@@ -81,7 +81,7 @@ class ExceptionTestCase(tests.TestCase):
         e = exception.Error(message)
 
         try:
-            self.assertEqual(unicode(e), message)
+            self.assertEqual(six.text_type(e), message)
         except UnicodeEncodeError:
             self.fail("unicode error message not supported")
 
@@ -108,7 +108,7 @@ class SecurityErrorTestCase(ExceptionTestCase):
         risky_info = uuid.uuid4().hex
         e = exception.Unauthorized(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertNotIn(risky_info, unicode(e))
+        self.assertNotIn(risky_info, six.text_type(e))
 
     def test_unauthorized_exposure_in_debug(self):
         self.opt(debug=True)
@@ -116,7 +116,7 @@ class SecurityErrorTestCase(ExceptionTestCase):
         risky_info = uuid.uuid4().hex
         e = exception.Unauthorized(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertIn(risky_info, unicode(e))
+        self.assertIn(risky_info, six.text_type(e))
 
     def test_forbidden_exposure(self):
         self.opt(debug=False)
@@ -124,7 +124,7 @@ class SecurityErrorTestCase(ExceptionTestCase):
         risky_info = uuid.uuid4().hex
         e = exception.Forbidden(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertNotIn(risky_info, unicode(e))
+        self.assertNotIn(risky_info, six.text_type(e))
 
     def test_forbidden_exposure_in_debug(self):
         self.opt(debug=True)
@@ -132,7 +132,7 @@ class SecurityErrorTestCase(ExceptionTestCase):
         risky_info = uuid.uuid4().hex
         e = exception.Forbidden(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertIn(risky_info, unicode(e))
+        self.assertIn(risky_info, six.text_type(e))
 
     def test_forbidden_action_exposure(self):
         self.opt(debug=False)
@@ -141,12 +141,12 @@ class SecurityErrorTestCase(ExceptionTestCase):
         action = uuid.uuid4().hex
         e = exception.ForbiddenAction(message=risky_info, action=action)
         self.assertValidJsonRendering(e)
-        self.assertNotIn(risky_info, unicode(e))
-        self.assertIn(action, unicode(e))
+        self.assertNotIn(risky_info, six.text_type(e))
+        self.assertIn(action, six.text_type(e))
 
         e = exception.ForbiddenAction(action=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertIn(risky_info, unicode(e))
+        self.assertIn(risky_info, six.text_type(e))
 
     def test_forbidden_action_exposure_in_debug(self):
         self.opt(debug=True)
@@ -155,11 +155,11 @@ class SecurityErrorTestCase(ExceptionTestCase):
 
         e = exception.ForbiddenAction(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertIn(risky_info, unicode(e))
+        self.assertIn(risky_info, six.text_type(e))
 
         e = exception.ForbiddenAction(action=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertIn(risky_info, unicode(e))
+        self.assertIn(risky_info, six.text_type(e))
 
     def test_unicode_argument_message(self):
         self.opt(debug=False)
@@ -167,4 +167,4 @@ class SecurityErrorTestCase(ExceptionTestCase):
         risky_info = u'\u7ee7\u7eed\u884c\u7f29\u8fdb\u6216'
         e = exception.Forbidden(message=risky_info)
         self.assertValidJsonRendering(e)
-        self.assertNotIn(risky_info, unicode(e))
+        self.assertNotIn(risky_info, six.text_type(e))

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,6 +11,8 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+
+import six
 
 from keystone import exception
 
@@ -50,7 +50,8 @@ def check_enabled(property_name, enabled):
 
 
 def check_name(property_name, name, min_length=1, max_length=64):
-    check_type('%s name' % property_name, name, basestring, 'str or unicode')
+    check_type('%s name' % property_name, name, six.string_types,
+               'str or unicode')
     name = name.strip()
     check_length('%s name' % property_name, name,
                  min_length=min_length, max_length=max_length)

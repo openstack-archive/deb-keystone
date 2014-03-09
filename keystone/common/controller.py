@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,11 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import collections
 import functools
 import uuid
 
+from keystone.common import authorization
 from keystone.common import dependency
+from keystone.common import driver_hints
+from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
@@ -28,7 +28,6 @@ from keystone.openstack.common import versionutils
 
 LOG = log.getLogger(__name__)
 CONF = config.CONF
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 v2_deprecated = versionutils.deprecated(what='v2 API',
                                         as_of=versionutils.deprecated.ICEHOUSE,
@@ -40,7 +39,23 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         'action': action,
         'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
+    # see if auth context has already been created. If so use it.
+    if ('environment' in context and
+            authorization.AUTH_CONTEXT_ENV in context['environment']):
+        LOG.debug(_('RBAC: using auth context from the request environment'))
+        return context['environment'].get(authorization.AUTH_CONTEXT_ENV)
+
+    # now build the auth context from the incoming auth token
     try:
+        LOG.debug(_('RBAC: building auth context from the incoming '
+                    'auth token'))
+        # TODO(ayoung): These two functions return the token in different
+        # formats.  However, the call
+        # to get_token hits the caching layer, and does not validate the
+        # token.  This should be reduced to one call
+        if not CONF.token.revoke_by_id:
+            self.token_api.token_provider_api.validate_token(
+                context['token_id'])
         token_ref = self.token_api.get_token(context['token_id'])
     except exception.TokenNotFound:
         LOG.warning(_('RBAC: Invalid token'))
@@ -50,62 +65,9 @@ def _build_policy_check_credentials(self, action, context, kwargs):
     # it would otherwise need to reload the token_ref from backing store.
     wsgi.validate_token_bind(context, token_ref)
 
-    creds = {}
-    if 'token_data' in token_ref and 'token' in token_ref['token_data']:
-        #V3 Tokens
-        token_data = token_ref['token_data']['token']
-        try:
-            creds['user_id'] = token_data['user']['id']
-        except AttributeError:
-            LOG.warning(_('RBAC: Invalid user'))
-            raise exception.Unauthorized()
+    auth_context = authorization.token_to_auth_context(token_ref['token_data'])
 
-        if 'project' in token_data:
-            creds['project_id'] = token_data['project']['id']
-        else:
-            LOG.debug(_('RBAC: Proceeding without project'))
-
-        if 'domain' in token_data:
-            creds['domain_id'] = token_data['domain']['id']
-
-        if 'roles' in token_data:
-            creds['roles'] = []
-            for role in token_data['roles']:
-                creds['roles'].append(role['name'])
-    else:
-        #v2 Tokens
-        creds = token_ref.get('metadata', {}).copy()
-        try:
-            creds['user_id'] = token_ref['user'].get('id')
-        except AttributeError:
-            LOG.warning(_('RBAC: Invalid user'))
-            raise exception.Unauthorized()
-        try:
-            creds['project_id'] = token_ref['tenant'].get('id')
-        except AttributeError:
-            LOG.debug(_('RBAC: Proceeding without tenant'))
-        # NOTE(vish): this is pretty inefficient
-        creds['roles'] = [self.assignment_api.get_role(role)['name']
-                          for role in creds.get('roles', [])]
-
-    return creds
-
-
-def flatten(d, parent_key=''):
-    """Flatten a nested dictionary
-
-    Converts a dictionary with nested values to a single level flat
-    dictionary, with dotted notation for each key.
-
-    """
-    items = []
-    for k, v in d.items():
-        new_key = parent_key + '.' + k if parent_key else k
-        if isinstance(v, collections.MutableMapping):
-            items.extend(flatten(v, new_key).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+    return auth_context
 
 
 def protected(callback=None):
@@ -169,7 +131,9 @@ def protected(callback=None):
                 # Add in the kwargs, which means that any entity provided as a
                 # parameter for calls like create and update will be included.
                 policy_dict.update(kwargs)
-                self.policy_api.enforce(creds, action, flatten(policy_dict))
+                self.policy_api.enforce(creds,
+                                        action,
+                                        authorization.flatten(policy_dict))
                 LOG.debug(_('RBAC: Authorization granted'))
             return f(self, context, *args, **kwargs)
         return inner
@@ -208,7 +172,9 @@ def filterprotected(*filters):
                 for key in kwargs:
                     target[key] = kwargs[key]
 
-                self.policy_api.enforce(creds, action, flatten(target))
+                self.policy_api.enforce(creds,
+                                        action,
+                                        authorization.flatten(target))
 
                 LOG.debug(_('RBAC: Authorization granted'))
             else:
@@ -227,7 +193,7 @@ class V2Controller(wsgi.Application):
         specified in the v2 call.
 
         """
-        ref['domain_id'] = DEFAULT_DOMAIN_ID
+        ref['domain_id'] = CONF.identity.default_domain_id
         return ref
 
     @staticmethod
@@ -235,6 +201,71 @@ class V2Controller(wsgi.Application):
         """Remove domain_id since v2 calls are not domain-aware."""
         ref.pop('domain_id', None)
         return ref
+
+    @staticmethod
+    def normalize_username_in_response(ref):
+        """Adds username to outgoing user refs to match the v2 spec.
+
+        Internally we use `name` to represent a user's name. The v2 spec
+        requires the use of `username` instead.
+
+        """
+        if 'username' not in ref and 'name' in ref:
+            ref['username'] = ref['name']
+        return ref
+
+    @staticmethod
+    def normalize_username_in_request(ref):
+        """Adds name in incoming user refs to match the v2 spec.
+
+        Internally we use `name` to represent a user's name. The v2 spec
+        requires the use of `username` instead.
+
+        """
+        if 'name' not in ref and 'username' in ref:
+            ref['name'] = ref.pop('username')
+        return ref
+
+    @staticmethod
+    def v3_to_v2_user(ref):
+        """Convert a user_ref from v3 to v2 compatible.
+
+        * v2.0 users are not domain aware, and should have domain_id removed
+        * v2.0 users expect the use of tenantId instead of default_project_id
+        * v2.0 users have a username attribute
+
+        This method should only be applied to user_refs being returned from the
+        v2.0 controller(s).
+
+        If ref is a list type, we will iterate through each element and do the
+        conversion.
+        """
+
+        def _format_default_project_id(ref):
+            """Convert default_project_id to tenantId for v2 calls."""
+            default_project_id = ref.pop('default_project_id', None)
+            if default_project_id is not None:
+                ref['tenantId'] = default_project_id
+            elif 'tenantId' in ref:
+                # NOTE(morganfainberg): To avoid v2.0 confusion if somehow a
+                # tenantId property sneaks its way into the extra blob on the
+                # user, we remove it here.  If default_project_id is set, we
+                # would override it in either case.
+                del ref['tenantId']
+
+        def _normalize_and_filter_user_properties(ref):
+            """Run through the various filter/normalization methods."""
+            _format_default_project_id(ref)
+            V2Controller.filter_domain_id(ref)
+            V2Controller.normalize_username_in_response(ref)
+            return ref
+
+        if isinstance(ref, dict):
+            return _normalize_and_filter_user_properties(ref)
+        elif isinstance(ref, list):
+            return [_normalize_and_filter_user_properties(x) for x in ref]
+        else:
+            raise ValueError(_('Expected dict or list: %s') % type(ref))
 
 
 @dependency.requires('policy_api', 'token_api')
@@ -245,6 +276,13 @@ class V3Controller(wsgi.Application):
     attributes, representing the collection of entities they are exposing to
     the API. This is required for supporting self-referential links,
     pagination, etc.
+
+    Class parameters:
+
+    * `_mutable_parameters` - set of parameters that can be changed by users.
+                              Usually used by cls.check_immutable_params()
+    * `_public_parameters` - set of parameters that are exposed to the user.
+                             Usually used by cls.filter_params()
 
     """
 
@@ -278,11 +316,31 @@ class V3Controller(wsgi.Application):
         return {cls.member_name: ref}
 
     @classmethod
-    def wrap_collection(cls, context, refs, filters=[]):
-        for f in filters:
-            refs = cls.filter_by_attribute(context, refs, f)
+    def wrap_collection(cls, context, refs, hints=None):
+        """Wrap a collection, checking for filtering and pagination.
 
-        refs = cls.paginate(context, refs)
+        Returns the wrapped collection, which includes:
+        - Executing any filtering not already carried out
+        - Truncate to a set limit if necessary
+        - Adds 'self' links in every member
+        - Adds 'next', 'self' and 'prev' links for the whole collection.
+
+        :param context: the current context, containing the original url path
+                        and query string
+        :param refs: the list of members of the collection
+        :param hints: list hints, containing any relevant filters and limit.
+                      Any filters already satisfied by managers will have been
+                      removed
+        """
+        # Check if there are any filters in hints that were not
+        # handled by the drivers. The driver will not have paginated or
+        # limited the output if it found there were filters it was unable to
+        # handle.
+
+        if hints is not None:
+            refs = cls.filter_by_attributes(refs, hints)
+
+        list_limited, refs = cls.limit(refs, hints)
 
         for ref in refs:
             cls.wrap_member(context, ref)
@@ -292,21 +350,49 @@ class V3Controller(wsgi.Application):
             'next': None,
             'self': cls.base_url(path=context['path']),
             'previous': None}
+
+        if list_limited:
+            container['truncated'] = True
+
         return container
 
     @classmethod
-    def paginate(cls, context, refs):
-        """Paginates a list of references by page & per_page query strings."""
-        # FIXME(dolph): client needs to support pagination first
-        return refs
+    def limit(cls, refs, hints):
+        """Limits a list of entities.
 
-        page = context['query_string'].get('page', 1)
-        per_page = context['query_string'].get('per_page', 30)
-        return refs[per_page * (page - 1):per_page * page]
+        The underlying driver layer may have already truncated the collection
+        for us, but in case it was unable to handle truncation we check here.
+
+        :param refs: the list of members of the collection
+        :param hints: hints, containing, among other things, the limit
+                      requested
+
+        :returns: boolean indicating whether the list was truncated, as well
+                  as the list of (truncated if necessary) entities.
+
+        """
+        NOT_LIMITED = False
+        LIMITED = True
+
+        if hints is None or hints.get_limit() is None:
+            # No truncation was requested
+            return NOT_LIMITED, refs
+
+        list_limit = hints.get_limit()
+        if list_limit.get('truncated', False):
+            # The driver did truncate the list
+            return LIMITED, refs
+
+        if len(refs) > list_limit['limit']:
+            # The driver layer wasn't able to truncate it for us, so we must
+            # do it here
+            return LIMITED, refs[:list_limit['limit']]
+
+        return NOT_LIMITED, refs
 
     @classmethod
-    def filter_by_attribute(cls, context, refs, attr):
-        """Filters a list of references by query string value."""
+    def filter_by_attributes(cls, refs, hints):
+        """Filters a list of references by filter values."""
 
         def _attr_match(ref_attr, val_attr):
             """Matches attributes allowing for booleans as strings.
@@ -317,20 +403,112 @@ class V3Controller(wsgi.Application):
 
             """
             if type(ref_attr) is bool:
-                if (isinstance(val_attr, basestring) and
-                        val_attr == '0'):
-                    val = False
-                else:
-                    val = True
-                return (ref_attr == val)
+                return ref_attr == utils.attr_as_boolean(val_attr)
             else:
-                return (ref_attr == val_attr)
+                return ref_attr == val_attr
 
-        if attr in context['query_string']:
-            value = context['query_string'][attr]
-            return [r for r in refs if _attr_match(
-                flatten(r).get(attr), value)]
+        def _inexact_attr_match(filter, ref):
+            """Applies an inexact filter to a result dict.
+
+            :param filter: the filter in question
+            :param ref: the dict to check
+
+            :returns True if there is a match
+
+            """
+            comparator = filter['comparator']
+            key = filter['name']
+
+            if key in ref:
+                filter_value = filter['value']
+                target_value = ref[key]
+                if not filter['case_sensitive']:
+                    # We only support inexact filters on strings so
+                    # it's OK to use lower()
+                    filter_value = filter_value.lower()
+                    target_value = target_value.lower()
+
+                if comparator == 'contains':
+                    return (filter_value in target_value)
+                elif comparator == 'startswith':
+                    return target_value.startswith(filter_value)
+                elif comparator == 'endswith':
+                    return target_value.endswith(filter_value)
+                else:
+                    # We silently ignore unsupported filters
+                    return True
+
+            return False
+
+        for filter in hints.filters():
+            if filter['comparator'] == 'equals':
+                attr = filter['name']
+                value = filter['value']
+                refs = [r for r in refs if _attr_match(
+                    authorization.flatten(r).get(attr), value)]
+            else:
+                # It might be an inexact filter
+                refs = [r for r in refs if _inexact_attr_match(
+                    filter, r)]
+
         return refs
+
+    @classmethod
+    def build_driver_hints(cls, context, supported_filters):
+        """Build list hints based on the context query string.
+
+        :param context: contains the query_string from which any list hints can
+                        be extracted
+        :param supported_filters: list of filters supported, so ignore any
+                                  keys in query_dict that are not in this list.
+
+        """
+        query_dict = context['query_string']
+        hints = driver_hints.Hints()
+
+        if query_dict is None:
+            return hints
+
+        for key in query_dict:
+            # Check if this is an exact filter
+            if supported_filters is None or key in supported_filters:
+                hints.add_filter(key, query_dict[key])
+                continue
+
+            # Check if it is an inexact filter
+            for valid_key in supported_filters:
+                # See if this entry in query_dict matches a known key with an
+                # inexact suffix added.  If it doesn't match, then that just
+                # means that there is no inexact filter for that key in this
+                # query.
+                if not key.startswith(valid_key + '__'):
+                    continue
+
+                base_key, comparator = key.split('__', 1)
+
+                # We map the query-style inexact of, for example:
+                #
+                # {'email__contains', 'myISP'}
+                #
+                # into a list directive add filter call parameters of:
+                #
+                # name = 'email'
+                # value = 'myISP'
+                # comparator = 'contains'
+                # case_sensitive = True
+
+                case_sensitive = True
+                if comparator.startswith('i'):
+                    case_sensitive = False
+                    comparator = comparator[1:]
+                hints.add_filter(base_key, query_dict[key],
+                                 comparator=comparator,
+                                 case_sensitive=case_sensitive)
+
+        # NOTE(henry-nash): If we were to support pagination, we would pull any
+        # pagination directives out of the query_dict here, and add them into
+        # the hints list.
+        return hints
 
     def _require_matching_id(self, value, ref):
         """Ensures the value matches the reference's ID, if any."""
@@ -347,7 +525,7 @@ class V3Controller(wsgi.Application):
         """Get the domain_id for a v3 call."""
 
         if context['is_admin']:
-            return DEFAULT_DOMAIN_ID
+            return CONF.identity.default_domain_id
 
         # Fish the domain_id out of the token
         #
@@ -365,7 +543,7 @@ class V3Controller(wsgi.Application):
         if 'domain' in token_ref:
             return token_ref['domain']['id']
         else:
-            return DEFAULT_DOMAIN_ID
+            return CONF.identity.default_domain_id
 
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id if not specified in a v3 call."""
@@ -403,5 +581,77 @@ class V3Controller(wsgi.Application):
             if target_attr:
                 policy_dict = {'target': target_attr}
             policy_dict.update(prep_info['input_attr'])
-            self.policy_api.enforce(creds, action, flatten(policy_dict))
+            self.policy_api.enforce(creds,
+                                    action,
+                                    authorization.flatten(policy_dict))
             LOG.debug(_('RBAC: Authorization granted'))
+
+    @classmethod
+    def check_immutable_params(cls, ref):
+        """Raise exception when disallowed parameter is in ref.
+
+        Check whether the ref dictionary representing a request has only
+        mutable parameters included. If not, raise an exception. This method
+        checks only root-level keys from a ref dictionary.
+
+        :param ref: a dictionary representing deserialized request to be
+                    stored
+        :raises: :class:`keystone.exception.ImmutableAttributeError`
+
+        """
+        ref_keys = set(ref.keys())
+        blocked_keys = ref_keys.difference(cls._mutable_parameters)
+
+        if not blocked_keys:
+            #No immutable parameters changed
+            return
+
+        exception_args = {'target': cls.__name__,
+                          'attribute': blocked_keys.pop()}
+        raise exception.ImmutableAttributeError(**exception_args)
+
+    @classmethod
+    def check_required_params(cls, ref):
+        """Raise exception when required parameter is not in ref.
+
+        Check whether the ref dictionary representing a request has the
+        required parameters to fulfill the request. If not, raise an
+        exception. This method checks only root-level keys from a ref
+        dictionary.
+
+        :param ref: a dictionary representing deserialized request to be
+                    stored
+        :raises: :class:`keystone.exception.ValidationError`
+
+        """
+        ref_keys = set(ref.keys())
+        missing_args = []
+
+        for required in cls._required_parameters:
+            if required not in ref_keys:
+                missing_args.append(required)
+
+        if len(missing_args) > 0:
+            exception_args = {'target': cls.__name__,
+                              'attribute': missing_args.pop()}
+            raise exception.ValidationError(**exception_args)
+        else:
+            return
+
+    @classmethod
+    def filter_params(cls, ref):
+        """Remove unspecified parameters from the dictionary.
+
+        This function removes unspecified parameters from the dictionary. See
+        check_immutable_parameters for corresponding function that raises
+        exceptions. This method checks only root-level keys from a ref
+        dictionary.
+
+        :param ref: a dictionary representing deserialized response to be
+                    serialized
+        """
+        ref_keys = set(ref.keys())
+        blocked_keys = ref_keys - cls._public_parameters
+        for blocked_param in blocked_keys:
+            del ref[blocked_param]
+        return ref

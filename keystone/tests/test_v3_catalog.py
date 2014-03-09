@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,24 +12,82 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+import uuid
+
 from keystone.tests import test_v3
 
 
 class CatalogTestCase(test_v3.RestfulTestCase):
     """Test service & endpoint CRUD."""
 
-    def setUp(self):
-        super(CatalogTestCase, self).setUp()
-
     # region crud tests
 
+    def test_create_region_with_id(self):
+        """Call ``PUT /regions/{region_id}`` w/o an ID in the request body."""
+        ref = self.new_region_ref()
+        region_id = ref.pop('id')
+        r = self.put(
+            '/regions/%s' % region_id,
+            body={'region': ref},
+            expected_status=201)
+        self.assertValidRegionResponse(r, ref)
+        # Double-check that the region ID was kept as-is and not
+        # populated with a UUID, as is the case with POST /v3/regions
+        self.assertEqual(region_id, r.json['region']['id'])
+
+    def test_create_region_with_matching_ids(self):
+        """Call ``PUT /regions/{region_id}`` with an ID in the request body."""
+        ref = self.new_region_ref()
+        region_id = ref['id']
+        r = self.put(
+            '/regions/%s' % region_id,
+            body={'region': ref},
+            expected_status=201)
+        self.assertValidRegionResponse(r, ref)
+        # Double-check that the region ID was kept as-is and not
+        # populated with a UUID, as is the case with POST /v3/regions
+        self.assertEqual(region_id, r.json['region']['id'])
+
     def test_create_region(self):
-        """Call ``POST /regions``."""
+        """Call ``POST /regions`` with an ID in the request body."""
+        # the ref will have an ID defined on it
         ref = self.new_region_ref()
         r = self.post(
             '/regions',
             body={'region': ref})
-        return self.assertValidRegionResponse(r, ref)
+        self.assertValidRegionResponse(r, ref)
+
+        # we should be able to get the region, having defined the ID ourselves
+        r = self.get(
+            '/regions/%(region_id)s' % {
+                'region_id': ref['id']})
+        self.assertValidRegionResponse(r, ref)
+
+    def test_create_region_without_id(self):
+        """Call ``POST /regions`` without an ID in the request body."""
+        ref = self.new_region_ref()
+
+        # instead of defining the ID ourselves...
+        del ref['id']
+
+        # let the service define the ID
+        r = self.post(
+            '/regions',
+            body={'region': ref},
+            expected_status=201)
+        self.assertValidRegionResponse(r, ref)
+
+    def test_create_region_with_conflicting_ids(self):
+        """Call ``PUT /regions/{region_id}`` with conflicting region IDs."""
+        # the region ref is created with an ID
+        ref = self.new_region_ref()
+
+        # but instead of using that ID, make up a new, conflicting one
+        self.put(
+            '/regions/%s' % uuid.uuid4().hex,
+            body={'region': ref},
+            expected_status=400)
 
     def test_list_regions(self):
         """Call ``GET /regions``."""
@@ -71,7 +127,7 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         r = self.post(
             '/services',
             body={'service': ref})
-        return self.assertValidServiceResponse(r, ref)
+        self.assertValidServiceResponse(r, ref)
 
     def test_list_services(self):
         """Call ``GET /services``."""
@@ -108,20 +164,90 @@ class CatalogTestCase(test_v3.RestfulTestCase):
     def test_list_endpoints(self):
         """Call ``GET /endpoints``."""
         r = self.get('/endpoints')
-        self.assertValidEndpointListResponse(r, ref=self.endpoint)
+        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
+        # able to remove keys_to_check=, see bug 1282266.
+        self.assertValidEndpointListResponse(r, ref=self.endpoint,
+                                             keys_to_check=['name',
+                                                            'description'])
 
     def test_list_endpoints_xml(self):
         """Call ``GET /endpoints`` (xml data)."""
         r = self.get('/endpoints', content_type='xml')
-        self.assertValidEndpointListResponse(r, ref=self.endpoint)
+        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
+        # able to remove keys_to_check=, see bug 1282266.
+        self.assertValidEndpointListResponse(r, ref=self.endpoint,
+                                             keys_to_check=['name',
+                                                            'description'])
 
-    def test_create_endpoint(self):
+    def test_create_endpoint_no_enabled(self):
         """Call ``POST /endpoints``."""
         ref = self.new_endpoint_ref(service_id=self.service_id)
         r = self.post(
             '/endpoints',
             body={'endpoint': ref})
+        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
+        # able to remove keys_to_check=, see bug 1282266, and also should be
+        # able to assertIs(True, r.result['endpoint']['enabled'] on the next
+        # line.
+        self.assertValidEndpointResponse(r, ref, keys_to_check=['name',
+                                                                'description'])
+        self.assertFalse('enabled' in r.result['endpoint'])
+
+    def test_create_endpoint_enabled_true(self):
+        """Call ``POST /endpoints`` with enabled: true."""
+        ref = self.new_endpoint_ref(service_id=self.service_id,
+                                    enabled=True)
+        r = self.post(
+            '/endpoints',
+            body={'endpoint': ref})
         self.assertValidEndpointResponse(r, ref)
+        self.assertIs(True, r.result['endpoint']['enabled'])
+
+    def test_create_endpoint_enabled_false(self):
+        """Call ``POST /endpoints`` with enabled: false."""
+        ref = self.new_endpoint_ref(service_id=self.service_id,
+                                    enabled=False)
+        r = self.post(
+            '/endpoints',
+            body={'endpoint': ref})
+        self.assertValidEndpointResponse(r, ref)
+        self.assertIs(False, r.result['endpoint']['enabled'])
+
+    def test_create_endpoint_enabled_str_true(self):
+        """Call ``POST /endpoints`` with enabled: 'True'."""
+        ref = self.new_endpoint_ref(service_id=self.service_id,
+                                    enabled='True')
+        # FIXME(blk-u): The enabled field is defined as a Boolean, so
+        # a string should be rejected with 400 Bad Request, see bug 1282266.
+        r = self.post(
+            '/endpoints',
+            body={'endpoint': ref})
+        self.assertValidEndpointResponse(r, ref)
+        self.assertEqual('True', r.result['endpoint']['enabled'])
+
+    def test_create_endpoint_enabled_str_false(self):
+        """Call ``POST /endpoints`` with enabled: 'False'."""
+        ref = self.new_endpoint_ref(service_id=self.service_id,
+                                    enabled='False')
+        # FIXME(blk-u): The enabled field is defined as a Boolean, so
+        # a string should be rejected with 400 Bad Request, see bug 1282266.
+        r = self.post(
+            '/endpoints',
+            body={'endpoint': ref})
+        self.assertValidEndpointResponse(r, ref)
+        self.assertEqual('False', r.result['endpoint']['enabled'])
+
+    def test_create_endpoint_enabled_str_random(self):
+        """Call ``POST /endpoints`` with enabled: 'puppies'."""
+        ref = self.new_endpoint_ref(service_id=self.service_id,
+                                    enabled='puppies')
+        # FIXME(blk-u): The enabled field is defined as a Boolean, so
+        # a string should be rejected with 400 Bad Request, see bug 1282266.
+        r = self.post(
+            '/endpoints',
+            body={'endpoint': ref})
+        self.assertValidEndpointResponse(r, ref)
+        self.assertEqual('puppies', r.result['endpoint']['enabled'])
 
     def assertValidErrorResponse(self, response):
         self.assertTrue(response.status_code in [400])
@@ -141,13 +267,72 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
     def test_update_endpoint(self):
         """Call ``PATCH /endpoints/{endpoint_id}``."""
-        ref = self.new_endpoint_ref(service_id=self.service_id)
+        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
+        # able to remove enabled=, see bug 1282266. Also, should be able to
+        # self.assertIs(True, r.result['endpoint']['enabled']).
+        ref = self.new_endpoint_ref(service_id=self.service_id, enabled=True)
         del ref['id']
         r = self.patch(
             '/endpoints/%(endpoint_id)s' % {
                 'endpoint_id': self.endpoint_id},
             body={'endpoint': ref})
         self.assertValidEndpointResponse(r, ref)
+
+    def test_update_endpoint_enabled_true(self):
+        """Call ``PATCH /endpoints/{endpoint_id}`` with enabled: True."""
+        r = self.patch(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id},
+            body={'endpoint': {'enabled': True}})
+        self.assertValidEndpointResponse(r, self.endpoint)
+        self.assertIs(True, r.result['endpoint']['enabled'])
+
+    def test_update_endpoint_enabled_false(self):
+        """Call ``PATCH /endpoints/{endpoint_id}`` with enabled: False."""
+        r = self.patch(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id},
+            body={'endpoint': {'enabled': False}})
+        exp_endpoint = copy.copy(self.endpoint)
+        exp_endpoint['enabled'] = False
+        self.assertValidEndpointResponse(r, exp_endpoint)
+        self.assertIs(False, r.result['endpoint']['enabled'])
+
+    def test_update_endpoint_enabled_str_true(self):
+        """Call ``PATCH /endpoints/{endpoint_id}`` with enabled: 'True'."""
+        # FIXME(blk-u): Enabled is a boolean so setting it to a string should
+        # fail with 400 Bad Request, see bug 1282266.
+        r = self.patch(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id},
+            body={'endpoint': {'enabled': 'True'}})
+        exp_endpoint = copy.copy(self.endpoint)
+        exp_endpoint['enabled'] = 'True'
+        self.assertValidEndpointResponse(r, exp_endpoint)
+
+    def test_update_endpoint_enabled_str_false(self):
+        """Call ``PATCH /endpoints/{endpoint_id}`` with enabled: 'False'."""
+        # FIXME(blk-u): Enabled is a boolean so setting it to a string should
+        # fail with 400 Bad Request, see bug 1282266.
+        r = self.patch(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id},
+            body={'endpoint': {'enabled': 'False'}})
+        exp_endpoint = copy.copy(self.endpoint)
+        exp_endpoint['enabled'] = 'False'
+        self.assertValidEndpointResponse(r, exp_endpoint)
+
+    def test_update_endpoint_enabled_str_random(self):
+        """Call ``PATCH /endpoints/{endpoint_id}`` with enabled: 'kitties'."""
+        # FIXME(blk-u): Enabled is a boolean so setting it to a string should
+        # fail with 400 Bad Request, see bug 1282266.
+        r = self.patch(
+            '/endpoints/%(endpoint_id)s' % {
+                'endpoint_id': self.endpoint_id},
+            body={'endpoint': {'enabled': 'kitties'}})
+        exp_endpoint = copy.copy(self.endpoint)
+        exp_endpoint['enabled'] = 'kitties'
+        self.assertValidEndpointResponse(r, exp_endpoint)
 
     def test_delete_endpoint(self):
         """Call ``DELETE /endpoints/{endpoint_id}``."""
@@ -162,7 +347,10 @@ class CatalogTestCase(test_v3.RestfulTestCase):
                 'endpoint_id': self.endpoint_id})
 
         # create a v3 endpoint ref, and then tweak it back to a v2-style ref
-        ref = self.new_endpoint_ref(service_id=self.service['id'])
+        # FIXME(blk-u): Should be able to remove enabled=True since it should
+        # be optional, see bug 1282266.
+        ref = self.new_endpoint_ref(service_id=self.service['id'],
+                                    enabled=True)
         del ref['id']
         del ref['interface']
         ref['publicurl'] = ref.pop('url')

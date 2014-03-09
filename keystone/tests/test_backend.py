@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -20,15 +18,17 @@ import hashlib
 import mock
 import uuid
 
-from six import moves
+import six
 from testtools import matchers
 
 from keystone.catalog import core
+from keystone.common import driver_hints
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests import filtering
 from keystone.tests import test_utils
 from keystone.token import provider
 
@@ -79,17 +79,20 @@ class IdentityTests(object):
     def test_authenticate_bad_user(self):
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id=uuid.uuid4().hex,
                           password=self.user_foo['password'])
 
     def test_authenticate_bad_password(self):
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id=self.user_foo['id'],
                           password=uuid.uuid4().hex)
 
     def test_authenticate(self):
         user_ref = self.identity_api.authenticate(
+            context={},
             user_id=self.user_sna['id'],
             password=self.user_sna['password'])
         # NOTE(termie): the password field is left in user_sna to make
@@ -110,6 +113,7 @@ class IdentityTests(object):
         self.assignment_api.add_user_to_project(self.tenant_baz['id'],
                                                 user['id'])
         user_ref = self.identity_api.authenticate(
+            context={},
             user_id=user['id'],
             password=user['password'])
         self.assertNotIn('password', user_ref)
@@ -134,6 +138,7 @@ class IdentityTests(object):
 
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id=id_,
                           password='password')
 
@@ -721,12 +726,6 @@ class IdentityTests(object):
                           uuid.uuid4().hex)
 
     def test_add_role_to_user_and_project_404(self):
-        self.assertRaises(exception.UserNotFound,
-                          self.assignment_api.add_role_to_user_and_project,
-                          uuid.uuid4().hex,
-                          self.tenant_bar['id'],
-                          self.role_admin['id'])
-
         self.assertRaises(exception.ProjectNotFound,
                           self.assignment_api.add_role_to_user_and_project,
                           self.user_foo['id'],
@@ -738,6 +737,13 @@ class IdentityTests(object):
                           self.user_foo['id'],
                           self.tenant_bar['id'],
                           uuid.uuid4().hex)
+
+    def test_add_role_to_user_and_project_no_user(self):
+        # If add_role_to_user_and_project and the user doesn't exist, then
+        # no error.
+        user_id_not_exist = uuid.uuid4().hex
+        self.assignment_api.add_role_to_user_and_project(
+            user_id_not_exist, self.tenant_bar['id'], self.role_admin['id'])
 
     def test_remove_role_from_user_and_project(self):
         self.assignment_api.add_role_to_user_and_project(
@@ -1565,10 +1571,12 @@ class IdentityTests(object):
                           uuid.uuid4().hex,
                           self.user_foo['id'])
 
-        self.assertRaises(exception.UserNotFound,
-                          self.assignment_api.add_user_to_project,
-                          self.tenant_bar['id'],
-                          uuid.uuid4().hex)
+    def test_add_user_to_project_no_user(self):
+        # If add_user_to_project and the user doesn't exist, then
+        # no error.
+        user_id_not_exist = uuid.uuid4().hex
+        self.assignment_api.add_user_to_project(self.tenant_bar['id'],
+                                                user_id_not_exist)
 
     def test_remove_user_from_project(self):
         self.assignment_api.add_user_to_project(self.tenant_baz['id'],
@@ -1816,10 +1824,12 @@ class IdentityTests(object):
         # with a password that  is empty string or None
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id='fake1',
                           password='')
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id='fake1',
                           password=None)
 
@@ -1832,10 +1842,12 @@ class IdentityTests(object):
         # with a password that  is empty string or None
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id='fake1',
                           password='')
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
+                          context={},
                           user_id='fake1',
                           password=None)
 
@@ -1983,7 +1995,8 @@ class IdentityTests(object):
 
     def test_list_projects_for_domain(self):
         project_ids = ([x['id'] for x in
-                       self.assignment_api.list_projects(DEFAULT_DOMAIN_ID)])
+                       self.assignment_api.list_projects_in_domain(
+                           DEFAULT_DOMAIN_ID)])
         self.assertEqual(len(project_ids), 4)
         self.assertIn(self.tenant_bar['id'], project_ids)
         self.assertIn(self.tenant_baz['id'], project_ids)
@@ -2000,7 +2013,8 @@ class IdentityTests(object):
                     'domain_id': domain1['id']}
         self.assignment_api.create_project(project2['id'], project2)
         project_ids = ([x['id'] for x in
-                       self.assignment_api.list_projects(domain1['id'])])
+                       self.assignment_api.list_projects_in_domain(
+                           domain1['id'])])
         self.assertEqual(len(project_ids), 2)
         self.assertIn(project1['id'], project_ids)
         self.assertIn(project2['id'], project_ids)
@@ -2873,6 +2887,21 @@ class IdentityTests(object):
             group_id=uuid.uuid4().hex,
             project_id=self.tenant_bar['id'])
 
+    def test_get_default_domain_by_name(self):
+        domain_name = 'default'
+
+        domain = {'id': uuid.uuid4().hex, 'name': domain_name, 'enabled': True}
+        self.assignment_api.create_domain(domain['id'], domain)
+
+        domain_ref = self.assignment_api.get_domain_by_name(domain_name)
+        self.assertEqual(domain_ref, domain)
+
+    def test_get_not_default_domain_by_name(self):
+        domain_name = 'foo'
+        self.assertRaises(exception.DomainNotFound,
+                          self.assignment_api.get_domain_by_name,
+                          domain_name)
+
 
 class TokenTests(object):
     def _create_token_id(self):
@@ -2891,14 +2920,14 @@ class TokenTests(object):
         data_ref = self.token_api.create_token(token_id, data)
         expires = data_ref.pop('expires')
         data_ref.pop('user_id')
-        self.assertTrue(isinstance(expires, datetime.datetime))
+        self.assertIsInstance(expires, datetime.datetime)
         data_ref.pop('id')
         data.pop('id')
         self.assertDictEqual(data_ref, data)
 
         new_data_ref = self.token_api.get_token(token_id)
         expires = new_data_ref.pop('expires')
-        self.assertTrue(isinstance(expires, datetime.datetime))
+        self.assertIsInstance(expires, datetime.datetime)
         new_data_ref.pop('user_id')
         new_data_ref.pop('id')
 
@@ -3116,7 +3145,7 @@ class TokenTests(object):
 
     def test_list_revoked_tokens_for_multiple_tokens(self):
         self.check_list_revoked_tokens([self.delete_token()
-                                        for x in moves.range(2)])
+                                        for x in six.moves.range(2)])
 
     def test_flush_expired_token(self):
         token_id = uuid.uuid4().hex
@@ -3207,17 +3236,17 @@ class TokenTests(object):
             self.assertIn('expires', t)
 
     def test_create_unicode_token_id(self):
-        token_id = unicode(self._create_token_id())
+        token_id = six.text_type(self._create_token_id())
         self.create_token_sample_data(token_id=token_id)
         self.token_api.get_token(token_id)
 
     def test_create_unicode_user_id(self):
-        user_id = unicode(uuid.uuid4().hex)
+        user_id = six.text_type(uuid.uuid4().hex)
         token_id, data = self.create_token_sample_data(user_id=user_id)
         self.token_api.get_token(token_id)
 
     def test_list_tokens_unicode_user_id(self):
-        user_id = unicode(uuid.uuid4().hex)
+        user_id = six.text_type(uuid.uuid4().hex)
         self.token_api.list_tokens(user_id)
 
     def test_token_expire_timezone(self):
@@ -3225,7 +3254,7 @@ class TokenTests(object):
         @test_utils.timezone
         def _create_token(expire_time):
             token_id = uuid.uuid4().hex
-            user_id = unicode(uuid.uuid4().hex)
+            user_id = six.text_type(uuid.uuid4().hex)
             return self.create_token_sample_data(token_id=token_id,
                                                  user_id=user_id,
                                                  expires=expire_time)
@@ -3338,17 +3367,18 @@ class TokenCacheInvalidation(object):
 
 
 class TrustTests(object):
-    def create_sample_trust(self, new_id):
+    def create_sample_trust(self, new_id, remaining_uses=None):
         self.trustor = self.user_foo
         self.trustee = self.user_two
         trust_data = (self.trust_api.create_trust
                       (new_id,
                        {'trustor_user_id': self.trustor['id'],
-                       'trustee_user_id': self.user_two['id'],
-                       'project_id': self.tenant_bar['id'],
-                       'expires_at': timeutils.
+                        'trustee_user_id': self.user_two['id'],
+                        'project_id': self.tenant_bar['id'],
+                        'expires_at': timeutils.
                         parse_isotime('2031-02-18T18:10:00Z'),
-                       'impersonation': True},
+                        'impersonation': True,
+                        'remaining_uses': remaining_uses},
                        roles=[{"id": "member"},
                               {"id": "other"},
                               {"id": "browser"}]))
@@ -3416,6 +3446,39 @@ class TrustTests(object):
         trusts = self.trust_api.list_trusts()
         self.assertEqual(len(trusts), 3)
 
+    def test_trust_has_remaining_uses_positive(self):
+        # create a trust with limited uses, check that we have uses left
+        trust_data = self.create_sample_trust(uuid.uuid4().hex,
+                                              remaining_uses=5)
+        self.assertEqual(5, trust_data['remaining_uses'])
+        # create a trust with unlimited uses, check that we have uses left
+        trust_data = self.create_sample_trust(uuid.uuid4().hex)
+        self.assertIsNone(trust_data['remaining_uses'])
+
+    def test_trust_has_remaining_uses_negative(self):
+        # try to create a trust with no remaining uses, check that it fails
+        self.assertRaises(exception.ValidationError,
+                          self.create_sample_trust,
+                          uuid.uuid4().hex,
+                          remaining_uses=0)
+        # try to create a trust with negative remaining uses,
+        # check that it fails
+        self.assertRaises(exception.ValidationError,
+                          self.create_sample_trust,
+                          uuid.uuid4().hex,
+                          remaining_uses=-12)
+
+    def test_consume_use(self):
+        # consume a trust repeatedly until it has no uses anymore
+        trust_data = self.create_sample_trust(uuid.uuid4().hex,
+                                              remaining_uses=2)
+        self.trust_api.consume_use(trust_data['id'])
+        t = self.trust_api.get_trust(trust_data['id'])
+        self.assertEqual(1, t['remaining_uses'])
+        self.trust_api.consume_use(trust_data['id'])
+        # This was the last use, the trust isn't available anymore
+        self.assertIsNone(self.trust_api.get_trust(trust_data['id']))
+
 
 class CommonHelperTests(tests.TestCase):
     def test_format_helper_raises_malformed_on_missing_key(self):
@@ -3446,7 +3509,6 @@ class CatalogTests(object):
             'description': uuid.uuid4().hex,
         }
         res = self.catalog_api.create_region(
-            region_id,
             new_region.copy())
         # Ensure that we don't need to have a
         # parent_region_id in the original supplied
@@ -3467,7 +3529,6 @@ class CatalogTests(object):
             'parent_region_id': parent_region_id
         }
         self.catalog_api.create_region(
-            region_id,
             new_region.copy())
 
         # list
@@ -3509,7 +3570,6 @@ class CatalogTests(object):
         }
         self.assertRaises(exception.RegionNotFound,
                           self.catalog_api.create_region,
-                          region_id,
                           new_region)
 
     def test_service_crud(self):
@@ -3968,3 +4028,197 @@ class InheritanceTests(object):
         # project3 (since it has both a direct user role and an inherited role)
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
         self.assertEqual(len(user_projects), 5)
+
+
+class FilterTests(filtering.FilterTests):
+    def test_list_users_filtered(self):
+        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain1['id'], domain1)
+
+        for entity in ['user', 'group', 'project']:
+            # Create 20 entities, 14 of which are in domain1
+            entity_list = self._create_test_data(entity, 6)
+            domain1_entity_list = self._create_test_data(entity, 14,
+                                                         domain1['id'])
+
+            # Should get back the 14 entities in domain1
+            hints = driver_hints.Hints()
+            hints.add_filter('domain_id', domain1['id'])
+            entities = self._list_entities(entity)(hints=hints)
+            self.assertEqual(len(entities), 14)
+            self._match_with_list(entities, domain1_entity_list)
+            # Check the driver has removed the filter from the list hints
+            self.assertFalse(hints.get_exact_filter_by_name('domain_id'))
+
+            # Try filtering to get one an exact item out of the list
+            hints = driver_hints.Hints()
+            hints.add_filter('name', domain1_entity_list[10]['name'])
+            entities = self._list_entities(entity)(hints=hints)
+            self.assertEqual(len(entities), 1)
+            self.assertEqual(entities[0]['id'], domain1_entity_list[10]['id'])
+            # Check the driver has removed the filter from the list hints
+            self.assertFalse(hints.get_exact_filter_by_name('name'))
+            self._delete_test_data(entity, entity_list)
+            self._delete_test_data(entity, domain1_entity_list)
+
+    def test_list_users_inexact_filtered(self):
+        # Create 20 users
+        user_list = self._create_test_data('user', 20)
+        # Set up some names that we can filter on
+        user = user_list[5]
+        user['name'] = 'The'
+        self.identity_api.update_user(user['id'], user)
+        user = user_list[6]
+        user['name'] = 'The Ministry'
+        self.identity_api.update_user(user['id'], user)
+        user = user_list[7]
+        user['name'] = 'The Ministry of'
+        self.identity_api.update_user(user['id'], user)
+        user = user_list[8]
+        user['name'] = 'The Ministry of Silly'
+        self.identity_api.update_user(user['id'], user)
+        user = user_list[9]
+        user['name'] = 'The Ministry of Silly Walks'
+        self.identity_api.update_user(user['id'], user)
+        # ...and one for useful case insensitivity testing
+        user = user_list[10]
+        user['name'] = 'The ministry of silly walks OF'
+        self.identity_api.update_user(user['id'], user)
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', 'ministry', comparator='contains')
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual(len(users), 5)
+        self._match_with_list(users, user_list,
+                              list_start=6, list_end=11)
+        #TODO(henry-nash) Check inexact filter has been removed.
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', 'The', comparator='startswith')
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual(len(users), 6)
+        self._match_with_list(users, user_list,
+                              list_start=5, list_end=11)
+        #TODO(henry-nash) Check inexact filter has been removed.
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', 'of', comparator='endswith')
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual(len(users), 2)
+        self.assertEqual(users[0]['id'], user_list[7]['id'])
+        self.assertEqual(users[1]['id'], user_list[10]['id'])
+        #TODO(henry-nash) Check inexact filter has been removed.
+
+        # TODO(henry-nash): Add some case sensitive tests.  The issue
+        # is that MySQL 0.7, by default, is installed in case
+        # insensitive mode (which is what is run by default for our
+        # SQL backend tests).  For production deployments. OpenStack
+        # assumes a case sensitive database.  For these tests, therefore, we
+        # need to be able to check the sensitivity of the database so as to
+        # know whether to run case sensitive tests here.
+
+        self._delete_test_data('user', user_list)
+
+    def test_filter_sql_injection_attack(self):
+        """Test against sql injection attack on filters
+
+        Test Plan:
+        - Attempt to get all entities back by passing a two-term attribute
+        - Attempt to piggyback filter to damage DB (e.g. drop table)
+
+        """
+        # Check we have some users
+        users = self.identity_api.list_users()
+        self.assertTrue(len(users) > 0)
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', "anything' or 'x'='x")
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual(len(users), 0)
+
+        # See if we can add a SQL command...use the group table instead of the
+        # user table since 'user' is reserved word for SQLAlchemy.
+        group = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                 'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_group(group['id'], group)
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', "x'; drop table group")
+        groups = self.identity_api.list_groups(hints=hints)
+        self.assertEqual(len(groups), 0)
+
+        groups = self.identity_api.list_groups()
+        self.assertTrue(len(groups) > 0)
+
+
+class LimitTests(filtering.FilterTests):
+    def setUp(self):
+        """Setup for Limit Test Cases."""
+
+        self.domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(self.domain1['id'], self.domain1)
+        self.addCleanup(self.clean_up_domain)
+
+        self.entity_lists = {}
+        self.domain1_entity_lists = {}
+
+        for entity in ['user', 'group', 'project']:
+            # Create 20 entities, 14 of which are in domain1
+            self.entity_lists[entity] = self._create_test_data(entity, 6)
+            self.domain1_entity_lists[entity] = self._create_test_data(
+                entity, 14, self.domain1['id'])
+             # Make sure we clean up when finished
+            self.addCleanup(self.clean_up_entity, entity)
+
+    def clean_up_domain(self):
+        """Clean up domain test data from Limit Test Cases."""
+
+        self.domain1['enabled'] = False
+        self.assignment_api.update_domain(self.domain1['id'], self.domain1)
+        self.assignment_api.delete_domain(self.domain1['id'])
+
+    def clean_up_entity(self, entity):
+        """Clean up entity test data from Limit Test Cases."""
+
+        self._delete_test_data(entity, self.entity_lists[entity])
+        self._delete_test_data(entity, self.domain1_entity_lists[entity])
+
+    def _test_list_entity_filtered_and_limited(self, entity):
+        self.opt(list_limit=10)
+        # Should get back just 10 entities in domain1
+        hints = driver_hints.Hints()
+        hints.add_filter('domain_id', self.domain1['id'])
+        entities = self._list_entities(entity)(hints=hints)
+        self.assertEqual(len(entities), hints.get_limit()['limit'])
+        self.assertTrue(hints.get_limit()['truncated'])
+        self._match_with_list(entities, self.domain1_entity_lists[entity])
+
+        # Override with driver specific limit
+        if entity == 'project':
+            self.opt_in_group('assignment', list_limit=5)
+        else:
+            self.opt_in_group('identity', list_limit=5)
+
+        # Should get back just 5 users in domain1
+        hints = driver_hints.Hints()
+        hints.add_filter('domain_id', self.domain1['id'])
+        entities = self._list_entities(entity)(hints=hints)
+        self.assertEqual(len(entities), hints.get_limit()['limit'])
+        self._match_with_list(entities, self.domain1_entity_lists[entity])
+
+        # Finally, let's pretend we want to get the full list of entities,
+        # even with the limits set, as part of some internal calculation.
+        # Calling the API without a hints list should achieve this, and
+        # return at least the 20 entries we created (there may be other
+        # entities lying around created by other tests/setup).
+        entities = self._list_entities(entity)()
+        self.assertTrue(len(entities) >= 20)
+
+    def test_list_users_filtered_and_limited(self):
+        self._test_list_entity_filtered_and_limited('user')
+
+    def test_list_groups_filtered_and_limited(self):
+        self._test_list_entity_filtered_and_limited('group')
+
+    def test_list_projects_filtered_and_limited(self):
+        self._test_list_entity_filtered_and_limited('project')

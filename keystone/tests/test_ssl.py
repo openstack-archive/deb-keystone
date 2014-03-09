@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,7 +48,7 @@ class SSLTestCase(tests.TestCase):
                 '127.0.0.1', CONF.admin_port)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
         # Verify Public
         with appserver.AppServer(paste_conf, appserver.MAIN, **ssl_kwargs):
@@ -58,7 +56,7 @@ class SSLTestCase(tests.TestCase):
                 '127.0.0.1', CONF.public_port)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
     def test_2way_ssl_ok(self):
         """Make sure both public and admin API work with 2-way SSL.
@@ -74,7 +72,7 @@ class SSLTestCase(tests.TestCase):
                 '127.0.0.1', CONF.admin_port, CLIENT, CLIENT)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
         # Verify Public
         with appserver.AppServer(paste_conf, appserver.MAIN, **ssl_kwargs):
@@ -82,7 +80,7 @@ class SSLTestCase(tests.TestCase):
                 '127.0.0.1', CONF.public_port, CLIENT, CLIENT)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
     def test_1way_ssl_with_ipv6_ok(self):
         """Make sure both public and admin API work with 1-way ipv6 & SSL."""
@@ -96,14 +94,14 @@ class SSLTestCase(tests.TestCase):
             conn = environment.httplib.HTTPSConnection('::1', CONF.admin_port)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
         # Verify Public
         with appserver.AppServer(paste_conf, appserver.MAIN, **ssl_kwargs):
             conn = environment.httplib.HTTPSConnection('::1', CONF.public_port)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
     def test_2way_ssl_with_ipv6_ok(self):
         """Make sure both public and admin API work with 2-way ipv6 & SSL.
@@ -122,7 +120,7 @@ class SSLTestCase(tests.TestCase):
                 '::1', CONF.admin_port, CLIENT, CLIENT)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
         # Verify Public
         with appserver.AppServer(paste_conf, appserver.MAIN, **ssl_kwargs):
@@ -130,7 +128,7 @@ class SSLTestCase(tests.TestCase):
                 '::1', CONF.public_port, CLIENT, CLIENT)
             conn.request('GET', '/')
             resp = conn.getresponse()
-            self.assertEqual(resp.status, 300)
+            self.assertEqual(300, resp.status)
 
     def test_2way_ssl_fail(self):
         """Expect to fail when client does not present proper certificate."""

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,7 +13,8 @@
 # under the License.
 
 from __future__ import absolute_import
-
+import atexit
+import copy
 import functools
 import os
 import re
@@ -28,10 +27,13 @@ import warnings
 import fixtures
 import logging
 from paste import deploy
+import six
 import testtools
 from testtools import testcase
+import webob
 
-
+from keystone.openstack.common.db.sqlalchemy import migration
+from keystone.openstack.common.fixture import mockpatch
 from keystone.openstack.common import gettextutils
 
 # NOTE(blk-u):
@@ -49,25 +51,30 @@ gettextutils.install('keystone', lazy=True)
 from keystone.common import environment
 environment.use_eventlet()
 
-from keystone.common import cache
+from keystone import auth
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
 from keystone.common import sql
-from keystone.common import utils
-from keystone.common import wsgi
+from keystone.common.sql import migration_helpers
+from keystone.common import utils as common_utils
 from keystone import config
 from keystone import exception
 from keystone import notifications
 from keystone.openstack.common.db.sqlalchemy import session
+from keystone.openstack.common.fixture import config as config_fixture
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone import service
+from keystone.tests import fixtures as ksfixtures
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
 #   policy_file command-line option declared before setUp runs. Importing the
 #   oslo policy module automatically declares the option.
 from keystone.openstack.common import policy as common_policy  # noqa
+
+
+config.configure()
 
 
 LOG = log.getLogger(__name__)
@@ -127,12 +134,12 @@ def checkout_vendor(repo, rev):
                 return revdir
 
         if not os.path.exists(revdir):
-            utils.git('clone', repo, revdir)
+            common_utils.git('clone', repo, revdir)
 
         os.chdir(revdir)
-        utils.git('checkout', '-q', 'master')
-        utils.git('pull', '-q')
-        utils.git('checkout', '-q', rev)
+        common_utils.git('checkout', '-q', 'master')
+        common_utils.git('pull', '-q')
+        common_utils.git('checkout', '-q', rev)
 
         # write out a modified time
         with open(modcheck, 'w') as fd:
@@ -147,16 +154,28 @@ def setup_database():
     db = dirs.tmp('test.db')
     pristine = dirs.tmp('test.db.pristine')
 
-    try:
-        if os.path.exists(db):
-            os.unlink(db)
-        if not os.path.exists(pristine):
-            sql.migration.db_sync()
-            shutil.copyfile(db, pristine)
-        else:
-            shutil.copyfile(pristine, db)
-    except Exception:
-        pass
+    if os.path.exists(db):
+        os.unlink(db)
+    if not os.path.exists(pristine):
+        migration.db_sync((migration_helpers.find_migrate_repo()))
+        migration_helpers.sync_database_to_version(extension='revoke')
+        shutil.copyfile(db, pristine)
+    else:
+        shutil.copyfile(pristine, db)
+
+
+def teardown_database():
+    session.cleanup()
+
+
+@atexit.register
+def remove_test_databases():
+    db = dirs.tmp('test.db')
+    if os.path.exists(db):
+        os.unlink(db)
+    pristine = dirs.tmp('test.db.pristine')
+    if os.path.exists(pristine):
+        os.unlink(pristine)
 
 
 def generate_paste_config(extension_name):
@@ -179,10 +198,6 @@ def remove_generated_paste_config(extension_name):
     # Remove the generated paste config file, named extension_name.ini
     paste_file_to_remove = dirs.tmp(extension_name + '.ini')
     os.remove(paste_file_to_remove)
-
-
-def teardown_database():
-    session.cleanup()
 
 
 def skip_if_cache_disabled(*sections):
@@ -220,6 +235,10 @@ def skip_if_cache_disabled(*sections):
     return wrapper
 
 
+class UnexpectedExit(Exception):
+    pass
+
+
 class TestClient(object):
     def __init__(self, app=None, token=None):
         self.app = app
@@ -232,9 +251,9 @@ class TestClient(object):
         if self.token:
             headers.setdefault('X-Auth-Token', self.token)
 
-        req = wsgi.Request.blank(path)
+        req = webob.Request.blank(path)
         req.method = method
-        for k, v in headers.iteritems():
+        for k, v in six.iteritems(headers):
             req.headers[k] = v
         if body:
             req.body = body
@@ -291,6 +310,13 @@ class NoModule(object):
 
 
 class TestCase(testtools.TestCase):
+
+    _config_file_list = [dirs.etc('keystone.conf.sample'),
+                         dirs.tests('test_overrides.conf')]
+
+    def config_files(self):
+        return copy.copy(self._config_file_list)
+
     def setUp(self):
         super(TestCase, self).setUp()
 
@@ -311,21 +337,15 @@ class TestCase(testtools.TestCase):
 
         self.addCleanup(CONF.reset)
 
-        self.config([dirs.etc('keystone.conf.sample'),
-                     dirs.tests('test_overrides.conf')])
-
+        self.exit_patch = self.useFixture(mockpatch.PatchObject(sys, 'exit'))
+        self.exit_patch.mock.side_effect = UnexpectedExit
+        self.config_fixture = self.useFixture(config_fixture.Config(CONF))
+        self.config(self.config_files())
         self.opt(policy_file=dirs.etc('policy.json'))
-
-        # NOTE(morganfainberg):  The only way to reconfigure the
-        # CacheRegion object on each setUp() call is to remove the
-        # .backend property.
-        self.addCleanup(delattr, cache.REGION, 'backend')
-
-        # ensure the cache region instance is setup
-        cache.configure_cache_region(cache.REGION)
 
         self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
         warnings.filterwarnings('ignore', category=DeprecationWarning)
+        self.useFixture(ksfixtures.Cache())
 
         # Clear the registry of providers so that providers from previous
         # tests aren't used.
@@ -337,16 +357,20 @@ class TestCase(testtools.TestCase):
 
         # Ensure Notification subscriotions and resource types are empty
         self.addCleanup(notifications.SUBSCRIBERS.clear)
+        self.addCleanup(notifications._reset_notifier)
+
+        # Reset the auth-plugin registry
+        self.addCleanup(self.clear_auth_plugin_registry)
 
     def config(self, config_files):
         CONF(args=[], project='keystone', default_config_files=config_files)
 
     def opt_in_group(self, group, **kw):
-        for k, v in kw.iteritems():
+        for k, v in six.iteritems(kw):
             CONF.set_override(k, v, group)
 
     def opt(self, **kw):
-        for k, v in kw.iteritems():
+        for k, v in six.iteritems(kw):
             CONF.set_override(k, v)
 
     def load_backends(self):
@@ -363,6 +387,7 @@ class TestCase(testtools.TestCase):
         # should eventually be removed once testing has been cleaned up.
         kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
 
+        self.clear_auth_plugin_registry()
         drivers = service.load_backends()
 
         # TODO(stevemar): currently, load oauth1 driver as well, eventually
@@ -370,10 +395,21 @@ class TestCase(testtools.TestCase):
         from keystone.contrib import oauth1
         drivers['oauth1_api'] = oauth1.Manager()
 
+        from keystone.contrib import federation
+        drivers['federation_api'] = federation.Manager()
+
         dependency.resolve_future_dependencies()
 
-        for manager_name, manager in drivers.iteritems():
+        for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
+
+        # The credential backend only supports SQL, so we always have to load
+        # the tables.
+        self.engine = session.get_engine()
+        self.addCleanup(session.cleanup)
+
+        sql.ModelBase.metadata.create_all(bind=self.engine)
+        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -447,6 +483,10 @@ class TestCase(testtools.TestCase):
         sys.path.insert(0, path)
         self._paths.append(path)
 
+    def clear_auth_plugin_registry(self):
+        auth.controllers.AUTH_METHODS.clear()
+        auth.controllers.AUTH_PLUGINS_LOADED = False
+
     def assertCloseEnoughForGovernmentWork(self, a, b, delta=3):
         """Asserts that two datetimes are nearly equal within a small delta.
 
@@ -460,8 +500,8 @@ class TestCase(testtools.TestCase):
         self.assertTrue(len(l))
 
     def assertDictEqual(self, d1, d2, msg=None):
-        self.assertTrue(isinstance(d1, dict), 'First argument is not a dict')
-        self.assertTrue(isinstance(d2, dict), 'Second argument is not a dict')
+        self.assertIsInstance(d1, dict)
+        self.assertIsInstance(d2, dict)
         self.assertEqual(d1, d2, msg)
 
     def assertRaisesRegexp(self, expected_exception, expected_regexp,
@@ -471,14 +511,14 @@ class TestCase(testtools.TestCase):
         try:
             callable_obj(*args, **kwargs)
         except expected_exception as exc_value:
-            if isinstance(expected_regexp, basestring):
+            if isinstance(expected_regexp, six.string_types):
                 expected_regexp = re.compile(expected_regexp)
 
             if isinstance(exc_value.args[0], gettextutils.Message):
-                if not expected_regexp.search(unicode(exc_value)):
+                if not expected_regexp.search(six.text_type(exc_value)):
                     raise self.failureException(
                         '"%s" does not match "%s"' %
-                        (expected_regexp.pattern, unicode(exc_value)))
+                        (expected_regexp.pattern, six.text_type(exc_value)))
             else:
                 if not expected_regexp.search(str(exc_value)):
                     raise self.failureException(
@@ -489,7 +529,7 @@ class TestCase(testtools.TestCase):
                 excName = expected_exception.__name__
             else:
                 excName = str(expected_exception)
-            raise self.failureException, "%s not raised" % excName
+            raise self.failureException("%s not raised" % excName)
 
     def assertDictContainsSubset(self, expected, actual, msg=None):
         """Checks whether actual is a superset of expected."""
@@ -506,7 +546,7 @@ class TestCase(testtools.TestCase):
 
         missing = []
         mismatched = []
-        for key, value in expected.iteritems():
+        for key, value in six.iteritems(expected):
             if key not in actual:
                 missing.append(key)
             elif value != actual[key]:

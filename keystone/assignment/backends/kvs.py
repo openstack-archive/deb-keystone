@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -16,15 +14,39 @@
 
 from keystone import assignment
 from keystone import clean
-from keystone.common import dependency
 from keystone.common import kvs
 from keystone import exception
 
 
-@dependency.requires('identity_api')
 class Assignment(kvs.Base, assignment.Driver):
-    def __init__(self):
-        super(Assignment, self).__init__()
+    """KVS Assignment backend.
+
+    This backend uses the following mappings to store data:
+
+    * Domains:
+
+      * domain_list -> [domain_id, ...]
+      * domain-{id} -> domain_ref
+      * domain_name-{name} -> domain_ref
+
+    * Projects:
+
+      * tenant-{id} -> project_ref
+      * tenant_name-{name} -> project_ref
+
+    * Roles:
+
+      * role_list -> [role_id, ...]
+      * role-{id} -> role_ref
+
+    * Role assignments:
+
+      * metadata_user-{target}-{user_id} ->
+        {'roles': [{'id': role-id, ...}, ...]}
+      * metadata_group-{target}-{group_id} ->
+        {'roles': [{'id': role-id, ...}, ...]}
+
+    """
 
     # Public interface
 
@@ -34,15 +56,19 @@ class Assignment(kvs.Base, assignment.Driver):
         except exception.NotFound:
             raise exception.ProjectNotFound(project_id=tenant_id)
 
-    def list_projects(self, domain_id=None):
+    def _build_project_refs(self):
         project_keys = filter(lambda x: x.startswith("tenant-"),
                               self.db.keys())
-        project_refs = [self.db.get(key) for key in project_keys]
+        return [self.db.get(key) for key in project_keys]
 
-        if domain_id:
-            self.get_domain(domain_id)
-            project_refs = filter(lambda x: domain_id in x['domain_id'],
-                                  project_refs)
+    def list_projects(self, hints):
+        return self._build_project_refs()
+
+    def list_projects_in_domain(self, domain_id):
+        project_refs = self._build_project_refs()
+        self.get_domain(domain_id)
+        project_refs = filter(lambda x: domain_id in x['domain_id'],
+                              project_refs)
         return project_refs
 
     def get_project_by_name(self, tenant_name, domain_id):
@@ -53,40 +79,39 @@ class Assignment(kvs.Base, assignment.Driver):
 
     def list_user_ids_for_project(self, tenant_id):
         self.get_project(tenant_id)
-        user_keys = filter(lambda x: x.startswith("user-"), self.db.keys())
-        user_refs = [self.db.get(key) for key in user_keys]
-        user_refs = filter(lambda x: tenant_id in x['tenants'], user_refs)
-        return [user_ref['id'] for user_ref in user_refs]
 
-    def _get_user(self, user_id):
-        try:
-            return self.db.get('user-%s' % user_id)
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=user_id)
+        user_ids = set()
 
-    def _get_user_by_name(self, user_name, domain_id):
-        try:
-            return self.db.get('user_name-%s' % user_name)
-        except exception.NotFound:
-            raise exception.UserNotFound(user_id=user_name)
+        metadata_keys = filter(lambda x: x.startswith("metadata_user-"),
+                               self.db.keys())
+        for key in metadata_keys:
+            _, meta_project_or_domain_id, meta_user_id = key.split('-')
+
+            if meta_project_or_domain_id != tenant_id:
+                # target is not the project, so on to next metadata.
+                continue
+
+            user_ids.add(meta_user_id)
+
+        return list(user_ids)
 
     def _get_metadata(self, user_id=None, tenant_id=None,
                       domain_id=None, group_id=None):
         try:
             if user_id:
                 if tenant_id:
-                    return self.db.get('metadata-%s-%s' % (tenant_id,
-                                                           user_id))
+                    return self.db.get('metadata_user-%s-%s' % (tenant_id,
+                                                                user_id))
                 else:
-                    return self.db.get('metadata-%s-%s' % (domain_id,
-                                                           user_id))
+                    return self.db.get('metadata_user-%s-%s' % (domain_id,
+                                                                user_id))
             else:
                 if tenant_id:
-                    return self.db.get('metadata-%s-%s' % (tenant_id,
-                                                           group_id))
+                    return self.db.get('metadata_group-%s-%s' % (tenant_id,
+                                                                 group_id))
                 else:
-                    return self.db.get('metadata-%s-%s' % (domain_id,
-                                                           group_id))
+                    return self.db.get('metadata_group-%s-%s' % (domain_id,
+                                                                 group_id))
         except exception.NotFound:
             raise exception.MetadataNotFound()
 
@@ -96,19 +121,55 @@ class Assignment(kvs.Base, assignment.Driver):
         except exception.NotFound:
             raise exception.RoleNotFound(role_id=role_id)
 
-    def list_roles(self):
+    def list_roles(self, hints):
+        return self._list_roles()
+
+    def _list_roles(self):
         role_ids = self.db.get('role_list', [])
         return [self.get_role(x) for x in role_ids]
 
-    def list_projects_for_user(self, user_id, group_ids):
+    def list_projects_for_user(self, user_id, group_ids, hints):
         # NOTE(henry-nash): The kvs backend is being deprecated, so no
         # support is provided for projects that the user has a role on solely
         # by virtue of group membership.
-        user_ref = self._get_user(user_id)
-        return [self.get_project(x) for x in user_ref.get('tenants', [])]
+
+        project_ids = set()
+
+        metadata_keys = filter(lambda x: x.startswith('metadata_user-'),
+                               self.db.keys())
+        for key in metadata_keys:
+            _, meta_project_or_domain_id, meta_user_id = key.split('-')
+
+            if meta_user_id != user_id:
+                # Not the user, so on to next metadata.
+                continue
+
+            try:
+                self.get_project(meta_project_or_domain_id)
+            except exception.NotFound:
+                # target is not a project, so on to next metadata.
+                continue
+
+            project_id = meta_project_or_domain_id
+            project_ids.add(project_id)
+
+        project_refs = []
+
+        for project_id in project_ids:
+            project_refs.append(self.get_project(project_id))
+
+        return project_refs
+
+    def get_roles_for_groups(self, group_ids, project_id=None, domain_id=None):
+        raise exception.NotImplemented()
+
+    def list_projects_for_groups(self, group_ids):
+        raise exception.NotImplemented()
+
+    def list_domains_for_groups(self, group_ids):
+        raise exception.NotImplemented()
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
-        self.identity_api.get_user(user_id)
         self.get_project(tenant_id)
         self.get_role(role_id)
         try:
@@ -144,48 +205,50 @@ class Assignment(kvs.Base, assignment.Driver):
         if metadata_ref['roles']:
             self._update_metadata(user_id, tenant_id, metadata_ref)
         else:
-
-            self.db.delete('metadata-%s-%s' % (tenant_id, user_id))
-            user_ref = self._get_user(user_id)
-            tenants = set(user_ref.get('tenants', []))
-            tenants.remove(tenant_id)
-            user_ref['tenants'] = list(tenants)
-            self.identity_api.update_user(user_id, user_ref)
+            self.db.delete('metadata_user-%s-%s' % (tenant_id, user_id))
 
     def list_role_assignments(self):
         """List the role assignments.
 
-        The kvs backend stores role assignments as key-values:
-
-        "metadata-{target}-{actor}", with the value being a role list
-
-        i.e. "metadata-MyProjectID-MyUserID" [{'id': role1}, {'id': role2}]
-
-        ...so we enumerate the list and extract the targets, actors
-        and roles.
+        We enumerate the metadata entries and extract the targets, actors, and
+        roles.
 
         """
         assignment_list = []
-        metadata_keys = filter(lambda x: x.startswith("metadata-"),
+        metadata_keys = filter(lambda x: x.startswith('metadata_user-'),
                                self.db.keys())
         for key in metadata_keys:
             template = {}
-            meta_id1 = key.split('-')[1]
-            meta_id2 = key.split('-')[2]
+            _, meta_project_or_domain_id, template['user_id'] = key.split('-')
             try:
-                self.get_project(meta_id1)
-                template['project_id'] = meta_id1
+                self.get_project(meta_project_or_domain_id)
+                template['project_id'] = meta_project_or_domain_id
             except exception.NotFound:
-                template['domain_id'] = meta_id1
-            try:
-                self._get_user(meta_id2)
-                template['user_id'] = meta_id2
-            except exception.NotFound:
-                template['group_id'] = meta_id2
+                template['domain_id'] = meta_project_or_domain_id
 
             entry = self.db.get(key)
+            inherited = False
             for r in self._roles_from_role_dicts(entry.get('roles', {}),
-                                                 False):
+                                                 inherited):
+                role_assignment = template.copy()
+                role_assignment['role_id'] = r
+                assignment_list.append(role_assignment)
+
+        metadata_keys = filter(lambda x: x.startswith('metadata_group-'),
+                               self.db.keys())
+        for key in metadata_keys:
+            template = {}
+            _, meta_project_or_domain_id, template['group_id'] = key.split('-')
+            try:
+                self.get_project(meta_project_or_domain_id)
+                template['project_id'] = meta_project_or_domain_id
+            except exception.NotFound:
+                template['domain_id'] = meta_project_or_domain_id
+
+            entry = self.db.get(key)
+            inherited = False
+            for r in self._roles_from_role_dicts(entry.get('roles', {}),
+                                                 inherited):
                 role_assignment = template.copy()
                 role_assignment['role_id'] = r
                 assignment_list.append(role_assignment)
@@ -256,30 +319,18 @@ class Assignment(kvs.Base, assignment.Driver):
                          domain_id=None, group_id=None):
         if user_id:
             if tenant_id:
-                self.db.set('metadata-%s-%s' % (tenant_id, user_id), metadata)
-                try:
-                    user_ref = self._get_user(user_id)
-                    # FIXME(morganfainberg): Setting the password does a number
-                    # of things including invalidating tokens. Simple solution
-                    # is to remove it from the ref before sending it on. The
-                    # correct solution is to remove the need to call the
-                    # identity_api from within the driver.
-                    user_ref.pop('password', None)
-                    tenants = set(user_ref.get('tenants', []))
-                    if tenant_id not in tenants:
-                        tenants.add(tenant_id)
-                        user_ref['tenants'] = list(tenants)
-                        self.identity_api.update_user(user_id, user_ref)
-                except exception.UserNotFound:
-                    # It's acceptable for the user to not exist.
-                    pass
+                self.db.set('metadata_user-%s-%s' % (tenant_id, user_id),
+                            metadata)
             else:
-                self.db.set('metadata-%s-%s' % (domain_id, user_id), metadata)
+                self.db.set('metadata_user-%s-%s' % (domain_id, user_id),
+                            metadata)
         else:
             if tenant_id:
-                self.db.set('metadata-%s-%s' % (tenant_id, group_id), metadata)
+                self.db.set('metadata_group-%s-%s' % (tenant_id, group_id),
+                            metadata)
             else:
-                self.db.set('metadata-%s-%s' % (domain_id, group_id), metadata)
+                self.db.set('metadata_group-%s-%s' % (domain_id, group_id),
+                            metadata)
         return metadata
 
     def create_role(self, role_id, role):
@@ -291,7 +342,7 @@ class Assignment(kvs.Base, assignment.Driver):
             msg = 'Duplicate ID, %s.' % role_id
             raise exception.Conflict(type='role', details=msg)
 
-        for role_ref in self.list_roles():
+        for role_ref in self._list_roles():
             if role['name'] == role_ref['name']:
                 msg = 'Duplicate name, %s.' % role['name']
                 raise exception.Conflict(type='role', details=msg)
@@ -303,7 +354,7 @@ class Assignment(kvs.Base, assignment.Driver):
 
     def update_role(self, role_id, role):
         old_role_ref = None
-        for role_ref in self.list_roles():
+        for role_ref in self._list_roles():
             if role['name'] == role_ref['name'] and role_id != role_ref['id']:
                 msg = 'Duplicate name, %s.' % role['name']
                 raise exception.Conflict(type='role', details=msg)
@@ -319,31 +370,39 @@ class Assignment(kvs.Base, assignment.Driver):
 
     def delete_role(self, role_id):
         self.get_role(role_id)
-        metadata_keys = filter(lambda x: x.startswith("metadata-"),
+
+        metadata_keys = filter(lambda x: x.startswith('metadata_user-'),
                                self.db.keys())
         for key in metadata_keys:
-            meta_id1 = key.split('-')[1]
-            meta_id2 = key.split('-')[2]
+            _, meta_project_or_domain_id, meta_user_id = key.split('-')
             try:
-                self.delete_grant(role_id, project_id=meta_id1,
-                                  user_id=meta_id2)
+                self.delete_grant(role_id,
+                                  project_id=meta_project_or_domain_id,
+                                  user_id=meta_user_id)
             except exception.NotFound:
                 pass
             try:
-                self.delete_grant(role_id, project_id=meta_id1,
-                                  group_id=meta_id2)
+                self.delete_grant(role_id, domain_id=meta_project_or_domain_id,
+                                  user_id=meta_user_id)
+            except exception.NotFound:
+                pass
+
+        metadata_keys = filter(lambda x: x.startswith('metadata_group-'),
+                               self.db.keys())
+        for key in metadata_keys:
+            _, meta_project_or_domain_id, meta_group_id = key.split('-')
+            try:
+                self.delete_grant(role_id,
+                                  project_id=meta_project_or_domain_id,
+                                  group_id=meta_group_id)
             except exception.NotFound:
                 pass
             try:
-                self.delete_grant(role_id, domain_id=meta_id1,
-                                  user_id=meta_id2)
+                self.delete_grant(role_id, domain_id=meta_project_or_domain_id,
+                                  group_id=meta_group_id)
             except exception.NotFound:
                 pass
-            try:
-                self.delete_grant(role_id, domain_id=meta_id1,
-                                  group_id=meta_id2)
-            except exception.NotFound:
-                pass
+
         self.db.delete('role-%s' % role_id)
         role_list = set(self.db.get('role_list', []))
         role_list.remove(role_id)
@@ -374,10 +433,6 @@ class Assignment(kvs.Base, assignment.Driver):
     def list_grants(self, user_id=None, group_id=None,
                     domain_id=None, project_id=None,
                     inherited_to_projects=False):
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
@@ -397,8 +452,6 @@ class Assignment(kvs.Base, assignment.Driver):
                   domain_id=None, project_id=None,
                   inherited_to_projects=False):
         self.get_role(role_id)
-        if user_id:
-            self.identity_api.get_user(user_id)
         if group_id:
             self.get_group(group_id)
         if domain_id:
@@ -423,10 +476,6 @@ class Assignment(kvs.Base, assignment.Driver):
                      domain_id=None, project_id=None,
                      inherited_to_projects=False):
         self.get_role(role_id)
-        if user_id:
-            self.identity_api.get_user(user_id)
-        if group_id:
-            self.identity_api.get_group(group_id)
         if domain_id:
             self.get_domain(domain_id)
         if project_id:
@@ -473,7 +522,7 @@ class Assignment(kvs.Base, assignment.Driver):
         self.db.set('domain_list', list(domain_list))
         return domain
 
-    def list_domains(self):
+    def list_domains(self, hints):
         domain_ids = self.db.get('domain_list', [])
         return [self.get_domain(x) for x in domain_ids]
 

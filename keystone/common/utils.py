@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
@@ -26,11 +24,13 @@ import os
 import pwd
 
 import passlib.hash
+import six
 
 from keystone.common import config
 from keystone.common import environment
 from keystone import exception
 from keystone.openstack.common import log
+from keystone.openstack.common import strutils
 from six import moves
 
 
@@ -106,11 +106,8 @@ def hash_ldap_user_password(user):
 def hash_password(password):
     """Hash a password. Hard."""
     password_utf8 = trunc_password(password).encode('utf-8')
-    if passlib.hash.sha512_crypt.identify(password_utf8):
-        return password_utf8
-    h = passlib.hash.sha512_crypt.encrypt(password_utf8,
-                                          rounds=CONF.crypt_strength)
-    return h
+    return passlib.hash.sha512_crypt.encrypt(
+        password_utf8, rounds=CONF.crypt_strength)
 
 
 def ldap_hash_password(password):
@@ -138,6 +135,18 @@ def check_password(password, hashed):
         return False
     password_utf8 = trunc_password(password).encode('utf-8')
     return passlib.hash.sha512_crypt.verify(password_utf8, hashed)
+
+
+def attr_as_boolean(val_attr):
+    """Returns the boolean value, decoded from a string.
+
+    We test explicitly for a value meaning False, which can be one of
+    several formats as specified in oslo strutils.FALSE_STRINGS.
+    All other string values (including an empty string) are treated as
+    meaning True.
+
+    """
+    return strutils.bool_from_string(val_attr, default=True)
 
 
 # From python 2.7
@@ -330,7 +339,7 @@ def get_unix_user(user=None):
     :return: tuple of (uid, name)
     '''
 
-    if isinstance(user, basestring):
+    if isinstance(user, six.string_types):
         try:
             user_info = pwd.getpwnam(user)
         except KeyError:
@@ -386,7 +395,7 @@ def get_unix_group(group=None):
     :return: tuple of (gid, name)
     '''
 
-    if isinstance(group, basestring):
+    if isinstance(group, six.string_types):
         try:
             group_info = grp.getgrnam(group)
         except KeyError:

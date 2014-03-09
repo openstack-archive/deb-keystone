@@ -1,4 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
 # flake8: noqa
 
 # Copyright 2012 OpenStack Foundation
@@ -18,3 +17,4 @@
 from keystone.contrib.ec2 import controllers
 from keystone.contrib.ec2.core import *
 from keystone.contrib.ec2.routers import Ec2Extension
+from keystone.contrib.ec2.routers import Ec2ExtensionV3

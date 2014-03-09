@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -24,12 +22,14 @@ from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
 
-METHOD_NAME = 'oauth1'
 LOG = log.getLogger(__name__)
 
 
 @dependency.requires('oauth_api')
 class OAuth(auth.AuthMethodHandler):
+
+    method = 'oauth1'
+
     def __init__(self):
         self.oauth_api = oauth1.Manager()
 

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,15 +12,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import copy
 import datetime
 import uuid
 
 from lxml import etree
+import six
 
 from keystone import auth
+from keystone.common import authorization
 from keystone.common import cache
 from keystone.common import serializer
 from keystone import config
+from keystone import middleware
 from keystone.openstack.common import timeutils
 from keystone.policy.backends import rules
 from keystone import tests
@@ -30,7 +32,7 @@ from keystone.tests import rest
 
 
 CONF = config.CONF
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
+DEFAULT_DOMAIN_ID = 'default'
 
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
@@ -41,9 +43,11 @@ class RestfulTestCase(rest.RestfulTestCase):
                          tests.dirs.tests('backend_sql.conf'),
                          tests.dirs.tests('backend_sql_disk.conf')]
 
-    #override this to sepcify the complete list of configuration files
+    #Subclasses can override this to specify the complete list of configuration
+    #files.  The base version makes a copy of the original values, otherwise
+    #additional tests end up appending to them and corrupting other tests.
     def config_files(self):
-        return self._config_file_list
+        return copy.copy(self._config_file_list)
 
     def setup_database(self):
         tests.setup_database()
@@ -83,9 +87,6 @@ class RestfulTestCase(rest.RestfulTestCase):
 
         #drop the policy rules
         self.addCleanup(rules.reset)
-
-        # need to reset the plug-ins
-        self.addCleanup(setattr, auth.controllers, 'AUTH_METHODS', {})
 
         self.addCleanup(self.teardown_database)
 
@@ -152,7 +153,6 @@ class RestfulTestCase(rest.RestfulTestCase):
         self.region = self.new_region_ref()
         self.region['id'] = self.region_id
         self.catalog_api.create_region(
-            self.region_id,
             self.region.copy())
 
         self.service_id = uuid.uuid4().hex
@@ -165,6 +165,9 @@ class RestfulTestCase(rest.RestfulTestCase):
         self.endpoint_id = uuid.uuid4().hex
         self.endpoint = self.new_endpoint_ref(service_id=self.service_id)
         self.endpoint['id'] = self.endpoint_id
+        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
+        # able to remove the next line. See bug 1282266.
+        self.endpoint['enabled'] = True
         self.catalog_api.create_endpoint(
             self.endpoint_id,
             self.endpoint.copy())
@@ -190,12 +193,14 @@ class RestfulTestCase(rest.RestfulTestCase):
         ref['type'] = uuid.uuid4().hex
         return ref
 
-    def new_endpoint_ref(self, service_id):
+    def new_endpoint_ref(self, service_id, **kwargs):
         ref = self.new_ref()
+        del ref['enabled']  # enabled is optional
         ref['interface'] = uuid.uuid4().hex[:8]
         ref['service_id'] = service_id
         ref['url'] = uuid.uuid4().hex
         ref['region'] = uuid.uuid4().hex
+        ref.update(kwargs)
         return ref
 
     def new_domain_ref(self):
@@ -242,15 +247,16 @@ class RestfulTestCase(rest.RestfulTestCase):
 
     def new_trust_ref(self, trustor_user_id, trustee_user_id, project_id=None,
                       impersonation=None, expires=None, role_ids=None,
-                      role_names=None):
+                      role_names=None, remaining_uses=None):
         ref = self.new_ref()
 
         ref['trustor_user_id'] = trustor_user_id
         ref['trustee_user_id'] = trustee_user_id
         ref['impersonation'] = impersonation or False
         ref['project_id'] = project_id
+        ref['remaining_uses'] = remaining_uses
 
-        if isinstance(expires, basestring):
+        if isinstance(expires, six.string_types):
             ref['expires_at'] = expires
         elif isinstance(expires, dict):
             ref['expires_at'] = timeutils.strtime(
@@ -338,9 +344,9 @@ class RestfulTestCase(rest.RestfulTestCase):
     def v3_request(self, path, **kwargs):
         # Check if the caller has passed in auth details for
         # use in requesting the token
-        auth = kwargs.pop('auth', None)
-        if auth:
-            token = self.get_requested_token(auth)
+        auth_arg = kwargs.pop('auth', None)
+        if auth_arg:
+            token = self.get_requested_token(auth_arg)
         else:
             token = kwargs.pop('token', None)
             if not token:
@@ -489,7 +495,7 @@ class RestfulTestCase(rest.RestfulTestCase):
         except Exception:
             msg = '%s is not a valid ISO 8601 extended format date time.' % dt
             raise AssertionError(msg)
-        self.assertTrue(isinstance(dt, datetime.datetime))
+        self.assertIsInstance(dt, datetime.datetime)
 
     def assertValidTokenResponse(self, r, user=None):
         self.assertTrue(r.headers.get('X-Subject-Token'))
@@ -570,7 +576,7 @@ class RestfulTestCase(rest.RestfulTestCase):
         trust = token.get('OS-TRUST:trust')
         self.assertIsNotNone(trust)
         self.assertIsNotNone(trust.get('id'))
-        self.assertTrue(isinstance(trust.get('impersonation'), bool))
+        self.assertIsInstance(trust.get('impersonation'), bool)
         self.assertIsNotNone(trust.get('trustor_user'))
         self.assertIsNotNone(trust.get('trustee_user'))
         self.assertIsNotNone(trust['trustor_user'].get('id'))
@@ -994,7 +1000,7 @@ class RestfulTestCase(rest.RestfulTestCase):
 
         if summary:
             # Trust list contains no roles, but getting a specific
-            # trust by ID provides the detailed reponse containing roles
+            # trust by ID provides the detailed response containing roles
             self.assertNotIn('roles', entity)
             self.assertIn('project_id', entity)
         else:
@@ -1112,3 +1118,47 @@ class RestfulTestCase(rest.RestfulTestCase):
 class VersionTestCase(RestfulTestCase):
     def test_get_version(self):
         pass
+
+
+#NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
+# because we need the token
+class AuthContextMiddlewareTestCase(RestfulTestCase):
+    def _mock_request_object(self, token_id):
+
+        class fake_req:
+            headers = {middleware.AUTH_TOKEN_HEADER: token_id}
+            environ = {}
+
+        return fake_req()
+
+    def test_auth_context_build_by_middleware(self):
+        # test to make sure AuthContextMiddleware successful build the auth
+        # context from the incoming auth token
+        admin_token = self.get_scoped_token()
+        req = self._mock_request_object(admin_token)
+        application = None
+        middleware.AuthContextMiddleware(application).process_request(req)
+        self.assertEqual(
+            req.environ.get(authorization.AUTH_CONTEXT_ENV)['user_id'],
+            self.user['id'])
+
+    def test_auth_context_override(self):
+        overridden_context = 'OVERRIDDEN_CONTEXT'
+        # this token should not be used
+        token = uuid.uuid4().hex
+        req = self._mock_request_object(token)
+        req.environ[authorization.AUTH_CONTEXT_ENV] = overridden_context
+        application = None
+        middleware.AuthContextMiddleware(application).process_request(req)
+        # make sure overridden context take precedence
+        self.assertEqual(req.environ.get(authorization.AUTH_CONTEXT_ENV),
+                         overridden_context)
+
+    def test_admin_token_auth_context(self):
+        # test to make sure AuthContextMiddleware does not attempt to build
+        # auth context if the incoming auth token is the special admin token
+        req = self._mock_request_object(CONF.admin_token)
+        application = None
+        middleware.AuthContextMiddleware(application).process_request(req)
+        self.assertDictEqual(req.environ.get(authorization.AUTH_CONTEXT_ENV),
+                             {})

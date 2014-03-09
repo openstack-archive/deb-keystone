@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,8 +17,17 @@ from keystone.common import router
 
 
 def append_v3_routers(mapper, routers):
-    routers.append(router.Router(controllers.RegionV3(),
+    regions_controller = controllers.RegionV3()
+    routers.append(router.Router(regions_controller,
                                  'regions', 'region'))
+
+    # Need to add an additional route to support PUT /regions/{region_id}
+    mapper.connect(
+        '/regions/{region_id}',
+        controller=regions_controller,
+        action='create_region_with_id',
+        conditions=dict(method=['PUT']))
+
     routers.append(router.Router(controllers.ServiceV3(),
                                  'services', 'service'))
     routers.append(router.Router(controllers.EndpointV3(),

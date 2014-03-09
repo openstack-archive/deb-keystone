@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # Copyright 2012 Canonical Ltd.
 #
@@ -17,8 +15,11 @@
 
 import uuid
 
+import six
+
 from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import wsgi
 from keystone import exception
 
 
@@ -109,7 +110,7 @@ class Endpoint(controller.V2Controller):
                 legacy_endpoint_ref.pop(url)
 
         legacy_endpoint_id = uuid.uuid4().hex
-        for interface, url in urls.iteritems():
+        for interface, url in six.iteritems(urls):
             endpoint_ref = endpoint.copy()
             endpoint_ref['id'] = uuid.uuid4().hex
             endpoint_ref['legacy_endpoint_id'] = legacy_endpoint_id
@@ -141,17 +142,34 @@ class RegionV3(controller.V3Controller):
     collection_name = 'regions'
     member_name = 'region'
 
-    def __init__(self):
-        super(RegionV3, self).__init__()
-        self.get_member_from_driver = self.catalog_api.get_region
+    def create_region_with_id(self, context, region_id, region):
+        """Create a region with a user-specified ID.
+
+        This method is unprotected because it depends on ``self.create_region``
+        to enforce policy.
+        """
+        if 'id' in region and region_id != region['id']:
+            raise exception.ValidationError(
+                _('Conflicting region IDs specified: '
+                  '"%(url_id)s" != "%(ref_id)s"') % {
+                      'url_id': region_id,
+                      'ref_id': region['id']})
+        region['id'] = region_id
+        return self.create_region(context, region)
 
     @controller.protected()
     def create_region(self, context, region):
-        ref = self._assign_unique_id(self._normalize_dict(region))
+        ref = self._normalize_dict(region)
 
-        ref = self.catalog_api.create_region(ref['id'], ref)
-        return RegionV3.wrap_member(context, ref)
+        if 'id' not in ref:
+            ref = self._assign_unique_id(ref)
 
+        ref = self.catalog_api.create_region(ref)
+        return wsgi.render_response(
+            RegionV3.wrap_member(context, ref),
+            status=(201, 'Created'))
+
+    @controller.protected()
     def list_regions(self, context):
         refs = self.catalog_api.list_regions()
         return RegionV3.wrap_collection(context, refs)
@@ -192,8 +210,9 @@ class ServiceV3(controller.V3Controller):
 
     @controller.filterprotected('type')
     def list_services(self, context, filters):
-        refs = self.catalog_api.list_services()
-        return ServiceV3.wrap_collection(context, refs, filters)
+        hints = ServiceV3.build_driver_hints(context, filters)
+        refs = self.catalog_api.list_services(hints=hints)
+        return ServiceV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_service(self, context, service_id):
@@ -244,8 +263,9 @@ class EndpointV3(controller.V3Controller):
 
     @controller.filterprotected('interface', 'service_id')
     def list_endpoints(self, context, filters):
-        refs = self.catalog_api.list_endpoints()
-        return EndpointV3.wrap_collection(context, refs, filters)
+        hints = EndpointV3.build_driver_hints(context, filters)
+        refs = self.catalog_api.list_endpoints(hints=hints)
+        return EndpointV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_endpoint(self, context, endpoint_id):

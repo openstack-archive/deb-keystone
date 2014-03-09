@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -16,10 +14,16 @@
 
 from keystone.common import dependency
 from keystone.common import sql
-from keystone.common.sql import migration
+from keystone.common.sql import migration_helpers
 from keystone.common import utils
 from keystone import exception
 from keystone import identity
+from keystone.openstack.common.db.sqlalchemy import migration
+from keystone.openstack.common.db.sqlalchemy import session as db_session
+
+# Import assignment sql to ensure that the models defined in there are
+# available for the reference from User and Group to Domain.id.
+from keystone.assignment.backends import sql as assignment_sql  # flake8: noqa
 
 
 class User(sql.ModelBase, sql.DictBase):
@@ -71,13 +75,14 @@ class UserGroupMembership(sql.ModelBase, sql.DictBase):
 
 
 @dependency.requires('assignment_api')
-class Identity(sql.Base, identity.Driver):
+class Identity(identity.Driver):
     def default_assignment_driver(self):
         return "keystone.assignment.backends.sql.Assignment"
 
     # Internal interface to manage the database
     def db_sync(self, version=None):
-        migration.db_sync(version=version)
+        migration.db_sync(
+            migration_helpers.find_migrate_repo(), version=version)
 
     def _check_password(self, password, user_ref):
         """Check the specified password against the data store.
@@ -98,14 +103,14 @@ class Identity(sql.Base, identity.Driver):
 
     # Identity interface
     def authenticate(self, user_id, password):
-        session = self.get_session()
+        session = db_session.get_session()
         user_ref = None
         try:
             user_ref = self._get_user(session, user_id)
         except exception.UserNotFound:
-            raise AssertionError('Invalid user / password')
+            raise AssertionError(_('Invalid user / password'))
         if not self._check_password(password, user_ref):
-            raise AssertionError('Invalid user / password')
+            raise AssertionError(_('Invalid user / password'))
         return identity.filter_user(user_ref.to_dict())
 
     # user crud
@@ -113,15 +118,17 @@ class Identity(sql.Base, identity.Driver):
     @sql.handle_conflicts(conflict_type='user')
     def create_user(self, user_id, user):
         user = utils.hash_user_password(user)
-        session = self.get_session()
+        session = db_session.get_session()
         with session.begin():
             user_ref = User.from_dict(user)
             session.add(user_ref)
         return identity.filter_user(user_ref.to_dict())
 
-    def list_users(self):
-        session = self.get_session()
-        user_refs = session.query(User)
+    @sql.truncated
+    def list_users(self, hints):
+        session = db_session.get_session()
+        query = session.query(User)
+        user_refs = sql.filter_limit_query(User, query, hints)
         return [identity.filter_user(x.to_dict()) for x in user_refs]
 
     def _get_user(self, session, user_id):
@@ -131,11 +138,11 @@ class Identity(sql.Base, identity.Driver):
         return user_ref
 
     def get_user(self, user_id):
-        session = self.get_session()
+        session = db_session.get_session()
         return identity.filter_user(self._get_user(session, user_id).to_dict())
 
     def get_user_by_name(self, user_name, domain_id):
-        session = self.get_session()
+        session = db_session.get_session()
         query = session.query(User)
         query = query.filter_by(name=user_name)
         query = query.filter_by(domain_id=domain_id)
@@ -147,9 +154,9 @@ class Identity(sql.Base, identity.Driver):
 
     @sql.handle_conflicts(conflict_type='user')
     def update_user(self, user_id, user):
-        session = self.get_session()
+        session = db_session.get_session()
         if 'id' in user and user_id != user['id']:
-            raise exception.ValidationError('Cannot change user ID')
+            raise exception.ValidationError(_('Cannot change user ID'))
 
         with session.begin():
             user_ref = self._get_user(session, user_id)
@@ -165,7 +172,7 @@ class Identity(sql.Base, identity.Driver):
         return identity.filter_user(user_ref.to_dict(include_extra_dict=True))
 
     def add_user_to_group(self, user_id, group_id):
-        session = self.get_session()
+        session = db_session.get_session()
         self.get_group(group_id)
         self.get_user(user_id)
         query = session.query(UserGroupMembership)
@@ -180,17 +187,17 @@ class Identity(sql.Base, identity.Driver):
                                             group_id=group_id))
 
     def check_user_in_group(self, user_id, group_id):
-        session = self.get_session()
+        session = db_session.get_session()
         self.get_group(group_id)
         self.get_user(user_id)
         query = session.query(UserGroupMembership)
         query = query.filter_by(user_id=user_id)
         query = query.filter_by(group_id=group_id)
         if not query.first():
-            raise exception.NotFound('User not found in group')
+            raise exception.NotFound(_('User not found in group'))
 
     def remove_user_from_group(self, user_id, group_id):
-        session = self.get_session()
+        session = db_session.get_session()
         # We don't check if user or group are still valid and let the remove
         # be tried anyway - in case this is some kind of clean-up operation
         query = session.query(UserGroupMembership)
@@ -198,19 +205,29 @@ class Identity(sql.Base, identity.Driver):
         query = query.filter_by(group_id=group_id)
         membership_ref = query.first()
         if membership_ref is None:
-            raise exception.NotFound('User not found in group')
+            raise exception.NotFound(_('User not found in group'))
         with session.begin():
             session.delete(membership_ref)
 
-    def list_groups_for_user(self, user_id):
-        session = self.get_session()
+    def list_groups_for_user(self, user_id, hints):
+        # TODO(henry-nash) We could implement full filtering here by enhancing
+        # the join below.  However, since it is likely to be a fairly rare
+        # occurrence to filter on more than the user_id already being used
+        # here, this is left as future enhancement and until then we leave
+        # it for the controller to do for us.
+        session = db_session.get_session()
         self.get_user(user_id)
         query = session.query(Group).join(UserGroupMembership)
         query = query.filter(UserGroupMembership.user_id == user_id)
         return [g.to_dict() for g in query]
 
-    def list_users_in_group(self, group_id):
-        session = self.get_session()
+    def list_users_in_group(self, group_id, hints):
+        # TODO(henry-nash) We could implement full filtering here by enhancing
+        # the join below.  However, since it is likely to be a fairly rare
+        # occurrence to filter on more than the group_id already being used
+        # here, this is left as future enhancement and until then we leave
+        # it for the controller to do for us.
+        session = db_session.get_session()
         self.get_group(group_id)
         query = session.query(User).join(UserGroupMembership)
         query = query.filter(UserGroupMembership.group_id == group_id)
@@ -218,7 +235,7 @@ class Identity(sql.Base, identity.Driver):
         return [identity.filter_user(u.to_dict()) for u in query]
 
     def delete_user(self, user_id):
-        session = self.get_session()
+        session = db_session.get_session()
 
         with session.begin():
             ref = self._get_user(session, user_id)
@@ -234,15 +251,17 @@ class Identity(sql.Base, identity.Driver):
 
     @sql.handle_conflicts(conflict_type='group')
     def create_group(self, group_id, group):
-        session = self.get_session()
+        session = db_session.get_session()
         with session.begin():
             ref = Group.from_dict(group)
             session.add(ref)
         return ref.to_dict()
 
-    def list_groups(self):
-        session = self.get_session()
-        refs = session.query(Group).all()
+    @sql.truncated
+    def list_groups(self, hints):
+        session = db_session.get_session()
+        query = session.query(Group)
+        refs = sql.filter_limit_query(Group, query, hints)
         return [ref.to_dict() for ref in refs]
 
     def _get_group(self, session, group_id):
@@ -252,12 +271,12 @@ class Identity(sql.Base, identity.Driver):
         return ref
 
     def get_group(self, group_id):
-        session = self.get_session()
+        session = db_session.get_session()
         return self._get_group(session, group_id).to_dict()
 
     @sql.handle_conflicts(conflict_type='group')
     def update_group(self, group_id, group):
-        session = self.get_session()
+        session = db_session.get_session()
 
         with session.begin():
             ref = self._get_group(session, group_id)
@@ -272,7 +291,7 @@ class Identity(sql.Base, identity.Driver):
         return ref.to_dict()
 
     def delete_group(self, group_id):
-        session = self.get_session()
+        session = db_session.get_session()
 
         with session.begin():
             ref = self._get_group(session, group_id)

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,6 +16,7 @@ import os.path
 
 import ldap
 import ldap.filter
+import six
 
 from keystone import exception
 from keystone.openstack.common import log
@@ -109,7 +108,7 @@ def register_handler(prefix, handler):
 
 
 def get_handler(conn_url):
-    for prefix, handler in _HANDLERS.iteritems():
+    for prefix, handler in six.iteritems(_HANDLERS):
         if conn_url.startswith(prefix):
             return handler
 
@@ -162,7 +161,7 @@ class BaseLdap(object):
             self.object_class = (getattr(conf.ldap, objclass)
                                  or self.DEFAULT_OBJECTCLASS)
 
-            for k, v in self.attribute_options_names.iteritems():
+            for k, v in six.iteritems(self.attribute_options_names):
                 v = '%s_%s_attribute' % (self.options_name, v)
                 self.attribute_mapping[k] = getattr(conf.ldap, v)
 
@@ -296,6 +295,21 @@ class BaseLdap(object):
 
         return obj
 
+    def check_allow_create(self):
+        if not self.allow_create:
+            action = _('LDAP %s create') % self.options_name
+            raise exception.ForbiddenAction(action=action)
+
+    def check_allow_update(self):
+        if not self.allow_update:
+            action = _('LDAP %s update') % self.options_name
+            raise exception.ForbiddenAction(action=action)
+
+    def check_allow_delete(self):
+        if not self.allow_delete:
+            action = _('LDAP %s delete') % self.options_name
+            raise exception.ForbiddenAction(action=action)
+
     def affirm_unique(self, values):
         if values.get('name') is not None:
             try:
@@ -319,14 +333,10 @@ class BaseLdap(object):
 
     def create(self, values):
         self.affirm_unique(values)
-        if not self.allow_create:
-            action = _('LDAP %s create') % self.options_name
-            raise exception.ForbiddenAction(action=action)
-
         conn = self.get_connection()
         object_classes = self.structural_classes + [self.object_class]
         attrs = [('objectClass', object_classes)]
-        for k, v in values.iteritems():
+        for k, v in six.iteritems(values):
             if k == 'id' or k in self.attribute_ignore:
                 continue
             if v is not None:
@@ -334,7 +344,7 @@ class BaseLdap(object):
                 if attr_type is not None:
                     attrs.append((attr_type, [v]))
                 extra_attrs = [attr for attr, name
-                               in self.extra_attr_mapping.iteritems()
+                               in six.iteritems(self.extra_attr_mapping)
                                if name == k]
                 for attr in extra_attrs:
                     attrs.append((attr, [v]))
@@ -405,15 +415,11 @@ class BaseLdap(object):
                 for x in self._ldap_get_all(ldap_filter)]
 
     def update(self, object_id, values, old_obj=None):
-        if not self.allow_update:
-            action = _('LDAP %s update') % self.options_name
-            raise exception.ForbiddenAction(action=action)
-
         if old_obj is None:
             old_obj = self.get(object_id)
 
         modlist = []
-        for k, v in values.iteritems():
+        for k, v in six.iteritems(values):
             if k == 'id' or k in self.attribute_ignore:
                 continue
 
@@ -453,10 +459,6 @@ class BaseLdap(object):
         return self.get(object_id)
 
     def delete(self, object_id):
-        if not self.allow_delete:
-            action = _('LDAP %s delete') % self.options_name
-            raise exception.ForbiddenAction(action=action)
-
         conn = self.get_connection()
         try:
             conn.delete_s(self._id_to_dn(object_id))
@@ -590,7 +592,7 @@ class LdapWrapper(object):
         o = []
         for dn, attrs in res:
             o.append((dn, dict((kind, [ldap2py(x) for x in values])
-                               for kind, values in attrs.iteritems())))
+                               for kind, values in six.iteritems(attrs))))
         return o
 
     def paged_search_s(self, dn, scope, query, attrlist=None):
@@ -674,10 +676,10 @@ class EnabledEmuMixIn(BaseLdap):
 
     * $name_enabled_emulation - boolean, on/off
     * $name_enabled_emulation_dn - DN of that groupOfNames, default is
-      cn=enabled_$name,$tree_dn
+      cn=enabled_${name}s,${tree_dn}
 
-    Where $name is self.options_name ('user' or 'tenant'), $tree_dn is
-    self.tree_dn.
+    Where ${name}s is the plural of self.options_name ('users' or 'tenants'),
+    ${tree_dn} is self.tree_dn.
     """
 
     def __init__(self, conf):
@@ -717,7 +719,7 @@ class EnabledEmuMixIn(BaseLdap):
             except ldap.NO_SUCH_OBJECT:
                 attr_list = [('objectClass', ['groupOfNames']),
                              ('member',
-                             [self._id_to_dn(object_id)])]
+                                 [self._id_to_dn(object_id)])]
                 if self.use_dumb_member:
                     attr_list[1][1].append(self.dumb_member)
                 conn.add_s(self.enabled_emulation_dn, attr_list)

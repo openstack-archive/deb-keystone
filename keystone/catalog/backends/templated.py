@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundationc
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -16,11 +14,14 @@
 
 import os.path
 
+import six
+
 from keystone.catalog.backends import kvs
 from keystone.catalog import core
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import log
+from keystone.openstack.common import versionutils
 
 
 LOG = log.getLogger(__name__)
@@ -55,10 +56,7 @@ def parse_templates(template_lines):
     return o
 
 
-# TODO(jaypipes): should be templated.Catalog,
-# not templated.TemplatedCatalog to be consistent with
-# other catalog backends
-class TemplatedCatalog(kvs.Catalog):
+class Catalog(kvs.Catalog):
     """A backend that generates endpoints for the Catalog based on templates.
 
     It is usually configured via config entries that look like:
@@ -91,6 +89,7 @@ class TemplatedCatalog(kvs.Catalog):
     """
 
     def __init__(self, templates=None):
+        super(Catalog, self).__init__()
         if templates:
             self.templates = templates
         else:
@@ -98,7 +97,6 @@ class TemplatedCatalog(kvs.Catalog):
             if not os.path.exists(template_file):
                 template_file = CONF.find_file(template_file)
             self._load_templates(template_file)
-        super(TemplatedCatalog, self).__init__()
 
     def _load_templates(self, template_file):
         try:
@@ -108,19 +106,27 @@ class TemplatedCatalog(kvs.Catalog):
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        d = dict(CONF.iteritems())
+        d = dict(six.iteritems(CONF))
         d.update({'tenant_id': tenant_id,
                   'user_id': user_id})
 
         o = {}
-        for region, region_ref in self.templates.iteritems():
+        for region, region_ref in six.iteritems(self.templates):
             o[region] = {}
-            for service, service_ref in region_ref.iteritems():
+            for service, service_ref in six.iteritems(region_ref):
                 o[region][service] = {}
-                for k, v in service_ref.iteritems():
+                for k, v in six.iteritems(service_ref):
                     o[region][service][k] = core.format_url(v, d)
 
         return o
 
     def get_v3_catalog(self, user_id, tenant_id, metadata=None):
         raise exception.NotImplemented()
+
+
+@versionutils.deprecated(
+    versionutils.deprecated.ICEHOUSE,
+    in_favor_of='keystone.catalog.backends.templated.Catalog',
+    remove_in=+2)
+class TemplatedCatalog(Catalog):
+    pass

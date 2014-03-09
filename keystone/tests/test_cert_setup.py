@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +20,7 @@ from keystone.common import openssl
 from keystone import exception
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests import rest
 from keystone import token
 
 
@@ -34,20 +33,25 @@ CERTDIR = os.path.join(SSLDIR, 'certs')
 KEYDIR = os.path.join(SSLDIR, 'private')
 
 
-class CertSetupTestCase(tests.TestCase):
+class CertSetupTestCase(rest.RestfulTestCase):
 
     def setUp(self):
         super(CertSetupTestCase, self).setUp()
-        CONF.signing.certfile = os.path.join(CERTDIR, 'signing_cert.pem')
-        CONF.signing.ca_certs = os.path.join(CERTDIR, "ca.pem")
-        CONF.signing.ca_key = os.path.join(CERTDIR, "cakey.pem")
-        CONF.signing.keyfile = os.path.join(KEYDIR, "signing_key.pem")
+        ca_certs = os.path.join(CERTDIR, 'ca.pem')
+        ca_key = os.path.join(CERTDIR, 'cakey.pem')
 
-        CONF.ssl.ca_certs = CONF.signing.ca_certs
-        CONF.ssl.ca_key = CONF.signing.ca_key
-
-        CONF.ssl.certfile = os.path.join(CERTDIR, 'keystone.pem')
-        CONF.ssl.keyfile = os.path.join(KEYDIR, 'keystonekey.pem')
+        self.opt_in_group(
+            'signing',
+            certfile=os.path.join(CERTDIR, 'signing_cert.pem'),
+            ca_certs=ca_certs,
+            ca_key=ca_key,
+            keyfile=os.path.join(KEYDIR, 'signing_key.pem'))
+        self.opt_in_group(
+            'ssl',
+            ca_certs=ca_certs,
+            ca_key=ca_key,
+            certfile=os.path.join(CERTDIR, 'keystone.pem'),
+            keyfile=os.path.join(KEYDIR, 'keystonekey.pem'))
 
         self.load_backends()
         self.load_fixtures(default_fixtures)
@@ -93,3 +97,41 @@ class CertSetupTestCase(tests.TestCase):
         self.assertTrue(os.path.exists(CONF.ssl.ca_certs))
         self.assertTrue(os.path.exists(CONF.ssl.certfile))
         self.assertTrue(os.path.exists(CONF.ssl.keyfile))
+
+    def test_fetch_signing_cert(self):
+        pki = openssl.ConfigurePKI(None, None)
+        pki.run()
+
+        # NOTE(jamielennox): Use request directly because certificate
+        # requests don't have some of the normal information
+        signing_resp = self.request(self.public_app,
+                                    '/v2.0/certificates/signing',
+                                    method='GET', expected_status=200)
+
+        cacert_resp = self.request(self.public_app,
+                                   '/v2.0/certificates/ca',
+                                   method='GET', expected_status=200)
+
+        with open(CONF.signing.certfile) as f:
+            self.assertEqual(signing_resp.text, f.read())
+
+        with open(CONF.signing.ca_certs) as f:
+            self.assertEqual(cacert_resp.text, f.read())
+
+        # NOTE(jamielennox): This is weird behaviour that we need to enforce.
+        # It doesn't matter what you ask for it's always going to give text
+        # with a text/html content_type.
+
+        for path in ['/v2.0/certificates/signing', '/v2.0/certificates/ca']:
+            for accept in [None, 'text/html', 'application/json', 'text/xml']:
+                headers = {'Accept': accept} if accept else {}
+                resp = self.request(self.public_app, path, method='GET',
+                                    expected_status=200,
+                                    headers=headers)
+
+                self.assertEqual(resp.content_type, 'text/html')
+
+    def test_failure(self):
+        for path in ['/v2.0/certificates/signing', '/v2.0/certificates/ca']:
+            self.request(self.public_app, path, method='GET',
+                         expected_status=500)

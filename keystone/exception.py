@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -28,7 +26,7 @@ LOG = log.getLogger(__name__)
 _FATAL_EXCEPTION_FORMAT_ERRORS = False
 
 
-class Error(StandardError):
+class Error(Exception):
     """Base error class.
 
     Child classes should define an HTTP status code, title, and a
@@ -110,6 +108,14 @@ class ValidationSizeError(Error):
     title = 'Bad Request'
 
 
+class PKITokenExpected(Error):
+    message_format = _('The certificates you requested are not available. '
+                       'It is likely that this server does not use PKI tokens '
+                       'otherwise this is the result of misconfiguration.')
+    code = 403
+    title = 'Cannot retrieve certificates'
+
+
 class SecurityError(Error):
     """Avoids exposing details of security failures, unless in debug mode."""
 
@@ -161,6 +167,11 @@ class Forbidden(SecurityError):
 class ForbiddenAction(Forbidden):
     message_format = _("You are not authorized to perform the"
                        " requested action, %(action)s.")
+
+
+class ImmutableAttributeError(Forbidden):
+    message_format = _("Could not change immutable attribute %(attribute)s"
+                       " in target %(target)s")
 
 
 class NotFound(Error):
@@ -217,8 +228,16 @@ class GroupNotFound(NotFound):
     message_format = _("Could not find group, %(group_id)s.")
 
 
+class MappingNotFound(NotFound):
+    message_format = _("Could not find mapping, %(mapping_id)s.")
+
+
 class TrustNotFound(NotFound):
     message_format = _("Could not find trust, %(trust_id)s.")
+
+
+class TrustUseLimitReached(Forbidden):
+    message_format = _("No remaining uses for trust %(trust_id)s.")
 
 
 class CredentialNotFound(NotFound):
@@ -227,6 +246,15 @@ class CredentialNotFound(NotFound):
 
 class VersionNotFound(NotFound):
     message_format = _("Could not find version, %(version)s.")
+
+
+class IdentityProviderNotFound(NotFound):
+    message_format = _("Could not find IdentityProvider, %(idp_id)s.")
+
+
+class FederatedProtocolNotFound(NotFound):
+    message_format = _("Could not find federated protocol %(protocol_id)s for"
+                       " IdentityProvider, %(idp_id)s")
 
 
 class Conflict(Error):
@@ -249,6 +277,11 @@ class UnexpectedError(Error):
     title = 'Internal Server Error'
 
 
+class CertificateFilesUnavailable(UnexpectedError):
+    message_format = _("Expected signing certificates are not available "
+                       "on the server. Please check Keystone configuration.")
+
+
 class MalformedEndpoint(UnexpectedError):
     message_format = _("Malformed endpoint URL (%(endpoint)s),"
                        " see ERROR log for details.")
@@ -261,6 +294,21 @@ class NotImplemented(Error):
     title = 'Not Implemented'
 
 
+class Gone(Error):
+    message_format = _("The service you have requested is no"
+                       " longer available on this server.")
+    code = 410
+    title = 'Gone'
+
+
 class ConfigFileNotFound(UnexpectedError):
     message_format = _("The Keystone configuration file %(config_file)s could "
                        "not be found.")
+
+
+class MigrationNotProvided(Exception):
+    def __init__(self, mod_name, path):
+        super(MigrationNotProvided, self).__init__(_(
+            "%(mod_name)s doesn't provide database migrations. The migration"
+            " repository path at %(path)s doesn't exist or isn't a directory."
+        ) % {'mod_name': mod_name, 'path': path})

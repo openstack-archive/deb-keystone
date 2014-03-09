@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,18 +16,14 @@ from __future__ import absolute_import
 
 import os
 
-from migrate import exceptions
-
 from oslo.config import cfg
 import pbr.version
 
 from keystone.common import openssl
 from keystone.common import sql
-from keystone.common.sql import migration
+from keystone.common.sql import migration_helpers
 from keystone.common import utils
 from keystone import config
-from keystone import contrib
-from keystone.openstack.common import importutils
 from keystone import token
 
 CONF = config.CONF
@@ -70,24 +64,7 @@ class DbSync(BaseApp):
     def main():
         version = CONF.command.version
         extension = CONF.command.extension
-        if not extension:
-            migration.db_sync(version=version)
-        else:
-            package_name = "%s.%s.migrate_repo" % (contrib.__name__, extension)
-            try:
-                package = importutils.import_module(package_name)
-                repo_path = os.path.abspath(os.path.dirname(package.__file__))
-            except ImportError:
-                print(_("This extension does not provide migrations."))
-                exit(0)
-            try:
-                # Register the repo with the version control API
-                # If it already knows about the repo, it will throw
-                # an exception that we can safely ignore
-                migration.db_version_control(version=None, repo_path=repo_path)
-            except exceptions.DatabaseAlreadyControlledError:
-                pass
-            migration.db_sync(version=version, repo_path=repo_path)
+        migration_helpers.sync_database_to_version(extension, version)
 
 
 class DbVersion(BaseApp):
@@ -106,18 +83,7 @@ class DbVersion(BaseApp):
     @staticmethod
     def main():
         extension = CONF.command.extension
-        if extension:
-            try:
-                package_name = ("%s.%s.migrate_repo" %
-                                (contrib.__name__, extension))
-                package = importutils.import_module(package_name)
-                repo_path = os.path.abspath(os.path.dirname(package.__file__))
-                print(migration.db_version(repo_path))
-            except ImportError:
-                print(_("This extension does not provide migrations."))
-                exit(1)
-        else:
-            print(migration.db_version())
+        migration_helpers.print_db_version(extension)
 
 
 class BaseCertificateSetup(BaseApp):
@@ -212,7 +178,9 @@ command_opt = cfg.SubCommandOpt('command',
 def main(argv=None, config_files=None):
     CONF.register_cli_opt(command_opt)
 
+    config.configure()
     sql.initialize()
+    config.set_default_for_default_log_levels()
 
     CONF(args=argv[1:],
          project='keystone',

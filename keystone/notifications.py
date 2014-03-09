@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 IBM Corp.
 #
 #   Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -17,18 +15,35 @@
 """Notifications module for OpenStack Identity Service resources"""
 
 import logging
+import socket
+
+from oslo.config import cfg
+from oslo import messaging
+import pycadf
+from pycadf import cadftaxonomy as taxonomy
+from pycadf import cadftype
+from pycadf import eventfactory
+from pycadf import resource
 
 from keystone.openstack.common import log
-from keystone.openstack.common.notifier import api as notifier_api
 
+notifier_opts = [
+    cfg.StrOpt('default_publisher_id',
+               default=None,
+               help='Default publisher_id for outgoing notifications'),
+]
 
 LOG = log.getLogger(__name__)
 # NOTE(gyee): actions that can be notified. One must update this list whenever
 # a new action is supported.
-ACTIONS = frozenset(['created', 'deleted', 'updated'])
+ACTIONS = frozenset(['created', 'deleted', 'disabled', 'updated'])
 # resource types that can be notified
-RESOURCE_TYPES = set()
 SUBSCRIBERS = {}
+_notifier = None
+
+
+CONF = cfg.CONF
+CONF.register_opts(notifier_opts)
 
 
 class ManagerNotificationWrapper(object):
@@ -37,14 +52,19 @@ class ManagerNotificationWrapper(object):
     Sends a notification if the wrapped Manager method does not raise an
     ``Exception`` (such as ``keystone.exception.NotFound``).
 
+    :param operation:  one of the values from ACTIONS
     :param resource_type: type of resource being affected
-    :param host: host of the resource (optional)
+    :param public:  If True (default), the event will be sent to the notifier
+                API.  If False, the event will only be sent via
+                notify_event_callbacks to in process listeners
+
     """
-    def __init__(self, operation, resource_type, host=None):
+    def __init__(self, operation, resource_type, public=True,
+                 resource_id_arg_index=1):
         self.operation = operation
         self.resource_type = resource_type
-        RESOURCE_TYPES.add(resource_type)
-        self.host = host
+        self.public = public
+        self.resource_id_arg_index = resource_id_arg_index
 
     def __call__(self, f):
         def wrapper(*args, **kwargs):
@@ -54,11 +74,12 @@ class ManagerNotificationWrapper(object):
             except Exception:
                 raise
             else:
+                resource_id = args[self.resource_id_arg_index]
                 _send_notification(
                     self.operation,
                     self.resource_type,
-                    args[1],  # f(self, resource_id, ...)
-                    self.host)
+                    resource_id,
+                    public=self.public)
             return result
 
         return wrapper
@@ -72,6 +93,11 @@ def created(*args, **kwargs):
 def updated(*args, **kwargs):
     """Decorator to send notifications for ``Manager.update_*`` methods."""
     return ManagerNotificationWrapper('updated', *args, **kwargs)
+
+
+def disabled(*args, **kwargs):
+    """Decorator to send notifications when an object is disabled."""
+    return ManagerNotificationWrapper('disabled', *args, **kwargs)
 
 
 def deleted(*args, **kwargs):
@@ -93,11 +119,6 @@ def register_event_callback(event, resource_type, callbacks):
         raise ValueError(_('%(event)s is not a valid notification event, must '
                            'be one of: %(actions)s') %
                          {'event': event, 'actions': ', '.join(ACTIONS)})
-    if resource_type not in RESOURCE_TYPES:
-        raise ValueError(_('%(resource_type)s is not a valid notification '
-                           'resource, must be one of: %(types)s') %
-                         {'resource_type': resource_type,
-                          'types': ', '.join(RESOURCE_TYPES)})
 
     if not hasattr(callbacks, '__iter__'):
         callbacks = [callbacks]
@@ -138,7 +159,34 @@ def notify_event_callbacks(service, resource_type, operation, payload):
                 cb(service, resource_type, operation, payload)
 
 
-def _send_notification(operation, resource_type, resource_id, host=None):
+def _get_notifier():
+    """Return a notifier object.
+
+    If _notifier is None it means that a notifier object has not been set.
+    If _notifier is False it means that a notifier has previously failed to
+    construct.
+    Otherwise it is a constructed Notifier object.
+    """
+    global _notifier
+
+    if _notifier is None:
+        host = CONF.default_publisher_id or socket.gethostname()
+        try:
+            transport = messaging.get_transport(CONF)
+            _notifier = messaging.Notifier(transport, "identity.%s" % host)
+        except Exception:
+            LOG.exception("Failed to construct notifier")
+            _notifier = False
+
+    return _notifier
+
+
+def _reset_notifier():
+    global _notifier
+    _notifier = None
+
+
+def _send_notification(operation, resource_type, resource_id, public=True):
     """Send notification to inform observers about the affected resource.
 
     This method doesn't raise an exception when sending the notification fails.
@@ -146,12 +194,14 @@ def _send_notification(operation, resource_type, resource_id, host=None):
     :param operation: operation being performed (created, updated, or deleted)
     :param resource_type: type of resource being operated on
     :param resource_id: ID of resource being operated on
-    :param host: resource host
+    :param public:  if True (default), the event will be sent
+                    to the notifier API.
+                    if False, the event will only be sent via
+                    notify_event_callbacks to in process listeners.
     """
     context = {}
     payload = {'resource_info': resource_id}
     service = 'identity'
-    publisher_id = notifier_api.publisher_id(service, host=host)
     event_type = '%(service)s.%(resource_type)s.%(operation)s' % {
         'service': service,
         'resource_type': resource_type,
@@ -159,10 +209,99 @@ def _send_notification(operation, resource_type, resource_id, host=None):
 
     notify_event_callbacks(service, resource_type, operation, payload)
 
-    try:
-        notifier_api.notify(
-            context, publisher_id, event_type, notifier_api.INFO, payload)
-    except Exception:
-        LOG.exception(
-            _('Failed to send %(res_id)s %(event_type)s notification'),
-            {'res_id': resource_id, 'event_type': event_type})
+    if public:
+        notifier = _get_notifier()
+        if notifier:
+            try:
+                notifier.info(context, event_type, payload)
+            except Exception:
+                LOG.exception(_(
+                    'Failed to send %(res_id)s %(event_type)s notification'),
+                    {'res_id': resource_id, 'event_type': event_type})
+
+
+class CadfNotificationWrapper(object):
+    """Send CADF event notifications for various methods.
+
+    Sends CADF notifications for events such as whether an authentication was
+    successful or not.
+
+    """
+
+    def __init__(self, action):
+        self.action = action
+
+    def __call__(self, f):
+        def wrapper(wrapped_self, context, user_id, *args, **kwargs):
+            """Always send a notification."""
+
+            remote_addr = None
+            http_user_agent = None
+            environment = context.get('environment')
+
+            if environment:
+                remote_addr = environment.get('REMOTE_ADDR')
+                http_user_agent = environment.get('HTTP_USER_AGENT')
+
+            host = pycadf.host.Host(address=remote_addr, agent=http_user_agent)
+            initiator = resource.Resource(typeURI=taxonomy.ACCOUNT_USER,
+                                          name=user_id, host=host)
+
+            _send_audit_notification(self.action, initiator,
+                                     taxonomy.OUTCOME_PENDING)
+            try:
+                result = f(wrapped_self, context, user_id, *args, **kwargs)
+            except Exception:
+                # For authentication failure send a cadf event as well
+                _send_audit_notification(self.action, initiator,
+                                         taxonomy.OUTCOME_FAILURE)
+                raise
+            else:
+                _send_audit_notification(self.action, initiator,
+                                         taxonomy.OUTCOME_SUCCESS)
+                return result
+
+        return wrapper
+
+
+def _send_audit_notification(action, initiator, outcome):
+    """Send CADF notification to inform observers about the affected resource.
+
+    This method logs an exception when sending the notification fails.
+
+    :param action: CADF action being audited (e.g., 'authenticate')
+    :param initiator: CADF resource representing the initiator
+    :param outcome: The CADF outcome (taxonomy.OUTCOME_PENDING,
+        taxonomy.OUTCOME_SUCCESS, taxonomy.OUTCOME_FAILURE)
+
+    """
+
+    event = eventfactory.EventFactory().new_event(
+        eventType=cadftype.EVENTTYPE_ACTIVITY,
+        outcome=outcome,
+        action=action,
+        initiator=initiator,
+        target=resource.Resource(typeURI=taxonomy.ACCOUNT_USER),
+        observer=resource.Resource(typeURI='service/security'))
+
+    context = {}
+    payload = event.as_dict()
+    LOG.debug(_('CADF Event: %s'), payload)
+    service = 'identity'
+    event_type = '%(service)s.%(action)s' % {'service': service,
+                                             'action': action}
+
+    notifier = _get_notifier()
+
+    if notifier:
+        try:
+            notifier.info(context, event_type, payload)
+        except Exception:
+            # diaper defense: any exception that occurs while emitting the
+            # notification should not interfere with the API request
+            LOG.exception(_(
+                'Failed to send %(action)s %(event_type)s notification'),
+                {'action': action, 'event_type': event_type})
+
+
+emit_event = CadfNotificationWrapper

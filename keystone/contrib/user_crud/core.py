@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 Red Hat, Inc
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -62,6 +60,7 @@ class UserController(identity.controllers.User):
 
         try:
             user_ref = self.identity_api.authenticate(
+                context,
                 user_id=user_id_from_token,
                 password=original_password)
             if not user_ref.get('enabled', True):

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -45,8 +43,8 @@ class ConsumerCrudV3(controller.V3Controller):
     def update_consumer(self, context, consumer_id, consumer):
         self._require_matching_id(consumer_id, consumer)
         ref = self._normalize_dict(consumer)
-        self._validate_consumer_ref(consumer)
-        ref = self.oauth_api.update_consumer(consumer_id, consumer)
+        self._validate_consumer_ref(ref)
+        ref = self.oauth_api.update_consumer(consumer_id, ref)
         return ConsumerCrudV3.wrap_member(context, ref)
 
     @controller.protected()

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,8 +12,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import six
 import webob.dec
 
+from keystone.common import authorization
 from keystone.common import config
 from keystone.common import serializer
 from keystone.common import utils
@@ -23,6 +23,7 @@ from keystone.common import wsgi
 from keystone import exception
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
+from keystone.openstack.common import versionutils
 
 CONF = config.CONF
 LOG = log.getLogger(__name__)
@@ -81,7 +82,7 @@ class PostParamsMiddleware(wsgi.Middleware):
     def process_request(self, request):
         params_parsed = request.params
         params = {}
-        for k, v in params_parsed.iteritems():
+        for k, v in six.iteritems(params_parsed):
             if k in ('self', 'context'):
                 continue
             if k.startswith('_'):
@@ -130,7 +131,7 @@ class JsonBodyMiddleware(wsgi.Middleware):
                 params_parsed = {}
 
         params = {}
-        for k, v in params_parsed.iteritems():
+        for k, v in six.iteritems(params_parsed):
             if k in ('self', 'context'):
                 continue
             if k.startswith('_'):
@@ -142,6 +143,14 @@ class JsonBodyMiddleware(wsgi.Middleware):
 
 class XmlBodyMiddleware(wsgi.Middleware):
     """De/serializes XML to/from JSON."""
+
+    @versionutils.deprecated(
+        what='keystone.middleware.core.XmlBodyMiddleware',
+        as_of=versionutils.deprecated.ICEHOUSE,
+        in_favor_of='support for "application/json" only',
+        remove_in=+2)
+    def __init__(self, *args, **kwargs):
+        super(XmlBodyMiddleware, self).__init__(*args, **kwargs)
 
     def process_request(self, request):
         """Transform the request from XML to JSON."""
@@ -191,7 +200,7 @@ class RequestBodySizeLimiter(wsgi.Middleware):
     def __init__(self, *args, **kwargs):
         super(RequestBodySizeLimiter, self).__init__(*args, **kwargs)
 
-    @webob.dec.wsgify(RequestClass=wsgi.Request)
+    @webob.dec.wsgify()
     def __call__(self, req):
 
         if req.content_length > CONF.max_request_body_size:
@@ -201,3 +210,55 @@ class RequestBodySizeLimiter(wsgi.Middleware):
                                            CONF.max_request_body_size)
             req.body_file = limiter
         return self.application
+
+
+class AuthContextMiddleware(wsgi.Middleware):
+    """Build the authentication context from the request auth token."""
+
+    def _build_auth_context(self, request):
+        token_id = request.headers.get(AUTH_TOKEN_HEADER)
+
+        if token_id == CONF.admin_token:
+            # NOTE(gyee): no need to proceed any further as the special admin
+            # token is being handled by AdminTokenAuthMiddleware. This code
+            # will not be impacted even if AdminTokenAuthMiddleware is removed
+            # from the pipeline as "is_admin" is default to "False". This code
+            # is independent of AdminTokenAuthMiddleware.
+            return {}
+
+        context = {'token_id': token_id}
+        context['environment'] = request.environ
+
+        try:
+            token_ref = self.token_api.get_token(token_id)
+            # TODO(ayoung): These two functions return the token in different
+            # formats instead of two calls, only make one.  However, the call
+            # to get_token hits the caching layer, and does not validate the
+            # token.  In the future, this should be reduced to one call.
+            if not CONF.token.revoke_by_id:
+                self.token_api.token_provider_api.validate_token(
+                    context['token_id'])
+
+            # TODO(gyee): validate_token_bind should really be its own
+            # middleware
+            wsgi.validate_token_bind(context, token_ref)
+            return authorization.token_to_auth_context(
+                token_ref['token_data'])
+        except exception.TokenNotFound:
+            LOG.warning(_('RBAC: Invalid token'))
+            raise exception.Unauthorized()
+
+    def process_request(self, request):
+        if AUTH_TOKEN_HEADER not in request.headers:
+            LOG.debug(_('Auth token not in the request header. '
+                        'Will not build auth context.'))
+            return
+
+        if authorization.AUTH_CONTEXT_ENV in request.environ:
+            msg = _('Auth context already exists in the request environment')
+            LOG.warning(msg)
+            return
+
+        auth_context = self._build_auth_context(request)
+        LOG.debug(_('RBAC: auth_context: %s'), auth_context)
+        request.environ[authorization.AUTH_CONTEXT_ENV] = auth_context

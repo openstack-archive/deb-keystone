@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -16,11 +14,14 @@
 
 import json
 
-from keystone.common import cms
+from keystoneclient.common import cms
+import six
+
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import config
+from keystone.contrib import federation
 from keystone import exception
 from keystone.openstack.common import importutils
 from keystone.openstack.common import log
@@ -33,22 +34,60 @@ CONF = config.CONF
 
 # registry of authentication methods
 AUTH_METHODS = {}
+AUTH_PLUGINS_LOADED = False
 
 
-def load_auth_method(method_name):
-    if method_name not in CONF.auth.methods:
-        raise exception.AuthMethodNotSupported()
-    driver = CONF.auth.get(method_name)
-    return importutils.import_object(driver)
+def load_auth_methods():
+    global AUTH_PLUGINS_LOADED
+
+    if AUTH_PLUGINS_LOADED:
+        # Only try and load methods a single time.
+        return
+    # config.setup_authentication should be idempotent, call it to ensure we
+    # have setup all the appropriate configuration options we may need.
+    config.setup_authentication()
+    for plugin in CONF.auth.methods:
+        if '.' in plugin:
+            # NOTE(morganfainberg): if '.' is in the plugin name, it should be
+            # imported rather than used as a plugin identifier.
+            plugin_class = plugin
+            driver = importutils.import_object(plugin)
+            if not hasattr(driver, 'method'):
+                raise ValueError(_('Cannot load an auth-plugin by class-name '
+                                   'without a "method" attribute defined: %s'),
+                                 plugin_class)
+        else:
+            plugin_class = CONF.auth.get(plugin)
+            driver = importutils.import_object(plugin_class)
+            if hasattr(driver, 'method'):
+                if driver.method != plugin:
+                    raise ValueError(_('Driver requested method %(req)s does '
+                                       'not match plugin name %(plugin)s.') %
+                                     {'req': driver.method,
+                                      'plugin': plugin})
+            else:
+                LOG.warning(_('Auth Plugin %s does not have a "method" '
+                              'attribute.'), plugin)
+                setattr(driver, 'method', plugin)
+        if driver.method in AUTH_METHODS:
+            raise ValueError(_('Auth plugin %(plugin)s is requesting '
+                               'previously registered method %(method)s') %
+                             {'plugin': plugin_class, 'method': driver.method})
+        AUTH_METHODS[driver.method] = driver
+    AUTH_PLUGINS_LOADED = True
 
 
 def get_auth_method(method_name):
     global AUTH_METHODS
     if method_name not in AUTH_METHODS:
-        AUTH_METHODS[method_name] = load_auth_method(method_name)
+        raise exception.AuthMethodNotSupported()
     return AUTH_METHODS[method_name]
 
 
+# TODO(blk-u): this class doesn't use identity_api directly, but makes it
+# available for consumers. Consumers should probably not be getting
+# identity_api from this since it's available in global registry, then
+# identity_api should be removed from this list.
 @dependency.requires('assignment_api', 'identity_api', 'trust_api')
 class AuthInfo(object):
     """Encapsulation of "auth" request."""
@@ -79,12 +118,6 @@ class AuthInfo(object):
     def _assert_domain_is_enabled(self, domain_ref):
         if not domain_ref.get('enabled'):
             msg = _('Domain is disabled: %s') % (domain_ref['id'])
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
-
-    def _assert_user_is_enabled(self, user_ref):
-        if not user_ref.get('enabled', True):
-            msg = _('User is disabled: %s') % (user_ref['id'])
             LOG.warning(msg)
             raise exception.Unauthorized(msg)
 
@@ -140,29 +173,6 @@ class AuthInfo(object):
             raise exception.TrustNotFound(trust_id=trust_id)
         return trust
 
-    def lookup_user(self, user_info):
-        user_id = user_info.get('id')
-        user_name = user_info.get('name')
-        user_ref = None
-        if not user_id and not user_name:
-            raise exception.ValidationError(attribute='id or name',
-                                            target='user')
-        try:
-            if user_name:
-                if 'domain' not in user_info:
-                    raise exception.ValidationError(attribute='domain',
-                                                    target='user')
-                domain_ref = self._lookup_domain(user_info['domain'])
-                user_ref = self.identity_api.get_user_by_name(
-                    user_name, domain_ref['id'])
-            else:
-                user_ref = self.identity_api.get_user(user_id)
-        except exception.UserNotFound as e:
-            LOG.exception(e)
-            raise exception.Unauthorized(e)
-        self._assert_user_is_enabled(user_ref)
-        return user_ref
-
     def _validate_and_normalize_scope_data(self):
         """Validate and normalize scope data."""
         if 'scope' not in self.auth:
@@ -211,7 +221,7 @@ class AuthInfo(object):
 
         # make sure auth method is supported
         for method_name in self.get_method_names():
-            if method_name not in CONF.auth.methods:
+            if method_name not in AUTH_METHODS:
                 raise exception.AuthMethodNotSupported()
 
     def _validate_and_normalize_auth_data(self):
@@ -276,7 +286,7 @@ class AuthInfo(object):
 
 
 @dependency.requires('assignment_api', 'identity_api', 'token_api',
-                     'token_provider_api')
+                     'token_provider_api', 'trust_api')
 class Auth(controller.V3Controller):
 
     # Note(atiwari): From V3 auth controller code we are
@@ -308,6 +318,10 @@ class Auth(controller.V3Controller):
                 auth_info.set_scope(None, auth_context['project_id'], None)
             self._check_and_set_default_scoping(auth_info, auth_context)
             (domain_id, project_id, trust) = auth_info.get_scope()
+
+            if trust:
+                self.trust_api.consume_use(trust['id'])
+
             method_names = auth_info.get_method_names()
             method_names += auth_context.get('method_names', [])
             # make sure the list is unique
@@ -332,6 +346,10 @@ class Auth(controller.V3Controller):
             project_id = trust['project_id']
         if domain_id or project_id or trust:
             # scope is specified
+            return
+
+        # Skip scoping when unscoped federated token is being issued
+        if federation.IDENTITY_PROVIDER in auth_context:
             return
 
         # fill in default_project_id if it is available
@@ -430,11 +448,13 @@ class Auth(controller.V3Controller):
 
     @controller.protected()
     def revocation_list(self, context, auth=None):
+        if not CONF.token.revoke_by_id:
+            raise exception.Gone()
         tokens = self.token_api.list_revoked_tokens()
 
         for t in tokens:
             expires = t['expires']
-            if not (expires and isinstance(expires, unicode)):
+            if not (expires and isinstance(expires, six.text_type)):
                     t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
         json_data = json.dumps(data)

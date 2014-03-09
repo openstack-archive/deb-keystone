@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -35,6 +33,7 @@ import os
 import time
 
 from keystone.common import utils
+from keystone import service
 from keystone import tests
 
 
@@ -148,6 +147,16 @@ class UtilsTestCase(tests.TestCase):
         for d in ['+0', '-11', '-8', '-5', '+5', '+8', '+14']:
             TZ = 'UTC' + d
             _test_unixtime()
+
+
+class ServiceHelperTests(tests.TestCase):
+
+    @service.fail_gracefully
+    def _do_test(self):
+        raise Exception("Test Exc")
+
+    def test_fail_gracefully(self):
+        self.assertRaises(tests.UnexpectedExit, self._do_test)
 
 
 class LimitingReaderTests(tests.TestCase):

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -24,8 +22,8 @@ from oslo.config import cfg
 import six
 
 from keystone import clean
-from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
@@ -74,7 +72,7 @@ def filter_user(user_ref):
 class DomainConfigs(dict):
     """Discover, store and provide access to domain specific configs.
 
-    The setup_domain_drives() call will be made via the wrapper from
+    The setup_domain_drivers() call will be made via the wrapper from
     the first call to any driver function handled by this manager. This
     setup call it will scan the domain config directory for files of the form
 
@@ -105,20 +103,20 @@ class DomainConfigs(dict):
             LOG.warning(
                 _('Invalid domain name (%s) found in config file name'),
                 domain_name)
+            return
 
-        if domain_ref:
-            # Create a new entry in the domain config dict, which contains
-            # a new instance of both the conf environment and driver using
-            # options defined in this set of config files.  Later, when we
-            # service calls via this Manager, we'll index via this domain
-            # config dict to make sure we call the right driver
-            domain = domain_ref['id']
-            self[domain] = {}
-            self[domain]['cfg'] = cfg.ConfigOpts()
-            config.configure(conf=self[domain]['cfg'])
-            self[domain]['cfg'](args=[], project='keystone',
-                                default_config_files=file_list)
-            self._load_driver(assignment_api, domain)
+        # Create a new entry in the domain config dict, which contains
+        # a new instance of both the conf environment and driver using
+        # options defined in this set of config files.  Later, when we
+        # service calls via this Manager, we'll index via this domain
+        # config dict to make sure we call the right driver
+        domain = domain_ref['id']
+        self[domain] = {}
+        self[domain]['cfg'] = cfg.ConfigOpts()
+        config.configure(conf=self[domain]['cfg'])
+        self[domain]['cfg'](args=[], project='keystone',
+                            default_config_files=file_list)
+        self._load_driver(assignment_api, domain)
 
     def setup_domain_drivers(self, standard_driver, assignment_api):
         # This is called by the api call wrapper
@@ -192,6 +190,7 @@ def domains_configured(f):
 
 
 @dependency.provider('identity_api')
+@dependency.optional('revoke_api')
 @dependency.requires('assignment_api', 'credential_api', 'token_api')
 class Manager(manager.Manager):
     """Default pivot point for the Identity backend.
@@ -216,45 +215,6 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.identity.driver)
         self.domain_configs = DomainConfigs()
-
-    @staticmethod
-    def v3_to_v2_user(ref):
-        """Convert a user_ref from v3 to v2 compatible.
-
-        * v2.0 users are not domain aware, and should have domain_id removed
-        * v2.0 users expect the use of tenantId instead of default_project_id
-
-        This method should only be applied to user_refs being returned from the
-        v2.0 controller(s).
-
-        If ref is a list type, we will iterate through each element and do the
-        conversion.
-        """
-
-        def _format_default_project_id(ref):
-            """Convert default_project_id to tenantId for v2 calls."""
-            default_project_id = ref.pop('default_project_id', None)
-            if default_project_id is not None:
-                ref['tenantId'] = default_project_id
-            elif 'tenantId' in ref:
-                # NOTE(morganfainberg): To avoid v2.0 confusion if somehow a
-                # tenantId property sneaks its way into the extra blob on the
-                # user, we remove it here.  If default_project_id is set, we
-                # would override it in either case.
-                del ref['tenantId']
-
-        def _normalize_and_filter_user_properties(ref):
-            """Run through the various filter/normalization methods."""
-            _format_default_project_id(ref)
-            controller.V2Controller.filter_domain_id(ref)
-            return ref
-
-        if isinstance(ref, dict):
-            return _normalize_and_filter_user_properties(ref)
-        elif isinstance(ref, list):
-            return [_normalize_and_filter_user_properties(x) for x in ref]
-        else:
-            raise ValueError(_('Expected dict or list: %s') % type(ref))
 
     # Domain ID normalization methods
 
@@ -293,17 +253,17 @@ class Manager(manager.Manager):
             self.assignment_api.get_domain(domain_id)
             return self.driver
 
-    def _get_domain_conf(self, domain_id):
-        conf = self.domain_configs.get_domain_conf(domain_id)
-        if conf:
-            return conf
-        else:
-            return CONF
-
     def _get_domain_id_and_driver(self, domain_scope):
         domain_id = self._normalize_scope(domain_scope)
         driver = self._select_identity_driver(domain_id)
         return (domain_id, driver)
+
+    def _mark_domain_id_filter_satisfied(self, hints):
+        if hints:
+            for filter in hints.filters():
+                if (filter['name'] == 'domain_id' and
+                        filter['comparator'] == 'equals'):
+                    hints.remove(filter)
 
     # The actual driver calls - these are pre/post processed here as
     # part of the Manager layer to make sure we:
@@ -311,8 +271,9 @@ class Manager(manager.Manager):
     # - select the right driver for this domain
     # - clear/set domain_ids for drivers that do not support domains
 
+    @notifications.emit_event('authenticate')
     @domains_configured
-    def authenticate(self, user_id, password, domain_scope=None):
+    def authenticate(self, context, user_id, password, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         ref = driver.authenticate(user_id, password)
         if not driver.is_domain_aware():
@@ -353,13 +314,18 @@ class Manager(manager.Manager):
             ref = self._set_domain_id(ref, domain_id)
         return ref
 
+    @manager.response_truncated
     @domains_configured
-    def list_users(self, domain_scope=None):
+    def list_users(self, domain_scope=None, hints=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
-        user_list = driver.list_users()
         if not driver.is_domain_aware():
-            user_list = self._set_domain_id(user_list, domain_id)
-        return user_list
+            # We are effectively satisfying any domain_id filter by the above
+            # driver selection, so remove any such filter
+            self._mark_domain_id_filter_satisfied(hints)
+        ref_list = driver.list_users(hints or driver_hints.Hints())
+        if not driver.is_domain_aware():
+            ref_list = self._set_domain_id(ref_list, domain_id)
+        return ref_list
 
     @notifications.updated('user')
     @domains_configured
@@ -375,6 +341,8 @@ class Manager(manager.Manager):
             user = self._clear_domain_id(user)
         ref = driver.update_user(user_id, user)
         if user.get('enabled') is False or user.get('password') is not None:
+            if self.revoke_api:
+                self.revoke_api.revoke_by_user(user_id)
             self.token_api.delete_tokens_for_user(user_id)
         if not driver.is_domain_aware():
             ref = self._set_domain_id(ref, domain_id)
@@ -423,18 +391,26 @@ class Manager(manager.Manager):
             ref = self._set_domain_id(ref, domain_id)
         return ref
 
+    def revoke_tokens_for_group(self, group_id, domain_scope):
+        # We get the list of users before we attempt the group
+        # deletion, so that we can remove these tokens after we know
+        # the group deletion succeeded.
+
+        # TODO(ayoung): revoke based on group and roleids instead
+        user_ids = []
+        for u in self.list_users_in_group(group_id, domain_scope):
+            user_ids.append(u['id'])
+            if self.revoke_api:
+                self.revoke_api.revoke_by_user(u['id'])
+        self.token_api.delete_tokens_for_users(user_ids)
+
     @notifications.deleted('group')
     @domains_configured
     def delete_group(self, group_id, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         # As well as deleting the group, we need to invalidate
         # any tokens for the users who are members of the group.
-        # We get the list of users before we attempt the group
-        # deletion, so that we can remove these tokens after we know
-        # the group deletion succeeded.
-        user_ids = [
-            u['id'] for u in self.list_users_in_group(group_id, domain_scope)]
-        self.token_api.delete_tokens_for_users(user_ids)
+        self.revoke_tokens_for_group(group_id, domain_scope)
         driver.delete_group(group_id)
 
     @domains_configured
@@ -447,36 +423,72 @@ class Manager(manager.Manager):
     def remove_user_from_group(self, user_id, group_id, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         driver.remove_user_from_group(user_id, group_id)
+        # TODO(ayoung) revoking all tokens for a user based on group
+        # membership is overkill, as we only would need to revoke tokens
+        # that had role assignments via the group.  Calculating those
+        # assignments would have to be done by the assignment backend.
+        if self.revoke_api:
+            self.revoke_api.revoke_by_user(user_id)
         self.token_api.delete_tokens_for_user(user_id)
 
+    @manager.response_truncated
     @domains_configured
-    def list_groups_for_user(self, user_id, domain_scope=None):
+    def list_groups_for_user(self, user_id, domain_scope=None,
+                             hints=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
-        group_list = driver.list_groups_for_user(user_id)
         if not driver.is_domain_aware():
-            group_list = self._set_domain_id(group_list, domain_id)
-        return group_list
+            # We are effectively satisfying any domain_id filter by the above
+            # driver selection, so remove any such filter
+            self._mark_domain_id_filter_satisfied(hints)
+        ref_list = driver.list_groups_for_user(
+            user_id, hints or driver_hints.Hints())
+        if not driver.is_domain_aware():
+            ref_list = self._set_domain_id(ref_list, domain_id)
+        return ref_list
 
+    @manager.response_truncated
     @domains_configured
-    def list_groups(self, domain_scope=None):
+    def list_groups(self, domain_scope=None, hints=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
-        group_list = driver.list_groups()
         if not driver.is_domain_aware():
-            group_list = self._set_domain_id(group_list, domain_id)
-        return group_list
+            # We are effectively satisfying any domain_id filter by the above
+            # driver selection, so remove any such filter
+            self._mark_domain_id_filter_satisfied(hints)
+        ref_list = driver.list_groups(hints or driver_hints.Hints())
+        if not driver.is_domain_aware():
+            ref_list = self._set_domain_id(ref_list, domain_id)
+        return ref_list
 
+    @manager.response_truncated
     @domains_configured
-    def list_users_in_group(self, group_id, domain_scope=None):
+    def list_users_in_group(self, group_id, domain_scope=None,
+                            hints=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
-        user_list = driver.list_users_in_group(group_id)
         if not driver.is_domain_aware():
-            user_list = self._set_domain_id(user_list, domain_id)
-        return user_list
+            # We are effectively satisfying any domain_id filter by the above
+            # driver selection, so remove any such filter
+            self._mark_domain_id_filter_satisfied(hints)
+        ref_list = driver.list_users_in_group(
+            group_id, hints or driver_hints.Hints())
+        if not driver.is_domain_aware():
+            ref_list = self._set_domain_id(ref_list, domain_id)
+        return ref_list
 
     @domains_configured
     def check_user_in_group(self, user_id, group_id, domain_scope=None):
         domain_id, driver = self._get_domain_id_and_driver(domain_scope)
         return driver.check_user_in_group(user_id, group_id)
+
+    @domains_configured
+    def change_password(self, context, user_id, original_password,
+                        new_password, domain_scope):
+
+        # authenticate() will raise an AssertionError if authentication fails
+        self.authenticate(context, user_id, original_password,
+                          domain_scope=domain_scope)
+
+        update_dict = {'password': new_password}
+        self.update_user(user_id, update_dict, domain_scope=domain_scope)
 
     # TODO(morganfainberg): Remove the following deprecated methods once
     # Icehouse is released.  Maintain identity -> assignment proxy for 1
@@ -494,8 +506,8 @@ class Manager(manager.Manager):
         return self.assignment_api.update_domain(domain_id, domain)
 
     @moved_to_assignment
-    def list_domains(self):
-        return self.assignment_api.list_domains()
+    def list_domains(self, hints=None):
+        return self.assignment_api.list_domains(hints=hints)
 
     @moved_to_assignment
     def delete_domain(self, domain_id):
@@ -522,16 +534,16 @@ class Manager(manager.Manager):
         return self.assignment_api.get_project(tenant_id)
 
     @moved_to_assignment
-    def list_projects(self, domain_id=None):
-        return self.assignment_api.list_projects(domain_id)
+    def list_projects(self, hints=None):
+        return self.assignment_api.list_projects(hints=hints)
 
     @moved_to_assignment
     def get_role(self, role_id):
         return self.assignment_api.get_role(role_id)
 
     @moved_to_assignment
-    def list_roles(self):
-        return self.assignment_api.list_roles()
+    def list_roles(self, hints=None):
+        return self.assignment_api.list_roles(hints=hints)
 
     @moved_to_assignment
     def get_project_users(self, tenant_id):
@@ -608,6 +620,9 @@ class Manager(manager.Manager):
 class Driver(object):
     """Interface description for an Identity driver."""
 
+    def _get_list_limit(self):
+        return CONF.identity.list_limit or CONF.list_limit
+
     @abc.abstractmethod
     def authenticate(self, user_id, password):
         """Authenticate a given user and password.
@@ -628,8 +643,11 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def list_users(self):
-        """List all users in the system.
+    def list_users(self, hints):
+        """List users in the system.
+
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
 
         :returns: a list of user_refs or an empty list.
 
@@ -637,8 +655,12 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def list_users_in_group(self, group_id):
-        """List all users in a group.
+    def list_users_in_group(self, group_id, hints):
+        """List users in a group.
+
+        :param group_id: the group in question
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
 
         :returns: a list of user_refs or an empty list.
 
@@ -725,8 +747,11 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def list_groups(self):
-        """List all groups in the system.
+    def list_groups(self, hints):
+        """List groups in the system.
+
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
 
         :returns: a list of group_refs or an empty list.
 
@@ -734,8 +759,12 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def list_groups_for_user(self, user_id):
-        """List all groups a user is in
+    def list_groups_for_user(self, user_id, hints):
+        """List groups a user is in
+
+        :param user_id: the user in question
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
 
         :returns: a list of group_refs or an empty list.
 

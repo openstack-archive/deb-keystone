@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -22,6 +20,7 @@ from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone import token
+from keystone.token.providers import pki
 
 
 CONF = config.CONF
@@ -644,19 +643,22 @@ SAMPLE_V3_TOKEN_WITH_EMBEDED_VERSION = {
     'token_version': 'v3.0'
 }
 
-SAMPLE_V2_TOKEN_VALID = {
-    "access": {
-        "token": {
-            "expires": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
-            "issued_at": "2013-05-21T00:02:43.941473Z",
-            "tenant": {
-                "enabled": True,
-                "id": "01257",
-                "name": "service"
+
+def create_v2_token():
+    return {
+        "access": {
+            "token": {
+                "expires": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+                "issued_at": "2013-05-21T00:02:43.941473Z",
+                "tenant": {
+                    "enabled": True,
+                    "id": "01257",
+                    "name": "service"
+                }
             }
         }
     }
-}
+
 
 SAMPLE_V2_TOKEN_EXPIRED = {
     "access": {
@@ -672,12 +674,16 @@ SAMPLE_V2_TOKEN_EXPIRED = {
     }
 }
 
-SAMPLE_V3_TOKEN_VALID = {
-    "token": {
-        "expires_at": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
-        "issued_at": "2013-05-21T00:02:43.941473Z",
+
+def create_v3_token():
+    return {
+        "token": {
+            'methods': [],
+            "expires_at": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+            "issued_at": "2013-05-21T00:02:43.941473Z",
+        }
     }
-}
+
 
 SAMPLE_V3_TOKEN_EXPIRED = {
     "token": {
@@ -815,10 +821,10 @@ class TestTokenProvider(tests.TestCase):
                           SAMPLE_MALFORMED_TOKEN)
         self.assertEqual(
             None,
-            self.token_provider_api._is_valid_token(SAMPLE_V2_TOKEN_VALID))
+            self.token_provider_api._is_valid_token(create_v2_token()))
         self.assertEqual(
             None,
-            self.token_provider_api._is_valid_token(SAMPLE_V3_TOKEN_VALID))
+            self.token_provider_api._is_valid_token(create_v3_token()))
 
     def test_uuid_provider_no_oauth_fails_oauth(self):
         self.load_fixtures(default_fixtures)
@@ -828,3 +834,56 @@ class TestTokenProvider(tests.TestCase):
         self.assertRaises(exception.Forbidden,
                           driver.issue_v3_token,
                           self.user_foo['id'], ['oauth1'])
+
+
+class TestPKIProvider(object):
+
+    def setUp(self):
+        super(TestPKIProvider, self).setUp()
+
+        from keystoneclient.common import cms
+        self.cms = cms
+
+        from keystone.common import environment
+        self.environment = environment
+
+        old_cms_subprocess = cms.subprocess
+        self.addCleanup(setattr, cms, 'subprocess', old_cms_subprocess)
+
+        old_env_subprocess = environment.subprocess
+        self.addCleanup(setattr, environment, 'subprocess', old_env_subprocess)
+
+        self.cms.subprocess = self.target_subprocess
+        self.environment.subprocess = self.target_subprocess
+
+        reload(pki)  # force module reload so the imports get re-evaluated
+
+    def test_get_token_id_error_handling(self):
+        # cause command-line failure
+        self.opt_in_group('signing', keyfile='--please-break-me')
+
+        provider = pki.Provider()
+        token_data = {}
+        self.assertRaises(exception.UnexpectedError,
+                          provider._get_token_id,
+                          token_data)
+
+
+class TestPKIProviderWithEventlet(TestPKIProvider, tests.TestCase):
+
+    def setUp(self):
+        # force keystoneclient.common.cms to use eventlet's subprocess
+        from eventlet.green import subprocess
+        self.target_subprocess = subprocess
+
+        super(TestPKIProviderWithEventlet, self).setUp()
+
+
+class TestPKIProviderWithStdlib(TestPKIProvider, tests.TestCase):
+
+    def setUp(self):
+        # force keystoneclient.common.cms to use the stdlib subprocess
+        import subprocess
+        self.target_subprocess = subprocess
+
+        super(TestPKIProviderWithStdlib, self).setUp()

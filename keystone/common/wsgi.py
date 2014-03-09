@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
@@ -19,8 +17,6 @@
 #    under the License.
 
 """Utility methods for working with WSGI servers."""
-
-import re
 
 import routes.middleware
 import six
@@ -46,10 +42,6 @@ CONTEXT_ENV = 'openstack.context'
 
 # Environment variable used to pass the request params
 PARAMS_ENV = 'openstack.params'
-
-
-_RE_PASS = re.compile(r'([\'"].*?password[\'"]\s*:\s*u?[\'"]).*?([\'"])',
-                      re.DOTALL)
 
 
 def validate_token_bind(context, token_ref):
@@ -78,7 +70,7 @@ def validate_token_bind(context, token_ref):
         LOG.info(_("Named bind mode %s not in bind information"), name)
         raise exception.Unauthorized()
 
-    for bind_type, identifier in bind.iteritems():
+    for bind_type, identifier in six.iteritems(bind):
         if bind_type == 'kerberos':
             if not (context['environment'].get('AUTH_TYPE', '').lower()
                     == 'negotiate'):
@@ -102,16 +94,15 @@ def validate_token_bind(context, token_ref):
             raise exception.Unauthorized()
 
 
-class Request(webob.Request):
-    def best_match_language(self):
-        """Determines the best available locale from the Accept-Language
-        HTTP header passed in the request.
-        """
+def best_match_language(req):
+    """Determines the best available locale from the Accept-Language
+    HTTP header passed in the request.
+    """
 
-        if not self.accept_language:
-            return None
-        return self.accept_language.best_match(
-            gettextutils.get_available_languages('keystone'))
+    if not req.accept_language:
+        return None
+    return req.accept_language.best_match(
+        gettextutils.get_available_languages('keystone'))
 
 
 class BaseApplication(object):
@@ -145,7 +136,7 @@ class BaseApplication(object):
     def __call__(self, environ, start_response):
         r"""Subclasses will probably want to implement __call__ like this:
 
-        @webob.dec.wsgify(RequestClass=Request)
+        @webob.dec.wsgify()
         def __call__(self, req):
           # Any of the following objects work as responses:
 
@@ -181,7 +172,7 @@ class BaseApplication(object):
 
 @dependency.requires('assignment_api', 'policy_api', 'token_api')
 class Application(BaseApplication):
-    @webob.dec.wsgify(RequestClass=Request)
+    @webob.dec.wsgify()
     def __call__(self, req):
         arg_dict = req.environ['wsgiorg.routing_args'][1]
         action = arg_dict.pop('action')
@@ -190,8 +181,8 @@ class Application(BaseApplication):
 
         # allow middleware up the stack to provide context, params and headers.
         context = req.environ.get(CONTEXT_ENV, {})
-        context['query_string'] = dict(req.params.iteritems())
-        context['headers'] = dict(req.headers.iteritems())
+        context['query_string'] = dict(six.iteritems(req.params))
+        context['headers'] = dict(six.iteritems(req.headers))
         context['path'] = req.environ['PATH_INFO']
         params = req.environ.get(PARAMS_ENV, {})
         #authentication and authorization attributes are set as environment
@@ -216,22 +207,22 @@ class Application(BaseApplication):
             LOG.warning(
                 _('Authorization failed. %(exception)s from %(remote_addr)s'),
                 {'exception': e, 'remote_addr': req.environ['REMOTE_ADDR']})
-            return render_exception(e, user_locale=req.best_match_language())
+            return render_exception(e, user_locale=best_match_language(req))
         except exception.Error as e:
             LOG.warning(e)
-            return render_exception(e, user_locale=req.best_match_language())
+            return render_exception(e, user_locale=best_match_language(req))
         except TypeError as e:
             LOG.exception(e)
             return render_exception(exception.ValidationError(e),
-                                    user_locale=req.best_match_language())
+                                    user_locale=best_match_language(req))
         except Exception as e:
             LOG.exception(e)
             return render_exception(exception.UnexpectedError(exception=e),
-                                    user_locale=req.best_match_language())
+                                    user_locale=best_match_language(req))
 
         if result is None:
             return render_response(status=(204, 'No Content'))
-        elif isinstance(result, basestring):
+        elif isinstance(result, six.string_types):
             return result
         elif isinstance(result, webob.Response):
             return result
@@ -254,7 +245,7 @@ class Application(BaseApplication):
 
     def _normalize_dict(self, d):
         return dict([(self._normalize_arg(k), v)
-                     for (k, v) in d.iteritems()])
+                     for (k, v) in six.iteritems(d)])
 
     def assert_admin(self, context):
         if not context['is_admin']:
@@ -287,7 +278,7 @@ class Application(BaseApplication):
     def _require_attribute(self, ref, attr):
         """Ensures the reference contains the specified attribute."""
         if ref.get(attr) is None or ref.get(attr) == '':
-            msg = '%s field is required and cannot be empty' % attr
+            msg = _('%s field is required and cannot be empty') % attr
             raise exception.ValidationError(message=msg)
 
     def _get_trust_id_for_request(self, context):
@@ -345,6 +336,7 @@ class Middleware(Application):
         return _factory
 
     def __init__(self, application):
+        super(Middleware, self).__init__()
         self.application = application
 
     def process_request(self, request):
@@ -361,7 +353,7 @@ class Middleware(Application):
         """Do whatever you'd like to the response, based on the request."""
         return response
 
-    @webob.dec.wsgify(RequestClass=Request)
+    @webob.dec.wsgify()
     def __call__(self, request):
         try:
             response = self.process_request(request)
@@ -372,15 +364,15 @@ class Middleware(Application):
         except exception.Error as e:
             LOG.warning(e)
             return render_exception(e,
-                                    user_locale=request.best_match_language())
+                                    user_locale=best_match_language(request))
         except TypeError as e:
             LOG.exception(e)
             return render_exception(exception.ValidationError(e),
-                                    user_locale=request.best_match_language())
+                                    user_locale=best_match_language(request))
         except Exception as e:
             LOG.exception(e)
             return render_exception(exception.UnexpectedError(exception=e),
-                                    user_locale=request.best_match_language())
+                                    user_locale=best_match_language(request))
 
 
 class Debug(Middleware):
@@ -391,7 +383,7 @@ class Debug(Middleware):
 
     """
 
-    @webob.dec.wsgify(RequestClass=Request)
+    @webob.dec.wsgify()
     def __call__(self, req):
         if not hasattr(LOG, 'isEnabledFor') or LOG.isEnabledFor(LOG.debug):
             LOG.debug('%s %s %s', ('*' * 20), 'REQUEST ENVIRON', ('*' * 20))
@@ -407,7 +399,7 @@ class Debug(Middleware):
         resp = req.get_response(self.application)
         if not hasattr(LOG, 'isEnabledFor') or LOG.isEnabledFor(LOG.debug):
             LOG.debug('%s %s %s', ('*' * 20), 'RESPONSE HEADERS', ('*' * 20))
-            for (key, value) in resp.headers.iteritems():
+            for (key, value) in six.iteritems(resp.headers):
                 LOG.debug('%s = %s', key, value)
             LOG.debug('')
 
@@ -455,7 +447,7 @@ class Router(object):
         self._router = routes.middleware.RoutesMiddleware(self._dispatch,
                                                           self.map)
 
-    @webob.dec.wsgify(RequestClass=Request)
+    @webob.dec.wsgify()
     def __call__(self, req):
         """Route the incoming request to a controller based on self.map.
 
@@ -465,7 +457,7 @@ class Router(object):
         return self._router
 
     @staticmethod
-    @webob.dec.wsgify(RequestClass=Request)
+    @webob.dec.wsgify()
     def _dispatch(req):
         """Dispatch the request to the appropriate controller.
 
@@ -478,7 +470,7 @@ class Router(object):
         if not match:
             return render_exception(
                 exception.NotFound(_('The resource could not be found.')),
-                user_locale=req.best_match_language())
+                user_locale=best_match_language(req))
         app = match['controller']
         return app
 

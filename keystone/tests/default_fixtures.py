@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -17,14 +15,13 @@
 # NOTE(dolph): please try to avoid additional fixtures if possible; test suite
 #              performance may be negatively affected.
 
-from keystone import assignment
 from keystone import config
 
 
 CONF = config.CONF
 
 
-DEFAULT_DOMAIN_ID = config.CONF.identity.default_domain_id
+DEFAULT_DOMAIN_ID = 'default'
 
 
 TENANTS = [
@@ -70,7 +67,6 @@ USERS = [
         'name': 'TWO',
         'domain_id': DEFAULT_DOMAIN_ID,
         'password': 'two2',
-        'email': 'two@example.com',
         'enabled': True,
         'default_project_id': 'baz',
         'tenants': ['baz'],
@@ -80,11 +76,10 @@ USERS = [
         'name': 'BadGuy',
         'domain_id': DEFAULT_DOMAIN_ID,
         'password': 'bad',
-        'email': 'bad@guy.com',
         'enabled': False,
         'default_project_id': 'baz',
         'tenants': ['baz'],
-        'email': 'badguy@goodguy.com',
+        'email': 'bad@guy.com',
     }, {
         'id': 'sna',
         'name': 'SNA',
@@ -104,8 +99,8 @@ ROLES = [
         'id': 'member',
         'name': 'Member',
     }, {
-        'id': CONF.member_role_id,
-        'name': CONF.member_role_name,
+        'id': '9fe2ff9ee4384b1894a90878d3e92bab',
+        'name': '_member_',
     }, {
         'id': 'other',
         'name': 'Other',
@@ -121,4 +116,9 @@ ROLES = [
     }
 ]
 
-DOMAINS = [assignment.DEFAULT_DOMAIN]
+DOMAINS = [{'description':
+            (u'Owns users and tenants (i.e. projects)'
+                ' available on Identity API v2.'),
+            'enabled': True,
+            'id': DEFAULT_DOMAIN_ID,
+            'name': u'Default'}]

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -24,7 +22,7 @@ from sphinx import apidoc
 
 # NOTE(dstanek): pbr will run Sphinx multiple times when it generates
 # documentation. Once for each builder. To run this extension we use the
-# 'builder-inited' hook that fires at the begining of a Sphinx build.
+# 'builder-inited' hook that fires at the beginning of a Sphinx build.
 # We use ``run_already`` to make sure apidocs are only generated once
 # even if Sphinx is run multiple times.
 run_already = False

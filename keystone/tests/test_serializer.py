@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -262,8 +260,8 @@ class XmlSerializerTestCase(tests.TestCase):
         d = {
             "object": {
                 "id": "v2.0",
-                "status": "stable",
-                "updated": "2013-03-06T00:00:00Z",
+                "status": "deprecated",
+                "updated": "2014-04-17T00:00:00Z",
                 "links": [{"href": "http://localhost:5000/v2.0/",
                            "rel": "self"},
                           {"href": "http://docs.openstack.org/api/openstack-"
@@ -278,7 +276,7 @@ class XmlSerializerTestCase(tests.TestCase):
         xml = """
             <?xml version="1.0" encoding="UTF-8"?>
             <object xmlns="http://docs.openstack.org/identity/api/v2.0"
-                id="v2.0" status="stable" updated="2013-03-06T00:00:00Z">
+                id="v2.0" status="deprecated" updated="2014-04-17T00:00:00Z">
                     <links>
                         <link rel="self" href="http://localhost:5000/v2.0/"/>
                         <link rel="describedby"

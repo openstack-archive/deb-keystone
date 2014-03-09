@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -38,11 +36,14 @@ import uuid
 from migrate.versioning import api as versioning_api
 import sqlalchemy
 
-from keystone.common.sql import migration
+from keystone.assignment.backends import sql as assignment_sql
+from keystone.common import sql
+from keystone.common.sql import migration_helpers
 from keystone.common import utils
 from keystone import config
 from keystone import credential
 from keystone import exception
+from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common.db.sqlalchemy import session
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -66,7 +67,7 @@ class SqlMigrateBase(tests.TestCase):
         return self._config_file_list
 
     def repo_package(self):
-        return None
+        return sql
 
     def setUp(self):
         super(SqlMigrateBase, self).setUp()
@@ -78,7 +79,8 @@ class SqlMigrateBase(tests.TestCase):
         self.Session = session.get_maker(self.engine, autocommit=False)
 
         self.initialize_sql()
-        self.repo_path = migration.find_migrate_repo(self.repo_package())
+        self.repo_path = migration_helpers.find_migrate_repo(
+            self.repo_package())
         self.schema = versioning_api.ControlledSchema.create(
             self.engine,
             self.repo_path, 0)
@@ -156,8 +158,8 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableDoesNotExist('user')
 
     def test_start_version_0(self):
-        version = migration.db_version()
-        self.assertEqual(version, 0, "DB is at version 0")
+        version = migration.db_version(self.repo_path, 0)
+        self.assertEqual(version, 0, "DB is not at version 0")
 
     def test_two_steps_forward_one_step_back(self):
         """You should be able to cleanly undo and re-apply all upgrades.
@@ -882,7 +884,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         # two uses with clashing name as we try to revert to a single global
         # name space.  This limitation is raised as Bug #1125046 and the delete
         # could be removed depending on how that bug is resolved.
-        cmd = this_table.delete(id=user['id'])
+        cmd = this_table.delete().where(this_table.c.id == user['id'])
         self.engine.execute(cmd)
 
         # Now, the Project table.
@@ -906,7 +908,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         # TODO(henry-nash): For now, we delete one of the projects for the same
         # reason as we delete one of the users (Bug #1125046). This delete
         # could be removed depending on that bug resolution.
-        cmd = this_table.delete(id=project['id'])
+        cmd = this_table.delete().where(this_table.c.id == project['id'])
         self.engine.execute(cmd)
 
     def test_upgrade_trusts(self):
@@ -1393,7 +1395,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         credential_api = credential.Manager()
         self.assertNotEmpty(credential_api.
                             list_credentials(
-                            user_id=ec2_credential['user_id']))
+                                user_id=ec2_credential['user_id']))
         self.downgrade(32)
         session.commit()
         self.assertTableExists('ec2_credential')
@@ -1681,6 +1683,414 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableExists('region')
         self.downgrade(36)
         self.assertTableDoesNotExist('region')
+
+    def test_assignment_table_migration(self):
+
+        def create_base_data(session):
+            domain_table = sqlalchemy.Table('domain', self.metadata,
+                                            autoload=True)
+            user_table = sqlalchemy.Table('user', self.metadata, autoload=True)
+            group_table = sqlalchemy.Table('group', self.metadata,
+                                           autoload=True)
+            role_table = sqlalchemy.Table('role', self.metadata, autoload=True)
+            project_table = sqlalchemy.Table(
+                'project', self.metadata, autoload=True)
+
+            base_data = {}
+            # Create a Domain
+            base_data['domain'] = {'id': uuid.uuid4().hex,
+                                   'name': uuid.uuid4().hex,
+                                   'enabled': True}
+            session.execute(domain_table.insert().values(base_data['domain']))
+
+            # Create another Domain
+            base_data['domain2'] = {'id': uuid.uuid4().hex,
+                                    'name': uuid.uuid4().hex,
+                                    'enabled': True}
+            session.execute(domain_table.insert().values(base_data['domain2']))
+
+            # Create a Project
+            base_data['project'] = {'id': uuid.uuid4().hex,
+                                    'name': uuid.uuid4().hex,
+                                    'domain_id': base_data['domain']['id'],
+                                    'extra': "{}"}
+            session.execute(
+                project_table.insert().values(base_data['project']))
+
+            # Create another Project
+            base_data['project2'] = {'id': uuid.uuid4().hex,
+                                     'name': uuid.uuid4().hex,
+                                     'domain_id': base_data['domain']['id'],
+                                     'extra': "{}"}
+            session.execute(
+                project_table.insert().values(base_data['project2']))
+
+            # Create a User
+            base_data['user'] = {'id': uuid.uuid4().hex,
+                                 'name': uuid.uuid4().hex,
+                                 'domain_id': base_data['domain']['id'],
+                                 'password': uuid.uuid4().hex,
+                                 'enabled': True,
+                                 'extra': "{}"}
+            session.execute(user_table.insert().values(base_data['user']))
+
+            # Create a Group
+            base_data['group'] = {'id': uuid.uuid4().hex,
+                                  'name': uuid.uuid4().hex,
+                                  'domain_id': base_data['domain']['id'],
+                                  'extra': "{}"}
+            session.execute(group_table.insert().values(base_data['group']))
+
+            # Create roles
+            base_data['roles'] = []
+            for _ in range(9):
+                role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+                session.execute(role_table.insert().values(role))
+                base_data['roles'].append(role)
+
+            return base_data
+
+        def populate_grants(session, base_data):
+
+            user_project_table = sqlalchemy.Table(
+                'user_project_metadata', self.metadata, autoload=True)
+            user_domain_table = sqlalchemy.Table(
+                'user_domain_metadata', self.metadata, autoload=True)
+            group_project_table = sqlalchemy.Table(
+                'group_project_metadata', self.metadata, autoload=True)
+            group_domain_table = sqlalchemy.Table(
+                'group_domain_metadata', self.metadata, autoload=True)
+
+            # Grant a role to user on project
+            grant = {'user_id': base_data['user']['id'],
+                     'project_id': base_data['project']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][0]['id']}]})}
+            session.execute(user_project_table.insert().values(grant))
+
+            # Grant two roles to user on project2
+            grant = {'user_id': base_data['user']['id'],
+                     'project_id': base_data['project2']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][1]['id']},
+                                    {'id': base_data['roles'][2]['id']}]})}
+            session.execute(user_project_table.insert().values(grant))
+
+            # Grant role to group on project
+            grant = {'group_id': base_data['group']['id'],
+                     'project_id': base_data['project']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][3]['id']}]})}
+            session.execute(group_project_table.insert().values(grant))
+
+            # Grant two roles to group on project2
+            grant = {'group_id': base_data['group']['id'],
+                     'project_id': base_data['project2']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][4]['id']},
+                                    {'id': base_data['roles'][5]['id']}]})}
+            session.execute(group_project_table.insert().values(grant))
+
+            # Grant two roles to group on domain, one inherited, one not
+            grant = {'group_id': base_data['group']['id'],
+                     'domain_id': base_data['domain']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][6]['id']},
+                                    {'id': base_data['roles'][7]['id'],
+                                     'inherited_to': 'projects'}]})}
+            session.execute(group_domain_table.insert().values(grant))
+
+            # Grant inherited role to user on domain
+            grant = {'user_id': base_data['user']['id'],
+                     'domain_id': base_data['domain']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][8]['id'],
+                                     'inherited_to': 'projects'}]})}
+            session.execute(user_domain_table.insert().values(grant))
+
+            # Grant two non-inherited roles to user on domain2, using roles
+            # that are also assigned to other actors/targets
+            grant = {'user_id': base_data['user']['id'],
+                     'domain_id': base_data['domain2']['id'],
+                     'data': json.dumps(
+                         {'roles': [{'id': base_data['roles'][6]['id']},
+                                    {'id': base_data['roles'][7]['id']}]})}
+            session.execute(user_domain_table.insert().values(grant))
+
+            session.commit()
+
+        def check_grants(session, base_data):
+            user_project_table = sqlalchemy.Table(
+                'user_project_metadata', self.metadata, autoload=True)
+            user_domain_table = sqlalchemy.Table(
+                'user_domain_metadata', self.metadata, autoload=True)
+            group_project_table = sqlalchemy.Table(
+                'group_project_metadata', self.metadata, autoload=True)
+            group_domain_table = sqlalchemy.Table(
+                'group_domain_metadata', self.metadata, autoload=True)
+
+            s = sqlalchemy.select([user_project_table.c.data]).where(
+                (user_project_table.c.user_id == base_data['user']['id']) &
+                (user_project_table.c.project_id ==
+                 base_data['project']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 1)
+            self.assertIn({'id': base_data['roles'][0]['id']}, data['roles'])
+
+            s = sqlalchemy.select([user_project_table.c.data]).where(
+                (user_project_table.c.user_id == base_data['user']['id']) &
+                (user_project_table.c.project_id ==
+                 base_data['project2']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 2)
+            self.assertIn({'id': base_data['roles'][1]['id']}, data['roles'])
+            self.assertIn({'id': base_data['roles'][2]['id']}, data['roles'])
+
+            s = sqlalchemy.select([group_project_table.c.data]).where(
+                (group_project_table.c.group_id == base_data['group']['id']) &
+                (group_project_table.c.project_id ==
+                 base_data['project']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 1)
+            self.assertIn({'id': base_data['roles'][3]['id']}, data['roles'])
+
+            s = sqlalchemy.select([group_project_table.c.data]).where(
+                (group_project_table.c.group_id == base_data['group']['id']) &
+                (group_project_table.c.project_id ==
+                 base_data['project2']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 2)
+            self.assertIn({'id': base_data['roles'][4]['id']}, data['roles'])
+            self.assertIn({'id': base_data['roles'][5]['id']}, data['roles'])
+
+            s = sqlalchemy.select([group_domain_table.c.data]).where(
+                (group_domain_table.c.group_id == base_data['group']['id']) &
+                (group_domain_table.c.domain_id == base_data['domain']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 2)
+            self.assertIn({'id': base_data['roles'][6]['id']}, data['roles'])
+            self.assertIn({'id': base_data['roles'][7]['id'],
+                           'inherited_to': 'projects'}, data['roles'])
+
+            s = sqlalchemy.select([user_domain_table.c.data]).where(
+                (user_domain_table.c.user_id == base_data['user']['id']) &
+                (user_domain_table.c.domain_id == base_data['domain']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 1)
+            self.assertIn({'id': base_data['roles'][8]['id'],
+                           'inherited_to': 'projects'}, data['roles'])
+
+            s = sqlalchemy.select([user_domain_table.c.data]).where(
+                (user_domain_table.c.user_id == base_data['user']['id']) &
+                (user_domain_table.c.domain_id == base_data['domain2']['id']))
+            r = session.execute(s)
+            data = json.loads(r.fetchone()['data'])
+            self.assertEqual(len(data['roles']), 2)
+            self.assertIn({'id': base_data['roles'][6]['id']}, data['roles'])
+            self.assertIn({'id': base_data['roles'][7]['id']}, data['roles'])
+
+        def check_assignments(session, base_data):
+
+            def check_assignment_type(refs, type):
+                for ref in refs:
+                    self.assertEqual(ref.type, type)
+
+            assignment_table = sqlalchemy.Table(
+                'assignment', self.metadata, autoload=True)
+
+            refs = session.query(assignment_table).all()
+            self.assertEqual(len(refs), 11)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['user']['id'])
+            q = q.filter_by(target_id=base_data['project']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].role_id, base_data['roles'][0]['id'])
+            self.assertFalse(refs[0].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.USER_PROJECT)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['user']['id'])
+            q = q.filter_by(target_id=base_data['project2']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 2)
+            role_ids = [base_data['roles'][1]['id'],
+                        base_data['roles'][2]['id']]
+            self.assertIn(refs[0].role_id, role_ids)
+            self.assertIn(refs[1].role_id, role_ids)
+            self.assertFalse(refs[0].inherited)
+            self.assertFalse(refs[1].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.USER_PROJECT)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['group']['id'])
+            q = q.filter_by(target_id=base_data['project']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].role_id, base_data['roles'][3]['id'])
+            self.assertFalse(refs[0].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.GROUP_PROJECT)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['group']['id'])
+            q = q.filter_by(target_id=base_data['project2']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 2)
+            role_ids = [base_data['roles'][4]['id'],
+                        base_data['roles'][5]['id']]
+            self.assertIn(refs[0].role_id, role_ids)
+            self.assertIn(refs[1].role_id, role_ids)
+            self.assertFalse(refs[0].inherited)
+            self.assertFalse(refs[1].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.GROUP_PROJECT)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['group']['id'])
+            q = q.filter_by(target_id=base_data['domain']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 2)
+            role_ids = [base_data['roles'][6]['id'],
+                        base_data['roles'][7]['id']]
+            self.assertIn(refs[0].role_id, role_ids)
+            self.assertIn(refs[1].role_id, role_ids)
+            if refs[0].role_id == base_data['roles'][7]['id']:
+                self.assertTrue(refs[0].inherited)
+                self.assertFalse(refs[1].inherited)
+            else:
+                self.assertTrue(refs[1].inherited)
+                self.assertFalse(refs[0].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.GROUP_DOMAIN)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['user']['id'])
+            q = q.filter_by(target_id=base_data['domain']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].role_id, base_data['roles'][8]['id'])
+            self.assertTrue(refs[0].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.USER_DOMAIN)
+
+            q = session.query(assignment_table)
+            q = q.filter_by(actor_id=base_data['user']['id'])
+            q = q.filter_by(target_id=base_data['domain2']['id'])
+            refs = q.all()
+            self.assertEqual(len(refs), 2)
+            role_ids = [base_data['roles'][6]['id'],
+                        base_data['roles'][7]['id']]
+            self.assertIn(refs[0].role_id, role_ids)
+            self.assertIn(refs[1].role_id, role_ids)
+            self.assertFalse(refs[0].inherited)
+            self.assertFalse(refs[1].inherited)
+            check_assignment_type(refs,
+                                  assignment_sql.AssignmentType.USER_DOMAIN)
+
+        self.upgrade(37)
+        session = self.Session()
+        self.assertTableDoesNotExist('assignment')
+        base_data = create_base_data(session)
+        populate_grants(session, base_data)
+        check_grants(session, base_data)
+        session.commit()
+        session.close()
+        self.upgrade(40)
+        session = self.Session()
+        self.assertTableExists('assignment')
+        self.assertTableDoesNotExist('user_project_metadata')
+        self.assertTableDoesNotExist('group_project_metadata')
+        self.assertTableDoesNotExist('user_domain_metadata')
+        self.assertTableDoesNotExist('group_domain_metadata')
+        check_assignments(session, base_data)
+        session.close()
+        self.downgrade(37)
+        session = self.Session()
+        self.assertTableDoesNotExist('assignment')
+        check_grants(session, base_data)
+        session.close()
+
+    def test_limited_trusts_upgrade(self):
+        # make sure that the remaining_uses column is created
+        self.upgrade(41)
+        self.assertTableColumns('trust',
+                                ['id', 'trustor_user_id',
+                                 'trustee_user_id',
+                                 'project_id', 'impersonation',
+                                 'deleted_at',
+                                 'expires_at', 'extra',
+                                 'remaining_uses'])
+
+    def test_limited_trusts_downgrade(self):
+        # make sure that the remaining_uses column is removed
+        self.upgrade(41)
+        self.downgrade(40)
+        self.assertTableColumns('trust',
+                                ['id', 'trustor_user_id',
+                                 'trustee_user_id',
+                                 'project_id', 'impersonation',
+                                 'deleted_at',
+                                 'expires_at', 'extra'])
+
+    def test_limited_trusts_downgrade_trusts_cleanup(self):
+        # make sure that only trusts with unlimited uses are kept in the
+        # downgrade
+        self.upgrade(41)
+        session = self.Session()
+        trust_table = sqlalchemy.Table(
+            'trust', self.metadata, autoload=True)
+        limited_trust = {
+            'id': uuid.uuid4().hex,
+            'trustor_user_id': uuid.uuid4().hex,
+            'trustee_user_id': uuid.uuid4().hex,
+            'project_id': uuid.uuid4().hex,
+            'impersonation': True,
+            'remaining_uses': 5
+        }
+        consumed_trust = {
+            'id': uuid.uuid4().hex,
+            'trustor_user_id': uuid.uuid4().hex,
+            'trustee_user_id': uuid.uuid4().hex,
+            'project_id': uuid.uuid4().hex,
+            'impersonation': True,
+            'remaining_uses': 0
+        }
+        unlimited_trust = {
+            'id': uuid.uuid4().hex,
+            'trustor_user_id': uuid.uuid4().hex,
+            'trustee_user_id': uuid.uuid4().hex,
+            'project_id': uuid.uuid4().hex,
+            'impersonation': True,
+            'remaining_uses': None
+        }
+        self.insert_dict(session, 'trust', limited_trust)
+        self.insert_dict(session, 'trust', consumed_trust)
+        self.insert_dict(session, 'trust', unlimited_trust)
+        trust_table = sqlalchemy.Table(
+            'trust', self.metadata, autoload=True)
+        # we should have 3 trusts in base
+        self.assertEqual(3, session.query(trust_table).count())
+
+        self.downgrade(40)
+        session = self.Session()
+        trust_table = sqlalchemy.Table(
+            'trust', self.metadata, autoload=True)
+        # Now only one trust remains ...
+        self.assertEqual(1, session.query(trust_table.columns.id).count())
+        # ... and this trust is the one that was not limited in uses
+        self.assertEqual(
+            unlimited_trust['id'],
+            session.query(trust_table.columns.id).one()[0])
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):

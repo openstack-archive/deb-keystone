@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -55,6 +53,13 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.PolicyNotFound(policy_id=policy_id)
 
+    @manager.response_truncated
+    def list_policies(self, hints=None):
+        # NOTE(henry-nash): Since the advantage of filtering or list limiting
+        # of policies at the driver level is minimal, we leave this to the
+        # caller.
+        return self.driver.list_policies()
+
     def delete_policy(self, policy_id):
         try:
             return self.driver.delete_policy(policy_id)
@@ -64,6 +69,9 @@ class Manager(manager.Manager):
 
 @six.add_metaclass(abc.ABCMeta)
 class Driver(object):
+
+    def _get_list_limit(self):
+        return CONF.policy.list_limit or CONF.list_limit
 
     @abc.abstractmethod
     def enforce(self, context, credentials, action, target):

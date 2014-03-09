@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -57,8 +55,8 @@ v2_PDF_DESCRIPTION = {
 
 v2_EXPECTED_RESPONSE = {
     "id": "v2.0",
-    "status": "stable",
-    "updated": "2013-03-06T00:00:00Z",
+    "status": "deprecated",
+    "updated": "2014-04-17T00:00:00Z",
     "links": [
         {
             "rel": "self",
@@ -272,7 +270,7 @@ class XmlVersionTestCase(tests.TestCase):
     XML_NAMESPACE_ATTR = 'xmlns="http://docs.openstack.org/identity/api/v2.0"'
 
     v2_VERSION_DATA = """
-<version %(v2_namespace)s status="stable" updated="2013-03-06T00:00:00Z"
+<version %(v2_namespace)s status="deprecated" updated="2014-04-17T00:00:00Z"
          id="v2.0">
   <media-types>
     <media-type base="application/json" type="application/\

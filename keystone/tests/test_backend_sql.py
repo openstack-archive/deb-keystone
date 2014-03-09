@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -22,7 +20,7 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
-from keystone.openstack.common.db.sqlalchemy import session
+from keystone.openstack.common.db.sqlalchemy import session as db_session
 from keystone.openstack.common.fixture import moxstubout
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -34,7 +32,7 @@ CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class SqlTests(tests.TestCase, sql.Base):
+class SqlTests(tests.TestCase):
 
     def setUp(self):
         super(SqlTests, self).setUp()
@@ -43,14 +41,6 @@ class SqlTests(tests.TestCase, sql.Base):
                      tests.dirs.tests('backend_sql.conf')])
 
         self.load_backends()
-
-        # create tables and keep an engine reference for cleanup.
-        # this must be done after the models are loaded by the managers.
-        self.engine = session.get_engine()
-        self.addCleanup(session.cleanup)
-
-        sql.ModelBase.metadata.create_all(bind=self.engine)
-        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
 
         # populate the engine with tables & fixtures
         self.load_fixtures(default_fixtures)
@@ -116,29 +106,13 @@ class SqlModels(SqlTests):
                 ('name', sql.String, 255))
         self.assertExpectedSchema('role', cols)
 
-    def test_user_project_metadata_model(self):
-        cols = (('user_id', sql.String, 64),
-                ('project_id', sql.String, 64),
-                ('data', sql.JsonBlob, None))
-        self.assertExpectedSchema('user_project_metadata', cols)
-
-    def test_user_domain_metadata_model(self):
-        cols = (('user_id', sql.String, 64),
-                ('domain_id', sql.String, 64),
-                ('data', sql.JsonBlob, None))
-        self.assertExpectedSchema('user_domain_metadata', cols)
-
-    def test_group_project_metadata_model(self):
-        cols = (('group_id', sql.String, 64),
-                ('project_id', sql.String, 64),
-                ('data', sql.JsonBlob, None))
-        self.assertExpectedSchema('group_project_metadata', cols)
-
-    def test_group_domain_metadata_model(self):
-        cols = (('group_id', sql.String, 64),
-                ('domain_id', sql.String, 64),
-                ('data', sql.JsonBlob, None))
-        self.assertExpectedSchema('group_domain_metadata', cols)
+    def test_role_assignment_model(self):
+        cols = (('type', sql.Enum, None),
+                ('actor_id', sql.String, 64),
+                ('target_id', sql.String, 64),
+                ('role_id', sql.String, 64),
+                ('inherited', sql.Boolean, False))
+        self.assertExpectedSchema('assignment', cols)
 
     def test_user_group_membership(self):
         cols = (('group_id', sql.String, 64),
@@ -148,7 +122,7 @@ class SqlModels(SqlTests):
 
 class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_password_hashed(self):
-        session = self.identity_api.get_session()
+        session = db_session.get_session()
         user_ref = self.identity_api._get_user(session, self.user_foo['id'])
         self.assertNotEqual(user_ref['password'], self.user_foo['password'])
 
@@ -337,7 +311,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
             'password': uuid.uuid4().hex}
 
         self.identity_api.create_user(user_id, user)
-        session = self.get_session()
+        session = db_session.get_session()
         query = session.query(identity_sql.User)
         query = query.filter_by(id=user_id)
         raw_user_ref = query.one()
@@ -359,14 +333,14 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         fixture = self.useFixture(moxstubout.MoxStubout())
         self.mox = fixture.mox
         tok = token_sql.Token()
-        session = tok.get_session()
+        session = db_session.get_session()
         q = session.query(token_sql.TokenModel.id,
                           token_sql.TokenModel.expires)
         self.mox.StubOutWithMock(session, 'query')
         session.query(token_sql.TokenModel.id,
                       token_sql.TokenModel.expires).AndReturn(q)
-        self.mox.StubOutWithMock(tok, 'get_session')
-        tok.get_session().AndReturn(session)
+        self.mox.StubOutWithMock(db_session, 'get_session')
+        db_session.get_session().AndReturn(session)
         self.mox.ReplayAll()
         tok.list_revoked_tokens()
 
@@ -490,3 +464,13 @@ class SqlTokenCacheInvalidation(SqlTests, test_backend.TokenCacheInvalidation):
     def setUp(self):
         super(SqlTokenCacheInvalidation, self).setUp()
         self._create_test_data()
+
+
+class SqlFilterTests(SqlTests, test_backend.FilterTests):
+    pass
+
+
+class SqlLimitTests(SqlTests, test_backend.LimitTests):
+    def setUp(self):
+        super(SqlLimitTests, self).setUp()
+        test_backend.LimitTests.setUp(self)

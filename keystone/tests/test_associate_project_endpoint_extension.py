@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,11 +12,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
 import uuid
 
-from keystone.common.sql import migration
+from keystone.common.sql import migration_helpers
 from keystone import contrib
+from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common import importutils
 from keystone import tests
 from keystone.tests import test_v3
@@ -29,27 +27,27 @@ class TestExtensionCase(test_v3.RestfulTestCase):
     EXTENSION_NAME = 'endpoint_filter'
     EXTENSION_TO_ADD = 'endpoint_filter_extension'
 
+    def config_files(self):
+        conf_files = super(TestExtensionCase, self).config_files()
+        conf_files.append(tests.dirs.tests(
+            'test_associate_project_endpoint_extension.conf'))
+        return conf_files
+
     def setup_database(self):
-        self.conf_files = super(TestExtensionCase, self).config_files()
-        self.conf_files.append(
-            tests.dirs.tests('test_associate_project_endpoint_extension.conf'))
-        self.addCleanup(self.conf_files.pop)
         super(TestExtensionCase, self).setup_database()
-        package_name = "%s.%s.migrate_repo" % (contrib.__name__,
-                                               self.EXTENSION_NAME)
+        package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
         package = importutils.import_module(package_name)
-        self.repo_path = os.path.abspath(
-            os.path.dirname(package.__file__))
-        migration.db_version_control(version=None, repo_path=self.repo_path)
-        migration.db_sync(version=None, repo_path=self.repo_path)
+        abs_path = migration_helpers.find_migrate_repo(package)
+        migration.db_version_control(abs_path)
+        migration.db_sync(abs_path)
 
     def setUp(self):
         super(TestExtensionCase, self).setUp()
         self.default_request_url = (
             '/OS-EP-FILTER/projects/%(project_id)s'
             '/endpoints/%(endpoint_id)s' % {
-            'project_id': self.default_domain_project_id,
-            'endpoint_id': self.endpoint_id})
+                'project_id': self.default_domain_project_id,
+                'endpoint_id': self.endpoint_id})
 
 
 class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
@@ -75,8 +73,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         """
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': uuid.uuid4().hex,
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': uuid.uuid4().hex,
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=404)
 
@@ -88,8 +86,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         """
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': self.default_domain_project_id,
-                 'endpoint_id': uuid.uuid4().hex},
+                     'project_id': self.default_domain_project_id,
+                     'endpoint_id': uuid.uuid4().hex},
                  body='',
                  expected_status=404)
 
@@ -115,8 +113,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
                  expected_status=204)
         self.head('/OS-EP-FILTER/projects/%(project_id)s'
                   '/endpoints/%(endpoint_id)s' % {
-                  'project_id': self.default_domain_project_id,
-                  'endpoint_id': self.endpoint_id},
+                      'project_id': self.default_domain_project_id,
+                      'endpoint_id': self.endpoint_id},
                   expected_status=204)
 
     def test_check_endpoint_project_assoc_noproj(self):
@@ -128,8 +126,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         self.head('/OS-EP-FILTER/projects/%(project_id)s'
                   '/endpoints/%(endpoint_id)s' % {
-                  'project_id': uuid.uuid4().hex,
-                  'endpoint_id': self.endpoint_id},
+                      'project_id': uuid.uuid4().hex,
+                      'endpoint_id': self.endpoint_id},
                   body='',
                   expected_status=404)
 
@@ -142,8 +140,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         self.head('/OS-EP-FILTER/projects/%(project_id)s'
                   '/endpoints/%(endpoint_id)s' % {
-                  'project_id': self.default_domain_project_id,
-                  'endpoint_id': uuid.uuid4().hex},
+                      'project_id': self.default_domain_project_id,
+                      'endpoint_id': uuid.uuid4().hex},
                   body='',
                   expected_status=404)
 
@@ -163,6 +161,39 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
                  body='',
                  expected_status=404)
 
+    def test_list_projects_for_endpoint_default(self):
+        """GET /OS-EP-FILTER/endpoints/{endpoint_id}/projects success
+
+        Don't associate project and endpoint, then get empty list.
+
+        """
+        r = self.get('/OS-EP-FILTER/endpoints/%(endpoint_id)s/projects' %
+                     {'endpoint_id': self.endpoint_id},
+                     expected_status=200)
+        self.assertValidProjectListResponse(r, expected_length=0)
+
+    def test_list_projects_for_endpoint_noendpoint(self):
+        """GET /OS-EP-FILTER/endpoints/{endpoint_id}/projects
+
+        Invalid endpoint id test case.
+
+        """
+        self.get('/OS-EP-FILTER/endpoints/%(endpoint_id)s/projects' %
+                 {'endpoint_id': uuid.uuid4().hex},
+                 expected_status=404)
+
+    def test_list_projects_for_endpoint_assoc(self):
+        """GET /OS-EP-FILTER/endpoints/{endpoint_id}/projects success
+
+        Associate default project and endpoint, then get it.
+
+        """
+        self.put(self.default_request_url)
+        r = self.get('/OS-EP-FILTER/endpoints/%(endpoint_id)s/projects' %
+                     {'endpoint_id': self.endpoint_id},
+                     expected_status=200)
+        self.assertValidProjectListResponse(r, self.default_domain_project)
+
     # DELETE
     def test_remove_endpoint_project_assoc(self):
         """DELETE /OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -173,8 +204,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         self.delete('/OS-EP-FILTER/projects/%(project_id)s'
                     '/endpoints/%(endpoint_id)s' % {
-                    'project_id': self.default_domain_project_id,
-                    'endpoint_id': self.endpoint_id},
+                        'project_id': self.default_domain_project_id,
+                        'endpoint_id': self.endpoint_id},
                     expected_status=204)
 
     def test_remove_endpoint_project_assoc_noproj(self):
@@ -186,8 +217,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         self.delete('/OS-EP-FILTER/projects/%(project_id)s'
                     '/endpoints/%(endpoint_id)s' % {
-                    'project_id': uuid.uuid4().hex,
-                    'endpoint_id': self.endpoint_id},
+                        'project_id': uuid.uuid4().hex,
+                        'endpoint_id': self.endpoint_id},
                     body='',
                     expected_status=404)
 
@@ -200,8 +231,8 @@ class AssociateEndpointProjectFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         self.delete('/OS-EP-FILTER/projects/%(project_id)s'
                     '/endpoints/%(endpoint_id)s' % {
-                    'project_id': self.default_domain_project_id,
-                    'endpoint_id': uuid.uuid4().hex},
+                        'project_id': self.default_domain_project_id,
+                        'endpoint_id': uuid.uuid4().hex},
                     body='',
                     expected_status=404)
 
@@ -232,8 +263,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add one endpoint to the project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': project['id'],
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': project['id'],
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=204)
 
@@ -255,8 +286,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add one endpoint to default project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': self.project['id'],
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': self.project['id'],
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=204)
 
@@ -296,8 +327,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add one endpoint to the project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': project['id'],
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': project['id'],
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=204)
 
@@ -319,8 +350,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add one endpoint to default project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': self.project['id'],
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': self.project['id'],
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=204)
 
@@ -389,8 +420,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add first endpoint to default project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': self.project['id'],
-                 'endpoint_id': self.endpoint_id},
+                     'project_id': self.project['id'],
+                     'endpoint_id': self.endpoint_id},
                  body='',
                  expected_status=204)
 
@@ -405,8 +436,8 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
         # add second endpoint to default project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
-                 'project_id': self.project['id'],
-                 'endpoint_id': self.endpoint_id2},
+                     'project_id': self.project['id'],
+                     'endpoint_id': self.endpoint_id2},
                  body='',
                  expected_status=204)
 

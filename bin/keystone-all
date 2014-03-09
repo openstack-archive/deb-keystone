@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2013 OpenStack Foundation
 #
@@ -40,7 +39,7 @@ from keystone.openstack.common import gettextutils
 # NOTE(blk-u):
 # gettextutils.install() must run to set _ before importing any modules that
 # contain static translated strings.
-gettextutils.install('keystone')
+gettextutils.install('keystone', lazy=True)
 
 from keystone.common import dependency
 from keystone.common import environment
@@ -56,7 +55,9 @@ CONF = config.CONF
 
 def create_server(conf, name, host, port):
     app = deploy.loadapp('config:%s' % conf, name=name)
-    server = environment.Server(app, host=host, port=port)
+    server = environment.Server(app, host=host, port=port,
+                                keepalive=CONF.tcp_keepalive,
+                                keepidle=CONF.tcp_keepidle)
     if CONF.ssl.enable:
         server.set_ssl(CONF.ssl.certfile, CONF.ssl.keyfile,
                        CONF.ssl.ca_certs, CONF.ssl.cert_required)
@@ -103,7 +104,9 @@ if __name__ == '__main__':
     if os.path.exists(dev_conf):
         config_files = [dev_conf]
 
+    config.configure()
     sql.initialize()
+    config.set_default_for_default_log_levels()
 
     CONF(project='keystone',
          version=pbr.version.VersionInfo('keystone').version_string(),

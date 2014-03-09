@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -48,4 +46,38 @@ class Ec2Extension(wsgi.ExtensionRouter):
             '/users/{user_id}/credentials/OS-EC2/{credential_id}',
             controller=ec2_controller,
             action='delete_credential',
+            conditions=dict(method=['DELETE']))
+
+
+class Ec2ExtensionV3(wsgi.ExtensionRouter):
+
+    def add_routes(self, mapper):
+        ec2_controller = controllers.Ec2ControllerV3()
+        # validation
+        mapper.connect(
+            '/ec2tokens',
+            controller=ec2_controller,
+            action='authenticate',
+            conditions=dict(method=['POST']))
+
+        # crud
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2',
+            controller=ec2_controller,
+            action='ec2_create_credential',
+            conditions=dict(method=['POST']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2',
+            controller=ec2_controller,
+            action='ec2_list_credentials',
+            conditions=dict(method=['GET']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2/{credential_id}',
+            controller=ec2_controller,
+            action='ec2_get_credential',
+            conditions=dict(method=['GET']))
+        mapper.connect(
+            '/users/{user_id}/credentials/OS-EC2/{credential_id}',
+            controller=ec2_controller,
+            action='ec2_delete_credential',
             conditions=dict(method=['DELETE']))

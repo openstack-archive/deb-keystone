@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import sys
+
 import functools
 import routes
 
@@ -24,6 +24,7 @@ from keystone.common import cache
 from keystone.common import wsgi
 from keystone import config
 from keystone.contrib import endpoint_filter
+from keystone.contrib import revoke
 from keystone import controllers
 from keystone import credential
 from keystone import identity
@@ -38,11 +39,10 @@ CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 
-# Ensure the cache is configured and built before we instantiate the managers
-cache.configure_cache_region(cache.REGION)
-
-
 def load_backends():
+
+    # Configure and build the cache
+    cache.configure_cache_region(cache.REGION)
 
     # Ensure that the identity driver is created before the assignment manager.
     # The default assignment driver is determined by the identity driver, so
@@ -56,9 +56,12 @@ def load_backends():
         endpoint_filter_api=endpoint_filter.Manager(),
         identity_api=_IDENTITY_API,
         policy_api=policy.Manager(),
+        revoke_api=revoke.Manager(),
         token_api=token.Manager(),
         trust_api=trust.Manager(),
         token_provider_api=token.provider.Manager())
+
+    auth.controllers.load_auth_methods()
 
     return DRIVERS
 
@@ -74,8 +77,8 @@ def fail_gracefully(f):
 
             # exception message is printed to all logs
             LOG.critical(e)
+            sys.exit(1)
 
-            exit(1)
     return wrapper
 
 

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -657,14 +655,12 @@ class KeystoneClientTests(object):
                           client.users.update,
                           user=uuid.uuid4().hex)
 
-    def test_user_update_tenant_404(self):
-        self.skipTest('N/A')
-        from keystoneclient import exceptions as client_exceptions
+    def test_user_update_tenant(self):
         client = self.get_client(admin=True)
-        self.assertRaises(client_exceptions.NotFound,
-                          client.users.update,
-                          user=self.user_foo['id'],
-                          tenant_id=uuid.uuid4().hex)
+        tenant_id = uuid.uuid4().hex
+        user = client.users.update(user=self.user_foo['id'],
+                                   tenant_id=tenant_id)
+        self.assertEqual(tenant_id, user.tenant_id)
 
     def test_user_update_password_404(self):
         from keystoneclient import exceptions as client_exceptions
@@ -898,13 +894,15 @@ class KeystoneClientTests(object):
         self.assertRaises(client_exceptions.NotFound,
                           client.roles.add_user_role,
                           tenant=self.tenant_baz['id'],
-                          user=uuid.uuid4().hex,
-                          role=self.role_member['id'])
-        self.assertRaises(client_exceptions.NotFound,
-                          client.roles.add_user_role,
-                          tenant=self.tenant_baz['id'],
                           user=self.user_foo['id'],
                           role=uuid.uuid4().hex)
+
+    def test_user_role_add_no_user(self):
+        # If add_user_role and user doesn't exist, doesn't fail.
+        client = self.get_client(admin=True)
+        client.roles.add_user_role(tenant=self.tenant_baz['id'],
+                                   user=uuid.uuid4().hex,
+                                   role=self.role_member['id'])
 
     def test_user_role_remove_404(self):
         from keystoneclient import exceptions as client_exceptions

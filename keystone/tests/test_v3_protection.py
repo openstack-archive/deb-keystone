@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # Copyright 2013 IBM Corp.
 #
@@ -271,7 +269,7 @@ class IdentityTestProtectedCase(test_v3.RestfulTestCase):
         r = self.get(url_by_name, auth=self.auth)
         # We should only get back one user, the one in DomainA
         id_list = self._get_id_list_from_ref_list(r.result.get('users'))
-        self.assertEqual(len(id_list), 1)
+        self.assertEqual(1, len(id_list))
         self.assertIn(self.user1['id'], id_list)
 
         # Now try for domainB, which should fail
@@ -301,7 +299,7 @@ class IdentityTestProtectedCase(test_v3.RestfulTestCase):
         r = self.get(url_by_name, auth=self.auth)
         # We should only get back two groups, the ones in DomainA
         id_list = self._get_id_list_from_ref_list(r.result.get('groups'))
-        self.assertEqual(len(id_list), 2)
+        self.assertEqual(2, len(id_list))
         self.assertIn(self.group1['id'], id_list)
         self.assertIn(self.group2['id'], id_list)
 
@@ -334,63 +332,8 @@ class IdentityTestProtectedCase(test_v3.RestfulTestCase):
         # We should only get back one user, the one in DomainA that matches
         # the name supplied
         id_list = self._get_id_list_from_ref_list(r.result.get('groups'))
-        self.assertEqual(len(id_list), 1)
+        self.assertEqual(1, len(id_list))
         self.assertIn(self.group2['id'], id_list)
-
-    def test_list_filtered_domains(self):
-        """GET /domains?enabled=0
-
-        Test Plan:
-
-        - Update policy for no protection on api
-        - Filter by the 'enabled' boolean to get disabled domains, which
-          should return just domainC
-        - Try the filter using different ways of specifying 'true'
-          to test that our handling of booleans in filter matching is
-          correct
-
-        """
-        new_policy = {"identity:list_domains": []}
-        self._set_policy(new_policy)
-        r = self.get('/domains?enabled=0', auth=self.auth)
-        id_list = self._get_id_list_from_ref_list(r.result.get('domains'))
-        self.assertEqual(len(id_list), 1)
-        self.assertIn(self.domainC['id'], id_list)
-
-        # Now try a few ways of specifying 'true' when we should get back
-        # the other two domains, plus the default domain
-        r = self.get('/domains?enabled=1', auth=self.auth)
-        id_list = self._get_id_list_from_ref_list(r.result.get('domains'))
-        self.assertEqual(len(id_list), 3)
-        self.assertIn(self.domainA['id'], id_list)
-        self.assertIn(self.domainB['id'], id_list)
-        self.assertIn(DEFAULT_DOMAIN_ID, id_list)
-
-        r = self.get('/domains?enabled', auth=self.auth)
-        id_list = self._get_id_list_from_ref_list(r.result.get('domains'))
-        self.assertEqual(len(id_list), 3)
-        self.assertIn(self.domainA['id'], id_list)
-        self.assertIn(self.domainB['id'], id_list)
-        self.assertIn(DEFAULT_DOMAIN_ID, id_list)
-
-    def test_multiple_filters(self):
-        """GET /domains?enabled&name=myname
-
-        Test Plan:
-
-        - Update policy for no protection on api
-        - Filter by the 'enabled' boolean and name - this should
-          return a single domain
-
-        """
-        new_policy = {"identity:list_domains": []}
-        self._set_policy(new_policy)
-
-        my_url = '/domains?enableds&name=%s' % self.domainA['name']
-        r = self.get(my_url, auth=self.auth)
-        id_list = self._get_id_list_from_ref_list(r.result.get('domains'))
-        self.assertEqual(len(id_list), 1)
-        self.assertIn(self.domainA['id'], id_list)
 
 
 class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
@@ -401,11 +344,16 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
 
         The following data is created:
 
-        - Three domains: A, B and admin_domain, and one project
-        - DomainA has users: domain_admin and just_a_user. domain_admin has
-          role 'admin', just_a_user does not
-        - admin_domain has user cloud_admin, with a plain role
-        - domain_admin and just_a_user gave the same roles on the project
+        - Three domains: domainA, domainB and admin_domain
+        - One project, which name is 'project'
+        - domainA has three users: domain_admin_user, project_admin_user and
+          just_a_user:
+
+          - domain_admin_user has role 'admin' on domainA,
+          - project_admin_user has role 'admin' on the project,
+          - just_a_user has a non-admin role on both domainA and the project.
+        - admin_domain has user cloud_admin_user, with an 'admin' role
+          on admin_domain.
 
         We test various api protection rules from the cloud sample policy
         file to make sure the sample is valid and that we correctly enforce it.
@@ -569,8 +517,8 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
                     expected_status=status_no_data)
 
     def test_user_management(self):
-        # First, authentication with a user that does not have the domain
-        # admin role - houldn't be able to do much.
+        # First, authenticate with a user that does not have the domain
+        # admin role - shouldn't be able to do much.
         self.auth = self.build_authentication_request(
             user_id=self.just_a_user['id'],
             password=self.just_a_user['password'],
@@ -579,7 +527,7 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
         self._test_user_management(
             self.domainA['id'], expected=exception.ForbiddenAction.code)
 
-        # Now, authentication with a user that does have the domain admin role
+        # Now, authenticate with a user that does have the domain admin role
         self.auth = self.build_authentication_request(
             user_id=self.domain_admin_user['id'],
             password=self.domain_admin_user['password'],
@@ -587,9 +535,19 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
 
         self._test_user_management(self.domainA['id'])
 
+    def test_user_management_by_cloud_admin(self):
+        # Test users management with a cloud admin. This user should
+        # be able to manage users in any domain.
+        self.auth = self.build_authentication_request(
+            user_id=self.cloud_admin_user['id'],
+            password=self.cloud_admin_user['password'],
+            domain_id=self.admin_domain['id'])
+
+        self._test_user_management(self.domainA['id'])
+
     def test_project_management(self):
-        # First, authentication with a user that does not have the project
-        # admin role - houldn't be able to do much.
+        # First, authenticate with a user that does not have the project
+        # admin role - shouldn't be able to do much.
         self.auth = self.build_authentication_request(
             user_id=self.just_a_user['id'],
             password=self.just_a_user['password'],
@@ -603,7 +561,7 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
         url = '/users/%s/projects' % self.just_a_user['id']
         self.get(url, auth=self.auth)
 
-        # Now, authentication with a user that does have the domain admin role
+        # Now, authenticate with a user that does have the domain admin role
         self.auth = self.build_authentication_request(
             user_id=self.domain_admin_user['id'],
             password=self.domain_admin_user['password'],
@@ -620,11 +578,21 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
         self._test_grants('domains', self.domainA['id'],
                           expected=exception.ForbiddenAction.code)
 
-        # Now, authentication with a user that does have the domain admin role
+        # Now, authenticate with a user that does have the domain admin role
         self.auth = self.build_authentication_request(
             user_id=self.domain_admin_user['id'],
             password=self.domain_admin_user['password'],
             domain_id=self.domainA['id'])
+
+        self._test_grants('domains', self.domainA['id'])
+
+    def test_domain_grants_by_cloud_admin(self):
+        # Test domain grants with a cloud admin. This user should be
+        # able to manage roles on any domain.
+        self.auth = self.build_authentication_request(
+            user_id=self.cloud_admin_user['id'],
+            password=self.cloud_admin_user['password'],
+            domain_id=self.admin_domain['id'])
 
         self._test_grants('domains', self.domainA['id'])
 
@@ -637,11 +605,22 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
         self._test_grants('projects', self.project['id'],
                           expected=exception.ForbiddenAction.code)
 
-        # Now, authentication with a user that does have the domain admin role
+        # Now, authenticate with a user that does have the project
+        # admin role
         self.auth = self.build_authentication_request(
             user_id=self.project_admin_user['id'],
             password=self.project_admin_user['password'],
             project_id=self.project['id'])
+
+        self._test_grants('projects', self.project['id'])
+
+    def test_project_grants_by_domain_admin(self):
+        # Test project grants with a domain admin. This user should be
+        # able to manage roles on any project in its own domain.
+        self.auth = self.build_authentication_request(
+            user_id=self.domain_admin_user['id'],
+            password=self.domain_admin_user['password'],
+            domain_id=self.domainA['id'])
 
         self._test_grants('projects', self.project['id'])
 

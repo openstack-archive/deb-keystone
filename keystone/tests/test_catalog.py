@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,6 +13,8 @@
 #    under the License.
 
 import uuid
+
+import six
 
 from keystone.tests import rest
 
@@ -57,9 +57,6 @@ class V2CatalogTestCase(rest.RestfulTestCase):
         """Applicable only to JSON."""
         return r.result['access']['token']['id']
 
-    def assertValidErrorResponse(self, response):
-        self.assertEqual(response.status_code, 400)
-
     def _endpoint_create(self, expected_status=200, service_id=SERVICE_FIXTURE,
                          publicurl='http://localhost:8080',
                          internalurl='http://localhost:8080',
@@ -72,7 +69,7 @@ class V2CatalogTestCase(rest.RestfulTestCase):
             'endpoint': {
                 'adminurl': adminurl,
                 'service_id': service_id,
-                'region': 'regionOne',
+                'region': 'RegionOne',
                 'internalurl': internalurl,
                 'publicurl': publicurl
             }
@@ -87,7 +84,7 @@ class V2CatalogTestCase(rest.RestfulTestCase):
         req_body, response = self._endpoint_create()
         self.assertTrue('endpoint' in response.result)
         self.assertTrue('id' in response.result['endpoint'])
-        for field, value in req_body['endpoint'].iteritems():
+        for field, value in six.iteritems(req_body['endpoint']):
             self.assertEqual(response.result['endpoint'][field], value)
 
     def test_endpoint_create_with_null_adminurl(self):

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -22,12 +20,13 @@ from keystone.openstack.common import timeutils
 from keystone.token import provider
 
 
-METHOD_NAME = 'token'
-
 LOG = log.getLogger(__name__)
 
 
 class Token(auth.AuthMethodHandler):
+
+    method = 'token'
+
     def __init__(self):
         self.provider = provider.Manager()
 
@@ -35,17 +34,17 @@ class Token(auth.AuthMethodHandler):
         try:
             if 'id' not in auth_payload:
                 raise exception.ValidationError(attribute='id',
-                                                target=METHOD_NAME)
+                                                target=self.method)
             token_id = auth_payload['id']
             response = self.provider.validate_token(token_id)
-            #for V3 tokens, the esential data is under  the 'token' value.
+            #for V3 tokens, the essential data is under  the 'token' value.
             #For V2, the comparable data was nested under 'access'
             token_ref = response.get('token', response.get('access'))
 
             #Do not allow tokens used for delegation to
             #create another token, or perform any changes of
             #state in Keystone. TO do so is to invite elevation of
-            #priviledge attacks
+            #privilege attacks
             if 'OS-TRUST:trust' in token_ref:
                 raise exception.Forbidden()
             if 'trust' in token_ref:

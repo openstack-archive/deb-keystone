@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -16,7 +14,11 @@
 
 from babel import localedata
 import gettext
+import mock
+import socket
+import webob
 
+from keystone.common import environment
 from keystone.common import wsgi
 from keystone import exception
 from keystone.openstack.common.fixture import moxstubout
@@ -36,7 +38,7 @@ class BaseWSGITest(tests.TestCase):
         super(BaseWSGITest, self).setUp()
 
     def _make_request(self, url='/'):
-        req = wsgi.Request.blank(url)
+        req = webob.Request.blank(url)
         args = {'action': 'index', 'controller': None}
         req.environ['wsgiorg.routing_args'] = [None, args]
         return req
@@ -217,8 +219,8 @@ class LocalizedResponseTest(tests.TestCase):
 
     def test_request_match_default(self):
         # The default language if no Accept-Language is provided is None
-        req = wsgi.Request.blank('/')
-        self.assertIsNone(req.best_match_language())
+        req = webob.Request.blank('/')
+        self.assertIsNone(wsgi.best_match_language(req))
 
     def test_request_match_language_expected(self):
         # If Accept-Language is a supported language, best_match_language()
@@ -226,8 +228,8 @@ class LocalizedResponseTest(tests.TestCase):
 
         self._set_expected_languages(all_locales=['it'])
 
-        req = wsgi.Request.blank('/', headers={'Accept-Language': 'it'})
-        self.assertEqual(req.best_match_language(), 'it')
+        req = webob.Request.blank('/', headers={'Accept-Language': 'it'})
+        self.assertEqual(wsgi.best_match_language(req), 'it')
 
     def test_request_match_language_unexpected(self):
         # If Accept-Language is a language we do not support,
@@ -235,8 +237,8 @@ class LocalizedResponseTest(tests.TestCase):
 
         self._set_expected_languages(all_locales=['it'])
 
-        req = wsgi.Request.blank('/', headers={'Accept-Language': 'zh'})
-        self.assertIsNone(req.best_match_language())
+        req = webob.Request.blank('/', headers={'Accept-Language': 'zh'})
+        self.assertIsNone(wsgi.best_match_language(req))
 
     def test_static_translated_string_is_Message(self):
         # Statically created message strings are Message objects so that they
@@ -249,3 +251,62 @@ class LocalizedResponseTest(tests.TestCase):
         # are lazy-translated.
         self.assertIsInstance(_('The resource could not be found.'),
                               gettextutils.Message)
+
+
+class ServerTest(tests.TestCase):
+
+    def setUp(self):
+        super(ServerTest, self).setUp()
+        environment.use_eventlet()
+        self.host = '127.0.0.1'
+        self.port = '1234'
+
+    @mock.patch('eventlet.listen')
+    @mock.patch('socket.getaddrinfo')
+    def test_keepalive_unset(self, mock_getaddrinfo, mock_listen):
+        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
+        mock_sock = mock.Mock()
+        mock_sock.setsockopt = mock.Mock()
+
+        mock_listen.return_value = mock_sock
+        server = environment.Server(mock.MagicMock(), host=self.host,
+                                    port=self.port)
+        server.start()
+        self.assertTrue(mock_listen.called)
+        self.assertFalse(mock_sock.setsockopt.called)
+
+    @mock.patch('eventlet.listen')
+    @mock.patch('socket.getaddrinfo')
+    def test_keepalive_set(self, mock_getaddrinfo, mock_listen):
+        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
+        mock_sock = mock.Mock()
+        mock_sock.setsockopt = mock.Mock()
+
+        mock_listen.return_value = mock_sock
+        server = environment.Server(mock.MagicMock(), host=self.host,
+                                    port=self.port, keepalive=True)
+        server.start()
+        mock_sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET,
+                                                     socket.SO_KEEPALIVE,
+                                                     1)
+        self.assertTrue(mock_listen.called)
+
+    @mock.patch('eventlet.listen')
+    @mock.patch('socket.getaddrinfo')
+    def test_keepalive_and_keepidle_set(self, mock_getaddrinfo, mock_listen):
+        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
+        mock_sock = mock.Mock()
+        mock_sock.setsockopt = mock.Mock()
+
+        mock_listen.return_value = mock_sock
+        server = environment.Server(mock.MagicMock(), host=self.host,
+                                    port=self.port, keepalive=True,
+                                    keepidle=1)
+        server.start()
+        self.assertEqual(mock_sock.setsockopt.call_count, 2)
+        # Test the last set of call args i.e. for the keepidle
+        mock_sock.setsockopt.assert_called_with(socket.IPPROTO_TCP,
+                                                socket.TCP_KEEPIDLE,
+                                                1)
+
+        self.assertTrue(mock_listen.called)

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -20,6 +18,7 @@ import ldap
 
 from keystone import clean
 from keystone.common import dependency
+from keystone.common import driver_hints
 from keystone.common import ldap as common_ldap
 from keystone.common import models
 from keystone.common import utils
@@ -54,17 +53,17 @@ class Identity(identity.Driver):
         try:
             user_ref = self._get_user(user_id)
         except exception.UserNotFound:
-            raise AssertionError('Invalid user / password')
+            raise AssertionError(_('Invalid user / password'))
         if not user_id or not password:
-            raise AssertionError('Invalid user / password')
+            raise AssertionError(_('Invalid user / password'))
         conn = None
         try:
             conn = self.user.get_connection(self.user._id_to_dn(user_id),
                                             password)
             if not conn:
-                raise AssertionError('Invalid user / password')
+                raise AssertionError(_('Invalid user / password'))
         except Exception:
-            raise AssertionError('Invalid user / password')
+            raise AssertionError(_('Invalid user / password'))
         finally:
             if conn:
                 conn.unbind_s()
@@ -76,7 +75,7 @@ class Identity(identity.Driver):
     def get_user(self, user_id):
         return identity.filter_user(self._get_user(user_id))
 
-    def list_users(self):
+    def list_users(self, hints):
         return self.user.get_all_filtered()
 
     def get_user_by_name(self, user_name, domain_id):
@@ -86,15 +85,17 @@ class Identity(identity.Driver):
 
     # CRUD
     def create_user(self, user_id, user):
+        self.user.check_allow_create()
         user_ref = self.user.create(user)
         return identity.filter_user(user_ref)
 
     def update_user(self, user_id, user):
+        self.user.check_allow_update()
         if 'id' in user and user['id'] != user_id:
-            raise exception.ValidationError('Cannot change user ID')
+            raise exception.ValidationError(_('Cannot change user ID'))
         old_obj = self.user.get(user_id)
         if 'name' in user and old_obj.get('name') != user['name']:
-            raise exception.Conflict('Cannot change user name')
+            raise exception.Conflict(_('Cannot change user name'))
 
         user = utils.hash_ldap_user_password(user)
         if self.user.enabled_mask:
@@ -103,6 +104,7 @@ class Identity(identity.Driver):
         return self.user.get_filtered(user_id)
 
     def delete_user(self, user_id):
+        self.user.check_allow_delete()
         self.assignment_api.delete_user(user_id)
         user_dn = self.user._id_to_dn(user_id)
         groups = self.group.list_user_groups(user_dn)
@@ -116,6 +118,7 @@ class Identity(identity.Driver):
         self.user.delete(user_id)
 
     def create_group(self, group_id, group):
+        self.group.check_allow_create()
         group['name'] = clean.group_name(group['name'])
         return self.group.create(group)
 
@@ -123,11 +126,13 @@ class Identity(identity.Driver):
         return self.group.get(group_id)
 
     def update_group(self, group_id, group):
+        self.group.check_allow_update()
         if 'name' in group:
             group['name'] = clean.group_name(group['name'])
         return self.group.update(group_id, group)
 
     def delete_group(self, group_id):
+        self.group.check_allow_delete()
         return self.group.delete(group_id)
 
     def add_user_to_group(self, user_id, group_id):
@@ -142,15 +147,15 @@ class Identity(identity.Driver):
         user_dn = self.user._id_to_dn(user_id)
         self.group.remove_user(user_dn, group_id, user_id)
 
-    def list_groups_for_user(self, user_id):
+    def list_groups_for_user(self, user_id, hints):
         self.get_user(user_id)
         user_dn = self.user._id_to_dn(user_id)
         return self.group.list_user_groups(user_dn)
 
-    def list_groups(self):
+    def list_groups(self, hints):
         return self.group.get_all()
 
-    def list_users_in_group(self, group_id):
+    def list_users_in_group(self, group_id, hints):
         self.get_group(group_id)
         users = []
         for user_dn in self.group.list_group_users(group_id):
@@ -167,7 +172,7 @@ class Identity(identity.Driver):
     def check_user_in_group(self, user_id, group_id):
         self.get_user(user_id)
         self.get_group(group_id)
-        user_refs = self.list_users_in_group(group_id)
+        user_refs = self.list_users_in_group(group_id, driver_hints.Hints())
         found = False
         for x in user_refs:
             if x['id'] == user_id:

@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # Copyright 2012 Canonical Ltd.
 #
@@ -22,6 +20,7 @@ import abc
 import six
 
 from keystone.common import dependency
+from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
@@ -68,9 +67,9 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.catalog.driver)
 
-    def create_region(self, region_id, region_ref):
+    def create_region(self, region_ref):
         try:
-            return self.driver.create_region(region_id, region_ref)
+            return self.driver.create_region(region_ref)
         except exception.NotFound:
             parent_region_id = region_ref.get('parent_region_id')
             raise exception.RegionNotFound(region_id=parent_region_id)
@@ -99,6 +98,10 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.ServiceNotFound(service_id=service_id)
 
+    @manager.response_truncated
+    def list_services(self, hints=None):
+        return self.driver.list_services(hints or driver_hints.Hints())
+
     def create_endpoint(self, endpoint_id, endpoint_ref):
         try:
             return self.driver.create_endpoint(endpoint_id, endpoint_ref)
@@ -118,6 +121,10 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.EndpointNotFound(endpoint_id=endpoint_id)
 
+    @manager.response_truncated
+    def list_endpoints(self, hints=None):
+        return self.driver.list_endpoints(hints or driver_hints.Hints())
+
     def get_catalog(self, user_id, tenant_id, metadata=None):
         try:
             return self.driver.get_catalog(user_id, tenant_id, metadata)
@@ -129,8 +136,11 @@ class Manager(manager.Manager):
 class Driver(object):
     """Interface description for an Catalog driver."""
 
+    def _get_list_limit(self):
+        return CONF.catalog.list_limit or CONF.list_limit
+
     @abc.abstractmethod
-    def create_region(self, region_id, region_ref):
+    def create_region(self, region_ref):
         """Creates a new region.
 
         :raises: keystone.exception.Conflict

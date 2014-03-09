@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,8 +13,11 @@
 # under the License.
 
 from keystone.common import sql
-from keystone.common.sql import migration
+from keystone.common.sql import migration_helpers
+from keystone.contrib import endpoint_filter
 from keystone import exception
+from keystone.openstack.common.db.sqlalchemy import migration
+from keystone.openstack.common.db.sqlalchemy import session as db_session
 
 
 class ProjectEndpoint(sql.ModelBase, sql.DictBase):
@@ -31,15 +32,16 @@ class ProjectEndpoint(sql.ModelBase, sql.DictBase):
                             nullable=False)
 
 
-class EndpointFilter(sql.Base):
+class EndpointFilter(object):
     # Internal interface to manage the database
 
     def db_sync(self, version=None):
-        migration.db_sync(version=version)
+        abs_path = migration_helpers.find_migrate_repo(endpoint_filter)
+        migration.db_sync(abs_path, version=version)
 
     @sql.handle_conflicts(conflict_type='project_endpoint')
     def add_endpoint_to_project(self, endpoint_id, project_id):
-        session = self.get_session()
+        session = db_session.get_session()
         with session.begin():
             endpoint_filter_ref = ProjectEndpoint(endpoint_id=endpoint_id,
                                                   project_id=project_id)
@@ -56,25 +58,25 @@ class EndpointFilter(sql.Base):
         return endpoint_filter_ref
 
     def check_endpoint_in_project(self, endpoint_id, project_id):
-        session = self.get_session()
+        session = db_session.get_session()
         self._get_project_endpoint_ref(session, endpoint_id, project_id)
 
     def remove_endpoint_from_project(self, endpoint_id, project_id):
-        session = self.get_session()
+        session = db_session.get_session()
         endpoint_filter_ref = self._get_project_endpoint_ref(
             session, endpoint_id, project_id)
         with session.begin():
             session.delete(endpoint_filter_ref)
 
     def list_endpoints_for_project(self, project_id):
-        session = self.get_session()
+        session = db_session.get_session()
         query = session.query(ProjectEndpoint)
         query = query.filter_by(project_id=project_id)
         endpoint_filter_refs = query.all()
         return endpoint_filter_refs
 
     def list_projects_for_endpoint(self, endpoint_id):
-        session = self.get_session()
+        session = db_session.get_session()
         query = session.query(ProjectEndpoint)
         query = query.filter_by(endpoint_id=endpoint_id)
         endpoint_filter_refs = query.all()

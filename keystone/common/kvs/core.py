@@ -24,6 +24,7 @@ from dogpile.cache import proxy
 from dogpile.cache import region
 from dogpile.cache import util as dogpile_util
 from dogpile.core import nameregistry
+import six
 
 from keystone.common import config
 from keystone import exception
@@ -140,6 +141,26 @@ class KeyValueStore(object):
                                               'configured: %s'),
                                             self._region.name)
 
+    def _set_keymangler_on_backend(self, key_mangler):
+            try:
+                self._region.backend.key_mangler = key_mangler
+            except Exception as e:
+                # NOTE(morganfainberg): The setting of the key_mangler on the
+                # backend is used to allow the backend to
+                # calculate a hashed key value as needed. Not all backends
+                # require the ability to calculate hashed keys. If the
+                # backend does not support/require this feature log a
+                # debug line and move on otherwise raise the proper exception.
+                # Support of the feature is implied by the existence of the
+                # 'raw_no_expiry_keys' attribute.
+                if not hasattr(self._region.backend, 'raw_no_expiry_keys'):
+                    LOG.debug(_('Non-expiring keys not supported/required by '
+                                '%(region)s backend; unable to set '
+                                'key_mangler for backend: %(err)s'),
+                              {'region': self._region.name, 'err': e})
+                else:
+                    raise
+
     def _set_key_mangler(self, key_mangler):
         # Set the key_mangler that is appropriate for the given region being
         # configured here.  The key_mangler function is called prior to storing
@@ -179,9 +200,11 @@ class KeyValueStore(object):
                 # unintended cases of exceeding cache-key in backends such
                 # as memcache.
                 self._region.key_mangler = dogpile_util.sha1_mangle_key
+            self._set_keymangler_on_backend(self._region.key_mangler)
         else:
             LOG.info(_('KVS region %s key_mangler disabled.'),
                      self._region.name)
+            self._set_keymangler_on_backend(None)
 
     def _configure_region(self, backend, **config_args):
         prefix = CONF.kvs.config_prefix
@@ -204,7 +227,7 @@ class KeyValueStore(object):
         if config_args['lock_timeout'] > 0:
             config_args['lock_timeout'] += LOCK_WINDOW
 
-        for argument, value in config_args.iteritems():
+        for argument, value in six.iteritems(config_args):
             arg_key = '.'.join([prefix, 'arguments', argument])
             conf_dict[arg_key] = value
 

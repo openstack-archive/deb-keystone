@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -51,7 +49,8 @@ class Catalog(kvs.Base, catalog.Driver):
             # which is the behavior we want.
             self.get_region(parent_region_id)
 
-    def create_region(self, region_id, region):
+    def create_region(self, region):
+        region_id = region['id']
         region.setdefault('parent_region_id')
         self._check_parent_region(region)
         self.db.set('region-%s' % region_id, region)
@@ -88,7 +87,7 @@ class Catalog(kvs.Base, catalog.Driver):
         self.db.set('service_list', list(service_list))
         return service
 
-    def list_services(self):
+    def list_services(self, hints):
         return [self.get_service(x) for x in self.db.get('service_list', [])]
 
     def get_service(self, service_id):
@@ -119,7 +118,7 @@ class Catalog(kvs.Base, catalog.Driver):
         self.db.set('endpoint_list', list(endpoint_list))
         return endpoint
 
-    def list_endpoints(self):
+    def list_endpoints(self, hints):
         return [self.get_endpoint(x) for x in self.db.get('endpoint_list', [])]
 
     def get_endpoint(self, endpoint_id):

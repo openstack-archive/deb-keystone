@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -24,6 +22,8 @@ by convention, with a few hardcoded exceptions.
 
 from lxml import etree
 import re
+
+import six
 
 
 DOCTYPE = '<?xml version="1.0" encoding="UTF-8"?>'
@@ -96,7 +96,7 @@ class XmlDeserializer(object):
         prefix = None
         for xmlns in XMLNS_LIST:
             if xmlns['value'] == ns:
-                prefix = xmlns.get('prefix', None)
+                prefix = xmlns.get('prefix')
                 break
         if prefix is not None:
             return '%(PREFIX)s:%(tag_name)s' \
@@ -107,9 +107,9 @@ class XmlDeserializer(object):
     def walk_element(self, element, namespace=False):
         """Populates a dictionary by walking an etree element."""
         values = {}
-        for k, v in element.attrib.iteritems():
+        for k, v in six.iteritems(element.attrib):
             # boolean-looking attributes become booleans in JSON
-            if k in ['enabled']:
+            if k in ['enabled', 'truncated']:
                 if v in ['true']:
                     v = True
                 elif v in ['false']:
@@ -141,6 +141,7 @@ class XmlDeserializer(object):
             return {'links': self._deserialize_links(element)}
 
         links = None
+        truncated = False
         for child in [self.walk_element(x) for x in element
                       if not isinstance(x, ENTITY_TYPE)]:
             if list_item_tag:
@@ -150,7 +151,10 @@ class XmlDeserializer(object):
                 if list_item_tag in child:
                     values.append(child[list_item_tag])
                 else:
-                    links = child['links']
+                    if 'links' in child:
+                        links = child['links']
+                    else:
+                        truncated = child['truncated']
             else:
                 values = dict(values.items() + child.items())
 
@@ -165,6 +169,9 @@ class XmlDeserializer(object):
             d['links'].setdefault('next')
             d['links'].setdefault('previous')
 
+        if truncated:
+            d['truncated'] = truncated['truncated']
+
         return d
 
 
@@ -176,17 +183,23 @@ class XmlSerializer(object):
 
         """
         links = None
+        truncated = False
         # FIXME(dolph): skipping links for now
         for key in d.keys():
             if '_links' in key:
                 d.pop(key)
-            # FIXME(gyee): special-case links in collections
+            # NOTE(gyee, henry-nash): special-case links and truncation
+            # attribute in collections
             if 'links' == key:
                 if links:
                     # we have multiple links
                     raise Exception('Multiple links found')
                 links = d.pop(key)
-
+            if 'truncated' == key:
+                if truncated:
+                    # we have multiple attributes
+                    raise Exception(_('Multiple truncation attributes found'))
+                truncated = d.pop(key)
         assert len(d.keys()) == 1, ('Cannot encode more than one root '
                                     'element: %s' % d.keys())
 
@@ -196,7 +209,7 @@ class XmlSerializer(object):
         root_name = m.string[m.start():]
         prefix = m.string[0:m.start() - 1]
         for ns in XMLNS_LIST:
-            if prefix == ns.get('prefix', None):
+            if prefix == ns.get('prefix'):
                 xmlns = ns['value']
                 break
         # only the root dom element gets an xlmns
@@ -204,22 +217,29 @@ class XmlSerializer(object):
 
         self.populate_element(root, d[name])
 
-        # FIXME(gyee): special-case links for now
+        # NOTE(gyee, henry-nash): special-case links and truncation attribute
         if links:
             self._populate_links(root, links)
+        if truncated:
+            self._populate_truncated(root, truncated)
 
         # TODO(dolph): you can get a doctype from lxml, using ElementTrees
         return '%s\n%s' % (DOCTYPE, etree.tostring(root, pretty_print=True))
 
     def _populate_links(self, element, links_json):
         links = etree.Element('links')
-        for k, v in links_json.iteritems():
+        for k, v in six.iteritems(links_json):
             if v:
                 link = etree.Element('link')
-                link.set('rel', unicode(k))
-                link.set('href', unicode(v))
+                link.set('rel', six.text_type(k))
+                link.set('href', six.text_type(v))
                 links.append(link)
         element.append(links)
+
+    def _populate_truncated(self, element, truncated_value):
+        truncated = etree.Element('truncated')
+        self._populate_bool(truncated, 'truncated', truncated_value)
+        element.append(truncated)
 
     def _populate_list(self, element, k, v):
         """Populates an element with a key & list value."""
@@ -277,18 +297,18 @@ class XmlSerializer(object):
     def _populate_bool(self, element, k, v):
         """Populates an element with a key & boolean value."""
         # booleans are 'true' and 'false'
-        element.set(k, unicode(v).lower())
+        element.set(k, six.text_type(v).lower())
 
     def _populate_str(self, element, k, v):
         """Populates an element with a key & string value."""
         if k in ['description']:
             # always becomes an element
             child = etree.Element(k)
-            child.text = unicode(v)
+            child.text = six.text_type(v)
             element.append(child)
         else:
             # add attributes to the current element
-            element.set(k, unicode(v))
+            element.set(k, six.text_type(v))
 
     def _populate_number(self, element, k, v):
         """Populates an element with a key & numeric value."""
@@ -305,16 +325,16 @@ class XmlSerializer(object):
             # NOTE(blk-u): For compatibility with Folsom, when serializing the
             # v2.0 version element also add the links to the base element.
             if (value.get('id') == 'v2.0' and
-                    value.get('status') == 'stable' and
-                    value.get('updated') == '2013-03-06T00:00:00Z'):
+                    value.get('status') == 'deprecated' and
+                    value.get('updated') == '2014-04-17T00:00:00Z'):
 
                 for item in value['links']:
                     child = etree.Element('link')
                     self.populate_element(child, item)
                     element.append(child)
 
-        elif isinstance(value, basestring):
-            element.text = unicode(value)
+        elif isinstance(value, six.string_types):
+            element.text = six.text_type(value)
 
     def _populate_sequence(self, element, l):
         """Populates an etree with a sequence of elements, given a list."""
@@ -332,14 +352,14 @@ class XmlSerializer(object):
 
     def _populate_tree(self, element, d):
         """Populates an etree with attributes & elements, given a dict."""
-        for k, v in d.iteritems():
+        for k, v in six.iteritems(d):
             if isinstance(v, dict):
                 self._populate_dict(element, k, v)
             elif isinstance(v, list):
                 self._populate_list(element, k, v)
             elif isinstance(v, bool):
                 self._populate_bool(element, k, v)
-            elif isinstance(v, basestring):
+            elif isinstance(v, six.string_types):
                 self._populate_str(element, k, v)
             elif type(v) in [int, float, long, complex]:
                 self._populate_number(element, k, v)

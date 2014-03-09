@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2013 Red Hat, Inc.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -258,7 +256,7 @@ class TestPEMParse(tests.TestCase):
         text += 'burfl blatz bingo\n'
 
         data = pemutils.get_pem_data(text)
-        self.assertEqual(None, data)
+        self.assertIsNone(data)
 
     def test_get_pem_data_invalid(self):
         p = PEM(pem_type='xxx',

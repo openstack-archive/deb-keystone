@@ -28,12 +28,16 @@ Notifications for Create/Update/Delete Events
 
 A notification is sent when a resource is successfully ``created``,
 ``updated``, or ``deleted``. The following resource types (where a
-``<resource type>`` is always a singular noun) produce notifications:
+``<resource type>`` is always a singular noun) produce notifications. For
+resource types that are immutable, like trusts, notifications are only sent
+on creation and deletion of that resource. Resource types that should be
+immutable from a Keystone perspective will not support update operations:
 
 - ``group``
 - ``project`` (i.e. "tenant")
 - ``role``
 - ``user``
+- ``trust`` (immutable resource - no ``updated`` notification)
 
 The following message template is used to form a message when an operation on a
 resource completes successfully::
@@ -52,6 +56,10 @@ resource completes successfully::
 Notifications for create, update and delete events are all similar to each
 other, where either ``created``, ``updated`` or ``deleted`` is inserted as the
 ``<operation>`` in the above notification's ``event_type``.
+
+The ``priority`` of the notification being sent is not configurable through
+the Keystone configuration file. This value is defaulted to INFO for all
+notifications sent in Keystone's case.
 
 If the operation fails, the notification won't be sent, and no special error
 notification will be sent.  Information about the error is handled through
