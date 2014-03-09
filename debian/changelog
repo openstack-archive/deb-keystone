@@ -1,6 +1,6 @@
-keystone (2014.1~b2-1) experimental; urgency=low
+keystone (2014.1~b3-1) experimental; urgency=low
 
-  * New upstream release (Icehouse beta 1).
+  * New upstream release (Icehouse beta 3).
   * Refresh patches.
   * Reviewed (build-)dependencies.
 
