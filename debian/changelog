@@ -3,6 +3,7 @@ keystone (2014.1~b3-1) experimental; urgency=low
   * New upstream release (Icehouse beta 3).
   * Refresh patches.
   * Reviewed (build-)dependencies.
+  * Fixed sphinx build for docs and man pages.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 17 Feb 2014 15:27:56 +0800
 

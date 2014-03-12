@@ -148,7 +148,7 @@ Package: keystone-doc
 Architecture: all
 Section: doc
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: libjs-jquery, libjs-underscore, ${misc:Depends}
+Depends: ${sphinxdoc:Depends}, ${misc:Depends}
 Description: OpenStack identity service - documentation
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
