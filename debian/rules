@@ -15,6 +15,9 @@ export OSLO_PACKAGE_VERSION=$(VERSION)
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
+
+	patch -p1 <debian/tests/fix-migration.patch
+
 	# create a dummy db for testing
 	rm -rf $(CURDIR)/debian/tests/testing.db
 	migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
@@ -33,6 +36,8 @@ override_dh_auto_test:
 	PYTHONPATH=$(CURDIR) python setup.py testr || true
 	mv $(CURDIR)/keystone/tests/test_overrides.conf.orig $(CURDIR)/keystone/tests/test_overrides.conf
 	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
+
+	patch -p1 -R <debian/tests/fix-migration.patch
 endif
 
 override_dh_auto_build:

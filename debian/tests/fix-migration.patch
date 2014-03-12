@@ -1,0 +1,31 @@
+Description: Fix migration for tests
+ Migration when creating the db in order to test it didn't work, as the config
+ could not be found. This patch fixes it for the test run.
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: not-needed
+Last-Update: 2014-03-12
+
+--- keystone-2014.1~b3.orig/keystone/common/sql/migrate_repo/versions/008_create_default_domain.py
++++ keystone-2014.1~b3/keystone/common/sql/migrate_repo/versions/008_create_default_domain.py
+@@ -31,7 +31,7 @@ def upgrade(migrate_engine):
+     domain_table = sql.Table('domain', meta, autoload=True)
+ 
+     domain = {
+-        'id': CONF.identity.default_domain_id,
++        'id': 'default',
+         'name': 'Default',
+         'enabled': True,
+         'extra': json.dumps({
+--- keystone-2014.1~b3.orig/keystone/common/sql/migrate_repo/versions/017_membership_role.py
++++ keystone-2014.1~b3/keystone/common/sql/migrate_repo/versions/017_membership_role.py
+@@ -46,8 +46,8 @@ def upgrade(migrate_engine):
+ 
+     conn = migrate_engine.connect()
+     conn.execute(role_table.insert(),
+-                 id=CONF.member_role_id,
+-                 name=CONF.member_role_name,
++                 id='9fe2ff9ee4384b1894a90878d3e92bab',
++                 name='_member_',
+                  extra=json.dumps({'description':
+                                    'Default role for project membership',
+                                    'enabled': 'True'}))
