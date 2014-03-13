@@ -15,29 +15,32 @@ export OSLO_PACKAGE_VERSION=$(VERSION)
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
+	mkdir -p $(CURDIR)/keystone/tests/tmp
+	sed -i 's|#connection=sqlite:////keystone/openstack/common/db/$sqlite_db|'$(CURDIR)'/debian/tests/keystone.db|' $(CURDIR)/etc/keystone.conf.sample
+	./run_tests.sh -N -P
 
-	patch -p1 <debian/tests/fix-migration.patch
-
-	# create a dummy db for testing
-	rm -rf $(CURDIR)/debian/tests/testing.db
-	migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
-		$(CURDIR)/keystone/common/sql/migrate_repo
-	# run migrations
-	PYTHONPATH=$(CURDIR)  migrate upgrade \
-		sqlite:////$(CURDIR)/debian/tests/testing.db \
-		$(CURDIR)/keystone/common/sql/migrate_repo
-
-	# tests/test_overrides.conf can be used to setup the environment
-	# for unit testing.
-	cp keystone/tests/test_overrides.conf keystone/tests/test_overrides.conf.orig
-	cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/keystone/tests/test_overrides.conf
-	sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/keystone/tests/test_overrides.conf
-	#PYTHONPATH=$(CURDIR) bash run_tests.sh -N || true
-	PYTHONPATH=$(CURDIR) python setup.py testr || true
-	mv $(CURDIR)/keystone/tests/test_overrides.conf.orig $(CURDIR)/keystone/tests/test_overrides.conf
-	rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
-
-	patch -p1 -R <debian/tests/fix-migration.patch
+	#patch -p1 <debian/tests/fix-migration.patch
+	#
+	## create a dummy db for testing
+	#rm -rf $(CURDIR)/debian/tests/testing.db
+	#migrate version_control sqlite:////$(CURDIR)/debian/tests/testing.db \
+	#	$(CURDIR)/keystone/common/sql/migrate_repo
+	## run migrations
+	#PYTHONPATH=$(CURDIR)  migrate upgrade \
+	#	sqlite:////$(CURDIR)/debian/tests/testing.db \
+	#	$(CURDIR)/keystone/common/sql/migrate_repo
+	#
+	## tests/test_overrides.conf can be used to setup the environment
+	## for unit testing.
+	#cp keystone/tests/test_overrides.conf keystone/tests/test_overrides.conf.orig
+	#cp $(CURDIR)/debian/tests/test_overrides.conf $(CURDIR)/keystone/tests/test_overrides.conf
+	#sed -i 's|%CUR_DIR%|$(CURDIR)|g' $(CURDIR)/keystone/tests/test_overrides.conf
+	##PYTHONPATH=$(CURDIR) bash run_tests.sh -N || true
+	#PYTHONPATH=$(CURDIR) python setup.py testr || true
+	#mv $(CURDIR)/keystone/tests/test_overrides.conf.orig $(CURDIR)/keystone/tests/test_overrides.conf
+	#rm -rf $(CURDIR)/debian/tests/testing.db $(CURDIR)/debian/tests/keystone-signing
+	#
+	#patch -p1 -R <debian/tests/fix-migration.patch
 endif
 
 override_dh_auto_build:
