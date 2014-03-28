@@ -27,6 +27,7 @@ from keystone.common import controller
 from keystone.common import dependency
 from keystone import config
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -419,7 +420,8 @@ class ProjectV3(controller.V3Controller):
     @controller.protected()
     def update_project(self, context, project_id, project):
         self._require_matching_id(project_id, project)
-
+        self._require_matching_domain_id(
+            project_id, project, self.assignment_api.get_project)
         ref = self.assignment_api.update_project(project_id, project)
         return ProjectV3.wrap_member(context, ref)
 
@@ -572,7 +574,7 @@ class RoleAssignmentV3(controller.V3Controller):
         # the wrapper as have already included the links in the entities
         pass
 
-    def _format_entity(self, entity):
+    def _format_entity(self, context, entity):
         """Format an assignment entity for API response.
 
         The driver layer returns entities as dicts containing the ids of the
@@ -639,16 +641,17 @@ class RoleAssignmentV3(controller.V3Controller):
             else:
                 target_link = '/domains/%s' % entity['domain_id']
         formatted_entity.setdefault('links', {})
-        formatted_entity['links']['assignment'] = (
-            self.base_url('%(target)s/%(actor)s/roles/%(role)s%(suffix)s' % {
-                'target': target_link,
-                'actor': actor_link,
-                'role': entity['role_id'],
-                'suffix': suffix}))
+
+        path = '%(target)s/%(actor)s/roles/%(role)s%(suffix)s' % {
+            'target': target_link,
+            'actor': actor_link,
+            'role': entity['role_id'],
+            'suffix': suffix}
+        formatted_entity['links']['assignment'] = self.base_url(context, path)
 
         return formatted_entity
 
-    def _expand_indirect_assignments(self, refs):
+    def _expand_indirect_assignments(self, context, refs):
         """Processes entity list into all-direct assignments.
 
         For any group role assignments in the list, create a role assignment
@@ -708,7 +711,7 @@ class RoleAssignmentV3(controller.V3Controller):
             user_entry = copy.deepcopy(template)
             user_entry['user'] = {'id': user['id']}
             user_entry['links']['membership'] = (
-                self.base_url('/groups/%s/users/%s' %
+                self.base_url(context, '/groups/%s/users/%s' %
                               (group_id, user['id'])))
             return user_entry
 
@@ -725,6 +728,7 @@ class RoleAssignmentV3(controller.V3Controller):
             project_entry['scope']['project'] = {'id': project_id}
             project_entry['links']['assignment'] = (
                 self.base_url(
+                    context,
                     '/OS-INHERIT/domains/%s/users/%s/roles/%s'
                     '/inherited_to_projects' % (
                         domain_id, project_entry['user']['id'],
@@ -744,12 +748,13 @@ class RoleAssignmentV3(controller.V3Controller):
             project_entry['user'] = {'id': user_id}
             project_entry['scope']['project'] = {'id': project_id}
             project_entry['links']['assignment'] = (
-                self.base_url('/OS-INHERIT/domains/%s/groups/%s/roles/%s'
+                self.base_url(context,
+                              '/OS-INHERIT/domains/%s/groups/%s/roles/%s'
                               '/inherited_to_projects' % (
                                   domain_id, group_id,
                                   project_entry['role']['id'])))
             project_entry['links']['membership'] = (
-                self.base_url('/groups/%s/users/%s' %
+                self.base_url(context, '/groups/%s/users/%s' %
                               (group_id, user_id)))
             return project_entry
 
@@ -860,14 +865,15 @@ class RoleAssignmentV3(controller.V3Controller):
         hints = self.build_driver_hints(context, filters)
         refs = self.assignment_api.list_role_assignments()
         formatted_refs = (
-            [self._format_entity(x) for x in refs
+            [self._format_entity(context, x) for x in refs
              if self._filter_inherited(x)])
 
         if ('effective' in context['query_string'] and
                 self._query_filter_is_true(
                     context['query_string']['effective'])):
 
-            formatted_refs = self._expand_indirect_assignments(formatted_refs)
+            formatted_refs = self._expand_indirect_assignments(context,
+                                                               formatted_refs)
 
         return self.wrap_collection(context, formatted_refs, hints=hints)
 

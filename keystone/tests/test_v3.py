@@ -12,12 +12,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import copy
 import datetime
 import uuid
 
 from lxml import etree
 import six
+from testtools import matchers
 
 from keystone import auth
 from keystone.common import authorization
@@ -37,17 +37,11 @@ DEFAULT_DOMAIN_ID = 'default'
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 
-class RestfulTestCase(rest.RestfulTestCase):
-    _config_file_list = [tests.dirs.etc('keystone.conf.sample'),
-                         tests.dirs.tests('test_overrides.conf'),
-                         tests.dirs.tests('backend_sql.conf'),
-                         tests.dirs.tests('backend_sql_disk.conf')]
-
-    #Subclasses can override this to specify the complete list of configuration
-    #files.  The base version makes a copy of the original values, otherwise
-    #additional tests end up appending to them and corrupting other tests.
+class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def config_files(self):
-        return copy.copy(self._config_file_list)
+        config_files = super(RestfulTestCase, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
+        return config_files
 
     def setup_database(self):
         tests.setup_database()
@@ -91,8 +85,6 @@ class RestfulTestCase(rest.RestfulTestCase):
         self.addCleanup(self.teardown_database)
 
     def load_backends(self):
-        self.config(self.config_files())
-
         self.setup_database()
 
         # ensure the cache region instance is setup
@@ -165,12 +157,11 @@ class RestfulTestCase(rest.RestfulTestCase):
         self.endpoint_id = uuid.uuid4().hex
         self.endpoint = self.new_endpoint_ref(service_id=self.service_id)
         self.endpoint['id'] = self.endpoint_id
-        # FIXME(blk-u): Endpoints should default to enabled=True, so should be
-        # able to remove the next line. See bug 1282266.
-        self.endpoint['enabled'] = True
         self.catalog_api.create_endpoint(
             self.endpoint_id,
             self.endpoint.copy())
+        # The server adds 'enabled' and defaults to True.
+        self.endpoint['enabled'] = True
 
     def new_ref(self):
         """Populates a ref with attributes common to all API entities."""
@@ -405,19 +396,17 @@ class RestfulTestCase(rest.RestfulTestCase):
     def assertValidListLinks(self, links):
         self.assertIsNotNone(links)
         self.assertIsNotNone(links.get('self'))
-        self.assertIn(CONF.public_endpoint % CONF, links['self'])
+        self.assertThat(links['self'], matchers.StartsWith('http://localhost'))
 
         self.assertIn('next', links)
         if links['next'] is not None:
-            self.assertIn(
-                CONF.public_endpoint % CONF,
-                links['next'])
+            self.assertThat(links['next'],
+                            matchers.StartsWith('http://localhost'))
 
         self.assertIn('previous', links)
         if links['previous'] is not None:
-            self.assertIn(
-                CONF.public_endpoint % CONF,
-                links['previous'])
+            self.assertThat(links['previous'],
+                            matchers.StartsWith('http://localhost'))
 
     def assertValidListResponse(self, resp, key, entity_validator, ref=None,
                                 expected_length=None, keys_to_check=None):
@@ -477,7 +466,8 @@ class RestfulTestCase(rest.RestfulTestCase):
 
         self.assertIsNotNone(entity.get('links'))
         self.assertIsNotNone(entity['links'].get('self'))
-        self.assertIn(CONF.public_endpoint % CONF, entity['links']['self'])
+        self.assertThat(entity['links']['self'],
+                        matchers.StartsWith('http://localhost'))
         self.assertIn(entity['id'], entity['links']['self'])
 
         if ref:
@@ -670,6 +660,7 @@ class RestfulTestCase(rest.RestfulTestCase):
 
     def assertValidService(self, entity, ref=None):
         self.assertIsNotNone(entity.get('type'))
+        self.assertIsInstance(entity.get('enabled'), bool)
         if ref:
             self.assertEqual(ref['type'], entity['type'])
         return entity
@@ -695,6 +686,7 @@ class RestfulTestCase(rest.RestfulTestCase):
     def assertValidEndpoint(self, entity, ref=None):
         self.assertIsNotNone(entity.get('interface'))
         self.assertIsNotNone(entity.get('service_id'))
+        self.assertIsInstance(entity['enabled'], bool)
 
         # this is intended to be an unexposed implementation detail
         self.assertNotIn('legacy_endpoint_id', entity)

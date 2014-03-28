@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import copy
 import datetime
 import json
 import uuid
@@ -19,6 +20,7 @@ import uuid
 from keystoneclient.common import cms
 
 from keystone import auth
+from keystone.common import dependency
 from keystone import config
 from keystone import exception
 from keystone.openstack.common import timeutils
@@ -178,7 +180,8 @@ class TokenAPITests(object):
 
         # 3) Update the default_domain_id config option to the new domain
 
-        self.opt_in_group('identity', default_domain_id=new_domain_id)
+        self.config_fixture.config(group='identity',
+                                   default_domain_id=new_domain_id)
 
         # 4) Get a token using v3 api.
 
@@ -379,10 +382,11 @@ class TokenAPITests(object):
 
 
 class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
-    def config_files(self):
-        conf_files = super(TestPKITokenAPIs, self).config_files()
-        conf_files.append(tests.dirs.tests('test_pki_token_provider.conf'))
-        return conf_files
+    def config_overrides(self):
+        super(TestPKITokenAPIs, self).config_overrides()
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.pki.Provider')
 
     def setUp(self):
         super(TestPKITokenAPIs, self).setUp()
@@ -390,10 +394,11 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
 
 
 class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
-    def config_files(self):
-        conf_files = super(TestUUIDTokenAPIs, self).config_files()
-        conf_files.append(tests.dirs.tests('test_uuid_token_provider.conf'))
-        return conf_files
+    def config_overrides(self):
+        super(TestUUIDTokenAPIs, self).config_overrides()
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.uuid.Provider')
 
     def setUp(self):
         super(TestUUIDTokenAPIs, self).setUp()
@@ -450,7 +455,11 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.orig_policy_file = CONF.policy_file
         from keystone.policy.backends import rules
         rules.reset()
-        self.opt(policy_file=tests.dirs.etc('policy.v3cloudsample.json'))
+
+    def config_overrides(self):
+        super(TestTokenRevokeSelfAndAdmin, self).config_overrides()
+        self.config_fixture.config(
+            policy_file=tests.dirs.etc('policy.v3cloudsample.json'))
 
     def test_user_revokes_own_token(self):
         r = self.post(
@@ -561,14 +570,19 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
                     token=adminB_token)
 
 
+@dependency.requires('revoke_api')
 class TestTokenRevokeById(test_v3.RestfulTestCase):
     """Test token revocation on the v3 Identity API."""
 
-    def config_files(self):
-        conf_files = super(TestTokenRevokeById, self).config_files()
-        conf_files.append(tests.dirs.tests(
-            'test_revoke_kvs.conf'))
-        return conf_files
+    def config_overrides(self):
+        super(TestTokenRevokeById, self).config_overrides()
+        self.config_fixture.config(
+            group='revoke',
+            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.pki.Provider',
+            revoke_by_id=False)
 
     def setUp(self):
         """Setup for Token Revoking Test Cases.
@@ -1176,16 +1190,21 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.head(role_path, expected_status=404)
 
 
+@dependency.requires('revoke_api')
 class TestTokenRevokeApi(TestTokenRevokeById):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
 
     """Test token revocation on the v3 Identity API."""
-    def config_files(self):
-        conf_files = super(TestTokenRevokeApi, self).config_files()
-        conf_files.append(tests.dirs.tests(
-            'test_revoke_kvs.conf'))
-        return conf_files
+    def config_overrides(self):
+        super(TestTokenRevokeApi, self).config_overrides()
+        self.config_fixture.config(
+            group='revoke',
+            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.pki.Provider',
+            revoke_by_id=False)
 
     def assertValidDeletedProjectResponse(self, events_response, project_id):
         events = events_response['events']
@@ -1366,10 +1385,12 @@ class TestTokenRevokeApi(TestTokenRevokeById):
 
 
 class TestAuthExternalDisabled(test_v3.RestfulTestCase):
-    def config_files(self):
-        cfg_list = self._config_file_list[:]
-        cfg_list.append(tests.dirs.tests('auth_plugin_external_disabled.conf'))
-        return cfg_list
+    def config_overrides(self):
+        super(TestAuthExternalDisabled, self).config_overrides()
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token'])
 
     def test_remote_user_disabled(self):
         api = auth.controllers.Auth()
@@ -1386,11 +1407,13 @@ class TestAuthExternalDisabled(test_v3.RestfulTestCase):
 class TestAuthExternalLegacyDefaultDomain(test_v3.RestfulTestCase):
     content_type = 'json'
 
-    def config_files(self):
-        cfg_list = self._config_file_list[:]
-        cfg_list.append(
-            tests.dirs.tests('auth_plugin_external_default_legacy.conf'))
-        return cfg_list
+    def config_overrides(self):
+        super(TestAuthExternalLegacyDefaultDomain, self).config_overrides()
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.external.LegacyDefaultDomain',
+                     'keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token'])
 
     def test_remote_user_no_realm(self):
         CONF.auth.methods = 'external'
@@ -1415,11 +1438,13 @@ class TestAuthExternalLegacyDefaultDomain(test_v3.RestfulTestCase):
 class TestAuthExternalLegacyDomain(test_v3.RestfulTestCase):
     content_type = 'json'
 
-    def config_files(self):
-        cfg_list = self._config_file_list[:]
-        cfg_list.append(
-            tests.dirs.tests('auth_plugin_external_domain_legacy.conf'))
-        return cfg_list
+    def config_overrides(self):
+        super(TestAuthExternalLegacyDomain, self).config_overrides()
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.external.LegacyDomain',
+                     'keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token'])
 
     def test_remote_user_with_realm(self):
         api = auth.controllers.Auth()
@@ -1466,10 +1491,13 @@ class TestAuthExternalLegacyDomain(test_v3.RestfulTestCase):
 class TestAuthExternalDomain(test_v3.RestfulTestCase):
     content_type = 'json'
 
-    def config_files(self):
-        cfg_list = self._config_file_list[:]
-        cfg_list.append(tests.dirs.tests('auth_plugin_external_domain.conf'))
-        return cfg_list
+    def config_overrides(self):
+        super(TestAuthExternalDomain, self).config_overrides()
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.external.Domain',
+                     'keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token'])
 
     def test_remote_user_with_realm(self):
         api = auth.controllers.Auth()
@@ -1618,6 +1646,52 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertValidProjectScopedTokenResponse(r, require_catalog=False)
         self.assertEqual(r.result['token']['project']['id'],
                          self.project['id'])
+
+    def _check_disabled_endpoint_result(self, catalog, disabled_endpoint_id):
+        endpoints = catalog[0]['endpoints']
+        endpoint_ids = [ep['id'] for ep in endpoints]
+        self.assertEqual([self.endpoint_id], endpoint_ids)
+
+    def test_auth_catalog_disabled_service(self):
+        """On authenticate, get a catalog that excludes disabled services."""
+        # although the child endpoint is enabled, the service is disabled
+        self.assertTrue(self.endpoint['enabled'])
+        self.catalog_api.update_service(
+            self.endpoint['service_id'], {'enabled': False})
+        service = self.catalog_api.get_service(self.endpoint['service_id'])
+        self.assertFalse(service['enabled'])
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+
+        # In JSON, this is an empty list. In XML, this is an empty string.
+        self.assertFalse(r.result['token']['catalog'])
+
+    def test_auth_catalog_disabled_endpoint(self):
+        """On authenticate, get a catalog that excludes disabled endpoints."""
+
+        # Create a disabled endpoint that's like the enabled one.
+        disabled_endpoint_ref = copy.copy(self.endpoint)
+        disabled_endpoint_id = uuid.uuid4().hex
+        disabled_endpoint_ref.update({
+            'id': disabled_endpoint_id,
+            'enabled': False,
+            'interface': 'internal'
+        })
+        self.catalog_api.create_endpoint(disabled_endpoint_id,
+                                         disabled_endpoint_ref)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+
+        self._check_disabled_endpoint_result(r.result['token']['catalog'],
+                                             disabled_endpoint_id)
 
     def test_project_id_scoped_token_with_user_id_401(self):
         project_id = uuid.uuid4().hex
@@ -2061,7 +2135,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
 
     #TODO(ayoung): move to TestPKITokenAPIs; it will be run for both formats
     def test_verify_with_bound_token(self):
-        self.opt_in_group('token', bind='kerberos')
+        self.config_fixture.config(group='token', bind='kerberos')
         auth_data = self.build_authentication_request(
             project_id=self.project['id'])
         remote_user = self.default_domain_user['name']
@@ -2102,7 +2176,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertEqual(token['bind']['kerberos'], remote_user)
 
     def test_v2_v3_bind_token_intermix(self):
-        self.opt_in_group('token', bind='kerberos')
+        self.config_fixture.config(group='token', bind='kerberos')
 
         # we need our own user registered to the default domain because of
         # the way external auth works.
@@ -2197,11 +2271,19 @@ class TestAuthJSON(test_v3.RestfulTestCase):
 class TestAuthXML(TestAuthJSON):
     content_type = 'xml'
 
+    def _check_disabled_endpoint_result(self, catalog, disabled_endpoint_id):
+        # FIXME(blk-u): As far as I can tell the catalog in the XML result is
+        # broken. Looks like it includes only one endpoint or the other, and
+        # which one is included is random.
+
+        endpoint = catalog['service']['endpoint']
+        self.assertEqual(self.endpoint_id, endpoint['id'])
+
 
 class TestTrustOptional(test_v3.RestfulTestCase):
-    def setUp(self, *args, **kwargs):
-        self.opt_in_group('trust', enabled=False)
-        super(TestTrustOptional, self).setUp(*args, **kwargs)
+    def config_overrides(self):
+        super(TestTrustOptional, self).config_overrides()
+        self.config_fixture.config(group='trust', enabled=False)
 
     def test_trusts_404(self):
         self.get('/OS-TRUST/trusts', body={'trust': {}}, expected_status=404)
@@ -2215,18 +2297,23 @@ class TestTrustOptional(test_v3.RestfulTestCase):
         self.post('/auth/tokens', body=auth_data, expected_status=403)
 
 
+@dependency.requires('revoke_api')
 class TestTrustAuth(TestAuthInfo):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
 
-    def config_files(self):
-        conf_files = super(TestTrustAuth, self).config_files()
-        conf_files.append(tests.dirs.tests(
-            'test_revoke_kvs.conf'))
-        return conf_files
+    def config_overrides(self):
+        super(TestTrustAuth, self).config_overrides()
+        self.config_fixture.config(
+            group='revoke',
+            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.pki.Provider',
+            revoke_by_id=False)
+        self.config_fixture.config(group='trust', enabled=True)
 
     def setUp(self):
-        self.opt_in_group('trust', enabled=True)
         super(TestTrustAuth, self).setUp()
 
         # create a trustee to delegate stuff to
@@ -2246,6 +2333,14 @@ class TestTrustAuth(TestAuthInfo):
         del ref['id']
         r = self.post('/OS-TRUST/trusts', body={'trust': ref})
         self.assertValidTrustResponse(r, ref)
+
+    def test_create_trust_no_roles(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id)
+        del ref['id']
+        self.post('/OS-TRUST/trusts', body={'trust': ref}, expected_status=403)
 
     def _initialize_test_consume_trust(self, count):
         # Make sure remaining_uses is decremented as we consume the trust
@@ -2404,14 +2499,18 @@ class TestTrustAuth(TestAuthInfo):
     def test_create_trust_trustee_404(self):
         ref = self.new_trust_ref(
             trustor_user_id=self.user_id,
-            trustee_user_id=uuid.uuid4().hex)
+            trustee_user_id=uuid.uuid4().hex,
+            project_id=self.project_id,
+            role_ids=[self.role_id])
         del ref['id']
         self.post('/OS-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
     def test_create_trust_trustor_trustee_backwards(self):
         ref = self.new_trust_ref(
             trustor_user_id=self.trustee_user_id,
-            trustee_user_id=self.user_id)
+            trustee_user_id=self.user_id,
+            project_id=self.project_id,
+            role_ids=[self.role_id])
         del ref['id']
         self.post('/OS-TRUST/trusts', body={'trust': ref}, expected_status=403)
 

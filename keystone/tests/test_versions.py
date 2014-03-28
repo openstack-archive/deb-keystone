@@ -55,7 +55,7 @@ v2_PDF_DESCRIPTION = {
 
 v2_EXPECTED_RESPONSE = {
     "id": "v2.0",
-    "status": "deprecated",
+    "status": "stable",
     "updated": "2014-04-17T00:00:00Z",
     "links": [
         {
@@ -118,11 +118,17 @@ class VersionTestCase(tests.TestCase):
         self.public_app = self.loadapp('keystone', 'main')
         self.admin_app = self.loadapp('keystone', 'admin')
 
-        port = random.randint(10000, 30000)
-        self.opt(public_port=port, admin_port=port)
+        self.config_fixture.config(
+            public_endpoint='http://localhost:%(public_port)d',
+            admin_endpoint='http://localhost:%(admin_port)d')
 
         fixture = self.useFixture(moxstubout.MoxStubout())
         self.stubs = fixture.stubs
+
+    def config_overrides(self):
+        super(VersionTestCase, self).config_overrides()
+        port = random.randint(10000, 30000)
+        self.config_fixture.config(public_port=port, admin_port=port)
 
     def _paste_in_port(self, response, port):
         for link in response['links']:
@@ -159,6 +165,25 @@ class VersionTestCase(tests.TestCase):
                     version, 'http://localhost:%s/v2.0/' % CONF.admin_port)
         self.assertEqual(data, expected)
 
+    def test_use_site_url_if_endpoint_unset(self):
+        self.config_fixture.config(public_endpoint=None, admin_endpoint=None)
+
+        for app in (self.public_app, self.admin_app):
+            client = self.client(app)
+            resp = client.get('/')
+            self.assertEqual(resp.status_int, 300)
+            data = jsonutils.loads(resp.body)
+            expected = VERSIONS_RESPONSE
+            for version in expected['versions']['values']:
+                # localhost happens to be the site url for tests
+                if version['id'] == 'v3.0':
+                    self._paste_in_port(
+                        version, 'http://localhost/v3/')
+                elif version['id'] == 'v2.0':
+                    self._paste_in_port(
+                        version, 'http://localhost/v2.0/')
+            self.assertEqual(data, expected)
+
     def test_public_version_v2(self):
         client = self.client(self.public_app)
         resp = client.get('/v2.0/')
@@ -179,6 +204,17 @@ class VersionTestCase(tests.TestCase):
                             'http://localhost:%s/v2.0/' % CONF.admin_port)
         self.assertEqual(data, expected)
 
+    def test_use_site_url_if_endpoint_unset_v2(self):
+        self.config_fixture.config(public_endpoint=None, admin_endpoint=None)
+        for app in (self.public_app, self.admin_app):
+            client = self.client(app)
+            resp = client.get('/v2.0/')
+            self.assertEqual(resp.status_int, 200)
+            data = jsonutils.loads(resp.body)
+            expected = v2_VERSION_RESPONSE
+            self._paste_in_port(expected['version'], 'http://localhost/v2.0/')
+            self.assertEqual(data, expected)
+
     def test_public_version_v3(self):
         client = self.client(self.public_app)
         resp = client.get('/v3/')
@@ -198,6 +234,17 @@ class VersionTestCase(tests.TestCase):
         self._paste_in_port(expected['version'],
                             'http://localhost:%s/v3/' % CONF.admin_port)
         self.assertEqual(data, expected)
+
+    def test_use_site_url_if_endpoint_unset_v3(self):
+        self.config_fixture.config(public_endpoint=None, admin_endpoint=None)
+        for app in (self.public_app, self.admin_app):
+            client = self.client(app)
+            resp = client.get('/v3/')
+            self.assertEqual(resp.status_int, 200)
+            data = jsonutils.loads(resp.body)
+            expected = v3_VERSION_RESPONSE
+            self._paste_in_port(expected['version'], 'http://localhost/v3/')
+            self.assertEqual(data, expected)
 
     def test_v2_disabled(self):
         self.stubs.Set(controllers, '_VERSIONS', ['v3'])
@@ -268,9 +315,10 @@ class XmlVersionTestCase(tests.TestCase):
 
     DOC_INTRO = '<?xml version="1.0" encoding="UTF-8"?>'
     XML_NAMESPACE_ATTR = 'xmlns="http://docs.openstack.org/identity/api/v2.0"'
+    XML_NAMESPACE_V3 = 'xmlns="http://docs.openstack.org/identity/api/v3"'
 
     v2_VERSION_DATA = """
-<version %(v2_namespace)s status="deprecated" updated="2014-04-17T00:00:00Z"
+<version %(v2_namespace)s status="stable" updated="2014-04-17T00:00:00Z"
          id="v2.0">
   <media-types>
     <media-type base="application/json" type="application/\
@@ -312,7 +360,7 @@ vnd.openstack.identity-v3+xml"/>
 """
 
     v3_VERSION_RESPONSE = ((DOC_INTRO + v3_VERSION_DATA) %
-                           dict(v3_namespace=XML_NAMESPACE_ATTR))
+                           dict(v3_namespace=XML_NAMESPACE_V3))
 
     VERSIONS_RESPONSE = ((DOC_INTRO + """
 <versions %(namespace)s>
@@ -328,11 +376,17 @@ vnd.openstack.identity-v3+xml"/>
         self.public_app = self.loadapp('keystone', 'main')
         self.admin_app = self.loadapp('keystone', 'admin')
 
-        port = random.randint(10000, 30000)
-        self.opt(public_port=port, admin_port=port)
+        self.config_fixture.config(
+            public_endpoint='http://localhost:%(public_port)d',
+            admin_endpoint='http://localhost:%(admin_port)d')
 
         fixture = self.useFixture(moxstubout.MoxStubout())
         self.stubs = fixture.stubs
+
+    def config_overrides(self):
+        super(XmlVersionTestCase, self).config_overrides()
+        port = random.randint(10000, 30000)
+        self.config_fixture.config(public_port=port, admin_port=port)
 
     def test_public_versions(self):
         client = self.client(self.public_app)
@@ -348,6 +402,14 @@ vnd.openstack.identity-v3+xml"/>
         self.assertEqual(resp.status_int, 300)
         data = resp.body
         expected = self.VERSIONS_RESPONSE % dict(port=CONF.admin_port)
+        self.assertThat(data, matchers.XMLEquals(expected))
+
+    def test_use_site_url_if_endpoint_unset(self):
+        client = self.client(self.public_app)
+        resp = client.get('/', headers=self.REQUEST_HEADERS)
+        self.assertEqual(resp.status_int, 300)
+        data = resp.body
+        expected = self.VERSIONS_RESPONSE % dict(port=CONF.public_port)
         self.assertThat(data, matchers.XMLEquals(expected))
 
     def test_public_version_v2(self):

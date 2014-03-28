@@ -24,6 +24,7 @@ from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -85,6 +86,10 @@ class Manager(manager.Manager):
             return self.driver.delete_region(region_id)
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
+
+    def create_service(self, service_id, service_ref):
+        service_ref.setdefault('enabled', True)
+        return self.driver.create_service(service_id, service_ref)
 
     def get_service(self, service_id):
         try:

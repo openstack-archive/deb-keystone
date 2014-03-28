@@ -28,6 +28,7 @@ from keystone.common import dependency
 from keystone.common import utils
 from keystone import exception
 from keystone.openstack.common import gettextutils
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
@@ -144,7 +145,7 @@ class BaseApplication(object):
           res = 'message\n'
 
           # Option 2: a nicely formatted HTTP exception page
-          res = exc.HTTPForbidden(detail='Nice try')
+          res = exc.HTTPForbidden(explanation='Nice try')
 
           # Option 3: a webob Response object (in case you need to play with
           # headers, or you want to be treated like an iterable, or or or)
@@ -184,6 +185,7 @@ class Application(BaseApplication):
         context['query_string'] = dict(six.iteritems(req.params))
         context['headers'] = dict(six.iteritems(req.headers))
         context['path'] = req.environ['PATH_INFO']
+        context['host_url'] = req.host_url
         params = req.environ.get(PARAMS_ENV, {})
         #authentication and authorization attributes are set as environment
         #values by the container and processed by the pipeline.  the complete
@@ -207,17 +209,21 @@ class Application(BaseApplication):
             LOG.warning(
                 _('Authorization failed. %(exception)s from %(remote_addr)s'),
                 {'exception': e, 'remote_addr': req.environ['REMOTE_ADDR']})
-            return render_exception(e, user_locale=best_match_language(req))
+            return render_exception(e, context=context,
+                                    user_locale=best_match_language(req))
         except exception.Error as e:
             LOG.warning(e)
-            return render_exception(e, user_locale=best_match_language(req))
+            return render_exception(e, context=context,
+                                    user_locale=best_match_language(req))
         except TypeError as e:
             LOG.exception(e)
             return render_exception(exception.ValidationError(e),
+                                    context=context,
                                     user_locale=best_match_language(req))
         except Exception as e:
             LOG.exception(e)
             return render_exception(exception.UnexpectedError(exception=e),
+                                    context=context,
                                     user_locale=best_match_language(req))
 
         if result is None:
@@ -287,6 +293,12 @@ class Application(BaseApplication):
         Retrieve the trust_id from the token
         Returns None if token is is not trust scoped
         """
+        if ('token_id' not in context or
+                context.get('token_id') == CONF.admin_token):
+            LOG.debug(_('will not lookup trust as the request auth token is '
+                        'either absent or it is the system admin token'))
+            return None
+
         try:
             token_ref = self.token_api.get_token(context['token_id'])
         except exception.TokenNotFound:
@@ -294,6 +306,22 @@ class Application(BaseApplication):
             raise exception.Unauthorized()
 
         return token_ref.get('trust_id')
+
+    @classmethod
+    def base_url(cls, context, endpoint_type):
+        url = CONF['%s_endpoint' % endpoint_type]
+
+        if url:
+            url = url % CONF
+        else:
+            # NOTE(jamielennox): if url is not set via the config file we
+            # should set it relative to the url that the user used to get here
+            # so as not to mess with version discovery. This is not perfect.
+            # host_url omits the path prefix, but there isn't another good
+            # solution that will work for all urls.
+            url = context['host_url']
+
+        return url.rstrip('/')
 
 
 class Middleware(Application):
@@ -363,15 +391,17 @@ class Middleware(Application):
             return self.process_response(request, response)
         except exception.Error as e:
             LOG.warning(e)
-            return render_exception(e,
+            return render_exception(e, request=request,
                                     user_locale=best_match_language(request))
         except TypeError as e:
             LOG.exception(e)
             return render_exception(exception.ValidationError(e),
+                                    request=request,
                                     user_locale=best_match_language(request))
         except Exception as e:
             LOG.exception(e)
             return render_exception(exception.UnexpectedError(exception=e),
+                                    request=request,
                                     user_locale=best_match_language(request))
 
 
@@ -468,9 +498,10 @@ class Router(object):
         """
         match = req.environ['wsgiorg.routing_args'][1]
         if not match:
-            return render_exception(
-                exception.NotFound(_('The resource could not be found.')),
-                user_locale=best_match_language(req))
+            msg = _('The resource could not be found.')
+            return render_exception(exception.NotFound(msg),
+                                    request=req,
+                                    user_locale=best_match_language(req))
         app = match['controller']
         return app
 
@@ -564,7 +595,7 @@ def render_response(body=None, status=None, headers=None):
                           headerlist=headers)
 
 
-def render_exception(error, user_locale=None):
+def render_exception(error, context=None, request=None, user_locale=None):
     """Forms a WSGI response based on the current error."""
 
     error_message = error.args[0]
@@ -583,9 +614,18 @@ def render_exception(error, user_locale=None):
     if isinstance(error, exception.AuthPluginException):
         body['error']['identity'] = error.authentication
     elif isinstance(error, exception.Unauthorized):
-        headers.append(('WWW-Authenticate',
-                        'Keystone uri="%s"' % (
-                            CONF.public_endpoint % CONF)))
+        url = CONF.public_endpoint
+        if not url:
+            if request:
+                context = {'host_url': request.host_url}
+            if context:
+                url = Application.base_url(context, 'public')
+            else:
+                url = 'http://localhost:%d' % CONF.public_port
+        else:
+            url = url % CONF
+
+        headers.append(('WWW-Authenticate', 'Keystone uri="%s"' % url))
     return render_response(status=(error.code, error.title),
                            body=body,
                            headers=headers)

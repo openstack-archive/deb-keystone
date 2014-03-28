@@ -57,7 +57,7 @@ class IdentityTestProtectedCase(test_v3.RestfulTestCase):
         self.addCleanup(rules.reset)
         rules.reset()
         _unused, self.tmpfilename = tempfile.mkstemp()
-        self.opt(policy_file=self.tmpfilename)
+        self.config_fixture.config(policy_file=self.tmpfilename)
 
         # A default auth request we can use - un-scoped user token
         self.auth = self.build_authentication_request(
@@ -367,7 +367,8 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
         # Finally, switch to the v3 sample policy file
         self.addCleanup(rules.reset)
         rules.reset()
-        self.opt(policy_file=tests.dirs.etc('policy.v3cloudsample.json'))
+        self.config_fixture.config(
+            policy_file=tests.dirs.etc('policy.v3cloudsample.json'))
 
     def load_sample_data(self):
         # Start by creating a couple of domains
@@ -585,6 +586,11 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
             domain_id=self.domainA['id'])
 
         self._test_grants('domains', self.domainA['id'])
+
+        # Check that with such a token we cannot modify grants on a
+        # different domain
+        self._test_grants('domains', self.domainB['id'],
+                          expected=exception.ForbiddenAction.code)
 
     def test_domain_grants_by_cloud_admin(self):
         # Test domain grants with a cloud admin. This user should be

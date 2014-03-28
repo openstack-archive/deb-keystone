@@ -22,6 +22,7 @@ from keystone.common import dependency
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone import token
 from keystone.token import provider
 from keystone import trust
@@ -354,9 +355,9 @@ class V3TokenDataHelper(object):
         return {'token': token_data}
 
 
-@dependency.optional('oauth_api')
+@dependency.optional('oauth_api', 'revoke_api')
 @dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'revoke_api', 'token_api', 'trust_api')
+                     'token_api', 'trust_api')
 class BaseProvider(provider.Provider):
     def __init__(self, *args, **kwargs):
         super(BaseProvider, self).__init__(*args, **kwargs)
@@ -499,7 +500,7 @@ class BaseProvider(provider.Provider):
 
         if project_id or domain_id:
             roles = self.v3_token_data_helper._populate_roles_for_groups(
-                group_ids, project_id, domain_id)
+                group_ids, project_id, domain_id, user_id)
             token_data.update({'roles': roles})
         else:
             idp = auth_context[federation.IDENTITY_PROVIDER]
@@ -507,9 +508,9 @@ class BaseProvider(provider.Provider):
             token_data['user'].update({
                 federation.FEDERATION: {
                     'identity_provider': {'id': idp},
-                    'protocol': {'id': protocol}
+                    'protocol': {'id': protocol},
+                    'groups': [{'id': x} for x in group_ids]
                 },
-                federation.GROUPS: [{'id': x} for x in group_ids]
             })
         return token_data
 

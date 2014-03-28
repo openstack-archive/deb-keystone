@@ -18,8 +18,12 @@ import uuid
 
 from keystoneclient.contrib.ec2 import utils as ec2_utils
 
+from keystone import config
 from keystone import exception
 from keystone.tests import test_v3
+
+
+CONF = config.CONF
 
 
 class CredentialBaseTestCase(test_v3.RestfulTestCase):
@@ -190,17 +194,29 @@ class CredentialTestCase(CredentialBaseTestCase):
             body={'credential': ref}, expected_status=400)
         self.assertValidErrorResponse(response)
 
+    def test_create_credential_with_admin_token(self):
+        # Make sure we can create credential with the static admin token
+        ref = self.new_credential_ref(user_id=self.user['id'])
+        r = self.post(
+            '/credentials',
+            body={'credential': ref},
+            token=CONF.admin_token)
+        self.assertValidCredentialResponse(r, ref)
+
 
 class TestCredentialTrustScoped(test_v3.RestfulTestCase):
     """Test credential with trust scoped token."""
     def setUp(self):
-        self.opt_in_group('trust', enabled=True)
         super(TestCredentialTrustScoped, self).setUp()
 
         self.trustee_user_id = uuid.uuid4().hex
         self.trustee_user = self.new_user_ref(domain_id=self.domain_id)
         self.trustee_user['id'] = self.trustee_user_id
         self.identity_api.create_user(self.trustee_user_id, self.trustee_user)
+
+    def config_overrides(self):
+        super(TestCredentialTrustScoped, self).config_overrides()
+        self.config_fixture.config(group='trust', enabled=True)
 
     def test_trust_scoped_ec2_credential(self):
         """Call ``POST /credentials`` for creating ec2 credential."""

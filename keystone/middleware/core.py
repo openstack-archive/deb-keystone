@@ -21,6 +21,7 @@ from keystone.common import serializer
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
@@ -117,7 +118,7 @@ class JsonBodyMiddleware(wsgi.Middleware):
         if request.content_type not in ('application/json', ''):
             e = exception.ValidationError(attribute='application/json',
                                           target='Content-Type header')
-            return wsgi.render_exception(e)
+            return wsgi.render_exception(e, request=request)
 
         params_parsed = {}
         try:
@@ -125,7 +126,7 @@ class JsonBodyMiddleware(wsgi.Middleware):
         except ValueError:
             e = exception.ValidationError(attribute='valid JSON',
                                           target='request body')
-            return wsgi.render_exception(e)
+            return wsgi.render_exception(e, request=request)
         finally:
             if not params_parsed:
                 params_parsed = {}
@@ -151,6 +152,7 @@ class XmlBodyMiddleware(wsgi.Middleware):
         remove_in=+2)
     def __init__(self, *args, **kwargs):
         super(XmlBodyMiddleware, self).__init__(*args, **kwargs)
+        self.xmlns = None
 
     def process_request(self, request):
         """Transform the request from XML to JSON."""
@@ -164,7 +166,7 @@ class XmlBodyMiddleware(wsgi.Middleware):
                 LOG.exception('Serializer failed')
                 e = exception.ValidationError(attribute='valid XML',
                                               target='request body')
-                return wsgi.render_exception(e)
+                return wsgi.render_exception(e, request=request)
 
     def process_response(self, request, response):
         """Transform the response from JSON to XML."""
@@ -173,11 +175,27 @@ class XmlBodyMiddleware(wsgi.Middleware):
             response.content_type = 'application/xml'
             try:
                 body_obj = jsonutils.loads(response.body)
-                response.body = serializer.to_xml(body_obj)
+                response.body = serializer.to_xml(body_obj, xmlns=self.xmlns)
             except Exception:
                 LOG.exception('Serializer failed')
                 raise exception.Error(message=response.body)
         return response
+
+
+class XmlBodyMiddlewareV2(XmlBodyMiddleware):
+    """De/serializes XML to/from JSON for v2.0 API."""
+
+    def __init__(self, *args, **kwargs):
+        super(XmlBodyMiddlewareV2, self).__init__(*args, **kwargs)
+        self.xmlns = 'http://docs.openstack.org/identity/api/v2.0'
+
+
+class XmlBodyMiddlewareV3(XmlBodyMiddleware):
+    """De/serializes XML to/from JSON for v3 API."""
+
+    def __init__(self, *args, **kwargs):
+        super(XmlBodyMiddlewareV3, self).__init__(*args, **kwargs)
+        self.xmlns = 'http://docs.openstack.org/identity/api/v3'
 
 
 class NormalizingFilter(wsgi.Middleware):

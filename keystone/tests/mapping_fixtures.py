@@ -425,6 +425,14 @@ EMPLOYEE_ASSERTION = {
     'orgPersonType': 'Employee;BuildingX;'
 }
 
+EMPLOYEE_ASSERTION_PREFIXED = {
+    'PREFIX_Email': 'tim@example.com',
+    'PREFIX_UserName': 'tbo',
+    'PREFIX_FirstName': 'Tim',
+    'PREFIX_LastName': 'Bo',
+    'PREFIX_orgPersonType': 'SuperEmployee;BuildingX;'
+}
+
 CONTRACTOR_ASSERTION = {
     'Email': 'jill@example.com',
     'UserName': 'jsmith',
@@ -463,4 +471,21 @@ BAD_TESTER_ASSERTION = {
     'FirstName': 'Test',
     'LastName': 'Account',
     'orgPersonType': 'Tester;'
+}
+
+MALFORMED_TESTER_ASSERTION = {
+    'Email': 'testacct@example.com',
+    'UserName': 'testacct',
+    'FirstName': 'Test',
+    'LastName': 'Account',
+    'orgPersonType': 'Tester;',
+    'object': object(),
+    'dictionary': dict(zip('teststring', xrange(10))),
+    'tuple': tuple(xrange(5))
+}
+
+CONTRACTOR_MALFORMED_ASSERTION = {
+    'UserName': 'user',
+    'FirstName': object(),
+    'orgPersonType': 'Contractor'
 }

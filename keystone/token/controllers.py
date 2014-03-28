@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
 import json
 
 from keystoneclient.common import cms
@@ -22,6 +23,7 @@ from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone.token import core
@@ -425,7 +427,7 @@ class Auth(controller.V2Controller):
 
         for t in tokens:
             expires = t['expires']
-            if not (expires and isinstance(expires, six.text_type)):
+            if expires and isinstance(expires, datetime.datetime):
                     t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
         json_data = json.dumps(data)

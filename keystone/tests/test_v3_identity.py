@@ -347,7 +347,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             body={'domain': {'enabled': False}})
 
         # Change the default domain
-        self.opt_in_group('identity', default_domain_id=new_domain_id)
+        self.config_fixture.config(group='identity',
+                                   default_domain_id=new_domain_id)
 
         # Attempt to delete the new domain
 
@@ -371,7 +372,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             body={'domain': {'enabled': False}})
 
         # Change the default domain
-        self.opt_in_group('identity', default_domain_id=new_domain_id)
+        self.config_fixture.config(group='identity',
+                                   default_domain_id=new_domain_id)
 
         # Delete the old default domain
 
@@ -418,6 +420,22 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                 'project_id': self.project_id},
             body={'project': ref})
         self.assertValidProjectResponse(r, ref)
+
+    def test_update_project_domain_id(self):
+        """Call ``PATCH /projects/{project_id}`` with domain_id."""
+        project = self.new_project_ref(domain_id=self.domain['id'])
+        self.assignment_api.create_project(project['id'], project)
+        project['domain_id'] = CONF.identity.default_domain_id
+        r = self.patch('/projects/%(project_id)s' % {
+            'project_id': project['id']},
+            body={'project': project},
+            expected_status=exception.ValidationError.code)
+        self.config_fixture.config(domain_id_immutable=False)
+        project['domain_id'] = self.domain['id']
+        r = self.patch('/projects/%(project_id)s' % {
+            'project_id': project['id']},
+            body={'project': project})
+        self.assertValidProjectResponse(r, project)
 
     def test_delete_project(self):
         """Call ``DELETE /projects/{project_id}``
@@ -575,6 +593,22 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             body={'user': user})
         self.assertValidUserResponse(r, user)
 
+    def test_update_user_domain_id(self):
+        """Call ``PATCH /users/{user_id}`` with domain_id."""
+        user = self.new_user_ref(domain_id=self.domain['id'])
+        self.identity_api.create_user(user['id'], user)
+        user['domain_id'] = CONF.identity.default_domain_id
+        r = self.patch('/users/%(user_id)s' % {
+            'user_id': user['id']},
+            body={'user': user},
+            expected_status=exception.ValidationError.code)
+        self.config_fixture.config(domain_id_immutable=False)
+        user['domain_id'] = self.domain['id']
+        r = self.patch('/users/%(user_id)s' % {
+            'user_id': user['id']},
+            body={'user': user})
+        self.assertValidUserResponse(r, user)
+
     def test_delete_user(self):
         """Call ``DELETE /users/{user_id}``.
 
@@ -663,6 +697,22 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         del group['id']
         r = self.patch('/groups/%(group_id)s' % {
             'group_id': self.group_id},
+            body={'group': group})
+        self.assertValidGroupResponse(r, group)
+
+    def test_update_group_domain_id(self):
+        """Call ``PATCH /groups/{group_id}`` with domain_id."""
+        group = self.new_group_ref(domain_id=self.domain['id'])
+        self.identity_api.create_group(group['id'], group)
+        group['domain_id'] = CONF.identity.default_domain_id
+        r = self.patch('/groups/%(group_id)s' % {
+            'group_id': group['id']},
+            body={'group': group},
+            expected_status=exception.ValidationError.code)
+        self.config_fixture.config(domain_id_immutable=False)
+        group['domain_id'] = self.domain['id']
+        r = self.patch('/groups/%(group_id)s' % {
+            'group_id': group['id']},
             body={'group': group})
         self.assertValidGroupResponse(r, group)
 
@@ -1288,9 +1338,9 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
     """Test inheritance crud and its effects."""
 
-    def setUp(self):
-        self.opt_in_group('os_inherit', enabled=True)
-        super(IdentityInheritanceTestCase, self).setUp()
+    def config_overrides(self):
+        super(IdentityInheritanceTestCase, self).config_overrides()
+        self.config_fixture.config(group='os_inherit', enabled=True)
 
     def test_crud_user_inherited_domain_role_grants(self):
         role_list = []
@@ -1500,7 +1550,7 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
 
         # Disable the extension and re-check the list, the role inherited
         # from the project should no longer show up
-        self.opt_in_group('os_inherit', enabled=False)
+        self.config_fixture.config(group='os_inherit', enabled=False)
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r)
         self.assertEqual(2, len(r.result.get('role_assignments')))
@@ -1715,9 +1765,9 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
 class IdentityInheritanceDisabledTestCase(test_v3.RestfulTestCase):
     """Test inheritance crud and its effects."""
 
-    def setUp(self):
-        self.opt_in_group('os_inherit', enabled=False)
-        super(IdentityInheritanceDisabledTestCase, self).setUp()
+    def config_overrides(self):
+        super(IdentityInheritanceDisabledTestCase, self).config_overrides()
+        self.config_fixture.config(group='os_inherit', enabled=False)
 
     def test_crud_inherited_role_grants_failed_if_disabled(self):
         role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}

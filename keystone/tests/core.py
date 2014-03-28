@@ -32,18 +32,8 @@ import testtools
 from testtools import testcase
 import webob
 
-from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common.fixture import mockpatch
 from keystone.openstack.common import gettextutils
-
-# NOTE(blk-u):
-# gettextutils.install() must run to set _ before importing any modules that
-# contain static translated strings.
-#
-# Configure gettextutils for deferred translation of messages
-# so that error messages in responses can be translated according to the
-# Accept-Language in the request rather than the Keystone server locale.
-gettextutils.install('keystone', lazy=True)
 
 # NOTE(ayoung)
 # environment.use_eventlet must run before any of the code that will
@@ -61,12 +51,13 @@ from keystone.common import utils as common_utils
 from keystone import config
 from keystone import exception
 from keystone import notifications
-from keystone.openstack.common.db.sqlalchemy import session
+from keystone.openstack.common.db import options as db_options
+from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common.fixture import config as config_fixture
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
 from keystone import service
-from keystone.tests import fixtures as ksfixtures
+from keystone.tests import ksfixtures
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
 #   policy_file command-line option declared before setUp runs. Importing the
@@ -78,15 +69,28 @@ config.configure()
 
 
 LOG = log.getLogger(__name__)
+PID = six.text_type(os.getpid())
 TESTSDIR = os.path.dirname(os.path.abspath(__file__))
+TESTCONF = os.path.join(TESTSDIR, 'config_files')
 ROOTDIR = os.path.normpath(os.path.join(TESTSDIR, '..', '..'))
 VENDOR = os.path.join(ROOTDIR, 'vendor')
 ETCDIR = os.path.join(ROOTDIR, 'etc')
-TMPDIR = os.path.join(TESTSDIR, 'tmp')
+
+
+def _calc_tmpdir():
+    env_val = os.environ.get('KEYSTONE_TEST_TEMP_DIR')
+    if not env_val:
+        return os.path.join(TESTSDIR, 'tmp', PID)
+    return os.path.join(env_val, PID)
+
+
+TMPDIR = _calc_tmpdir()
 
 CONF = config.CONF
 
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
+os.makedirs(TMPDIR)
+atexit.register(shutil.rmtree, TMPDIR)
 
 
 class dirs:
@@ -106,12 +110,22 @@ class dirs:
     def tmp(*p):
         return os.path.join(TMPDIR, *p)
 
+    @staticmethod
+    def tests_conf(*p):
+        return os.path.join(TESTCONF, *p)
+
 
 # keystone.common.sql.initialize() for testing.
+DEFAULT_TEST_DB_FILE = dirs.tmp('test.db')
+
+
 def _initialize_sql_session():
-    db_file = dirs.tmp('test.db')
-    session.set_defaults(
-        sql_connection="sqlite:///" + db_file,
+    # Make sure the DB is located in the correct location, in this case set
+    # the default value, as this should be able to be overridden in some
+    # test cases.
+    db_file = DEFAULT_TEST_DB_FILE
+    db_options.set_defaults(
+        sql_connection='sqlite:///%s' % db_file,
         sqlite_db=db_file)
 
 
@@ -157,7 +171,8 @@ def setup_database():
     if os.path.exists(db):
         os.unlink(db)
     if not os.path.exists(pristine):
-        migration.db_sync((migration_helpers.find_migrate_repo()))
+        migration.db_sync(sql.get_engine(),
+                          migration_helpers.find_migrate_repo())
         migration_helpers.sync_database_to_version(extension='revoke')
         shutil.copyfile(db, pristine)
     else:
@@ -165,7 +180,7 @@ def setup_database():
 
 
 def teardown_database():
-    session.cleanup()
+    sql.cleanup()
 
 
 @atexit.register
@@ -280,10 +295,15 @@ class NoModule(object):
         def cleanup_finders():
             for finder in self._finders:
                 sys.meta_path.remove(finder)
+            del self._finders
         self.addCleanup(cleanup_finders)
 
         self._cleared_modules = {}
-        self.addCleanup(sys.modules.update, self._cleared_modules)
+
+        def cleanup_modules():
+            sys.modules.update(self._cleared_modules)
+            del self._cleared_modules
+        self.addCleanup(cleanup_modules)
 
     def clear_module(self, module):
         cleared_modules = {}
@@ -309,16 +329,87 @@ class NoModule(object):
         sys.meta_path.insert(0, finder)
 
 
-class TestCase(testtools.TestCase):
+class BaseTestCase(testtools.TestCase):
+    """Light weight base test class.
 
-    _config_file_list = [dirs.etc('keystone.conf.sample'),
-                         dirs.tests('test_overrides.conf')]
+    This is a placeholder that will eventually go away once thc
+    setup/teardown in TestCase is properly trimmed down to the bare
+    essentials. This is really just a play to speed up the tests by
+    eliminating unnecessary work.
+    """
+
+    def cleanup_instance(self, *names):
+        """Create a function suitable for use with self.addCleanup.
+
+        :returns: a callable that uses a closure to delete instance attributes
+
+        """
+        def cleanup():
+            for name in names:
+                # TODO(dstanek): remove this 'if' statement once
+                # load_backend in test_backend_ldap is only called once
+                # per test
+                if hasattr(self, name):
+                    delattr(self, name)
+        return cleanup
+
+
+@dependency.optional('revoke_api')
+class TestCase(BaseTestCase):
+
+    _config_file_list = []
 
     def config_files(self):
         return copy.copy(self._config_file_list)
 
+    def config_overrides(self):
+        self.config_fixture.config(policy_file=dirs.etc('policy.json'))
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.external.DefaultDomain',
+                     'keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token',
+                     'keystone.auth.plugins.oauth1.OAuth',
+                     'keystone.auth.plugins.saml2.Saml2'])
+        self.config_fixture.config(
+            # TODO(morganfainberg): Make Cache Testing a separate test case
+            # in tempest, and move it out of the base unit tests.
+            group='cache',
+            backend='dogpile.cache.memory',
+            enabled=True,
+            proxies=['keystone.tests.test_cache.CacheIsolatingProxy'])
+        self.config_fixture.config(
+            group='catalog',
+            driver='keystone.catalog.backends.templated.Catalog',
+            template_file=dirs.tests('default_catalog.templates'))
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.kvs.Identity')
+        self.config_fixture.config(
+            group='kvs',
+            backends=[
+                'keystone.tests.test_kvs.KVSBackendForcedKeyMangleFixture',
+                'keystone.tests.test_kvs.KVSBackendFixture'])
+        self.config_fixture.config(
+            group='revoke',
+            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(
+            group='signing',
+            certfile='examples/pki/certs/signing_cert.pem',
+            keyfile='examples/pki/private/signing_key.pem',
+            ca_certs='examples/pki/certs/cacert.pem')
+        self.config_fixture.config(
+            group='token',
+            driver='keystone.token.backends.kvs.Token')
+        self.config_fixture.config(
+            group='trust',
+            driver='keystone.trust.backends.kvs.Trust')
+
     def setUp(self):
         super(TestCase, self).setUp()
+        self.addCleanup(self.cleanup_instance(
+            '_paths', '_memo', '_overrides', '_group_overrides', 'maxDiff',
+            'exit_patch', 'config_fixture', 'logger'))
 
         self._paths = []
 
@@ -341,7 +432,8 @@ class TestCase(testtools.TestCase):
         self.exit_patch.mock.side_effect = UnexpectedExit
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.config(self.config_files())
-        self.opt(policy_file=dirs.etc('policy.json'))
+
+        self.config_overrides()
 
         self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
         warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -353,8 +445,6 @@ class TestCase(testtools.TestCase):
 
         self.addCleanup(kvs.INMEMDB.clear)
 
-        self.addCleanup(timeutils.clear_time_override)
-
         # Ensure Notification subscriotions and resource types are empty
         self.addCleanup(notifications.SUBSCRIBERS.clear)
         self.addCleanup(notifications._reset_notifier)
@@ -364,14 +454,6 @@ class TestCase(testtools.TestCase):
 
     def config(self, config_files):
         CONF(args=[], project='keystone', default_config_files=config_files)
-
-    def opt_in_group(self, group, **kw):
-        for k, v in six.iteritems(kw):
-            CONF.set_override(k, v, group)
-
-    def opt(self, **kw):
-        for k, v in six.iteritems(kw):
-            CONF.set_override(k, v)
 
     def load_backends(self):
         """Initializes each manager and assigns them to an attribute."""
@@ -390,23 +472,17 @@ class TestCase(testtools.TestCase):
         self.clear_auth_plugin_registry()
         drivers = service.load_backends()
 
-        # TODO(stevemar): currently, load oauth1 driver as well, eventually
-        # we need to have this as optional.
-        from keystone.contrib import oauth1
-        drivers['oauth1_api'] = oauth1.Manager()
-
-        from keystone.contrib import federation
-        drivers['federation_api'] = federation.Manager()
-
-        dependency.resolve_future_dependencies()
+        drivers.update(dependency.resolve_future_dependencies())
 
         for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
+        self.addCleanup(self.cleanup_instance(*drivers.keys()))
 
         # The credential backend only supports SQL, so we always have to load
         # the tables.
-        self.engine = session.get_engine()
-        self.addCleanup(session.cleanup)
+        self.engine = sql.get_engine()
+        self.addCleanup(sql.cleanup)
+        self.addCleanup(self.cleanup_instance('engine'))
 
         sql.ModelBase.metadata.create_all(bind=self.engine)
         self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
@@ -418,6 +494,10 @@ class TestCase(testtools.TestCase):
         defined on `self`.
 
         """
+        # NOTE(dstanek): create a list of attribute names to be removed
+        # from this instance during cleanup
+        fixtures_to_cleanup = []
+
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
         if hasattr(self, 'identity_api') and hasattr(self, 'assignment_api'):
@@ -429,7 +509,9 @@ class TestCase(testtools.TestCase):
                     rv = self.assignment_api.get_domain(domain['id'])
                 except exception.NotImplemented:
                     rv = domain
-                setattr(self, 'domain_%s' % domain['id'], rv)
+                attrname = 'domain_%s' % domain['id']
+                setattr(self, attrname, rv)
+                fixtures_to_cleanup.append(attrname)
 
             for tenant in fixtures.TENANTS:
                 try:
@@ -437,23 +519,24 @@ class TestCase(testtools.TestCase):
                         tenant['id'], tenant)
                 except exception.Conflict:
                     rv = self.assignment_api.get_project(tenant['id'])
-                    pass
-                setattr(self, 'tenant_%s' % tenant['id'], rv)
+                attrname = 'tenant_%s' % tenant['id']
+                setattr(self, attrname, rv)
+                fixtures_to_cleanup.append(attrname)
 
             for role in fixtures.ROLES:
                 try:
                     rv = self.assignment_api.create_role(role['id'], role)
                 except exception.Conflict:
                     rv = self.assignment_api.get_role(role['id'])
-                    pass
-                setattr(self, 'role_%s' % role['id'], rv)
+                attrname = 'role_%s' % role['id']
+                setattr(self, attrname, rv)
+                fixtures_to_cleanup.append(attrname)
 
             for user in fixtures.USERS:
                 user_copy = user.copy()
                 tenants = user_copy.pop('tenants')
                 try:
-                    rv = self.identity_api.create_user(user['id'],
-                                                       user_copy.copy())
+                    self.identity_api.create_user(user['id'], user_copy)
                 except exception.Conflict:
                     pass
                 for tenant_id in tenants:
@@ -462,7 +545,11 @@ class TestCase(testtools.TestCase):
                                                                 user['id'])
                     except exception.Conflict:
                         pass
-                setattr(self, 'user_%s' % user['id'], user_copy)
+                attrname = 'user_%s' % user['id']
+                setattr(self, attrname, user_copy)
+                fixtures_to_cleanup.append(attrname)
+
+            self.addCleanup(self.cleanup_instance(*fixtures_to_cleanup))
 
     def _paste_config(self, config):
         if not config.startswith('config:'):
@@ -588,6 +675,10 @@ class TestCase(testtools.TestCase):
         if not self.ipv6_enabled:
             raise self.skipTest("IPv6 is not enabled in the system")
 
+    def skip_if_env_not_set(self, env_var):
+        if not os.environ.get(env_var):
+            self.skipTest('Env variable %s is not set.' % env_var)
+
     def assertSetEqual(self, set1, set2, msg=None):
         # TODO(morganfainberg): Remove this and self._assertSetEqual once
         # support for python 2.6 is no longer needed.
@@ -640,3 +731,31 @@ class TestCase(testtools.TestCase):
 
         standardMsg = '\n'.join(lines)
         self.fail(self._formatMessage(msg, standardMsg))
+
+
+class SQLDriverOverrides(object):
+    """A mixin for consolidating sql-specific test overrides."""
+    def config_overrides(self):
+        super(SQLDriverOverrides, self).config_overrides()
+        # SQL specific driver overrides
+        self.config_fixture.config(
+            group='catalog',
+            driver='keystone.catalog.backends.sql.Catalog')
+        self.config_fixture.config(
+            group='ec2',
+            driver='keystone.contrib.ec2.backends.sql.Ec2')
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.sql.Identity')
+        self.config_fixture.config(
+            group='policy',
+            driver='keystone.policy.backends.sql.Policy')
+        self.config_fixture.config(
+            group='revoke',
+            driver='keystone.contrib.revoke.backends.sql.Revoke')
+        self.config_fixture.config(
+            group='token',
+            driver='keystone.token.backends.sql.Token')
+        self.config_fixture.config(
+            group='trust',
+            driver='keystone.trust.backends.sql.Trust')

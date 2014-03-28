@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2012 OpenStack Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,12 +16,13 @@
 import uuid
 
 import sqlalchemy
+from sqlalchemy import exc
 
 from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
-from keystone.openstack.common.db.sqlalchemy import session as db_session
+from keystone.openstack.common.db import exception as db_exception
 from keystone.openstack.common.fixture import moxstubout
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -32,20 +34,21 @@ CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class SqlTests(tests.TestCase):
+class SqlTests(tests.SQLDriverOverrides, tests.TestCase):
 
     def setUp(self):
         super(SqlTests, self).setUp()
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_sql.conf')])
-
         self.load_backends()
 
         # populate the engine with tables & fixtures
         self.load_fixtures(default_fixtures)
         #defaulted by the data load
         self.user_foo['enabled'] = True
+
+    def config_files(self):
+        config_files = super(SqlTests, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
+        return config_files
 
 
 class SqlModels(SqlTests):
@@ -122,7 +125,7 @@ class SqlModels(SqlTests):
 
 class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_password_hashed(self):
-        session = db_session.get_session()
+        session = sql.get_session()
         user_ref = self.identity_api._get_user(session, self.user_foo['id'])
         self.assertNotEqual(user_ref['password'], self.user_foo['password'])
 
@@ -311,7 +314,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
             'password': uuid.uuid4().hex}
 
         self.identity_api.create_user(user_id, user)
-        session = db_session.get_session()
+        session = sql.get_session()
         query = session.query(identity_sql.User)
         query = query.filter_by(id=user_id)
         raw_user_ref = query.one()
@@ -333,14 +336,14 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         fixture = self.useFixture(moxstubout.MoxStubout())
         self.mox = fixture.mox
         tok = token_sql.Token()
-        session = db_session.get_session()
+        session = sql.get_session()
         q = session.query(token_sql.TokenModel.id,
                           token_sql.TokenModel.expires)
         self.mox.StubOutWithMock(session, 'query')
         session.query(token_sql.TokenModel.id,
                       token_sql.TokenModel.expires).AndReturn(q)
-        self.mox.StubOutWithMock(db_session, 'get_session')
-        db_session.get_session().AndReturn(session)
+        self.mox.StubOutWithMock(sql, 'get_session')
+        sql.get_session().AndReturn(session)
         self.mox.ReplayAll()
         tok.list_revoked_tokens()
 
@@ -474,3 +477,44 @@ class SqlLimitTests(SqlTests, test_backend.LimitTests):
     def setUp(self):
         super(SqlLimitTests, self).setUp()
         test_backend.LimitTests.setUp(self)
+
+
+class FakeTable(sql.ModelBase):
+    __tablename__ = 'test_table'
+    col = sql.Column(sql.String(32), primary_key=True)
+
+    @sql.handle_conflicts('keystone')
+    def insert(self):
+        raise db_exception.DBDuplicateEntry
+
+    @sql.handle_conflicts('keystone')
+    def update(self):
+        raise db_exception.DBError(
+            inner_exception=exc.IntegrityError('a', 'a', 'a'))
+
+    @sql.handle_conflicts('keystone')
+    def lookup(self):
+        raise KeyError
+
+
+class SqlDecorators(tests.TestCase):
+
+    def test_initialization_fail(self):
+        self.assertRaises(exception.StringLengthExceeded,
+                          FakeTable, col='a' * 64)
+
+    def test_initialization(self):
+        tt = FakeTable(col='a')
+        self.assertEqual('a', tt.col)
+
+    def test_non_ascii_init(self):
+        # NOTE(I159): Non ASCII characters must cause UnicodeDecodeError
+        # if encoding is not provided explicitly.
+        self.assertRaises(UnicodeDecodeError, FakeTable, col='Я')
+
+    def test_conflict_happend(self):
+        self.assertRaises(exception.Conflict, FakeTable().insert)
+        self.assertRaises(exception.Conflict, FakeTable().update)
+
+    def test_not_conflict_error(self):
+        self.assertRaises(KeyError, FakeTable().lookup)

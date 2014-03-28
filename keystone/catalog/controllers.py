@@ -21,6 +21,7 @@ from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 
 
 INTERFACES = ['public', 'internal', 'admin']
@@ -200,8 +201,15 @@ class ServiceV3(controller.V3Controller):
         super(ServiceV3, self).__init__()
         self.get_member_from_driver = self.catalog_api.get_service
 
+    def _validate_service(self, service):
+        if 'enabled' in service and not isinstance(service['enabled'], bool):
+            msg = _('Enabled field must be a boolean')
+            raise exception.ValidationError(message=msg)
+
     @controller.protected()
     def create_service(self, context, service):
+        self._validate_service(service)
+
         ref = self._assign_unique_id(self._normalize_dict(service))
         self._require_attribute(ref, 'type')
 
@@ -222,6 +230,7 @@ class ServiceV3(controller.V3Controller):
     @controller.protected()
     def update_service(self, context, service_id, service):
         self._require_matching_id(service_id, service)
+        self._validate_service(service)
 
         ref = self.catalog_api.update_service(service_id, service)
         return ServiceV3.wrap_member(context, ref)
@@ -251,11 +260,19 @@ class EndpointV3(controller.V3Controller):
         ref = cls.filter_endpoint(ref)
         return super(EndpointV3, cls).wrap_member(context, ref)
 
+    def _validate_endpoint(self, endpoint):
+        if 'enabled' in endpoint and not isinstance(endpoint['enabled'], bool):
+            msg = _('Enabled field must be a boolean')
+            raise exception.ValidationError(message=msg)
+
     @controller.protected()
     def create_endpoint(self, context, endpoint):
+        self._validate_endpoint(endpoint)
+
         ref = self._assign_unique_id(self._normalize_dict(endpoint))
         self._require_attribute(ref, 'service_id')
         self._require_attribute(ref, 'interface')
+        self._require_attribute(ref, 'url')
         self.catalog_api.get_service(ref['service_id'])
 
         ref = self.catalog_api.create_endpoint(ref['id'], ref)
@@ -275,6 +292,7 @@ class EndpointV3(controller.V3Controller):
     @controller.protected()
     def update_endpoint(self, context, endpoint_id, endpoint):
         self._require_matching_id(endpoint_id, endpoint)
+        self._validate_endpoint(endpoint)
 
         if 'service_id' in endpoint:
             self.catalog_api.get_service(endpoint['service_id'])

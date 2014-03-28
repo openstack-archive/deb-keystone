@@ -21,6 +21,7 @@ CONF() because it sets up configuration options.
 import contextlib
 import functools
 
+from oslo.config import cfg
 import six
 import sqlalchemy as sql
 from sqlalchemy.ext import declarative
@@ -30,10 +31,14 @@ from sqlalchemy import types as sql_types
 from keystone.common import utils
 from keystone import exception
 from keystone.openstack.common.db import exception as db_exception
+from keystone.openstack.common.db import options as db_options
 from keystone.openstack.common.db.sqlalchemy import models
 from keystone.openstack.common.db.sqlalchemy import session as db_session
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import jsonutils
 
+
+CONF = cfg.CONF
 
 ModelBase = declarative.declarative_base()
 
@@ -54,17 +59,15 @@ Boolean = sql.Boolean
 Text = sql.Text
 UniqueConstraint = sql.UniqueConstraint
 PrimaryKeyConstraint = sql.PrimaryKeyConstraint
-relationship = sql.orm.relationship
 joinedload = sql.orm.joinedload
 # Suppress flake8's unused import warning for flag_modified:
 flag_modified = flag_modified
-and_ = sql.and_
 
 
 def initialize():
     """Initialize the module."""
 
-    db_session.set_defaults(
+    db_options.set_defaults(
         sql_connection="sqlite:///keystone.db",
         sqlite_db="keystone.db")
 
@@ -90,7 +93,7 @@ def initialize_decorator(init):
                     column = attr.property.columns[0]
                     if isinstance(column.type, String):
                         if not isinstance(v, six.text_type):
-                            v = str(v)
+                            v = six.text_type(v)
                         if column.type.length and \
                                 column.type.length < len(v):
                             raise exception.StringLengthExceeded(
@@ -162,10 +165,37 @@ class ModelDictMixin(object):
         return dict((name, getattr(self, name)) for name in names)
 
 
+_engine_facade = None
+
+
+def _get_engine_facade():
+    global _engine_facade
+
+    if not _engine_facade:
+        _engine_facade = db_session.EngineFacade.from_config(
+            CONF.database.connection, CONF)
+
+    return _engine_facade
+
+
+def cleanup():
+    global _engine_facade
+
+    _engine_facade = None
+
+
+def get_engine():
+    return _get_engine_facade().get_engine()
+
+
+def get_session(expire_on_commit=False):
+    return _get_engine_facade().get_session(expire_on_commit=expire_on_commit)
+
+
 @contextlib.contextmanager
 def transaction(expire_on_commit=False):
     """Return a SQLAlchemy session in a scoped transaction."""
-    session = db_session.get_session(expire_on_commit=expire_on_commit)
+    session = get_session(expire_on_commit=expire_on_commit)
     with session.begin():
         yield session
 

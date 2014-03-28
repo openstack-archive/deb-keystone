@@ -12,10 +12,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from babel import localedata
 import gettext
-import mock
 import socket
+import uuid
+
+from babel import localedata
+import mock
 import webob
 
 from keystone.common import environment
@@ -23,6 +25,7 @@ from keystone.common import wsgi
 from keystone import exception
 from keystone.openstack.common.fixture import moxstubout
 from keystone.openstack.common import gettextutils
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import jsonutils
 from keystone import tests
 
@@ -112,6 +115,13 @@ class ApplicationTest(BaseWSGITest):
         resp = wsgi.render_exception(e)
         self.assertEqual(resp.status_int, 401)
 
+    def test_render_exception_host(self):
+        e = exception.Unauthorized(message=u'\u7f51\u7edc')
+        context = {'host_url': 'http://%s:5000' % uuid.uuid4().hex}
+        resp = wsgi.render_exception(e, context=context)
+
+        self.assertEqual(resp.status_int, 401)
+
 
 class ExtensionRouterTest(BaseWSGITest):
     def test_extensionrouter_local_config(self):
@@ -167,14 +177,26 @@ class MiddlewareTest(BaseWSGITest):
         self.assertEqual(resp.status_int, exception.ValidationError.code)
 
     def test_middleware_exception_error(self):
+
+        exception_str = 'EXCEPTIONERROR'
+
         class FakeMiddleware(wsgi.Middleware):
             def process_response(self, request, response):
-                raise exception.UnexpectedError("EXCEPTIONERROR")
+                raise exception.UnexpectedError(exception_str)
 
-        req = self._make_request()
-        resp = FakeMiddleware(self.app)(req)
-        self.assertEqual(resp.status_int, exception.UnexpectedError.code)
-        self.assertIn("EXCEPTIONERROR", resp.body)
+        def do_request():
+            req = self._make_request()
+            resp = FakeMiddleware(self.app)(req)
+            self.assertEqual(resp.status_int, exception.UnexpectedError.code)
+            return resp
+
+        # Exception data should not be in the message when debug is False
+        self.config_fixture.config(debug=False)
+        self.assertNotIn(exception_str, do_request().body)
+
+        # Exception data should be in the message when debug is True
+        self.config_fixture.config(debug=True)
+        self.assertIn(exception_str, do_request().body)
 
     def test_middleware_local_config(self):
         class FakeMiddleware(wsgi.Middleware):
@@ -303,10 +325,16 @@ class ServerTest(tests.TestCase):
                                     port=self.port, keepalive=True,
                                     keepidle=1)
         server.start()
-        self.assertEqual(mock_sock.setsockopt.call_count, 2)
-        # Test the last set of call args i.e. for the keepidle
-        mock_sock.setsockopt.assert_called_with(socket.IPPROTO_TCP,
-                                                socket.TCP_KEEPIDLE,
-                                                1)
+
+        # keepidle isn't available in the OS X version of eventlet
+        if hasattr(socket, 'TCP_KEEPIDLE'):
+            self.assertEqual(mock_sock.setsockopt.call_count, 2)
+
+            # Test the last set of call args i.e. for the keepidle
+            mock_sock.setsockopt.assert_called_with(socket.IPPROTO_TCP,
+                                                    socket.TCP_KEEPIDLE,
+                                                    1)
+        else:
+            self.assertEqual(mock_sock.setsockopt.call_count, 1)
 
         self.assertTrue(mock_listen.called)

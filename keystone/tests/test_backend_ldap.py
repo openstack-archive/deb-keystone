@@ -25,7 +25,6 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone import identity
-from keystone.openstack.common.db.sqlalchemy import session
 from keystone.openstack.common.fixture import moxstubout
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -53,10 +52,16 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         # Only one conf structure unless we are using separate domain backends
         return CONF
 
-    def _set_config(self):
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_ldap.conf')])
+    def config_overrides(self):
+        super(BaseLDAPIdentity, self).config_overrides()
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.ldap.Identity')
+
+    def config_files(self):
+        config_files = super(BaseLDAPIdentity, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_ldap.conf'))
+        return config_files
 
     def test_build_tree(self):
         """Regression test for building the tree names
@@ -351,6 +356,33 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         after_assignments = len(self.assignment_api.list_role_assignments())
         self.assertEqual(existing_assignments + 2, after_assignments)
 
+    def test_list_role_assignments_dumb_member(self):
+        self.config_fixture.config(group='ldap', use_dumb_member=True)
+        self.clear_database()
+        self.load_backends()
+        self.load_fixtures(default_fixtures)
+
+        new_domain = self._get_domain_fixture()
+        new_user = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'password': uuid.uuid4().hex, 'enabled': True,
+                    'domain_id': new_domain['id']}
+        self.identity_api.create_user(new_user['id'],
+                                      new_user)
+        new_project = {'id': uuid.uuid4().hex,
+                       'name': uuid.uuid4().hex,
+                       'domain_id': new_domain['id']}
+        self.assignment_api.create_project(new_project['id'], new_project)
+        self.assignment_api.create_grant(user_id=new_user['id'],
+                                         project_id=new_project['id'],
+                                         role_id='other')
+
+        # Read back the list of assignments and ensure
+        # that the LDAP dumb member isn't listed.
+        assignment_ids = [a['user_id'] for a in
+                          self.assignment_api.list_role_assignments()]
+        dumb_id = common_ldap.BaseLdap._dn_to_id(CONF.ldap.dumb_member)
+        self.assertNotIn(dumb_id, assignment_ids)
+
     def test_list_role_assignments_bad_role(self):
         self.skipTest('Blocked by bug 1221805')
 
@@ -423,7 +455,8 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         # returned by list_domains changes is the new default_domain_id.
 
         new_domain_id = uuid.uuid4().hex
-        self.opt_in_group('identity', default_domain_id=new_domain_id)
+        self.config_fixture.config(group='identity',
+                                   default_domain_id=new_domain_id)
 
         domains = self.assignment_api.list_domains()
 
@@ -512,10 +545,9 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         self.skipTest("Using arbitrary attributes doesn't work under LDAP")
 
 
-class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
+class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
     def setUp(self):
         super(LDAPIdentity, self).setUp()
-        self._set_config()
         self.clear_database()
 
         common_ldap.register_handler('fake://', fakeldap.FakeLdap)
@@ -541,7 +573,7 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
                           'fake1')
 
     def test_configurable_subtree_delete(self):
-        self.opt_in_group('ldap', allow_subtree_delete=True)
+        self.config_fixture.config(group='ldap', allow_subtree_delete=True)
         self.load_backends()
 
         project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
@@ -671,14 +703,14 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
                           self.role_member['id'])
 
     def test_dumb_member(self):
-        CONF.ldap.use_dumb_member = True
-        CONF.ldap.dumb_member = 'cn=dumb,cn=example,cn=com'
+        self.config_fixture.config(group='ldap', use_dumb_member=True)
         self.clear_database()
         self.load_backends()
         self.load_fixtures(default_fixtures)
+        dumb_id = common_ldap.BaseLdap._dn_to_id(CONF.ldap.dumb_member)
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user,
-                          'dumb')
+                          dumb_id)
 
     def test_project_attribute_mapping(self):
         CONF.ldap.tenant_name_attribute = 'ou'
@@ -854,9 +886,8 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
 
     def test_user_api_get_connection_no_user_password(self):
         """Don't bind in case the user and password are blank."""
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf')])
-        CONF.ldap.url = "fake://memory"
+        # Ensure the username/password are in-fact blank
+        self.config_fixture.config(group='ldap', user=None, password=None)
         user_api = identity.backends.ldap.UserApi(CONF)
         self.stubs.Set(fakeldap, 'FakeLdap',
                        self.mox.CreateMock(fakeldap.FakeLdap))
@@ -870,10 +901,61 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
                                  tls_cacertdir=None,
                                  tls_cacertfile=None,
                                  tls_req_cert=2,
-                                 use_tls=False).AndReturn(conn)
+                                 use_tls=False,
+                                 chase_referrals=None).AndReturn(conn)
         self.mox.ReplayAll()
 
         user_api.get_connection(user=None, password=None)
+
+    def test_chase_referrals_off(self):
+        self.config_fixture.config(
+            group='ldap',
+            url='fake://memory',
+            chase_referrals=False)
+        user_api = identity.backends.ldap.UserApi(CONF)
+        self.stubs.Set(fakeldap, 'FakeLdap',
+                       self.mox.CreateMock(fakeldap.FakeLdap))
+        common_ldap.register_handler('fake://', fakeldap.FakeLdap)
+        user = uuid.uuid4().hex
+        password = uuid.uuid4().hex
+        conn = self.mox.CreateMockAnything()
+        conn = fakeldap.FakeLdap(CONF.ldap.url,
+                                 0,
+                                 alias_dereferencing=None,
+                                 tls_cacertdir=None,
+                                 tls_cacertfile=None,
+                                 tls_req_cert=2,
+                                 use_tls=False,
+                                 chase_referrals=False).AndReturn(conn)
+        conn.simple_bind_s(user, password).AndReturn(None)
+        self.mox.ReplayAll()
+
+        user_api.get_connection(user=user, password=password)
+
+    def test_chase_referrals_on(self):
+        self.config_fixture.config(
+            group='ldap',
+            url='fake://memory',
+            chase_referrals=True)
+        user_api = identity.backends.ldap.UserApi(CONF)
+        self.stubs.Set(fakeldap, 'FakeLdap',
+                       self.mox.CreateMock(fakeldap.FakeLdap))
+        common_ldap.register_handler('fake://', fakeldap.FakeLdap)
+        user = uuid.uuid4().hex
+        password = uuid.uuid4().hex
+        conn = self.mox.CreateMockAnything()
+        conn = fakeldap.FakeLdap(CONF.ldap.url,
+                                 0,
+                                 alias_dereferencing=None,
+                                 tls_cacertdir=None,
+                                 tls_cacertfile=None,
+                                 tls_req_cert=2,
+                                 use_tls=False,
+                                 chase_referrals=True).AndReturn(conn)
+        conn.simple_bind_s(user, password).AndReturn(None)
+        self.mox.ReplayAll()
+
+        user_api.get_connection(user=user, password=password)
 
     def test_wrong_ldap_scope(self):
         CONF.ldap.query_scope = uuid.uuid4().hex
@@ -1109,28 +1191,27 @@ class LDAPIdentity(tests.TestCase, BaseLDAPIdentity):
         domain_ref = self.assignment_api.get_domain_by_name(domain['name'])
         self.assertEqual(domain_ref, domain)
 
-    def test_get_not_default_domain_by_name(self):
-        domain_name = 'foo'
-        self.assertRaises(exception.DomainNotFound,
-                          self.assignment_api.get_domain_by_name,
-                          domain_name)
-
 
 class LDAPIdentityEnabledEmulation(LDAPIdentity):
     def setUp(self):
         super(LDAPIdentityEnabledEmulation, self).setUp()
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_ldap.conf')])
-        self.opt_in_group('ldap',
-                          user_enabled_emulation=True,
-                          tenant_enabled_emulation=True)
         self.clear_database()
         self.load_backends()
         self.load_fixtures(default_fixtures)
         for obj in [self.tenant_bar, self.tenant_baz, self.user_foo,
                     self.user_two, self.user_badguy]:
             obj.setdefault('enabled', True)
+
+    def config_files(self):
+        config_files = super(LDAPIdentityEnabledEmulation, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_ldap.conf'))
+        return config_files
+
+    def config_overrides(self):
+        super(LDAPIdentityEnabledEmulation, self).config_overrides()
+        self.config_fixture.config(group='ldap',
+                                   user_enabled_emulation=True,
+                                   tenant_enabled_emulation=True)
 
     def test_project_crud(self):
         # NOTE(topol): LDAPIdentityEnabledEmulation will create an
@@ -1191,21 +1272,21 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             "Enabled emulation conflicts with enabled mask")
 
 
-class LdapIdentitySqlAssignment(tests.TestCase, BaseLDAPIdentity):
+class LdapIdentitySqlAssignment(BaseLDAPIdentity, tests.SQLDriverOverrides,
+                                tests.TestCase):
 
-    def _set_config(self):
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_ldap_sql.conf')])
+    def config_files(self):
+        config_files = super(LdapIdentitySqlAssignment, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_ldap_sql.conf'))
+        return config_files
 
     def setUp(self):
         super(LdapIdentitySqlAssignment, self).setUp()
-        self._set_config()
         self.clear_database()
         self.load_backends()
         cache.configure_cache_region(cache.REGION)
-        self.engine = session.get_engine()
-        self.addCleanup(session.cleanup)
+        self.engine = sql.get_engine()
+        self.addCleanup(sql.cleanup)
 
         sql.ModelBase.metadata.create_all(bind=self.engine)
         self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
@@ -1213,6 +1294,15 @@ class LdapIdentitySqlAssignment(tests.TestCase, BaseLDAPIdentity):
         self.load_fixtures(default_fixtures)
         #defaulted by the data load
         self.user_foo['enabled'] = True
+
+    def config_overrides(self):
+        super(LdapIdentitySqlAssignment, self).config_overrides()
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.ldap.Identity')
+        self.config_fixture.config(
+            group='assignment',
+            driver='keystone.assignment.backends.sql.Assignment')
 
     def test_domain_crud(self):
         pass
@@ -1230,7 +1320,8 @@ class LdapIdentitySqlAssignment(tests.TestCase, BaseLDAPIdentity):
         orig_default_domain_id = CONF.identity.default_domain_id
 
         new_domain_id = uuid.uuid4().hex
-        self.opt_in_group('identity', default_domain_id=new_domain_id)
+        self.config_fixture.config(group='identity',
+                                   default_domain_id=new_domain_id)
 
         domains = self.assignment_api.list_domains()
 
@@ -1254,7 +1345,8 @@ class LdapIdentitySqlAssignment(tests.TestCase, BaseLDAPIdentity):
         self.skipTest('Blocked by bug 1221805')
 
 
-class MultiLDAPandSQLIdentity(tests.TestCase, BaseLDAPIdentity):
+class MultiLDAPandSQLIdentity(BaseLDAPIdentity, tests.SQLDriverOverrides,
+                              tests.TestCase):
     """Class to test common SQL plus individual LDAP backends.
 
     We define a set of domains and domain-specific backends:
@@ -1275,11 +1367,10 @@ class MultiLDAPandSQLIdentity(tests.TestCase, BaseLDAPIdentity):
     def setUp(self):
         super(MultiLDAPandSQLIdentity, self).setUp()
 
-        self._set_config()
         self.load_backends()
 
-        self.engine = session.get_engine()
-        self.addCleanup(session.cleanup)
+        self.engine = sql.get_engine()
+        self.addCleanup(sql.cleanup)
 
         sql.ModelBase.metadata.create_all(bind=self.engine)
         self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
@@ -1289,18 +1380,24 @@ class MultiLDAPandSQLIdentity(tests.TestCase, BaseLDAPIdentity):
         # All initial domain data setup complete, time to switch on support
         # for separate backends per domain.
 
-        self.opt_in_group('identity',
-                          domain_specific_drivers_enabled=True,
-                          domain_config_dir=tests.TESTSDIR)
+        self.config_fixture.config(group='identity',
+                                   domain_specific_drivers_enabled=True,
+                                   domain_config_dir=tests.TESTSDIR)
 
         self._set_domain_configs()
         self.clear_database()
         self.load_fixtures(default_fixtures)
 
-    def _set_config(self):
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_multi_ldap_sql.conf')])
+    def config_overrides(self):
+        super(MultiLDAPandSQLIdentity, self).config_overrides()
+        # Make sure identity and assignment are actually SQL drivers,
+        # BaseLDAPIdentity sets these options to use LDAP.
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.sql.Identity')
+        self.config_fixture.config(
+            group='assignment',
+            driver='keystone.assignment.backends.sql.Assignment')
 
     def _setup_domain_test_data(self):
 
@@ -1328,24 +1425,15 @@ class MultiLDAPandSQLIdentity(tests.TestCase, BaseLDAPIdentity):
         # test overrides are included.
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [tests.dirs.etc('keystone.conf.sample'),
-             tests.dirs.tests('test_overrides.conf'),
-             tests.dirs.tests('backend_multi_ldap_sql.conf'),
-             tests.dirs.tests('keystone.Default.conf')],
+            [tests.dirs.tests_conf('keystone.Default.conf')],
             'Default')
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [tests.dirs.etc('keystone.conf.sample'),
-             tests.dirs.tests('test_overrides.conf'),
-             tests.dirs.tests('backend_multi_ldap_sql.conf'),
-             tests.dirs.tests('keystone.domain1.conf')],
+            [tests.dirs.tests_conf('keystone.domain1.conf')],
             'domain1')
         self.identity_api.domain_configs._load_config(
             self.identity_api.assignment_api,
-            [tests.dirs.etc('keystone.conf.sample'),
-             tests.dirs.tests('test_overrides.conf'),
-             tests.dirs.tests('backend_multi_ldap_sql.conf'),
-             tests.dirs.tests('keystone.domain2.conf')],
+            [tests.dirs.tests_conf('keystone.domain2.conf')],
             'domain2')
 
     def reload_backends(self, domain_id):

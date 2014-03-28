@@ -21,6 +21,7 @@ from keystone.common import controller
 from keystone.common import dependency
 from keystone import config
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -52,13 +53,13 @@ class TrustV3(controller.V3Controller):
     member_name = "trust"
 
     @classmethod
-    def base_url(cls, path=None):
+    def base_url(cls, context, path=None):
         """Construct a path and pass it to V3Controller.base_url method."""
 
         # NOTE(stevemar): Overriding path to /OS-TRUST/trusts so that
         # V3Controller.base_url handles setting the self link correctly.
         path = '/OS-TRUST/' + cls.collection_name
-        return controller.V3Controller.base_url(path=path)
+        return super(TrustV3, cls).base_url(context, path=path)
 
     def _get_user_id(self, context):
         if 'token_id' in context:
@@ -98,7 +99,7 @@ class TrustV3(controller.V3Controller):
                 trust_full_roles.append(full_role)
         trust['roles'] = trust_full_roles
         trust['roles_links'] = {
-            'self': (self.base_url() + "/%s/roles" % trust['id']),
+            'self': (self.base_url(context) + "/%s/roles" % trust['id']),
             'next': None,
             'previous': None}
 
@@ -134,6 +135,9 @@ class TrustV3(controller.V3Controller):
         if not trust:
             raise exception.ValidationError(attribute='trust',
                                             target='request')
+        if trust.get('project_id') and not trust.get('roles'):
+            raise exception.Forbidden(
+                _('At least one role should be specified.'))
         try:
             user_id = self._get_user_id(context)
             _trustor_only(context, trust, user_id)

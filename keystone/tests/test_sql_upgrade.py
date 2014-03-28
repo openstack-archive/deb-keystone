@@ -35,16 +35,19 @@ import uuid
 
 from migrate.versioning import api as versioning_api
 import sqlalchemy
+import sqlalchemy.exc
 
 from keystone.assignment.backends import sql as assignment_sql
 from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone.common import utils
 from keystone import config
+from keystone.contrib import federation
 from keystone import credential
 from keystone import exception
+from keystone.openstack.common.db import exception as db_exception
 from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.db.sqlalchemy import session
+from keystone.openstack.common.db.sqlalchemy import session as db_session
 from keystone import tests
 from keystone.tests import default_fixtures
 
@@ -53,18 +56,15 @@ CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class SqlMigrateBase(tests.TestCase):
+class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
     def initialize_sql(self):
         self.metadata = sqlalchemy.MetaData()
         self.metadata.bind = self.engine
 
-    _config_file_list = [tests.dirs.etc('keystone.conf.sample'),
-                         tests.dirs.tests('test_overrides.conf'),
-                         tests.dirs.tests('backend_sql.conf')]
-
-    #override this to specify the complete list of configuration files
     def config_files(self):
-        return self._config_file_list
+        config_files = super(SqlMigrateBase, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
+        return config_files
 
     def repo_package(self):
         return sql
@@ -74,9 +74,21 @@ class SqlMigrateBase(tests.TestCase):
 
         self.config(self.config_files())
 
+        conn_str = CONF.database.connection
+        if (conn_str.startswith('sqlite') and
+                conn_str[10:] == tests.DEFAULT_TEST_DB_FILE):
+            # Override the default with a DB that is specific to the migration
+            # tests only if the DB Connection string is the same as the global
+            # default. This is required so that no conflicts occur due to the
+            # global default DB already being under migrate control.
+            db_file = tests.dirs.tmp('keystone_migrate_test.db')
+            self.config_fixture.config(
+                group='database',
+                connection='sqlite:///%s' % db_file)
+
         # create and share a single sqlalchemy engine for testing
-        self.engine = session.get_engine()
-        self.Session = session.get_maker(self.engine, autocommit=False)
+        self.engine = sql.get_engine()
+        self.Session = db_session.get_maker(self.engine, autocommit=False)
 
         self.initialize_sql()
         self.repo_path = migration_helpers.find_migrate_repo(
@@ -94,7 +106,7 @@ class SqlMigrateBase(tests.TestCase):
                                  autoload=True)
         self.downgrade(0)
         table.drop(self.engine, checkfirst=True)
-        session.cleanup()
+        sql.cleanup()
         super(SqlMigrateBase, self).tearDown()
 
     def select_table(self, name):
@@ -158,7 +170,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableDoesNotExist('user')
 
     def test_start_version_0(self):
-        version = migration.db_version(self.repo_path, 0)
+        version = migration.db_version(sql.get_engine(), self.repo_path, 0)
         self.assertEqual(version, 0, "DB is not at version 0")
 
     def test_two_steps_forward_one_step_back(self):
@@ -595,9 +607,13 @@ class SqlUpgradeTests(SqlMigrateBase):
         session.commit()
         session.close()
 
-    def insert_dict(self, session, table_name, d):
+    def insert_dict(self, session, table_name, d, table=None):
         """Naively inserts key-value pairs into a table, given a dictionary."""
-        this_table = sqlalchemy.Table(table_name, self.metadata, autoload=True)
+        if table is None:
+            this_table = sqlalchemy.Table(table_name, self.metadata,
+                                          autoload=True)
+        else:
+            this_table = table
         insert = this_table.insert()
         insert.execute(d)
         session.commit()
@@ -829,11 +845,9 @@ class SqlUpgradeTests(SqlMigrateBase):
     def test_upgrade_default_roles(self):
         def count_member_roles():
             session = self.Session()
-            query_string = ("select count(*) as c from role "
-                            "where name='%s'" % config.CONF.member_role_name)
-            role_count = session.execute(query_string).fetchone()['c']
-            session.close()
-            return role_count
+            role_table = sqlalchemy.Table("role", self.metadata, autoload=True)
+            return session.query(role_table).filter_by(
+                name=config.CONF.member_role_name).count()
 
         self.upgrade(16)
         self.assertEqual(0, count_member_roles())
@@ -930,6 +944,12 @@ class SqlUpgradeTests(SqlMigrateBase):
                                  "trust_id", "user_id"])
 
     def test_fixup_role(self):
+        def count_role():
+            session = self.Session()
+            self.initialize_sql()
+            role_table = sqlalchemy.Table("role", self.metadata, autoload=True)
+            return session.query(role_table).filter_by(extra=None).count()
+
         session = self.Session()
         self.assertEqual(self.schema.version, 0, "DB is at version 0")
         self.upgrade(1)
@@ -938,14 +958,9 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.insert_dict(session, "role", {"id": "test2",
                                            "name": "test2",
                                            "extra": None})
-        r = session.execute('select count(*) as c from role '
-                            'where extra is null')
-        self.assertEqual(r.fetchone()['c'], 2)
-        session.commit()
+        self.assertEqual(count_role(), 2)
         self.upgrade(19)
-        r = session.execute('select count(*) as c from role '
-                            'where extra is null')
-        self.assertEqual(r.fetchone()['c'], 0)
+        self.assertEqual(count_role(), 0)
 
     def test_legacy_endpoint_id(self):
         session = self.Session()
@@ -2092,6 +2107,454 @@ class SqlUpgradeTests(SqlMigrateBase):
             unlimited_trust['id'],
             session.query(trust_table.columns.id).one()[0])
 
+    def test_upgrade_service_enabled_cols(self):
+        """Migration 44 added `enabled` column to `service` table."""
+
+        self.upgrade(44)
+
+        # Verify that there's an 'enabled' field.
+        exp_cols = ['id', 'type', 'extra', 'enabled']
+        self.assertTableColumns('service', exp_cols)
+
+    def test_downgrade_service_enabled_cols(self):
+        """Check columns when downgrade to migration 43.
+
+        The downgrade from migration 44 removes the `enabled` column from the
+        `service` table.
+
+        """
+
+        self.upgrade(44)
+        self.downgrade(43)
+
+        exp_cols = ['id', 'type', 'extra']
+        self.assertTableColumns('service', exp_cols)
+
+    def test_upgrade_service_enabled_data(self):
+        """Migration 44 has to migrate data from `extra` to `enabled`."""
+
+        session = self.Session()
+
+        def add_service(**extra_data):
+            service_id = uuid.uuid4().hex
+
+            service = {
+                'id': service_id,
+                'type': uuid.uuid4().hex,
+                'extra': json.dumps(extra_data),
+            }
+
+            self.insert_dict(session, 'service', service)
+
+            return service_id
+
+        self.upgrade(43)
+
+        # Different services with expected enabled and extra values, and a
+        # description.
+        random_attr_name = uuid.uuid4().hex
+        random_attr_value = uuid.uuid4().hex
+        random_attr = {random_attr_name: random_attr_value}
+        random_attr_str = "%s='%s'" % (random_attr_name, random_attr_value)
+        random_attr_enabled_false = {random_attr_name: random_attr_value,
+                                     'enabled': False}
+        random_attr_enabled_false_str = 'enabled=False,%s' % random_attr_str
+
+        services = [
+            # Some values for True.
+            (add_service(), (True, {}), 'no enabled'),
+            (add_service(enabled=True), (True, {}), 'enabled=True'),
+            (add_service(enabled='true'), (True, {}), "enabled='true'"),
+            (add_service(**random_attr),
+             (True, random_attr), random_attr_str),
+            (add_service(enabled=None), (True, {}), 'enabled=None'),
+
+            # Some values for False.
+            (add_service(enabled=False), (False, {}), 'enabled=False'),
+            (add_service(enabled='false'), (False, {}), "enabled='false'"),
+            (add_service(enabled='0'), (False, {}), "enabled='0'"),
+            (add_service(**random_attr_enabled_false),
+             (False, random_attr), random_attr_enabled_false_str),
+        ]
+
+        self.upgrade(44)
+
+        # Verify that the services have the expected values.
+
+        self.metadata.clear()
+        service_table = sqlalchemy.Table('service', self.metadata,
+                                         autoload=True)
+
+        def fetch_service(service_id):
+            cols = [service_table.c.enabled, service_table.c.extra]
+            f = service_table.c.id == service_id
+            s = sqlalchemy.select(cols).where(f)
+            ep = session.execute(s).fetchone()
+            return ep.enabled, json.loads(ep.extra)
+
+        for service_id, exp, msg in services:
+            exp_enabled, exp_extra = exp
+
+            enabled, extra = fetch_service(service_id)
+
+            self.assertIs(exp_enabled, enabled, msg)
+            self.assertEqual(exp_extra, extra, msg)
+
+    def test_downgrade_service_enabled_data(self):
+        """Downgrade from migration 44 migrates data.
+
+        Downgrade from migration 44 migrates data from `enabled` to
+        `extra`. Any disabled services have 'enabled': False put into 'extra'.
+
+        """
+
+        session = self.Session()
+
+        def add_service(enabled=True, **extra_data):
+            service_id = uuid.uuid4().hex
+
+            service = {
+                'id': service_id,
+                'type': uuid.uuid4().hex,
+                'extra': json.dumps(extra_data),
+                'enabled': enabled
+            }
+
+            self.insert_dict(session, 'service', service)
+
+            return service_id
+
+        self.upgrade(44)
+
+        # Insert some services using the new format.
+
+        # We'll need a service entry since it's the foreign key for services.
+        service_id = add_service(True)
+
+        new_service = (lambda enabled, **extra_data:
+                       add_service(enabled, **extra_data))
+
+        # Different services with expected extra values, and a
+        # description.
+        services = [
+            # True tests
+            (new_service(True), {}, 'enabled'),
+            (new_service(True, something='whatever'),
+             {'something': 'whatever'},
+             "something='whatever'"),
+
+            # False tests
+            (new_service(False), {'enabled': False}, 'enabled=False'),
+            (new_service(False, something='whatever'),
+             {'enabled': False, 'something': 'whatever'},
+             "enabled=False, something='whatever'"),
+        ]
+
+        self.downgrade(43)
+
+        # Verify that the services have the expected values.
+
+        self.metadata.clear()
+        service_table = sqlalchemy.Table('service', self.metadata,
+                                         autoload=True)
+
+        def fetch_service(service_id):
+            cols = [service_table.c.extra]
+            f = service_table.c.id == service_id
+            s = sqlalchemy.select(cols).where(f)
+            ep = session.execute(s).fetchone()
+            return json.loads(ep.extra)
+
+        for service_id, exp_extra, msg in services:
+            extra = fetch_service(service_id)
+            self.assertEqual(exp_extra, extra, msg)
+
+    def test_upgrade_endpoint_enabled_cols(self):
+        """Migration 42 added `enabled` column to `endpoint` table."""
+
+        self.upgrade(42)
+
+        # Verify that there's an 'enabled' field.
+        exp_cols = ['id', 'legacy_endpoint_id', 'interface', 'region',
+                    'service_id', 'url', 'extra', 'enabled']
+        self.assertTableColumns('endpoint', exp_cols)
+
+    def test_downgrade_endpoint_enabled_cols(self):
+        """Check columns when downgrade from migration 41.
+
+        The downgrade from migration 42 removes the `enabled` column from the
+        `endpoint` table.
+
+        """
+
+        self.upgrade(42)
+        self.downgrade(41)
+
+        exp_cols = ['id', 'legacy_endpoint_id', 'interface', 'region',
+                    'service_id', 'url', 'extra']
+        self.assertTableColumns('endpoint', exp_cols)
+
+    def test_upgrade_endpoint_enabled_data(self):
+        """Migration 42 has to migrate data from `extra` to `enabled`."""
+
+        session = self.Session()
+
+        def add_service():
+            service_id = uuid.uuid4().hex
+
+            service = {
+                'id': service_id,
+                'type': uuid.uuid4().hex
+            }
+
+            self.insert_dict(session, 'service', service)
+
+            return service_id
+
+        def add_endpoint(service_id, **extra_data):
+            endpoint_id = uuid.uuid4().hex
+
+            endpoint = {
+                'id': endpoint_id,
+                'interface': uuid.uuid4().hex[:8],
+                'service_id': service_id,
+                'url': uuid.uuid4().hex,
+                'extra': json.dumps(extra_data)
+            }
+            self.insert_dict(session, 'endpoint', endpoint)
+
+            return endpoint_id
+
+        self.upgrade(41)
+
+        # Insert some endpoints using the old format where `enabled` is in
+        # `extra` JSON.
+
+        # We'll need a service entry since it's the foreign key for endpoints.
+        service_id = add_service()
+
+        new_ep = lambda **extra_data: add_endpoint(service_id, **extra_data)
+
+        # Different endpoints with expected enabled and extra values, and a
+        # description.
+        random_attr_name = uuid.uuid4().hex
+        random_attr_value = uuid.uuid4().hex
+        random_attr = {random_attr_name: random_attr_value}
+        random_attr_str = "%s='%s'" % (random_attr_name, random_attr_value)
+        random_attr_enabled_false = {random_attr_name: random_attr_value,
+                                     'enabled': False}
+        random_attr_enabled_false_str = 'enabled=False,%s' % random_attr_str
+
+        endpoints = [
+            # Some values for True.
+            (new_ep(), (True, {}), 'no enabled'),
+            (new_ep(enabled=True), (True, {}), 'enabled=True'),
+            (new_ep(enabled='true'), (True, {}), "enabled='true'"),
+            (new_ep(**random_attr),
+             (True, random_attr), random_attr_str),
+            (new_ep(enabled=None), (True, {}), 'enabled=None'),
+
+            # Some values for False.
+            (new_ep(enabled=False), (False, {}), 'enabled=False'),
+            (new_ep(enabled='false'), (False, {}), "enabled='false'"),
+            (new_ep(enabled='0'), (False, {}), "enabled='0'"),
+            (new_ep(**random_attr_enabled_false),
+             (False, random_attr), random_attr_enabled_false_str),
+        ]
+
+        self.upgrade(42)
+
+        # Verify that the endpoints have the expected values.
+
+        self.metadata.clear()
+        endpoint_table = sqlalchemy.Table('endpoint', self.metadata,
+                                          autoload=True)
+
+        def fetch_endpoint(endpoint_id):
+            cols = [endpoint_table.c.enabled, endpoint_table.c.extra]
+            f = endpoint_table.c.id == endpoint_id
+            s = sqlalchemy.select(cols).where(f)
+            ep = session.execute(s).fetchone()
+            return ep.enabled, json.loads(ep.extra)
+
+        for endpoint_id, exp, msg in endpoints:
+            exp_enabled, exp_extra = exp
+
+            enabled, extra = fetch_endpoint(endpoint_id)
+
+            self.assertIs(exp_enabled, enabled, msg)
+            self.assertEqual(exp_extra, extra, msg)
+
+    def test_downgrade_endpoint_enabled_data(self):
+        """Downgrade from migration 42 migrates data.
+
+        Downgrade from migration 42 migrates data from `enabled` to
+        `extra`. Any disabled endpoints have 'enabled': False put into 'extra'.
+
+        """
+
+        session = self.Session()
+
+        def add_service():
+            service_id = uuid.uuid4().hex
+
+            service = {
+                'id': service_id,
+                'type': uuid.uuid4().hex
+            }
+
+            self.insert_dict(session, 'service', service)
+
+            return service_id
+
+        def add_endpoint(service_id, enabled, **extra_data):
+            endpoint_id = uuid.uuid4().hex
+
+            endpoint = {
+                'id': endpoint_id,
+                'interface': uuid.uuid4().hex[:8],
+                'service_id': service_id,
+                'url': uuid.uuid4().hex,
+                'extra': json.dumps(extra_data),
+                'enabled': enabled
+            }
+            self.insert_dict(session, 'endpoint', endpoint)
+
+            return endpoint_id
+
+        self.upgrade(42)
+
+        # Insert some endpoints using the new format.
+
+        # We'll need a service entry since it's the foreign key for endpoints.
+        service_id = add_service()
+
+        new_ep = (lambda enabled, **extra_data:
+                  add_endpoint(service_id, enabled, **extra_data))
+
+        # Different endpoints with expected extra values, and a
+        # description.
+        endpoints = [
+            # True tests
+            (new_ep(True), {}, 'enabled'),
+            (new_ep(True, something='whatever'), {'something': 'whatever'},
+             "something='whatever'"),
+
+            # False tests
+            (new_ep(False), {'enabled': False}, 'enabled=False'),
+            (new_ep(False, something='whatever'),
+             {'enabled': False, 'something': 'whatever'},
+             "enabled=False, something='whatever'"),
+        ]
+
+        self.downgrade(41)
+
+        # Verify that the endpoints have the expected values.
+
+        self.metadata.clear()
+        endpoint_table = sqlalchemy.Table('endpoint', self.metadata,
+                                          autoload=True)
+
+        def fetch_endpoint(endpoint_id):
+            cols = [endpoint_table.c.extra]
+            f = endpoint_table.c.id == endpoint_id
+            s = sqlalchemy.select(cols).where(f)
+            ep = session.execute(s).fetchone()
+            return json.loads(ep.extra)
+
+        for endpoint_id, exp_extra, msg in endpoints:
+            extra = fetch_endpoint(endpoint_id)
+            self.assertEqual(exp_extra, extra, msg)
+
+    def test_upgrade_region_non_unique_description(self):
+        """Test upgrade to migration 43.
+
+        This migration should occur with no unique constraint on the region
+        description column.
+
+        Create two regions with the same description.
+
+        """
+        session = self.Session()
+
+        def add_region():
+            region_uuid = uuid.uuid4().hex
+
+            region = {
+                'id': region_uuid,
+                'description': ''
+            }
+
+            self.insert_dict(session, 'region', region)
+            return region_uuid
+
+        self.upgrade(43)
+        # Write one region to the database
+        add_region()
+        # Write another region to the database with the same description
+        add_region()
+
+    def test_upgrade_region_unique_description(self):
+        """Test upgrade to migration 43.
+
+        This test models a migration where there is a unique constraint on the
+        description column.
+
+        Create two regions with the same description.
+
+        """
+        session = self.Session()
+
+        def add_region(table):
+            region_uuid = uuid.uuid4().hex
+
+            region = {
+                'id': region_uuid,
+                'description': ''
+            }
+
+            self.insert_dict(session, 'region', region, table=table)
+            return region_uuid
+
+        def get_metadata():
+            meta = sqlalchemy.MetaData()
+            meta.bind = self.engine
+            return meta
+
+        # Migrate to version 42
+        self.upgrade(42)
+        region_table = sqlalchemy.Table('region',
+                                        get_metadata(),
+                                        autoload=True)
+        # create the unique constraint and load the new version of the
+        # reflection cache
+        idx = sqlalchemy.Index('description', region_table.c.description,
+                               unique=True)
+        idx.create(self.engine)
+
+        region_unique_table = sqlalchemy.Table('region',
+                                               get_metadata(),
+                                               autoload=True)
+        add_region(region_unique_table)
+        self.assertEqual(1, session.query(region_unique_table).count())
+        # verify the unique constraint is enforced
+        self.assertRaises(sqlalchemy.exc.IntegrityError,
+                          add_region,
+                          table=region_unique_table)
+
+        # migrate to 43, unique constraint should be dropped
+        self.upgrade(43)
+
+        # reload the region table from the schema
+        region_nonunique = sqlalchemy.Table('region',
+                                            get_metadata(),
+                                            autoload=True)
+        self.assertEqual(1, session.query(region_nonunique).count())
+
+        # Write a second region to the database with the same description
+        add_region(region_nonunique)
+        self.assertEqual(2, session.query(region_nonunique).count())
+
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):
         # Populate the appropriate fields in the user
@@ -2212,3 +2675,56 @@ class SqlUpgradeTests(SqlMigrateBase):
                          "Non-InnoDB tables exist")
 
         connection.close()
+
+
+class VersionTests(SqlMigrateBase):
+    def test_core_initial(self):
+        """When get the version before migrated, it's 0."""
+        version = migration_helpers.get_db_version()
+        self.assertEqual(0, version)
+
+    def test_core_max(self):
+        """When get the version after upgrading, it's the new version."""
+        self.upgrade(self.max_version)
+        version = migration_helpers.get_db_version()
+        self.assertEqual(self.max_version, version)
+
+    def test_extension_not_controlled(self):
+        """When get the version before controlling, raises DbMigrationError."""
+        self.assertRaises(db_exception.DbMigrationError,
+                          migration_helpers.get_db_version,
+                          extension='federation')
+
+    def test_extension_initial(self):
+        """When get the initial version of an extension, it's 0."""
+        abs_path = migration_helpers.find_migrate_repo(federation)
+        migration.db_version_control(sql.get_engine(), abs_path)
+        version = migration_helpers.get_db_version(extension='federation')
+        self.assertEqual(0, version)
+
+    def test_extension_migrated(self):
+        """When get the version after migrating an extension, it's not 0."""
+        abs_path = migration_helpers.find_migrate_repo(federation)
+        migration.db_version_control(sql.get_engine(), abs_path)
+        migration.db_sync(sql.get_engine(), abs_path)
+        version = migration_helpers.get_db_version(extension='federation')
+        self.assertTrue(version > 0, "Version didn't change after migrated?")
+
+    def test_unexpected_extension(self):
+        """The version for an extension that doesn't exist raises ImportError.
+
+        """
+
+        extension_name = uuid.uuid4().hex
+        self.assertRaises(ImportError,
+                          migration_helpers.get_db_version,
+                          extension=extension_name)
+
+    def test_unversioned_extension(self):
+        """The version for extensions without migrations raise an exception.
+
+        """
+
+        self.assertRaises(exception.MigrationNotProvided,
+                          migration_helpers.get_db_version,
+                          extension='access')

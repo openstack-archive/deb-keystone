@@ -20,7 +20,7 @@ from keystone import config
 from keystone import exception
 from keystone import identity
 from keystone import tests
-from keystone.tests import _ldap_livetest
+from keystone.tests import test_ldap_livetest
 
 
 CONF = config.CONF
@@ -34,18 +34,27 @@ def create_object(dn, attrs):
     conn.unbind_s()
 
 
-class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
+class LiveTLSLDAPIdentity(test_ldap_livetest.LiveLDAPIdentity):
 
-    def _set_config(self):
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_tls_liveldap.conf')])
+    def _ldap_skip_live(self):
+            self.skip_if_env_not_set('ENABLE_TLS_LDAP_LIVE_TEST')
+
+    def config_files(self):
+        config_files = super(LiveTLSLDAPIdentity, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_tls_liveldap.conf'))
+        return config_files
+
+    def config_overrides(self):
+        super(LiveTLSLDAPIdentity, self).config_overrides()
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.ldap.Identity')
 
     def test_tls_certfile_demand_option(self):
-        self.opt_in_group('ldap',
-                          use_tls=True,
-                          tls_cacertdir=None,
-                          tls_req_cert='demand')
+        self.config_fixture.config(group='ldap',
+                                   use_tls=True,
+                                   tls_cacertdir=None,
+                                   tls_req_cert='demand')
         self.identity_api = identity.backends.ldap.Identity()
 
         user = {'id': 'fake1',
@@ -64,10 +73,10 @@ class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
                           'fake1')
 
     def test_tls_certdir_demand_option(self):
-        self.opt_in_group('ldap',
-                          use_tls=True,
-                          tls_cacertdir=None,
-                          tls_req_cert='demand')
+        self.config_fixture.config(group='ldap',
+                                   use_tls=True,
+                                   tls_cacertdir=None,
+                                   tls_req_cert='demand')
         self.identity_api = identity.backends.ldap.Identity()
 
         user = {'id': 'fake1',
@@ -86,8 +95,8 @@ class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
                           'fake1')
 
     def test_tls_bad_certfile(self):
-        self.opt_in_group(
-            'ldap',
+        self.config_fixture.config(
+            group='ldap',
             use_tls=True,
             tls_req_cert='demand',
             tls_cacertfile='/etc/keystone/ssl/certs/mythicalcert.pem',
@@ -101,8 +110,8 @@ class LiveTLSLDAPIdentity(_ldap_livetest.LiveLDAPIdentity):
         self.assertRaises(IOError, self.identity_api.create_user, 'fake', user)
 
     def test_tls_bad_certdir(self):
-        self.opt_in_group(
-            'ldap',
+        self.config_fixture.config(
+            group='ldap',
             use_tls=True,
             tls_cacertfile=None,
             tls_req_cert='demand',

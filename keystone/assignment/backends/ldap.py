@@ -25,6 +25,7 @@ from keystone.common import models
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import ldap as ldap_identity
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -293,7 +294,7 @@ class Assignment(assignment.Driver):
                     conn = self.group.get_connection()
                     roles = conn.search_s(dn, ldap.SCOPE_ONELEVEL,
                                           query, ['%s' % '1.1'])
-                    for role_dn, _ in roles:
+                    for role_dn, i in roles:
                         conn.delete_s(role_dn)
                 except ldap.NO_SUCH_OBJECT:
                     pass
@@ -706,6 +707,16 @@ class RoleApi(common_ldap.BaseLdap):
             # object.
             tenant_dn = ldap.dn.dn2str(tenant)
             for user_dn in role[self.member_attribute]:
+                # NOTE(nkinder): Ideally, this comparison would be aware of the
+                # Distinguished Name LDAP syntax. Since Keystone is responsible
+                # for setting the dumb member DN, we are relatively sure that
+                # it is returned in the same form. We still need to do a case
+                # insensitive comparison since attribute names will be upper
+                # case for AD. We already do this elsewhere in the LDAP
+                # driver, so it's OK until we decide to become syntax aware.
+                if (self.use_dumb_member and
+                        user_dn.lower() == self.dumb_member.lower()):
+                    continue
                 res.append(UserRoleAssociation(
                            user_dn=user_dn,
                            role_dn=role_dn,

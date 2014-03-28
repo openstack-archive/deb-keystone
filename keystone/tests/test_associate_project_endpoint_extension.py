@@ -12,13 +12,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import copy
 import uuid
 
+from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone import contrib
 from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common import importutils
-from keystone import tests
 from keystone.tests import test_v3
 
 
@@ -27,19 +28,20 @@ class TestExtensionCase(test_v3.RestfulTestCase):
     EXTENSION_NAME = 'endpoint_filter'
     EXTENSION_TO_ADD = 'endpoint_filter_extension'
 
-    def config_files(self):
-        conf_files = super(TestExtensionCase, self).config_files()
-        conf_files.append(tests.dirs.tests(
-            'test_associate_project_endpoint_extension.conf'))
-        return conf_files
-
     def setup_database(self):
         super(TestExtensionCase, self).setup_database()
         package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
         package = importutils.import_module(package_name)
         abs_path = migration_helpers.find_migrate_repo(package)
-        migration.db_version_control(abs_path)
-        migration.db_sync(abs_path)
+        migration.db_version_control(sql.get_engine(), abs_path)
+        migration.db_sync(sql.get_engine(), abs_path)
+
+    def config_overrides(self):
+        super(TestExtensionCase, self).config_overrides()
+        self.config_fixture.config(
+            group='catalog',
+            driver='keystone.contrib.endpoint_filter.backends.catalog_sql.'
+                   'EndpointFilterCatalog')
 
     def setUp(self):
         super(TestExtensionCase, self).setUp()
@@ -458,3 +460,43 @@ class AssociateProjectEndpointFilterTokenRequestTestCase(TestExtensionCase):
             ep_filter_assoc=1)
         self.assertEqual(r.result['token']['project']['id'],
                          self.project['id'])
+
+    def test_disabled_endpoint(self):
+        """The catalog contains only enabled endpoints."""
+
+        # Add an enabled endpoint to the default project
+        self.put('/OS-EP-FILTER/projects/%(project_id)s'
+                 '/endpoints/%(endpoint_id)s' % {
+                     'project_id': self.project['id'],
+                     'endpoint_id': self.endpoint_id},
+                 expected_status=204)
+
+        # Add a disabled endpoint to the default project.
+
+        # Create a disabled endpoint that's like the enabled one.
+        disabled_endpoint_ref = copy.copy(self.endpoint)
+        disabled_endpoint_id = uuid.uuid4().hex
+        disabled_endpoint_ref.update({
+            'id': disabled_endpoint_id,
+            'enabled': False,
+            'interface': 'internal'
+        })
+        self.catalog_api.create_endpoint(disabled_endpoint_id,
+                                         disabled_endpoint_ref)
+
+        self.put('/OS-EP-FILTER/projects/%(project_id)s'
+                 '/endpoints/%(endpoint_id)s' % {
+                     'project_id': self.project['id'],
+                     'endpoint_id': disabled_endpoint_id},
+                 expected_status=204)
+
+        # Authenticate to get token with catalog
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+
+        endpoints = r.result['token']['catalog'][0]['endpoints']
+        endpoint_ids = [ep['id'] for ep in endpoints]
+        self.assertEqual([self.endpoint_id], endpoint_ids)

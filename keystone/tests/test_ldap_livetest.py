@@ -38,6 +38,13 @@ def create_object(dn, attrs):
 
 class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
 
+    def setUp(self):
+        self._ldap_skip_live()
+        super(LiveLDAPIdentity, self).setUp()
+
+    def _ldap_skip_live(self):
+            self.skip_if_env_not_set('ENABLE_LDAP_LIVE_TEST')
+
     def clear_database(self):
         devnull = open('/dev/null', 'w')
         subprocess.call(['ldapdelete',
@@ -69,10 +76,16 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
                       {'objectclass': 'organizationalUnit',
                        'ou': 'UserGroups'})
 
-    def _set_config(self):
-        self.config([tests.dirs.etc('keystone.conf.sample'),
-                     tests.dirs.tests('test_overrides.conf'),
-                     tests.dirs.tests('backend_liveldap.conf')])
+    def config_files(self):
+        config_files = super(LiveLDAPIdentity, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_liveldap.conf'))
+        return config_files
+
+    def config_overrides(self):
+        super(LiveLDAPIdentity, self).config_overrides()
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.ldap.Identity')
 
     def test_build_tree(self):
         """Regression test for building the tree names
@@ -101,20 +114,21 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
         create_object("ou=alt_users,%s" % CONF.ldap.user_tree_dn,
                       aliased_users_ldif)
 
-        self.opt_in_group('ldap',
-                          query_scope='sub',
-                          alias_dereferencing='never')
+        self.config_fixture.config(group='ldap',
+                                   query_scope='sub',
+                                   alias_dereferencing='never')
         self.identity_api = identity_ldap.Identity()
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user,
                           'alt_fake1')
 
-        self.opt_in_group('ldap', alias_dereferencing='searching')
+        self.config_fixture.config(group='ldap',
+                                   alias_dereferencing='searching')
         self.identity_api = identity_ldap.Identity()
         user_ref = self.identity_api.get_user('alt_fake1')
         self.assertEqual(user_ref['id'], 'alt_fake1')
 
-        self.opt_in_group('ldap', alias_dereferencing='always')
+        self.config_fixture.config(group='ldap', alias_dereferencing='always')
         self.identity_api = identity_ldap.Identity()
         user_ref = self.identity_api.get_user('alt_fake1')
         self.assertEqual(user_ref['id'], 'alt_fake1')
@@ -200,7 +214,7 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
                 negative_user['id'])
             self.assertEqual(len(group_refs), 0)
 
-        self.opt_in_group('ldap', group_filter='(dn=xx)')
+        self.config_fixture.config(group='ldap', group_filter='(dn=xx)')
         self.reload_backends(CONF.identity.default_domain_id)
         group_refs = self.identity_api.list_groups_for_user(
             positive_user['id'])
@@ -209,7 +223,8 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
             negative_user['id'])
         self.assertEqual(len(group_refs), 0)
 
-        self.opt_in_group('ldap', group_filter='(objectclass=*)')
+        self.config_fixture.config(group='ldap',
+                                   group_filter='(objectclass=*)')
         self.reload_backends(CONF.identity.default_domain_id)
         group_refs = self.identity_api.list_groups_for_user(
             positive_user['id'])
@@ -219,8 +234,8 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
         self.assertEqual(len(group_refs), 0)
 
     def test_user_enable_attribute_mask(self):
-        self.opt_in_group(
-            'ldap',
+        self.config_fixture.config(
+            group='ldap',
             user_enabled_emulation=False,
             user_enabled_attribute='employeeType')
         super(LiveLDAPIdentity, self).test_user_enable_attribute_mask()

@@ -3584,7 +3584,8 @@ class CatalogTests(object):
         res = self.catalog_api.create_service(
             service_id,
             new_service.copy())
-        self.assertDictEqual(res, new_service)
+        new_service['enabled'] = True
+        self.assertDictEqual(new_service, res)
 
         # list
         services = self.catalog_api.list_services()
@@ -3675,6 +3676,73 @@ class CatalogTests(object):
             'url': uuid.uuid4().hex,
         }
         self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
+
+    def _create_endpoints(self):
+        # Creates a service and 2 endpoints for the service in the same region.
+        # The 'public' interface is enabled and the 'internal' interface is
+        # disabled.
+
+        def create_endpoint(service_id, region, **kwargs):
+            id_ = uuid.uuid4().hex
+            ref = {
+                'id': id_,
+                'interface': 'public',
+                'region': region,
+                'service_id': service_id,
+                'url': 'http://localhost/%s' % uuid.uuid4().hex,
+            }
+            ref.update(kwargs)
+            self.catalog_api.create_endpoint(id_, ref)
+            return ref
+
+        # Create a service for use with the endpoints.
+        service_id = uuid.uuid4().hex
+        service_ref = {
+            'id': service_id,
+            'name': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_service(service_id, service_ref)
+
+        region = uuid.uuid4().hex
+
+        # Create endpoints
+        enabled_endpoint_ref = create_endpoint(service_id, region)
+        disabled_endpoint_ref = create_endpoint(
+            service_id, region, enabled=False, interface='internal')
+
+        return service_ref, enabled_endpoint_ref, disabled_endpoint_ref
+
+    def test_get_catalog_endpoint_disabled(self):
+        """Get back only enabled endpoints when get the v2 catalog."""
+
+        service_ref, enabled_endpoint_ref, dummy_disabled_endpoint_ref = (
+            self._create_endpoints())
+
+        user_id = uuid.uuid4().hex
+        project_id = uuid.uuid4().hex
+        catalog = self.catalog_api.get_catalog(user_id, project_id)
+
+        exp_entry = {
+            'id': enabled_endpoint_ref['id'],
+            'name': service_ref['name'],
+            'publicURL': enabled_endpoint_ref['url'],
+        }
+
+        region = enabled_endpoint_ref['region']
+        self.assertEqual(exp_entry, catalog[region][service_ref['type']])
+
+    def test_get_v3_catalog_endpoint_disabled(self):
+        """Get back only enabled endpoints when get the v3 catalog."""
+
+        enabled_endpoint_ref = self._create_endpoints()[1]
+
+        user_id = uuid.uuid4().hex
+        project_id = uuid.uuid4().hex
+        catalog = self.catalog_api.get_v3_catalog(user_id, project_id)
+
+        endpoint_ids = [x['id'] for x in catalog[0]['endpoints']]
+        self.assertEqual([enabled_endpoint_ref['id']], endpoint_ids)
 
 
 class PolicyTests(object):
@@ -3782,7 +3850,7 @@ class InheritanceTests(object):
           inherited should not show up
 
         """
-        self.opt_in_group('os_inherit', enabled=True)
+        self.config_fixture.config(group='os_inherit', enabled=True)
         role_list = []
         for _ in range(3):
             role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -3857,7 +3925,7 @@ class InheritanceTests(object):
           direct and two by virtue of inherited group roles
 
         """
-        self.opt_in_group('os_inherit', enabled=True)
+        self.config_fixture.config(group='os_inherit', enabled=True)
         role_list = []
         for _ in range(4):
             role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -3935,7 +4003,7 @@ class InheritanceTests(object):
         - Get a list of projects for user, should return all three projects
 
         """
-        self.opt_in_group('os_inherit', enabled=True)
+        self.config_fixture.config(group='os_inherit', enabled=True)
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.assignment_api.create_domain(domain['id'], domain)
         user1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
@@ -3979,7 +4047,7 @@ class InheritanceTests(object):
           from the domain, plus the one separate project
 
         """
-        self.opt_in_group('os_inherit', enabled=True)
+        self.config_fixture.config(group='os_inherit', enabled=True)
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.assignment_api.create_domain(domain['id'], domain)
         domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -4152,6 +4220,8 @@ class FilterTests(filtering.FilterTests):
 
 
 class LimitTests(filtering.FilterTests):
+    ENTITIES = ['user', 'group', 'project']
+
     def setUp(self):
         """Setup for Limit Test Cases."""
 
@@ -4162,13 +4232,12 @@ class LimitTests(filtering.FilterTests):
         self.entity_lists = {}
         self.domain1_entity_lists = {}
 
-        for entity in ['user', 'group', 'project']:
+        for entity in self.ENTITIES:
             # Create 20 entities, 14 of which are in domain1
             self.entity_lists[entity] = self._create_test_data(entity, 6)
             self.domain1_entity_lists[entity] = self._create_test_data(
                 entity, 14, self.domain1['id'])
-             # Make sure we clean up when finished
-            self.addCleanup(self.clean_up_entity, entity)
+        self.addCleanup(self.clean_up_entities)
 
     def clean_up_domain(self):
         """Clean up domain test data from Limit Test Cases."""
@@ -4176,15 +4245,18 @@ class LimitTests(filtering.FilterTests):
         self.domain1['enabled'] = False
         self.assignment_api.update_domain(self.domain1['id'], self.domain1)
         self.assignment_api.delete_domain(self.domain1['id'])
+        del self.domain1
 
-    def clean_up_entity(self, entity):
+    def clean_up_entities(self):
         """Clean up entity test data from Limit Test Cases."""
-
-        self._delete_test_data(entity, self.entity_lists[entity])
-        self._delete_test_data(entity, self.domain1_entity_lists[entity])
+        for entity in self.ENTITIES:
+            self._delete_test_data(entity, self.entity_lists[entity])
+            self._delete_test_data(entity, self.domain1_entity_lists[entity])
+        del self.entity_lists
+        del self.domain1_entity_lists
 
     def _test_list_entity_filtered_and_limited(self, entity):
-        self.opt(list_limit=10)
+        self.config_fixture.config(list_limit=10)
         # Should get back just 10 entities in domain1
         hints = driver_hints.Hints()
         hints.add_filter('domain_id', self.domain1['id'])
@@ -4195,9 +4267,9 @@ class LimitTests(filtering.FilterTests):
 
         # Override with driver specific limit
         if entity == 'project':
-            self.opt_in_group('assignment', list_limit=5)
+            self.config_fixture.config(group='assignment', list_limit=5)
         else:
-            self.opt_in_group('identity', list_limit=5)
+            self.config_fixture.config(group='identity', list_limit=5)
 
         # Should get back just 5 users in domain1
         hints = driver_hints.Hints()

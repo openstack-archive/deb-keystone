@@ -22,16 +22,30 @@ from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
-from keystone.openstack.common import versionutils
 
 
 LOG = log.getLogger(__name__)
 CONF = config.CONF
 
-v2_deprecated = versionutils.deprecated(what='v2 API',
-                                        as_of=versionutils.deprecated.ICEHOUSE,
-                                        in_favor_of='v3 API')
+
+def v2_deprecated(f):
+    """No-op decorator in preparation for deprecating Identity API v2.
+
+    This is a placeholder for the pending deprecation of v2. The implementation
+    of this decorator can be replaced with::
+
+        from keystone.openstack.common import versionutils
+
+
+        v2_deprecated = versionutils.deprecated(
+            what='v2 API',
+            as_of=versionutils.deprecated.JUNO,
+            in_favor_of='v3 API')
+
+    """
+    return f
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
@@ -291,28 +305,21 @@ class V3Controller(wsgi.Application):
     get_member_from_driver = None
 
     @classmethod
-    def base_url(cls, path=None):
-        endpoint = CONF.public_endpoint % CONF
+    def base_url(cls, context, path=None):
+        endpoint = super(V3Controller, cls).base_url(context, 'public')
+        if not path:
+            path = cls.collection_name
 
-        # allow a missing trailing slash in the config
-        if endpoint[-1] != '/':
-            endpoint += '/'
-
-        url = endpoint + 'v3'
-
-        if path:
-            return url + path
-        else:
-            return url + '/' + cls.collection_name
+        return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
 
     @classmethod
-    def _add_self_referential_link(cls, ref):
+    def _add_self_referential_link(cls, context, ref):
         ref.setdefault('links', {})
-        ref['links']['self'] = cls.base_url() + '/' + ref['id']
+        ref['links']['self'] = cls.base_url(context) + '/' + ref['id']
 
     @classmethod
     def wrap_member(cls, context, ref):
-        cls._add_self_referential_link(ref)
+        cls._add_self_referential_link(context, ref)
         return {cls.member_name: ref}
 
     @classmethod
@@ -348,7 +355,7 @@ class V3Controller(wsgi.Application):
         container = {cls.collection_name: refs}
         container['links'] = {
             'next': None,
-            'self': cls.base_url(path=context['path']),
+            'self': cls.base_url(context, path=context['path']),
             'previous': None}
 
         if list_limited:
@@ -514,6 +521,28 @@ class V3Controller(wsgi.Application):
         """Ensures the value matches the reference's ID, if any."""
         if 'id' in ref and ref['id'] != value:
             raise exception.ValidationError('Cannot change ID')
+
+    def _require_matching_domain_id(self, ref_id, ref, get_member):
+        """Ensure the current domain ID matches the reference one, if any.
+
+        Provided we want domain IDs to be immutable, check whether any
+        domain_id specified in the ref dictionary matches the existing
+        domain_id for this entity.
+
+        :param ref_id: the ID of the entity
+        :param ref: the dictionary of new values proposed for this entity
+        :param get_member: The member function to call to get the current
+                           entity
+        :raises: :class:`keystone.exception.ValidationError`
+
+        """
+        # TODO(henry-nash): It might be safer and more efficient to do this
+        # check in the managers affected, so look to migrate this check to
+        # there in the future.
+        if CONF.domain_id_immutable and 'domain_id' in ref:
+            existing_ref = get_member(ref_id)
+            if ref['domain_id'] != existing_ref['domain_id']:
+                raise exception.ValidationError(_('Cannot change Domain ID'))
 
     def _assign_unique_id(self, ref):
         """Generates and assigns a unique identifer to a reference."""

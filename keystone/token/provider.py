@@ -22,9 +22,9 @@ from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
-from keystone.contrib.revoke import model as revoke_model
 
 from keystone import exception
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -124,9 +124,9 @@ class Manager(manager.Manager):
         except KeyError:
             raise exception.TokenNotFound(_('Failed to validate token'))
 
-        token_values = revoke_model.build_token_values_v2(
-            token_data, CONF.identity.default_domain_id)
         if self.revoke_api is not None:
+            token_values = self.revoke_api.model.build_token_values_v2(
+                token_data, CONF.identity.default_domain_id)
             self.revoke_api.check_token(token_values)
 
     def validate_v2_token(self, token_id, belongs_to=None):
@@ -144,8 +144,8 @@ class Manager(manager.Manager):
             token_data = token['token']
         except KeyError:
             raise exception.TokenNotFound(_('Failed to validate token'))
-        token_values = revoke_model.build_token_values(token_data)
         if self.revoke_api is not None:
+            token_values = self.revoke_api.model.build_token_values(token_data)
             self.revoke_api.check_token(token_values)
 
     def check_revocation(self, token):

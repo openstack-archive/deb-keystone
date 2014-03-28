@@ -69,12 +69,10 @@ class Version(wsgi.Application):
 
         super(Version, self).__init__()
 
-    def _get_identity_url(self, version='v2.0'):
+    def _get_identity_url(self, context, version):
         """Returns a URL to keystone's own endpoint."""
-        url = CONF['%s_endpoint' % self.endpoint_url_type] % CONF
-        if url[-1] != '/':
-            url += '/'
-        return '%s%s/' % (url, version)
+        url = self.base_url(context, self.endpoint_url_type)
+        return '%s/%s/' % (url, version)
 
     def _get_versions_list(self, context):
         """The list of versions is dependent on the context."""
@@ -82,12 +80,12 @@ class Version(wsgi.Application):
         if 'v2.0' in _VERSIONS:
             versions['v2.0'] = {
                 'id': 'v2.0',
-                'status': 'deprecated',
+                'status': 'stable',
                 'updated': '2014-04-17T00:00:00Z',
                 'links': [
                     {
                         'rel': 'self',
-                        'href': self._get_identity_url(version='v2.0'),
+                        'href': self._get_identity_url(context, 'v2.0'),
                     }, {
                         'rel': 'describedby',
                         'type': 'text/html',
@@ -120,7 +118,7 @@ class Version(wsgi.Application):
                 'links': [
                     {
                         'rel': 'self',
-                        'href': self._get_identity_url(version='v3'),
+                        'href': self._get_identity_url(context, 'v3'),
                     }
                 ],
                 'media-types': [

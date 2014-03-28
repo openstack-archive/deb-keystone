@@ -14,9 +14,13 @@ import random
 import uuid
 
 from keystone.auth import controllers as auth_controllers
+from keystone.common import dependency
+from keystone.common import serializer
+from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone import config
 from keystone import contrib
+from keystone.contrib.federation import controllers as federation_controllers
 from keystone.contrib.federation import utils as mapping_utils
 from keystone import exception
 from keystone.openstack.common.db.sqlalchemy import migration
@@ -35,6 +39,7 @@ def dummy_validator(*args, **kwargs):
     pass
 
 
+@dependency.requires('federation_api')
 class FederationTests(test_v3.RestfulTestCase):
 
     EXTENSION_NAME = 'federation'
@@ -45,8 +50,8 @@ class FederationTests(test_v3.RestfulTestCase):
         package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
         package = importutils.import_module(package_name)
         abs_path = migration_helpers.find_migrate_repo(package)
-        migration.db_version_control(abs_path)
-        migration.db_sync(abs_path)
+        migration.db_version_control(sql.get_engine(), abs_path)
+        migration.db_sync(sql.get_engine(), abs_path)
 
 
 class FederatedIdentityProviderTests(FederationTests):
@@ -67,18 +72,6 @@ class FederatedIdentityProviderTests(FederationTests):
         result = resp.result.get(parameter)
         if assert_is_not_none:
             self.assertIsNotNone(result)
-        return result
-
-    def _fetch_attributes_from_response(self, resp, parameters=[],
-                                        assert_is_not_none=True):
-        """Fetch parameters from the TestResponse object."""
-
-        result = dict()
-        kwargs = {'assert_is_not_none': assert_is_not_none}
-        for parameter in parameters:
-            value = self._fetch_attribute_from_response(resp, parameter,
-                                                        **kwargs)
-            result[parameter] = value
         return result
 
     def _create_and_decapsulate_response(self, body=None):
@@ -692,18 +685,15 @@ class MappingRuleEngineTests(FederationTests):
         self.assertEqual(name, user_name)
         self.assertIn(mapping_fixtures.EMPLOYEE_GROUP_ID, group_ids)
 
-    def test_rule_engine_regex_match_and_many_groups(self):
+    def _rule_engine_regex_match_and_many_groups(self, assertion):
         """Should return group DEVELOPER_GROUP_ID and TESTER_GROUP_ID.
 
-        The TESTER_ASSERTION should successfully have a match in
-        MAPPING_LARGE. This will test a successful regex match
-        for an `any_one_of` evaluation type, and will have many
-        groups returned.
+        A helper function injecting assertion passed as an argument.
+        Expect DEVELOPER_GROUP_ID and TESTER_GROUP_ID in the results.
 
         """
 
         mapping = mapping_fixtures.MAPPING_LARGE
-        assertion = mapping_fixtures.TESTER_ASSERTION
         rp = mapping_utils.RuleProcessor(mapping['rules'])
         values = rp.process(assertion)
         user_name = assertion.get('UserName')
@@ -714,6 +704,44 @@ class MappingRuleEngineTests(FederationTests):
         self.assertIn(mapping_fixtures.DEVELOPER_GROUP_ID, group_ids)
         self.assertIn(mapping_fixtures.TESTER_GROUP_ID, group_ids)
 
+    def test_rule_engine_regex_match_and_many_groups(self):
+        """Should return group DEVELOPER_GROUP_ID and TESTER_GROUP_ID.
+
+        The TESTER_ASSERTION should successfully have a match in
+        MAPPING_LARGE. This will test a successful regex match
+        for an `any_one_of` evaluation type, and will have many
+        groups returned.
+
+        """
+        self._rule_engine_regex_match_and_many_groups(
+            mapping_fixtures.TESTER_ASSERTION)
+
+    def test_rule_engine_discards_nonstring_objects(self):
+        """Check whether RuleProcessor discards non string objects.
+
+        Despite the fact that assertion is malformed and contains
+        non string objects, RuleProcessor should correctly discard them and
+        successfully have a match in MAPPING_LARGE.
+
+        """
+        self._rule_engine_regex_match_and_many_groups(
+            mapping_fixtures.MALFORMED_TESTER_ASSERTION)
+
+    def test_rule_engine_fails_after_discarding_nonstring(self):
+        """Check whether RuleProcessor discards non string objects.
+
+        Expect RuleProcessor to discard non string object, which
+        is required for a correct rule match. Since no rules are
+        matched expect RuleProcessor to raise exception.Unauthorized
+        exception.
+
+        """
+        mapping = mapping_fixtures.MAPPING_SMALL
+        rp = mapping_utils.RuleProcessor(mapping['rules'])
+        assertion = mapping_fixtures.CONTRACTOR_MALFORMED_ASSERTION
+        self.assertRaises(exception.Unauthorized,
+                          rp.process, assertion)
+
 
 class FederatedTokenTests(FederationTests):
 
@@ -721,6 +749,7 @@ class FederatedTokenTests(FederationTests):
     PROTOCOL = 'saml2'
     AUTH_METHOD = 'saml2'
     USER = 'user@ORGANIZATION'
+    ASSERTION_PREFIX = 'PREFIX_'
 
     UNSCOPED_V3_SAML2_REQ = {
         "identity": {
@@ -759,6 +788,17 @@ class FederatedTokenTests(FederationTests):
             'id': uuid.uuid4().hex,
             'rules': rules or self.rules['rules']
         }
+
+    def _assertSerializeToXML(self, json_body):
+        """Serialize JSON body to XML.
+
+        Serialize JSON body to XML, then deserialize to JSON
+        again. Expect both JSON dictionaries to be equal.
+
+        """
+        xml_body = serializer.to_xml(json_body)
+        json_deserialized = serializer.from_xml(xml_body)
+        self.assertDictEqual(json_deserialized, json_body)
 
     def _scope_request(self, unscoped_token_id, scope, scope_id):
         return {
@@ -814,14 +854,58 @@ class FederatedTokenTests(FederationTests):
                                  "project or domain.")
 
     def _issue_unscoped_token(self, assertion='EMPLOYEE_ASSERTION'):
-        api = auth_controllers.Auth()
+        api = federation_controllers.Auth()
         context = {'environment': {}}
         self._inject_assertion(context, assertion)
-        r = api.authenticate_for_token(context, self.UNSCOPED_V3_SAML2_REQ)
+        r = api.federated_authentication(context, self.IDP, self.PROTOCOL)
         return r
 
     def test_issue_unscoped_token(self):
         r = self._issue_unscoped_token()
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_issue_unscoped_token_serialize_to_xml(self):
+        """Issue unscoped token and serialize to XML.
+
+        Make sure common.serializer doesn't complain about
+        the response structure and tag names.
+
+        """
+        r = self._issue_unscoped_token()
+        token_resp = r.json_body
+        # Remove 'extras' if empty or None,
+        # as JSON and XML (de)serializers treat
+        # them differently, making dictionaries
+        # comparisions fail.
+        if not token_resp['token'].get('extras'):
+            token_resp['token'].pop('extras')
+        self._assertSerializeToXML(token_resp)
+
+    def test_issue_unscoped_token_no_groups(self):
+        self.assertRaises(exception.Unauthorized,
+                          self._issue_unscoped_token,
+                          assertion='BAD_TESTER_ASSERTION')
+
+    def test_issue_unscoped_token_malformed_environment(self):
+        """Test whether non string objects are filtered out.
+
+        Put non string objects into the environment, inject
+        correct assertion and try to get an unscoped token.
+        Expect server not to fail on using split() method on
+        non string objects and return token id in the HTTP header.
+
+        """
+        api = auth_controllers.Auth()
+        context = {
+            'environment': {
+                'malformed_object': object(),
+                'another_bad_idea': tuple(xrange(10)),
+                'yet_another_bad_param': dict(zip(uuid.uuid4().hex,
+                                                  range(32)))
+            }
+        }
+        self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
+        r = api.authenticate_for_token(context, self.UNSCOPED_V3_SAML2_REQ)
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_scope_to_project_once(self):
@@ -835,7 +919,7 @@ class FederatedTokenTests(FederationTests):
         projects_ref = self.proj_employees
         self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
 
-    def scope_to_bad_project(self):
+    def test_scope_to_bad_project(self):
         """Scope unscoped token with a project we don't have access to."""
 
         self.post(self.AUTH_URL,
@@ -878,11 +962,15 @@ class FederatedTokenTests(FederationTests):
                           context, self.UNSCOPED_V3_SAML2_REQ)
 
     def test_issue_token_with_nonexistent_group(self):
-        r = self._issue_unscoped_token(assertion='CONTRACTOR_ASSERTION')
-        groups = r.json['token']['user']['OS-FEDERATION:groups']
-        group_ids = set(g['id'] for g in groups)
-        group_ids_ref = set(['bad_group_id'])
-        self.assertEqual(group_ids, group_ids_ref)
+        """Inject assertion that matches rule issuing bad group id.
+
+        Expect server to find out that some groups are missing in the
+        backend and raise exception.MappedGroupNotFound exception.
+
+        """
+        self.assertRaises(exception.MappedGroupNotFound,
+                          self._issue_unscoped_token,
+                          assertion='CONTRACTOR_ASSERTION')
 
     def test_scope_to_domain_once(self):
         r = self.post(self.AUTH_URL,
@@ -981,6 +1069,111 @@ class FederatedTokenTests(FederationTests):
         project_id = token_resp['project']['id']
         self.assertEqual(project_id, project['id'])
         self._check_scoped_token_attributes(token_resp)
+
+    def test_workflow_with_groups_deletion(self):
+        """Test full workflow with groups deletion before token scoping.
+
+        The test scenario is as follows:
+         - Create group ``group``
+         - Create and assign roles to ``group`` and ``project_all``
+         - Patch mapping rules for existing IdP so it issues group id
+         - Issue unscoped token with ``group``'s id
+         - Delete group ``group``
+         - Scope token to ``project_all``
+         - Expect HTTP 500 response
+
+        """
+        # create group and role
+        group = self.new_group_ref(
+            domain_id=self.domainA['id'])
+        self.identity_api.create_group(group['id'],
+                                       group)
+        role = self.new_role_ref()
+        self.assignment_api.create_role(role['id'],
+                                        role)
+
+        # assign role to group and project_admins
+        self.assignment_api.create_grant(role['id'],
+                                         group_id=group['id'],
+                                         project_id=self.project_all['id'])
+
+        rules = {
+            'rules': [
+                {
+                    'local': [
+                        {
+                            'group': {
+                                'id': group['id']
+                            }
+                        },
+                        {
+                            'user': {
+                                'name': '{0}'
+                            }
+                        }
+                    ],
+                    'remote': [
+                        {
+                            'type': 'UserName'
+                        },
+                        {
+                            'type': 'LastName',
+                            'any_one_of': [
+                                'Account'
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        self.federation_api.update_mapping(self.mapping['id'], rules)
+
+        r = self._issue_unscoped_token(assertion='TESTER_ASSERTION')
+        token_id = r.headers.get('X-Subject-Token')
+
+        # delete group
+        self.identity_api.delete_group(group['id'])
+
+        # scope token to project_all, expect HTTP 500
+        scoped_token = self._scope_request(
+            token_id, 'project',
+            self.project_all['id'])
+
+        self.post(self.AUTH_URL,
+                  body=scoped_token,
+                  expected_status=500)
+
+    def test_assertion_prefix_parameter(self):
+        """Test parameters filtering based on the prefix.
+
+        With ``assertion_prefix`` set to fixed, non defailt value,
+        issue an unscoped token from assertion EMPLOYEE_ASSERTION_PREFIXED.
+        Expect server to return unscoped token.
+
+        """
+        self.config_fixture.config(group='federation',
+                                   assertion_prefix=self.ASSERTION_PREFIX)
+        r = self._issue_unscoped_token(assertion='EMPLOYEE_ASSERTION_PREFIXED')
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_assertion_prefix_parameter_expect_fail(self):
+        """Test parameters filtering based on the prefix.
+
+        With ``assertion_prefix`` default value set to empty string
+        issue an unscoped token from assertion EMPLOYEE_ASSERTION.
+        Next, configure ``assertion_prefix`` to value ``UserName``.
+        Try issuing unscoped token with EMPLOYEE_ASSERTION.
+        Expect server to raise exception.Unathorized exception.
+
+        """
+        r = self._issue_unscoped_token()
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+        self.config_fixture.config(group='federation',
+                                   assertion_prefix='UserName')
+
+        self.assertRaises(exception.Unauthorized,
+                          self._issue_unscoped_token)
 
     def load_federation_sample_data(self):
         """Inject additional data."""
@@ -1136,6 +1329,31 @@ class FederatedTokenTests(FederationTests):
                     'local': [
                         {
                             'group': {
+                                'id': self.group_employees['id']
+                            }
+                        },
+                        {
+                            'user': {
+                                'name': '{0}'
+                            }
+                        }
+                    ],
+                    'remote': [
+                        {
+                            'type': self.ASSERTION_PREFIX + 'UserName'
+                        },
+                        {
+                            'type': self.ASSERTION_PREFIX + 'orgPersonType',
+                            'any_one_of': [
+                                'SuperEmployee'
+                            ]
+                        }
+                    ]
+                },
+                {
+                    'local': [
+                        {
+                            'group': {
                                 'id': self.group_customers['id']
                             }
                         },
@@ -1198,7 +1416,12 @@ class FederatedTokenTests(FederationTests):
                     'local': [
                         {
                             'group': {
-                                'id': 'bad_group_id'
+                                'id': uuid.uuid4().hex
+                            }
+                        },
+                        {
+                            'group': {
+                                'id': self.group_customers['id']
                             }
                         },
                         {
@@ -1225,6 +1448,38 @@ class FederatedTokenTests(FederationTests):
                         }
                     ]
                 },
+                {
+                    'local': [
+                        {
+                            'group': {
+                                'id': 'this_group_no_longer_exists'
+                            }
+                        },
+                        {
+                            'user': {
+                                'name': '{0}'
+                            }
+                        }
+                    ],
+                    'remote': [
+                        {
+                            'type': 'UserName',
+                        },
+                        {
+                            'type': 'Email',
+                            'any_one_of': [
+                                'testacct@example.com'
+                            ]
+                        },
+                        {
+                            'type': 'orgPersonType',
+                            'any_one_of': [
+                                'Tester'
+                            ]
+                        }
+                    ]
+                },
+
 
             ]
         }

@@ -12,18 +12,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import os
 import uuid
 import webob
 
-from keystone.common import sql
+import mock
+
 from keystone import config
-from keystone.openstack.common.db.sqlalchemy import session
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
-from keystone.tests.fixtures import appserver
+from keystone.tests.ksfixtures import appserver
 
 
 CONF = config.CONF
@@ -34,8 +35,8 @@ KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
 class CompatTestCase(tests.NoModule, tests.TestCase):
 
-    def config(self, config_files):
-        super(CompatTestCase, self).config(config_files)
+    def setUp(self):
+        super(CompatTestCase, self).setUp()
 
         # FIXME(morganfainberg): Since we are running tests through the
         # controllers and some internal api drivers are SQL-only, the correct
@@ -43,20 +44,12 @@ class CompatTestCase(tests.NoModule, tests.TestCase):
         # credential api makes some very SQL specific assumptions that should
         # be addressed allowing for non-SQL based testing to occur.
         self.load_backends()
-        self.engine = session.get_engine()
-        self.addCleanup(session.cleanup)
-        self.addCleanup(sql.ModelBase.metadata.drop_all,
-                        bind=self.engine)
-        sql.ModelBase.metadata.create_all(bind=self.engine)
-
-    def setUp(self):
-        super(CompatTestCase, self).setUp()
 
         self.load_fixtures(default_fixtures)
 
         # TODO(termie): add an admin user to the fixtures and use that user
         # override the fixtures, for now
-        self.md_foobar = self.assignment_api.add_role_to_user_and_project(
+        self.assignment_api.add_role_to_user_and_project(
             self.user_foo['id'],
             self.tenant_bar['id'],
             self.role_admin['id'])
@@ -64,10 +57,10 @@ class CompatTestCase(tests.NoModule, tests.TestCase):
         conf = self._paste_config('keystone')
         fixture = self.useFixture(appserver.AppServer(conf, appserver.MAIN))
         self.public_server = fixture.server
-        self.addCleanup(delattr, self, 'public_server')
         fixture = self.useFixture(appserver.AppServer(conf, appserver.ADMIN))
         self.admin_server = fixture.server
-        self.addCleanup(delattr, self, 'admin_server')
+
+        self.addCleanup(self.cleanup_instance('public_server', 'admin_server'))
 
         if isinstance(self.checkout_info, str):
             revdir = self.checkout_info
@@ -530,12 +523,14 @@ class KeystoneClientTests(object):
                           client.tokens.authenticate,
                           token=token_id)
 
-    def test_token_expiry_maintained(self):
-        timeutils.set_time_override()
+    @mock.patch.object(timeutils, 'utcnow')
+    def test_token_expiry_maintained(self, mock_utcnow):
+        now = datetime.datetime.utcnow()
+        mock_utcnow.return_value = now
         foo_client = self.get_client(self.user_foo)
 
         orig_token = foo_client.service_catalog.catalog['token']
-        timeutils.advance_time_seconds(1)
+        mock_utcnow.return_value = now + datetime.timedelta(seconds=1)
         reauthenticated_token = foo_client.tokens.authenticate(
             token=foo_client.auth_token)
 

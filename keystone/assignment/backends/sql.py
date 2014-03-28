@@ -13,6 +13,7 @@
 # under the License.
 
 import six
+import sqlalchemy
 
 from keystone import assignment
 from keystone import clean
@@ -21,7 +22,7 @@ from keystone.common.sql import migration_helpers
 from keystone import config
 from keystone import exception
 from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.db.sqlalchemy import session as db_session
+from keystone.openstack.common.gettextutils import _
 
 
 CONF = config.CONF
@@ -39,7 +40,8 @@ class Assignment(assignment.Driver):
     # Internal interface to manage the database
     def db_sync(self, version=None):
         migration.db_sync(
-            migration_helpers.find_migrate_repo(), version=version)
+            sql.get_engine(), migration_helpers.find_migrate_repo(),
+            version=version)
 
     def _get_project(self, session, project_id):
         project_ref = session.query(Project).get(project_id)
@@ -81,7 +83,7 @@ class Assignment(assignment.Driver):
 
         # We aren't given a session when called by the manager directly.
         if session is None:
-            session = db_session.get_session()
+            session = sql.get_session()
 
         q = session.query(RoleAssignment)
         q = q.filter_by(actor_id=user_id or group_id)
@@ -290,13 +292,13 @@ class Assignment(assignment.Driver):
         else:
             raise AttributeError(_("Must specify either domain or project"))
 
-        sql_constraints = sql.and_(
+        sql_constraints = sqlalchemy.and_(
             RoleAssignment.type == assignment_type,
             RoleAssignment.target_id == target_id,
             Role.id == RoleAssignment.role_id,
             RoleAssignment.actor_id.in_(group_ids))
 
-        session = db_session.get_session()
+        session = sql.get_session()
         with session.begin():
             query = session.query(Role).filter(
                 sql_constraints).distinct()
@@ -308,12 +310,12 @@ class Assignment(assignment.Driver):
         else:
             assignment_type = AssignmentType.GROUP_PROJECT
 
-        group_sql_conditions = sql.and_(
+        group_sql_conditions = sqlalchemy.and_(
             RoleAssignment.type == assignment_type,
             entity.id == RoleAssignment.target_id,
             RoleAssignment.actor_id.in_(group_ids))
 
-        session = db_session.get_session()
+        session = sql.get_session()
         with session.begin():
             query = session.query(entity).filter(
                 group_sql_conditions)
