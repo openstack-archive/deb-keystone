@@ -2,16 +2,16 @@ Description: Fixes default db config
  Sets SQLite by default, so that db_sync can work in a non-interactive mode.
 Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
-Last-Update: 2014-03-09
+Last-Update: 2014-03-28
 
---- keystone-2014.1~b3.orig/etc/keystone.conf.sample
-+++ keystone-2014.1~b3/etc/keystone.conf.sample
-@@ -591,7 +591,7 @@
+--- keystone-2014.1~rc1.orig/etc/keystone.conf.sample
++++ keystone-2014.1~rc1/etc/keystone.conf.sample
+@@ -622,7 +622,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
  # Deprecated group/name - [sql]/connection
--#connection=sqlite:////keystone/openstack/common/db/$sqlite_db
+-#connection=<None>
 +connection=sqlite:////var/lib/keystone/keystone.sqlite
  
- # The SQLAlchemy connection string used to connect to the
- # slave database (string value)
+ # The SQL mode to be used for MySQL sessions. This option,
+ # including the default, overrides any server-set SQL mode. To
