@@ -1,3 +1,11 @@
+keystone (2014.1~rc1-1) experimental; urgency=low
+
+  * New upstream release.
+  * Fixed new upsteram (build-)dependencies.
+  * Drops now useless fix-sqla-version-in-requirements patch.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 28 Mar 2014 14:39:11 +0800
+
 keystone (2014.1~b3-1) experimental; urgency=low
 
   * New upstream release (Icehouse beta 3).
