@@ -1,3 +1,9 @@
+keystone (2014.1~rc2-1) experimental; urgency=low
+
+  * New upstream pre-release.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 09 Apr 2014 23:17:06 +0800
+
 keystone (2014.1~rc1-1) experimental; urgency=low
 
   * New upstream release.
