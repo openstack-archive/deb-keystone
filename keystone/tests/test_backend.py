@@ -2249,6 +2249,16 @@ class IdentityTests(object):
                           uuid.uuid4().hex,
                           new_group['id'])
 
+        new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
+                    'password': uuid.uuid4().hex, 'enabled': True,
+                    'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_user(new_user['id'], new_user)
+
+        self.assertRaises(exception.NotFound,
+                          self.identity_api.check_user_in_group,
+                          new_user['id'],
+                          new_group['id'])
+
     def test_list_users_in_group(self):
         domain = self._get_domain_fixture()
         new_group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
@@ -3550,6 +3560,18 @@ class CatalogTests(object):
         self.assertRaises(exception.RegionNotFound,
                           self.catalog_api.get_region,
                           region_id)
+
+    def test_create_region_with_duplicate_id(self):
+        region_id = uuid.uuid4().hex
+        new_region = {
+            'id': region_id,
+            'description': uuid.uuid4().hex
+        }
+        self.catalog_api.create_region(new_region)
+        # Create region again with duplicate id
+        self.assertRaises(exception.Conflict,
+                          self.catalog_api.create_region,
+                          new_region)
 
     def test_get_region_404(self):
         self.assertRaises(exception.RegionNotFound,

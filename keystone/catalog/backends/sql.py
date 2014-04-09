@@ -134,6 +134,7 @@ class Catalog(catalog.Driver):
             session.query(Region).filter_by(id=region_id).delete()
             session.delete(ref)
 
+    @sql.handle_conflicts(conflict_type='region')
     def create_region(self, region_ref):
         session = sql.get_session()
         with session.begin():
@@ -288,6 +289,9 @@ class Catalog(catalog.Driver):
 
         def make_v3_endpoint(endpoint):
             del endpoint['service_id']
+            del endpoint['legacy_endpoint_id']
+            del endpoint['enabled']
+
             endpoint['url'] = core.format_url(endpoint['url'], d)
             return endpoint
 
