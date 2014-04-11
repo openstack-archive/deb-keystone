@@ -1,6 +1,7 @@
 keystone (2014.1~rc2-1) experimental; urgency=low
 
   * New upstream pre-release.
+  * Removed broken patch: defines-gettext-function-to-avoid-ftbfs.patch
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 09 Apr 2014 23:17:06 +0800
 

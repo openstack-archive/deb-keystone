@@ -1,4 +1,3 @@
 fixes-keystone-default-catalog.patch
-defines-gettext-function-to-avoid-ftbfs.patch
 fix-missing-gettextutil.py-import.patch
 fixes-default-connection.patch
