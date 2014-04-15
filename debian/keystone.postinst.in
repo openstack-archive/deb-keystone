@@ -80,7 +80,7 @@ if [ "$1" = "configure" ] ; then
 	fi
 	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
 	# Configure the SQL connection of keystone.conf according to dbconfig-common
-	pkgos_dbc_postinst ${KEY_CONF} sql connection keystone $@
+	pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
 
 	# Make sure /var/log/keystone/keystone.log is owned by keystone
 	# BEFORE any keystone-manage calls.
