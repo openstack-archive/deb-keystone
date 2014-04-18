@@ -1,5 +1,7 @@
-keystone (2014.1~rc2-2) UNRELEASED; urgency=low
+keystone (2014.1-1) unstable; urgency=medium
 
+  * New upstream release.
+  * Uploading to unstable.
   * Fixed config file handling (DEFAULT/connection vs database/connection).
     (Closes: #744761).
 
