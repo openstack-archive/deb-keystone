@@ -1,3 +1,9 @@
+keystone (2014.1-2) UNRELEASED; urgency=low
+
+  * Fixed debian/watch to use github tags.
+
+ -- Thomas Goirand <zigo@debian.org>  Sat, 19 Apr 2014 21:40:41 +0800
+
 keystone (2014.1-1) unstable; urgency=medium
 
   * New upstream release.
