@@ -1,3 +1,4 @@
 fixes-keystone-default-catalog.patch
 fix-missing-gettextutil.py-import.patch
 fixes-default-connection.patch
+cve-2014-0204-stable-icehouse.patch
