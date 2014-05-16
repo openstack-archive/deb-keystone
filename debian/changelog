@@ -1,8 +1,10 @@
-keystone (2014.1-2) UNRELEASED; urgency=low
+keystone (2014.1-2) unstable; urgency=medium
 
   * Fixed debian/watch to use github tags.
+  * Now using "service X restart" to restart keystone after logrotate, and stop
+    using dpkg-dev (Closes: #747890).
 
- -- Thomas Goirand <zigo@debian.org>  Sat, 19 Apr 2014 21:40:41 +0800
+ -- Thomas Goirand <zigo@debian.org>  Sat, 17 May 2014 01:54:29 +0800
 
 keystone (2014.1-1) unstable; urgency=medium
 
