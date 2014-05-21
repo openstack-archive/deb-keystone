@@ -45,7 +45,7 @@ msgstr ""
 " * typ databáze, kterou chcete používat;\n"
 " * název hostitele databázového serveru (který musí přijímat TCP\n"
 "   spojení z tohoto počítače);\n"
-" * uživatelské jméno a heslo pro přístup k databázi;\n"
+" * uživatelské jméno a heslo pro přístup k databázi."
 
 #. Type: boolean
 #. Description
