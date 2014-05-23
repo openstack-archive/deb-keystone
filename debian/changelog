@@ -3,6 +3,7 @@ keystone (2014.1-3) unstable; urgency=medium
   * Added sql migration: ensure using innodb utf8 for assignment table which
     fixes upgrade path from Havana.
   * Fixed cs.po.
+  * Added cve-2014-0204-stable-icehouse.patch.
   * Standards-Version: is now 3.9.5
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 20 May 2014 23:26:00 +0800
