@@ -4,8 +4,5 @@
     rotate 5
     compress
     minsize 100k
-    create 640 keystone keystone
-    postrotate
-        service keystone restart >/dev/null 2>&1 || true
-    endscript
+    copytruncate
 }
