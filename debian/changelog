@@ -1,3 +1,10 @@
+keystone (2014.1-5) unstable; urgency=medium
+
+  * Updates cve-2014-0204-stable-icehouse.patch with latest version from
+    upstream (Closes: #749026).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 30 May 2014 23:09:45 +0800
+
 keystone (2014.1-4) unstable; urgency=medium
 
   * Switched from restarting keystone to copytruncate in logrotate.
