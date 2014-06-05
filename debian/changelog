@@ -1,3 +1,9 @@
+keystone (2014.1-6) unstable; urgency=medium
+
+  * Now build-depends on openstack-pkg-tools >= 12~.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 05 Jun 2014 09:09:54 +0000
+
 keystone (2014.1-5) unstable; urgency=medium
 
   * Updates cve-2014-0204-stable-icehouse.patch with latest version from
