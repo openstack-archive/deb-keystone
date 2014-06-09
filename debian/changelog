@@ -4,6 +4,7 @@ keystone (2014.1.1-1) unstable; urgency=medium
   * Remove cve-2014-0204-stable-icehouse.patch applied upstream.
   * Removed sql_migration_ensure_using_innodb_utf8_for_assignment_table.patch
     applied upstream.
+  * Now (build-)depends on python-six >= 1.6.0.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 09 Jun 2014 23:22:20 +0800
 
