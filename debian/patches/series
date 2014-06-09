@@ -1,4 +1,3 @@
 fixes-keystone-default-catalog.patch
 fix-missing-gettextutil.py-import.patch
 fixes-default-connection.patch
-sql_migration_ensure_using_innodb_utf8_for_assignment_table.patch
