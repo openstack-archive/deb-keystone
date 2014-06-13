@@ -1,3 +1,10 @@
+keystone (2014.1.1-2) unstable; urgency=medium
+
+  * CVE-2014-3476: privilege escalation through trust chained delegation.
+    Applied upstream patch. (Closes: #751454).
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 13 Jun 2014 17:30:08 +0800
+
 keystone (2014.1.1-1) unstable; urgency=medium
 
   * New upstream release.
