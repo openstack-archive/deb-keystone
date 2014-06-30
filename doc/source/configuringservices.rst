@@ -31,7 +31,7 @@ In general:
 * Clients making calls to the service will pass in an authentication token.
 * The Keystone middleware will look for and validate that token, taking the
   appropriate action.
-* It will also retrive additional information from the token such as user
+* It will also retrieve additional information from the token such as user
   name, id, tenant name, id, roles, etc...
 
 The middleware will pass those data down to the service as headers. More
@@ -166,7 +166,7 @@ get more details of the middleware in :doc:`middlewarearchitecture`.
 Configuring Nova to use Keystone
 --------------------------------
 
-When configuring Nova, it is important to create a admin service token for
+When configuring Nova, it is important to create an admin service token for
 the service (from the Configuration step above) and include that as the key
 'admin_token' in Nova's api-paste.ini [filter:authtoken] section or in
 nova.conf [keystone_authtoken] section.
@@ -184,7 +184,7 @@ Auth-Token Middleware with Username and Password
 It is also possible to configure Keystone's auth_token middleware using the
 'admin_user' and 'admin_password' options. When using the 'admin_user' and
 'admin_password' options the 'admin_token' parameter is optional. If
-'admin_token' is specified it will by used only if the specified token is
+'admin_token' is specified it will be used only if the specified token is
 still valid.
 
 Here is an example paste config filter that makes use of the 'admin_user' and
@@ -199,7 +199,7 @@ Here is an example paste config filter that makes use of the 'admin_user' and
     admin_password = keystone123
 
 It should be noted that when using this option an admin tenant/role
-relationship is required. The admin user is granted access to to the 'Admin'
+relationship is required. The admin user is granted access to the 'Admin'
 role to the 'admin' tenant.
 
 The auth_token middleware can also be configured in nova.conf

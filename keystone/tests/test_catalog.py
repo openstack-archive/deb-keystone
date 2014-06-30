@@ -82,29 +82,29 @@ class V2CatalogTestCase(rest.RestfulTestCase):
 
     def test_endpoint_create(self):
         req_body, response = self._endpoint_create()
-        self.assertTrue('endpoint' in response.result)
-        self.assertTrue('id' in response.result['endpoint'])
+        self.assertIn('endpoint', response.result)
+        self.assertIn('id', response.result['endpoint'])
         for field, value in six.iteritems(req_body['endpoint']):
             self.assertEqual(response.result['endpoint'][field], value)
 
     def test_endpoint_create_with_null_adminurl(self):
         req_body, response = self._endpoint_create(adminurl=None)
-        self.assertEqual(req_body['endpoint']['adminurl'], None)
+        self.assertIsNone(req_body['endpoint']['adminurl'])
         self.assertNotIn('adminurl', response.result['endpoint'])
 
     def test_endpoint_create_with_empty_adminurl(self):
         req_body, response = self._endpoint_create(adminurl='')
-        self.assertEqual(req_body['endpoint']['adminurl'], '')
+        self.assertEqual('', req_body['endpoint']['adminurl'])
         self.assertNotIn("adminurl", response.result['endpoint'])
 
     def test_endpoint_create_with_null_internalurl(self):
         req_body, response = self._endpoint_create(internalurl=None)
-        self.assertEqual(req_body['endpoint']['internalurl'], None)
+        self.assertIsNone(req_body['endpoint']['internalurl'])
         self.assertNotIn('internalurl', response.result['endpoint'])
 
     def test_endpoint_create_with_empty_internalurl(self):
         req_body, response = self._endpoint_create(internalurl='')
-        self.assertEqual(req_body['endpoint']['internalurl'], '')
+        self.assertEqual('', req_body['endpoint']['internalurl'])
         self.assertNotIn("internalurl", response.result['endpoint'])
 
     def test_endpoint_create_with_null_publicurl(self):

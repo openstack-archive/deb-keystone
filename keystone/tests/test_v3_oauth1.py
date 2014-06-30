@@ -17,15 +17,11 @@ import uuid
 
 from six.moves import urllib
 
-from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone import config
-from keystone import contrib
 from keystone.contrib import oauth1
 from keystone.contrib.oauth1 import controllers
+from keystone.contrib.oauth1 import core
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common import importutils
 from keystone.tests import test_v3
 
 
@@ -38,14 +34,6 @@ class OAuth1Tests(test_v3.RestfulTestCase):
     EXTENSION_TO_ADD = 'oauth1_extension'
 
     CONSUMER_URL = '/OS-OAUTH1/consumers'
-
-    def setup_database(self):
-        super(OAuth1Tests, self).setup_database()
-        package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
-        package = importutils.import_module(package_name)
-        abs_path = migration_helpers.find_migrate_repo(package)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        migration.db_sync(sql.get_engine(), abs_path)
 
     def setUp(self):
         super(OAuth1Tests, self).setUp()
@@ -269,6 +257,8 @@ class OAuthFlowTests(OAuth1Tests):
         body = {'roles': [{'id': self.role_id}]}
         resp = self.put(url, body=body, expected_status=200)
         self.verifier = resp.result['token']['oauth_verifier']
+        self.assertTrue(all(i in core.VERIFIER_CHARS for i in self.verifier))
+        self.assertEqual(8, len(self.verifier))
 
         self.request_token.set_verifier(self.verifier)
         url, headers = self._create_access_token(self.consumer,
@@ -466,7 +456,7 @@ class AuthTokenTests(OAuthFlowTests):
     def test_token_chaining_is_not_allowed(self):
         self.test_oauth_flow()
 
-        #attempt to re-authenticate (token chain) with the given token
+        # attempt to re-authenticate (token chain) with the given token
         path = '/v3/auth/tokens/'
         auth_data = self.build_authentication_request(
             token=self.keystone_token_id)

@@ -17,7 +17,6 @@ import ldap.modlist
 import subprocess
 import uuid
 
-from keystone.common import ldap as ldap_common
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import ldap as identity_ldap
@@ -90,7 +89,7 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
     def test_build_tree(self):
         """Regression test for building the tree names
         """
-        #logic is different from the fake backend.
+        # logic is different from the fake backend.
         user_api = identity_ldap.UserApi(CONF)
         self.assertTrue(user_api)
         self.assertEqual(user_api.tree_dn, CONF.ldap.user_tree_dn)
@@ -133,44 +132,8 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
         user_ref = self.identity_api.get_user('alt_fake1')
         self.assertEqual(user_ref['id'], 'alt_fake1')
 
-    def test_base_ldap_connection_deref_option(self):
-        deref = ldap_common.parse_deref('default')
-        ldap_wrapper = ldap_common.LdapWrapper(CONF.ldap.url,
-                                               CONF.ldap.page_size,
-                                               alias_dereferencing=deref)
-        self.assertEqual(ldap.get_option(ldap.OPT_DEREF),
-                         ldap_wrapper.conn.get_option(ldap.OPT_DEREF))
-
-        deref = ldap_common.parse_deref('always')
-        ldap_wrapper = ldap_common.LdapWrapper(CONF.ldap.url,
-                                               CONF.ldap.page_size,
-                                               alias_dereferencing=deref)
-        self.assertEqual(ldap.DEREF_ALWAYS,
-                         ldap_wrapper.conn.get_option(ldap.OPT_DEREF))
-
-        deref = ldap_common.parse_deref('finding')
-        ldap_wrapper = ldap_common.LdapWrapper(CONF.ldap.url,
-                                               CONF.ldap.page_size,
-                                               alias_dereferencing=deref)
-        self.assertEqual(ldap.DEREF_FINDING,
-                         ldap_wrapper.conn.get_option(ldap.OPT_DEREF))
-
-        deref = ldap_common.parse_deref('never')
-        ldap_wrapper = ldap_common.LdapWrapper(CONF.ldap.url,
-                                               CONF.ldap.page_size,
-                                               alias_dereferencing=deref)
-        self.assertEqual(ldap.DEREF_NEVER,
-                         ldap_wrapper.conn.get_option(ldap.OPT_DEREF))
-
-        deref = ldap_common.parse_deref('searching')
-        ldap_wrapper = ldap_common.LdapWrapper(CONF.ldap.url,
-                                               CONF.ldap.page_size,
-                                               alias_dereferencing=deref)
-        self.assertEqual(ldap.DEREF_SEARCHING,
-                         ldap_wrapper.conn.get_option(ldap.OPT_DEREF))
-
-    #FakeLDAP does not correctly process filters, so this test can only be run
-    #against a live LDAP server
+    # FakeLDAP does not correctly process filters, so this test can only be
+    # run against a live LDAP server
     def test_list_groups_for_user_filtered(self):
         domain = self._get_domain_fixture()
         test_groups = []
@@ -239,12 +202,6 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
             user_enabled_emulation=False,
             user_enabled_attribute='employeeType')
         super(LiveLDAPIdentity, self).test_user_enable_attribute_mask()
-
-    def test_create_unicode_user_name(self):
-        self.skipTest('Addressed by bug #1172106')
-
-    def test_create_update_delete_unicode_project(self):
-        self.skipTest('Addressed by bug #1172106')
 
     def test_create_project_case_sensitivity(self):
         # The attribute used for the live LDAP tests is case insensitive.

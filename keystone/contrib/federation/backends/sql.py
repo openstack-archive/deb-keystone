@@ -13,11 +13,8 @@
 # under the License.
 
 from keystone.common import sql
-from keystone.common.sql import migration_helpers
-from keystone.contrib import federation
 from keystone.contrib.federation import core
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common import jsonutils
 
 
@@ -30,7 +27,6 @@ class FederationProtocolModel(sql.ModelBase, sql.DictBase):
     idp_id = sql.Column(sql.String(64), sql.ForeignKey('identity_provider.id',
                         ondelete='CASCADE'), primary_key=True)
     mapping_id = sql.Column(sql.String(64), nullable=False)
-    __table_args__ = (sql.UniqueConstraint('id', 'idp_id'), dict())
 
     @classmethod
     def from_dict(cls, dictionary):
@@ -89,10 +85,6 @@ class MappingModel(sql.ModelBase, sql.DictBase):
 
 class Federation(core.Driver):
 
-    def db_sync(self):
-        abs_path = migration_helpers.find_migrate_repo(federation)
-        migration.db_sync(sql.get_engine(), abs_path)
-
     # Identity Provider CRUD
     @sql.handle_conflicts(conflict_type='identity_provider')
     def create_idp(self, idp_id, idp):
@@ -107,9 +99,6 @@ class Federation(core.Driver):
         session = sql.get_session()
         with session.begin():
             idp_ref = self._get_idp(session, idp_id)
-            q = session.query(IdentityProviderModel)
-            q = q.filter_by(id=idp_id)
-            q.delete(synchronize_session=False)
             session.delete(idp_ref)
 
     def _get_idp(self, session, idp_id):
@@ -190,9 +179,6 @@ class Federation(core.Driver):
         session = sql.get_session()
         with session.begin():
             key_ref = self._get_protocol(session, idp_id, protocol_id)
-            q = session.query(FederationProtocolModel)
-            q = q.filter_by(id=protocol_id, idp_id=idp_id)
-            q.delete(synchronize_session=False)
             session.delete(key_ref)
 
     # Mapping CRUD

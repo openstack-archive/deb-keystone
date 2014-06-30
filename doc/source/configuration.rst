@@ -25,8 +25,22 @@ Configuring Keystone
    man/keystone-all
 
 Once Keystone is installed, it is configured via a primary configuration file
-(``etc/keystone.conf``), a PasteDeploy configuration file (``etc/keystone-paste.ini``),
-possibly a separate logging configuration file, and initializing data into Keystone using the command line client.
+(``etc/keystone.conf``), a PasteDeploy configuration file
+(``etc/keystone-paste.ini``), possibly a separate logging configuration file,
+and initializing data into Keystone using the command line client.
+
+By default, keystone starts a service on `IANA-assigned port 35357
+<http://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.txt>`_.
+This may overlap with your system's ephemeral port range, so another process
+may already be using this port without being explicitly configured to do so. To
+prevent this scenario from occurring, it's recommended that you explicitly
+exclude port 35357 from the available ephemeral port range. On a Linux system,
+this would be accomplished by::
+
+    # sysctl -w 'sys.net.ipv4.ip_local_reserved_ports=35357'
+
+To make the above change persistent, `net.ipv4.ip_local_reserved_ports = 35357`
+should be added to ``/etc/sysctl.conf`` or to ``/etc/sysctl.d/keystone.conf``.
 
 Starting and Stopping Keystone
 ==============================
@@ -119,6 +133,10 @@ configuration file.
 
 Authentication Plugins
 ----------------------
+
+.. NOTE::
+
+    This feature is only supported by Keystone for the Identity API v3 clients.
 
 Keystone supports authentication plugins and they are specified
 in the ``[auth]`` section of the configuration file. However, an
@@ -231,7 +249,7 @@ became the default configuration option in the Grizzly release.
 Caching Layer
 -------------
 
-Keystone supports a caching layer that is above the configurable subsystems (e.g ``token``,
+Keystone supports a caching layer that is above the configurable subsystems (e.g. ``token``,
 ``identity``, etc).  Keystone uses the `dogpile.cache`_ library which allows for flexible
 cache backends. The majority of the caching configuration options are set in the ``[cache]``
 section.  However, each section that has the capability to be cached usually has a ``caching``
@@ -345,6 +363,15 @@ token generation requires a public/private key pair.  The public key must be
 signed in an X509 certificate, and the certificate used to sign it must be
 available as Certificate Authority (CA) certificate.  These files can be
 generated either using the keystone-manage utility, or externally generated.
+
+Use of ``keystone-manage``'s ``pki_setup`` command is discouraged in favor
+of using an external CA. This is because the CA secret key should generally
+be kept apart from the token signing secret keys so that a compromise of
+a node does not lead to an attacker being able to generate valid signed
+Keystone tokens. This is a low probability attack vector, as compromise of
+a Keystone service machine's filesystem security almost certainly means the
+attacker will be able to gain direct access to the token backend.
+
 The files need to be in the locations specified by the top level Keystone
 configuration file as specified in the above section.  Additionally, the
 private key should only be readable by the system user that will run Keystone.
@@ -767,7 +794,7 @@ The following attributes are available
 
 * Attributes related to API call: Any parameters that are passed into the
   API call are available, along with any filters specified in the query
-  string. Attributes of objects passed can be refererenced using an
+  string. Attributes of objects passed can be referenced using an
   object.attribute syntax (e.g. user.domain_id). The target objects of an
   API are also available using a target.object.attribute syntax.  For instance:
 
@@ -820,12 +847,12 @@ provider wishes to allow adminsistration of the contents of a domain to
 be delegated, it is recommended that the supplied policy.v3cloudsample.json
 is used as a basis for creating a suitable production policy file. This
 example policy file also shows the use of an admin_domain to allow a cloud
-provider to enable cloud adminstrators to have wider access across the APIs.
+provider to enable cloud administrators to have wider access across the APIs.
 
 A clean installation would need to perhaps start with the standard policy
 file, to allow creation of the admin_domain with the first users within
 it. The domain_id of the admin domain would then be obtained and could be
-pasted into a modifed version of policy.v3cloudsample.json which could then
+pasted into a modified version of policy.v3cloudsample.json which could then
 be enabled as the main policy file.
 
 .. _`adding extensions`:
@@ -839,14 +866,14 @@ OAuth1.0a
 .. toctree::
    :maxdepth: 1
 
-   extensions/oauth1-configuration.rst
+   extensions/oauth1.rst
 
 Endpoint Filtering
 ------------------
 .. toctree::
    :maxdepth: 1
 
-   extensions/endpoint_filter-configuration.rst
+   extensions/endpoint_filter.rst
 
 Federation
 ----------
@@ -854,7 +881,7 @@ Federation
 .. toctree::
    :maxdepth: 1
 
-   extensions/federation-configuration.rst
+   extensions/federation.rst
 
 Revocation Events
 ------------------
@@ -862,7 +889,7 @@ Revocation Events
 .. toctree::
    :maxdepth: 1
 
-   extensions/revoke-configuration.rst
+   extensions/revoke.rst
 
 .. _`prepare your deployment`:
 

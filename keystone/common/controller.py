@@ -147,7 +147,7 @@ def protected(callback=None):
                 policy_dict.update(kwargs)
                 self.policy_api.enforce(creds,
                                         action,
-                                        authorization.flatten(policy_dict))
+                                        utils.flatten_dict(policy_dict))
                 LOG.debug(_('RBAC: Authorization granted'))
             return f(self, context, *args, **kwargs)
         return inner
@@ -188,7 +188,7 @@ def filterprotected(*filters):
 
                 self.policy_api.enforce(creds,
                                         action,
-                                        authorization.flatten(target))
+                                        utils.flatten_dict(target))
 
                 LOG.debug(_('RBAC: Authorization granted'))
             else:
@@ -381,19 +381,18 @@ class V3Controller(wsgi.Application):
         NOT_LIMITED = False
         LIMITED = True
 
-        if hints is None or hints.get_limit() is None:
+        if hints is None or hints.limit is None:
             # No truncation was requested
             return NOT_LIMITED, refs
 
-        list_limit = hints.get_limit()
-        if list_limit.get('truncated', False):
+        if hints.limit.get('truncated', False):
             # The driver did truncate the list
             return LIMITED, refs
 
-        if len(refs) > list_limit['limit']:
+        if len(refs) > hints.limit['limit']:
             # The driver layer wasn't able to truncate it for us, so we must
             # do it here
-            return LIMITED, refs[:list_limit['limit']]
+            return LIMITED, refs[:hints.limit['limit']]
 
         return NOT_LIMITED, refs
 
@@ -447,12 +446,12 @@ class V3Controller(wsgi.Application):
 
             return False
 
-        for filter in hints.filters():
+        for filter in hints.filters:
             if filter['comparator'] == 'equals':
                 attr = filter['name']
                 value = filter['value']
                 refs = [r for r in refs if _attr_match(
-                    authorization.flatten(r).get(attr), value)]
+                    utils.flatten_dict(r).get(attr), value)]
             else:
                 # It might be an inexact filter
                 refs = [r for r in refs if _inexact_attr_match(
@@ -545,7 +544,7 @@ class V3Controller(wsgi.Application):
                 raise exception.ValidationError(_('Cannot change Domain ID'))
 
     def _assign_unique_id(self, ref):
-        """Generates and assigns a unique identifer to a reference."""
+        """Generates and assigns a unique identifier to a reference."""
         ref = ref.copy()
         ref['id'] = uuid.uuid4().hex
         return ref
@@ -612,7 +611,7 @@ class V3Controller(wsgi.Application):
             policy_dict.update(prep_info['input_attr'])
             self.policy_api.enforce(creds,
                                     action,
-                                    authorization.flatten(policy_dict))
+                                    utils.flatten_dict(policy_dict))
             LOG.debug(_('RBAC: Authorization granted'))
 
     @classmethod
@@ -632,40 +631,12 @@ class V3Controller(wsgi.Application):
         blocked_keys = ref_keys.difference(cls._mutable_parameters)
 
         if not blocked_keys:
-            #No immutable parameters changed
+            # No immutable parameters changed
             return
 
         exception_args = {'target': cls.__name__,
-                          'attribute': blocked_keys.pop()}
+                          'attributes': ', '.join(blocked_keys)}
         raise exception.ImmutableAttributeError(**exception_args)
-
-    @classmethod
-    def check_required_params(cls, ref):
-        """Raise exception when required parameter is not in ref.
-
-        Check whether the ref dictionary representing a request has the
-        required parameters to fulfill the request. If not, raise an
-        exception. This method checks only root-level keys from a ref
-        dictionary.
-
-        :param ref: a dictionary representing deserialized request to be
-                    stored
-        :raises: :class:`keystone.exception.ValidationError`
-
-        """
-        ref_keys = set(ref.keys())
-        missing_args = []
-
-        for required in cls._required_parameters:
-            if required not in ref_keys:
-                missing_args.append(required)
-
-        if len(missing_args) > 0:
-            exception_args = {'target': cls.__name__,
-                              'attribute': missing_args.pop()}
-            raise exception.ValidationError(**exception_args)
-        else:
-            return
 
     @classmethod
     def filter_params(cls, ref):

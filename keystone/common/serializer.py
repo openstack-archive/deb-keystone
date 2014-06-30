@@ -92,17 +92,17 @@ class XmlDeserializer(object):
             return tag_name
         bracket = re.search('[^{]+$', tag)
         ns = m.string[bracket.start():m.start() - 1]
-        #If the namespace is
-        #http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0
-        #for the root element, a prefix needs to add in front of the tag name.
+        # If the namespace is
+        # http://docs.openstack.org/identity/api/ext/OS-KSADM/v1.0 for the
+        # root element, a prefix needs to add in front of the tag name.
         prefix = None
         for xmlns in XMLNS_LIST:
             if xmlns['value'] == ns:
                 prefix = xmlns.get('prefix')
                 break
         if prefix is not None:
-            return '%(PREFIX)s:%(tag_name)s' \
-                % {'PREFIX': prefix, 'tag_name': tag_name}
+            return '%(PREFIX)s:%(tag_name)s' % {
+                'PREFIX': prefix, 'tag_name': tag_name}
         else:
             return tag_name
 

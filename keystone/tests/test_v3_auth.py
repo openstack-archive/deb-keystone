@@ -14,7 +14,7 @@
 
 import copy
 import datetime
-import json
+import operator
 import uuid
 
 from keystoneclient.common import cms
@@ -128,6 +128,11 @@ class TokenAPITests(object):
     def test_default_fixture_scope_token(self):
         self.assertIsNotNone(self.get_scoped_token())
 
+    def sign_token(self, resp):
+        return cms.cms_sign_token(resp.body,
+                                  CONF.signing.certfile,
+                                  CONF.signing.keyfile)
+
     def test_v3_token_id(self):
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -137,9 +142,7 @@ class TokenAPITests(object):
         token_id = resp.headers.get('X-Subject-Token')
         self.assertIn('expires_at', token_data['token'])
 
-        expected_token_id = cms.cms_sign_token(json.dumps(token_data),
-                                               CONF.signing.certfile,
-                                               CONF.signing.keyfile)
+        expected_token_id = self.sign_token(resp)
         self.assertEqual(expected_token_id, token_id)
         # should be able to validate hash PKI token as well
         hash_token_id = cms.cms_hash_token(token_id)
@@ -405,6 +408,24 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
         self.doSetUp()
 
 
+class TestPKIZTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
+
+    def sign_token(self, resp):
+        return cms.pkiz_sign(resp.body,
+                             CONF.signing.certfile,
+                             CONF.signing.keyfile)
+
+    def config_overrides(self):
+        super(TestPKIZTokenAPIs, self).config_overrides()
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.pkiz.Provider')
+
+    def setUp(self):
+        super(TestPKIZTokenAPIs, self).setUp()
+        self.doSetUp()
+
+
 class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
     def config_overrides(self):
         super(TestUUIDTokenAPIs, self).config_overrides()
@@ -424,7 +445,7 @@ class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
         token_data = resp.result
         token_id = resp.headers.get('X-Subject-Token')
         self.assertIn('expires_at', token_data['token'])
-        self.assertFalse(cms.is_ans1_token(token_id))
+        self.assertFalse(cms.is_asn1_token(token_id))
 
     def test_v3_v2_hashed_pki_token_intermix(self):
         # this test is only applicable for PKI tokens
@@ -434,14 +455,14 @@ class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
 
 class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
     """Test token revoke using v3 Identity API by token owner and admin."""
-    def setUp(self):
-        """Setup for Test Cases.
+    def load_sample_data(self):
+        """Load Sample Data for Test Cases.
         Two domains, domainA and domainB
         Two users in domainA, userNormalA and userAdminA
         One user in domainB, userAdminB
 
         """
-        super(TestTokenRevokeSelfAndAdmin, self).setUp()
+        super(TestTokenRevokeSelfAndAdmin, self).load_sample_data()
         # DomainA setup
         self.domainA = self.new_domain_ref()
         self.assignment_api.create_domain(self.domainA['id'], self.domainA)
@@ -455,11 +476,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.userNormalA['password'] = uuid.uuid4().hex
         self.identity_api.create_user(self.userNormalA['id'], self.userNormalA)
 
-        self.role1 = self.new_role_ref()
-        self.role1['name'] = 'admin'
-        self.assignment_api.create_role(self.role1['id'], self.role1)
-
-        self.assignment_api.create_grant(self.role1['id'],
+        self.assignment_api.create_grant(self.role['id'],
                                          user_id=self.userAdminA['id'],
                                          domain_id=self.domainA['id'])
 
@@ -555,7 +572,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.userAdminB = self.new_user_ref(domain_id=self.domainB['id'])
         self.userAdminB['password'] = uuid.uuid4().hex
         self.identity_api.create_user(self.userAdminB['id'], self.userAdminB)
-        self.assignment_api.create_grant(self.role1['id'],
+        self.assignment_api.create_grant(self.role['id'],
                                          user_id=self.userAdminB['id'],
                                          domain_id=self.domainB['id'])
         r = self.post(
@@ -1659,6 +1676,33 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertEqual(r.result['token']['project']['id'],
                          self.project['id'])
 
+    def test_auth_catalog_attributes(self):
+        if self.content_type == 'xml':
+            self.skipTest('XML catalog parsing is just broken')
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+
+        catalog = r.result['token']['catalog']
+        self.assertEqual(1, len(catalog))
+        catalog = catalog[0]
+
+        self.assertEqual(self.service['id'], catalog['id'])
+        self.assertEqual(self.service['name'], catalog['name'])
+        self.assertEqual(self.service['type'], catalog['type'])
+
+        endpoint = catalog['endpoints']
+        self.assertEqual(1, len(endpoint))
+        endpoint = endpoint[0]
+
+        self.assertEqual(self.endpoint['id'], endpoint['id'])
+        self.assertEqual(self.endpoint['interface'], endpoint['interface'])
+        self.assertEqual(self.endpoint['region'], endpoint['region'])
+        self.assertEqual(self.endpoint['url'], endpoint['url'])
+
     def _check_disabled_endpoint_result(self, catalog, disabled_endpoint_id):
         endpoints = catalog[0]['endpoints']
         endpoint_ids = [ep['id'] for ep in endpoints]
@@ -2090,21 +2134,21 @@ class TestAuthJSON(test_v3.RestfulTestCase):
                           auth_context)
 
     def test_remote_user_and_password(self):
-        #both REMOTE_USER and password methods must pass.
-        #note that they do not have to match
+        # both REMOTE_USER and password methods must pass.
+        # note that they do not have to match
         api = auth.controllers.Auth()
         auth_data = self.build_authentication_request(
-            user_domain_id=self.domain['id'],
-            username=self.user['name'],
-            password=self.user['password'])['auth']
+            user_domain_id=self.default_domain_user['domain_id'],
+            username=self.default_domain_user['name'],
+            password=self.default_domain_user['password'])['auth']
         context, auth_info, auth_context = self.build_external_auth_request(
             self.default_domain_user['name'], auth_data=auth_data)
 
         api.authenticate(context, auth_info, auth_context)
 
     def test_remote_user_and_explicit_external(self):
-        #both REMOTE_USER and password methods must pass.
-        #note that they do not have to match
+        # both REMOTE_USER and password methods must pass.
+        # note that they do not have to match
         auth_data = self.build_authentication_request(
             user_domain_id=self.domain['id'],
             username=self.user['name'],
@@ -2121,7 +2165,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
                           auth_context)
 
     def test_remote_user_bad_password(self):
-        #both REMOTE_USER and password methods must pass.
+        # both REMOTE_USER and password methods must pass.
         api = auth.controllers.Auth()
         auth_data = self.build_authentication_request(
             user_domain_id=self.domain['id'],
@@ -2141,11 +2185,11 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         remote_user = self.default_domain_user['name']
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
                                              'AUTH_TYPE': 'Negotiate'})
-        r = self.post('/auth/tokens', body=auth_data)
+        r = self.post('/auth/tokens', body=auth_data, noauth=True)
         token = self.assertValidUnscopedTokenResponse(r)
         self.assertNotIn('bind', token)
 
-    #TODO(ayoung): move to TestPKITokenAPIs; it will be run for both formats
+    # TODO(ayoung): move to TestPKITokenAPIs; it will be run for both formats
     def test_verify_with_bound_token(self):
         self.config_fixture.config(group='token', bind='kerberos')
         auth_data = self.build_authentication_request(
@@ -2154,7 +2198,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
                                              'AUTH_TYPE': 'Negotiate'})
 
-        resp = self.post('/auth/tokens', body=auth_data)
+        resp = self.post('/auth/tokens', body=auth_data, noauth=True)
 
         token = resp.headers.get('X-Subject-Token')
         headers = {'X-Subject-Token': token}
@@ -2170,7 +2214,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         remote_user = self.default_domain_user['name']
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
                                              'AUTH_TYPE': 'Negotiate'})
-        r = self.post('/auth/tokens', body=auth_data)
+        r = self.post('/auth/tokens', body=auth_data, noauth=True)
 
         # the unscoped token should have bind information in it
         token = self.assertValidUnscopedTokenResponse(r)
@@ -2181,7 +2225,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         # using unscoped token with remote user succeeds
         auth_params = {'token': token, 'project_id': self.project_id}
         auth_data = self.build_authentication_request(**auth_params)
-        r = self.post('/auth/tokens', body=auth_data)
+        r = self.post('/auth/tokens', body=auth_data, noauth=True)
         token = self.assertValidProjectScopedTokenResponse(r)
 
         # the bind information should be carried over from the original token
@@ -2206,6 +2250,12 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertEqual(bind['kerberos'], self.default_domain_user['name'])
 
         v2_token_id = v2_token_data['access']['token']['id']
+        # NOTE(gyee): self.get() will try to obtain an auth token if one
+        # is not provided. When REMOTE_USER is present in the request
+        # environment, the external user auth plugin is used in conjunction
+        # with the password auth for the admin user. Therefore, we need to
+        # cleanup the REMOTE_USER information from the previous call.
+        del self.admin_app.extra_environ['REMOTE_USER']
         headers = {'X-Subject-Token': v2_token_id}
         resp = self.get('/auth/tokens', headers=headers)
         token_data = resp.result
@@ -2278,6 +2328,49 @@ class TestAuthJSON(test_v3.RestfulTestCase):
             password=self.user['password'])
         r = self.post('/auth/tokens', body=auth_data)
         self.assertValidUnscopedTokenResponse(r)
+
+    def test_disabled_scope_project_domain_result_in_401(self):
+        # create a disabled domain
+        domain = self.new_domain_ref()
+        domain['enabled'] = False
+        self.assignment_api.create_domain(domain['id'], domain)
+
+        # create a project in the disabled domain
+        project = self.new_project_ref(domain_id=domain['id'])
+        self.assignment_api.create_project(project['id'], project)
+
+        # assign some role to self.user for the project in the disabled domain
+        self.assignment_api.add_role_to_user_and_project(
+            self.user['id'],
+            project['id'],
+            self.role_id)
+
+        # user should not be able to auth with project_id
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=project['id'])
+        self.post('/auth/tokens', body=auth_data, expected_status=401)
+
+        # user should not be able to auth with project_name & domain
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_name=project['name'],
+            project_domain_id=domain['id'])
+        self.post('/auth/tokens', body=auth_data, expected_status=401)
+
+    def test_auth_methods_with_different_identities_fails(self):
+        # get the token for a user. This is self.user which is different from
+        # self.default_domain_user.
+        token = self.get_scoped_token()
+        # try both password and token methods with different identities and it
+        # should fail
+        auth_data = self.build_authentication_request(
+            token=token,
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'])
+        self.post('/auth/tokens', body=auth_data, expected_status=401)
 
 
 class TestAuthXML(TestAuthJSON):
@@ -2422,6 +2515,34 @@ class TestTrustAuth(TestAuthInfo):
             remaining_uses=bad_value,
             role_ids=[self.role_id])
         del ref['id']
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': ref},
+                  expected_status=400)
+
+    def test_invalid_trust_request_without_impersonation(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            role_ids=[self.role_id])
+
+        del ref['id']
+        del ref['impersonation']
+
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': ref},
+                  expected_status=400)
+
+    def test_invalid_trust_request_without_trustee(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            role_ids=[self.role_id])
+
+        del ref['id']
+        del ref['trustee_user_id']
+
         self.post('/OS-TRUST/trusts',
                   body={'trust': ref},
                   expected_status=400)
@@ -2967,3 +3088,51 @@ class TestAPIProtectionWithoutAuthContextMiddleware(test_v3.RestfulTestCase):
                    'environment': {}}
         r = auth_controller.validate_token(context)
         self.assertEqual(200, r.status_code)
+
+
+class TestAuthContext(tests.TestCase):
+    def setUp(self):
+        super(TestAuthContext, self).setUp()
+        self.auth_context = auth.controllers.AuthContext()
+
+    def test_pick_lowest_expires_at(self):
+        expires_at_1 = timeutils.isotime(timeutils.utcnow())
+        expires_at_2 = timeutils.isotime(timeutils.utcnow() +
+                                         datetime.timedelta(seconds=10))
+        # make sure auth_context picks the lowest value
+        self.auth_context['expires_at'] = expires_at_1
+        self.auth_context['expires_at'] = expires_at_2
+        self.assertEqual(expires_at_1, self.auth_context['expires_at'])
+
+    def test_identity_attribute_conflict(self):
+        for identity_attr in auth.controllers.AuthContext.IDENTITY_ATTRIBUTES:
+            self.auth_context[identity_attr] = uuid.uuid4().hex
+            if identity_attr == 'expires_at':
+                # 'expires_at' is a special case. Will test it in a separate
+                # test case.
+                continue
+            self.assertRaises(exception.Unauthorized,
+                              operator.setitem,
+                              self.auth_context,
+                              identity_attr,
+                              uuid.uuid4().hex)
+
+    def test_identity_attribute_conflict_with_none_value(self):
+        identity_attr = list(
+            auth.controllers.AuthContext.IDENTITY_ATTRIBUTES)[0]
+        self.auth_context[identity_attr] = None
+        self.assertRaises(exception.Unauthorized,
+                          operator.setitem,
+                          self.auth_context,
+                          identity_attr,
+                          uuid.uuid4().hex)
+
+    def test_non_identity_attribute_conflict_override(self):
+        # for attributes Keystone doesn't know about, make sure they can be
+        # freely manipulated
+        attr_name = uuid.uuid4().hex
+        attr_val_1 = uuid.uuid4().hex
+        attr_val_2 = uuid.uuid4().hex
+        self.auth_context[attr_name] = attr_val_1
+        self.auth_context[attr_name] = attr_val_2
+        self.assertEqual(attr_val_2, self.auth_context[attr_name])

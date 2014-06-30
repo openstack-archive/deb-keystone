@@ -18,10 +18,8 @@ import sqlalchemy
 from keystone import assignment
 from keystone import clean
 from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common.gettextutils import _
 
 
@@ -36,12 +34,6 @@ class AssignmentType:
 
 
 class Assignment(assignment.Driver):
-
-    # Internal interface to manage the database
-    def db_sync(self, version=None):
-        migration.db_sync(
-            sql.get_engine(), migration_helpers.find_migrate_repo(),
-            version=version)
 
     def _get_project(self, session, project_id):
         project_ref = session.query(Project).get(project_id)
@@ -588,7 +580,7 @@ class Role(sql.ModelBase, sql.DictBase):
     __tablename__ = 'role'
     attributes = ['id', 'name']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(255), nullable=False)
+    name = sql.Column(sql.String(255), unique=True, nullable=False)
     extra = sql.Column(sql.JsonBlob())
     __table_args__ = (sql.UniqueConstraint('name'), {})
 

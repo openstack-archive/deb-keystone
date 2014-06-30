@@ -648,7 +648,8 @@ def create_v2_token():
     return {
         "access": {
             "token": {
-                "expires": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+                "expires": timeutils.isotime(timeutils.utcnow() +
+                                             FUTURE_DELTA),
                 "issued_at": "2013-05-21T00:02:43.941473Z",
                 "tenant": {
                     "enabled": True,
@@ -679,7 +680,7 @@ def create_v3_token():
     return {
         "token": {
             'methods': [],
-            "expires_at": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+            "expires_at": timeutils.isotime(timeutils.utcnow() + FUTURE_DELTA),
             "issued_at": "2013-05-21T00:02:43.941473Z",
         }
     }
@@ -729,22 +730,12 @@ class TestTokenProvider(tests.TestCase):
         self.config_fixture.config(group='signing', token_format='UUID')
         self.config_fixture.config(group='token',
                                    provider=token.provider.PKI_PROVIDER)
-        try:
-            token.provider.Manager()
-            raise Exception(
-                'expecting ValueError on token provider misconfiguration')
-        except exception.UnexpectedError:
-            pass
+        self.assertRaises(exception.UnexpectedError, token.provider.Manager)
 
         self.config_fixture.config(group='signing', token_format='PKI')
         self.config_fixture.config(group='token',
                                    provider=token.provider.UUID_PROVIDER)
-        try:
-            token.provider.Manager()
-            raise Exception(
-                'expecting ValueError on token provider misconfiguration')
-        except exception.UnexpectedError:
-            pass
+        self.assertRaises(exception.UnexpectedError, token.provider.Manager)
 
         # should be OK as token_format and provider aligns
         self.config_fixture.config(group='signing', token_format='PKI')
@@ -821,21 +812,27 @@ class TestTokenProvider(tests.TestCase):
         self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api._is_valid_token,
                           SAMPLE_MALFORMED_TOKEN)
-        self.assertEqual(
-            None,
+        self.assertIsNone(
             self.token_provider_api._is_valid_token(create_v2_token()))
-        self.assertEqual(
-            None,
+        self.assertIsNone(
             self.token_provider_api._is_valid_token(create_v3_token()))
+
+
+class TestTokenProviderOAuth1(tests.TestCase):
+    def setUp(self):
+        super(TestTokenProviderOAuth1, self).setUp()
+        self.load_backends()
+
+    def config_overrides(self):
+        super(TestTokenProviderOAuth1, self).config_overrides()
+        self.config_fixture.config(group='token',
+                                   provider=token.provider.UUID_PROVIDER)
 
     def test_uuid_provider_no_oauth_fails_oauth(self):
         self.load_fixtures(default_fixtures)
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        driver = token.provider.Manager().driver
-        driver.oauth_api = None
+        self.token_provider_api.driver.oauth_api = None
         self.assertRaises(exception.Forbidden,
-                          driver.issue_v3_token,
+                          self.token_provider_api.driver.issue_v3_token,
                           self.user_foo['id'], ['oauth1'])
 
 

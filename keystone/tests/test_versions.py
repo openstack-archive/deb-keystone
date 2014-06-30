@@ -15,9 +15,10 @@
 
 import random
 
+import mock
+
 from keystone import config
 from keystone import controllers
-from keystone.openstack.common.fixture import moxstubout
 from keystone.openstack.common import jsonutils
 from keystone import tests
 from keystone.tests import matchers
@@ -40,18 +41,9 @@ v2_MEDIA_TYPES = [
 v2_HTML_DESCRIPTION = {
     "rel": "describedby",
     "type": "text/html",
-    "href": "http://docs.openstack.org/api/"
-            "openstack-identity-service/2.0/"
-            "content/"
+    "href": "http://docs.openstack.org/"
 }
 
-v2_PDF_DESCRIPTION = {
-    "rel": "describedby",
-    "type": "application/pdf",
-    "href": "http://docs.openstack.org/api/"
-            "openstack-identity-service/2.0/"
-            "identity-dev-guide-2.0.pdf"
-}
 
 v2_EXPECTED_RESPONSE = {
     "id": "v2.0",
@@ -62,8 +54,7 @@ v2_EXPECTED_RESPONSE = {
             "rel": "self",
             "href": "",     # Will get filled in after initialization
         },
-        v2_HTML_DESCRIPTION,
-        v2_PDF_DESCRIPTION
+        v2_HTML_DESCRIPTION
     ],
     "media-types": v2_MEDIA_TYPES
 }
@@ -121,9 +112,6 @@ class VersionTestCase(tests.TestCase):
         self.config_fixture.config(
             public_endpoint='http://localhost:%(public_port)d',
             admin_endpoint='http://localhost:%(admin_port)d')
-
-        fixture = self.useFixture(moxstubout.MoxStubout())
-        self.stubs = fixture.stubs
 
     def config_overrides(self):
         super(VersionTestCase, self).config_overrides()
@@ -246,8 +234,8 @@ class VersionTestCase(tests.TestCase):
             self._paste_in_port(expected['version'], 'http://localhost/v3/')
             self.assertEqual(data, expected)
 
+    @mock.patch.object(controllers, '_VERSIONS', ['v3'])
     def test_v2_disabled(self):
-        self.stubs.Set(controllers, '_VERSIONS', ['v3'])
         client = self.client(self.public_app)
         # request to /v2.0 should fail
         resp = client.get('/v2.0/')
@@ -277,8 +265,8 @@ class VersionTestCase(tests.TestCase):
         data = jsonutils.loads(resp.body)
         self.assertEqual(data, v3_only_response)
 
+    @mock.patch.object(controllers, '_VERSIONS', ['v2.0'])
     def test_v3_disabled(self):
-        self.stubs.Set(controllers, '_VERSIONS', ['v2.0'])
         client = self.client(self.public_app)
         # request to /v3 should fail
         resp = client.get('/v3/')
@@ -328,16 +316,12 @@ vnd.openstack.identity-v2.0+xml"/>
   </media-types>
   <links>
     <link href="http://localhost:%%(port)s/v2.0/" rel="self"/>
-    <link href="http://docs.openstack.org/api/openstack-identity-service/\
-2.0/content/" type="text/html" rel="describedby"/>
-    <link href="http://docs.openstack.org/api/openstack-identity-service/\
-2.0/identity-dev-guide-2.0.pdf" type="application/pdf" rel="describedby"/>
+    <link href="http://docs.openstack.org/" type="text/html" \
+rel="describedby"/>
   </links>
   <link href="http://localhost:%%(port)s/v2.0/" rel="self"/>
-  <link href="http://docs.openstack.org/api/openstack-identity-service/\
-2.0/content/" type="text/html" rel="describedby"/>
-  <link href="http://docs.openstack.org/api/openstack-identity-service/\
-2.0/identity-dev-guide-2.0.pdf" type="application/pdf" rel="describedby"/>
+  <link href="http://docs.openstack.org/" type="text/html" \
+rel="describedby"/>
 </version>
 """
 
@@ -379,9 +363,6 @@ vnd.openstack.identity-v3+xml"/>
         self.config_fixture.config(
             public_endpoint='http://localhost:%(public_port)d',
             admin_endpoint='http://localhost:%(admin_port)d')
-
-        fixture = self.useFixture(moxstubout.MoxStubout())
-        self.stubs = fixture.stubs
 
     def config_overrides(self):
         super(XmlVersionTestCase, self).config_overrides()
@@ -444,8 +425,8 @@ vnd.openstack.identity-v3+xml"/>
         expected = self.v3_VERSION_RESPONSE % dict(port=CONF.admin_port)
         self.assertThat(data, matchers.XMLEquals(expected))
 
+    @mock.patch.object(controllers, '_VERSIONS', ['v3'])
     def test_v2_disabled(self):
-        self.stubs.Set(controllers, '_VERSIONS', ['v3'])
         client = self.client(self.public_app)
 
         # request to /v3 should pass
@@ -467,8 +448,8 @@ vnd.openstack.identity-v3+xml"/>
         data = resp.body
         self.assertThat(data, matchers.XMLEquals(v3_only_response))
 
+    @mock.patch.object(controllers, '_VERSIONS', ['v2.0'])
     def test_v3_disabled(self):
-        self.stubs.Set(controllers, '_VERSIONS', ['v2.0'])
         client = self.client(self.public_app)
 
         # request to /v2.0 should pass

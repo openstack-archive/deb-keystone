@@ -13,7 +13,6 @@
 #    under the License.
 
 import datetime
-import json
 
 from keystoneclient.common import cms
 import six
@@ -24,6 +23,7 @@ from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.openstack.common.gettextutils import _
+from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone.token import core
@@ -156,7 +156,7 @@ class Auth(controller.V2Controller):
 
         wsgi.validate_token_bind(context, old_token_ref)
 
-        #A trust token cannot be used to get another token
+        # A trust token cannot be used to get another token
         if 'trust' in old_token_ref:
             raise exception.Forbidden()
         if 'trust_id' in old_token_ref['metadata']:
@@ -253,11 +253,11 @@ class Auth(controller.V2Controller):
                                                 size=CONF.max_param_size)
 
         username = auth['passwordCredentials'].get('username', '')
-        if len(username) > CONF.max_param_size:
-            raise exception.ValidationSizeError(attribute='username',
-                                                size=CONF.max_param_size)
 
         if username:
+            if len(username) > CONF.max_param_size:
+                raise exception.ValidationSizeError(attribute='username',
+                                                    size=CONF.max_param_size)
             try:
                 user_ref = self.identity_api.get_user_by_name(
                     username, CONF.identity.default_domain_id)
@@ -289,7 +289,7 @@ class Auth(controller.V2Controller):
         if 'REMOTE_USER' not in context.get('environment', {}):
             raise ExternalAuthNotApplicable()
 
-        #NOTE(jamielennox): xml and json differ and get confused about what
+        # NOTE(jamielennox): xml and json differ and get confused about what
         # empty auth should look like so just reset it.
         if not auth:
             auth = {}
@@ -430,7 +430,7 @@ class Auth(controller.V2Controller):
             if expires and isinstance(expires, datetime.datetime):
                     t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
-        json_data = json.dumps(data)
+        json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,
                                         CONF.signing.certfile,
                                         CONF.signing.keyfile)

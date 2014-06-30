@@ -15,7 +15,7 @@
 import six
 
 from keystone.common import config
-from keystone.openstack.common.gettextutils import _ # flake8: noqa
+from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import strutils
 
@@ -119,11 +119,14 @@ class PKITokenExpected(Error):
 
 class SecurityError(Error):
     """Avoids exposing details of security failures, unless in debug mode."""
+    amendment = _('(Disable debug mode to suppress these details.)')
 
     def _build_message(self, message, **kwargs):
         """Only returns detailed messages in debug mode."""
         if CONF.debug:
-            return message or self.message_format % kwargs
+            return _('%(message)s %(amendment)s') % {
+                'message': message or self.message_format % kwargs,
+                'amendment': self.amendment}
         else:
             return self.message_format % kwargs
 
@@ -176,8 +179,8 @@ class ForbiddenAction(Forbidden):
 
 
 class ImmutableAttributeError(Forbidden):
-    message_format = _("Could not change immutable attribute %(attribute)s"
-                       " in target %(target)s")
+    message_format = _("Could not change immutable attribute(s) "
+                       "'%(attributes)s' in target %(target)s")
 
 
 class NotFound(Error):

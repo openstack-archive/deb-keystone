@@ -18,6 +18,7 @@ import hashlib
 import mock
 import uuid
 
+from keystoneclient.common import cms
 import six
 from testtools import matchers
 
@@ -31,6 +32,7 @@ from keystone.tests import default_fixtures
 from keystone.tests import filtering
 from keystone.tests import test_utils
 from keystone.token import provider
+
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
@@ -124,7 +126,7 @@ class IdentityTests(object):
         self.assertDictContainsSubset(user, user_ref)
         role_list = self.assignment_api.get_roles_for_user_and_project(
             user['id'], self.tenant_baz['id'])
-        self.assertEqual(len(role_list), 1)
+        self.assertEqual(1, len(role_list))
         self.assertIn(CONF.member_role_id, role_list)
 
     def test_authenticate_if_no_password_set(self):
@@ -141,12 +143,6 @@ class IdentityTests(object):
                           context={},
                           user_id=id_,
                           password='password')
-
-    def test_password_hashed(self):
-        driver = self.identity_api._select_identity_driver(
-            self.user_foo['domain_id'])
-        user_ref = driver._get_user(self.user_foo['id'])
-        self.assertNotEqual(user_ref['password'], self.user_foo['password'])
 
     def test_create_unicode_user_name(self):
         unicode_name = u'name \u540d\u5b57'
@@ -181,7 +177,7 @@ class IdentityTests(object):
     def test_list_user_ids_for_project(self):
         user_ids = self.assignment_api.list_user_ids_for_project(
             self.tenant_baz['id'])
-        self.assertEqual(len(user_ids), 2)
+        self.assertEqual(2, len(user_ids))
         self.assertIn(self.user_two['id'], user_ids)
         self.assertIn(self.user_badguy['id'], user_ids)
 
@@ -398,7 +394,7 @@ class IdentityTests(object):
                           'fake1',
                           user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['id'], 'fake1')
+        self.assertEqual('fake1', user_ref['id'])
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user,
                           'fake2')
@@ -489,7 +485,7 @@ class IdentityTests(object):
         tenant['id'] = 'fake2'
         self.assignment_api.update_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['id'], 'fake1')
+        self.assertEqual('fake1', tenant_ref['id'])
         self.assertRaises(exception.ProjectNotFound,
                           self.assignment_api.get_project,
                           'fake2')
@@ -546,7 +542,7 @@ class IdentityTests(object):
 
         # Read back the full list of assignments - check it is gone up by 4
         assignment_list = self.assignment_api.list_role_assignments()
-        self.assertEqual(len(assignment_list), existing_assignments + 4)
+        self.assertEqual(existing_assignments + 4, len(assignment_list))
 
         # Now check that each of our four new entries are in the list
         self.assertIn(
@@ -570,8 +566,8 @@ class IdentityTests(object):
         # this only goes up by two.
         assignment_list = self.assignment_api.list_role_assignments_for_role(
             role_id='admin')
-        self.assertEqual(len(assignment_list),
-                         existing_assignments_for_role + 2)
+        self.assertEqual(existing_assignments_for_role + 2,
+                         len(assignment_list))
 
         # Now check that each of our two new entries are in the list
         self.assertIn(
@@ -586,7 +582,7 @@ class IdentityTests(object):
     def test_list_role_assignments_bad_role(self):
         assignment_list = self.assignment_api.list_role_assignments_for_role(
             role_id=uuid.uuid4().hex)
-        self.assertEqual(assignment_list, [])
+        self.assertEqual([], assignment_list)
 
     def test_add_duplicate_role_grant(self):
         roles_ref = self.assignment_api.get_roles_for_user_and_project(
@@ -691,7 +687,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=new_user1['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         # Now create the grants (roles are defined in default_fixtures)
         self.assignment_api.create_grant(user_id=new_user1['id'],
                                          domain_id=new_domain['id'],
@@ -705,7 +701,7 @@ class IdentityTests(object):
         # Read back the roles for user1 on domain
         roles_ids = self.assignment_api.get_roles_for_user_and_domain(
             new_user1['id'], new_domain['id'])
-        self.assertEqual(len(roles_ids), 2)
+        self.assertEqual(2, len(roles_ids))
         self.assertIn(self.role_member['id'], roles_ids)
         self.assertIn(self.role_other['id'], roles_ids)
 
@@ -719,7 +715,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=new_user1['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
 
     def test_get_roles_for_user_and_domain_404(self):
         """Test errors raised when getting roles for user on a domain.
@@ -796,7 +792,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=self.user_foo['id'],
             project_id=self.tenant_bar['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.assignment_api.create_grant(user_id=self.user_foo['id'],
                                          project_id=self.tenant_bar['id'],
                                          role_id=self.role_admin['id'])
@@ -834,7 +830,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=self.user_foo['id'],
             project_id=self.tenant_baz['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           user_id=self.user_foo['id'],
@@ -856,7 +852,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             project_id=self.tenant_bar['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(group_id=new_group['id'],
                                          project_id=self.tenant_bar['id'],
                                          role_id='member')
@@ -871,7 +867,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             project_id=self.tenant_bar['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           group_id=new_group['id'],
@@ -894,7 +890,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
 
         self.assignment_api.create_grant(group_id=new_group['id'],
                                          domain_id=new_domain['id'],
@@ -911,7 +907,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           group_id=new_group['id'],
@@ -944,7 +940,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         # Now add the grant we are going to test for, and some others as
         # well just to make sure we get back the right one
         self.assignment_api.create_grant(group_id=new_group['id'],
@@ -972,7 +968,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=new_group['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           group_id=new_group['id'],
@@ -989,7 +985,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=new_user['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(user_id=new_user['id'],
                                          domain_id=new_domain['id'],
                                          role_id='member')
@@ -1004,7 +1000,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=new_user['id'],
             domain_id=new_domain['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           user_id=new_user['id'],
@@ -1030,11 +1026,11 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain2['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(group_id=group1['id'],
                                          domain_id=domain1['id'],
                                          role_id=group1_domain1_role['id'])
@@ -1056,7 +1052,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain2['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           group_id=group1['id'],
@@ -1083,11 +1079,11 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain2['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(user_id=user1['id'],
                                          domain_id=domain1['id'],
                                          role_id=user1_domain1_role['id'])
@@ -1109,7 +1105,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain2['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assertRaises(exception.NotFound,
                           self.assignment_api.delete_grant,
                           user_id=user1['id'],
@@ -1134,7 +1130,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(group_id=group1['id'],
                                          project_id=project1['id'],
                                          role_id=role1['id'])
@@ -1157,7 +1153,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.assertDictEqual(roles_ref[0], role2)
 
     def test_role_grant_by_user_and_cross_domain_project(self):
@@ -1179,7 +1175,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(user_id=user1['id'],
                                          project_id=project1['id'],
                                          role_id=role1['id'])
@@ -1202,7 +1198,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.assertDictEqual(roles_ref[0], role2)
 
     def test_delete_user_grant_no_user(self):
@@ -1263,7 +1259,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(user_id=user1['id'],
                                          domain_id=domain1['id'],
                                          role_id=role_list[0]['id'])
@@ -1290,22 +1286,22 @@ class IdentityTests(object):
                                          role_id=role_list[7]['id'])
         roles_ref = self.assignment_api.list_grants(user_id=user1['id'],
                                                     domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 2)
+        self.assertEqual(2, len(roles_ref))
         self.assertIn(role_list[0], roles_ref)
         self.assertIn(role_list[1], roles_ref)
         roles_ref = self.assignment_api.list_grants(group_id=group1['id'],
                                                     domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 2)
+        self.assertEqual(2, len(roles_ref))
         self.assertIn(role_list[2], roles_ref)
         self.assertIn(role_list[3], roles_ref)
         roles_ref = self.assignment_api.list_grants(user_id=user1['id'],
                                                     project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 2)
+        self.assertEqual(2, len(roles_ref))
         self.assertIn(role_list[4], roles_ref)
         self.assertIn(role_list[5], roles_ref)
         roles_ref = self.assignment_api.list_grants(group_id=group1['id'],
                                                     project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 2)
+        self.assertEqual(2, len(roles_ref))
         self.assertIn(role_list[6], roles_ref)
         self.assertIn(role_list[7], roles_ref)
 
@@ -1314,7 +1310,7 @@ class IdentityTests(object):
         # the above results.
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 4)
+        self.assertEqual(4, len(combined_list))
         self.assertIn(role_list[4]['id'], combined_list)
         self.assertIn(role_list[5]['id'], combined_list)
         self.assertIn(role_list[6]['id'], combined_list)
@@ -1322,7 +1318,7 @@ class IdentityTests(object):
 
         combined_role_list = self.assignment_api.get_roles_for_user_and_domain(
             user1['id'], domain1['id'])
-        self.assertEqual(len(combined_role_list), 4)
+        self.assertEqual(4, len(combined_role_list))
         self.assertIn(role_list[0]['id'], combined_role_list)
         self.assertIn(role_list[1]['id'], combined_role_list)
         self.assertIn(role_list[2]['id'], combined_role_list)
@@ -1373,7 +1369,7 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         self.assignment_api.create_grant(user_id=user1['id'],
                                          domain_id=domain1['id'],
                                          role_id=role_list[0]['id'])
@@ -1397,14 +1393,14 @@ class IdentityTests(object):
         # both project and domain
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 3)
+        self.assertEqual(3, len(combined_list))
         self.assertIn(role_list[3]['id'], combined_list)
         self.assertIn(role_list[4]['id'], combined_list)
         self.assertIn(role_list[5]['id'], combined_list)
 
         combined_role_list = self.assignment_api.get_roles_for_user_and_domain(
             user1['id'], domain1['id'])
-        self.assertEqual(len(combined_role_list), 3)
+        self.assertEqual(3, len(combined_role_list))
         self.assertIn(role_list[0]['id'], combined_role_list)
         self.assertIn(role_list[1]['id'], combined_role_list)
         self.assertIn(role_list[2]['id'], combined_role_list)
@@ -1476,36 +1472,36 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.assignment_api.delete_role(role1['id'])
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
 
     def test_delete_user_with_group_project_domain_links(self):
         role1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
@@ -1533,11 +1529,11 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.identity_api.check_user_in_group(
             user_id=user1['id'],
             group_id=group1['id'])
@@ -1573,11 +1569,11 @@ class IdentityTests(object):
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         roles_ref = self.assignment_api.list_grants(
             group_id=group1['id'],
             domain_id=domain1['id'])
-        self.assertEqual(len(roles_ref), 1)
+        self.assertEqual(1, len(roles_ref))
         self.identity_api.check_user_in_group(
             user_id=user1['id'],
             group_id=group1['id'])
@@ -1585,7 +1581,7 @@ class IdentityTests(object):
         self.identity_api.get_user(user1['id'])
 
     def test_delete_domain_with_user_group_project_links(self):
-        #TODO(chungg):add test case once expected behaviour defined
+        # TODO(chungg):add test case once expected behaviour defined
         pass
 
     def test_role_crud(self):
@@ -1942,7 +1938,7 @@ class IdentityTests(object):
                        'domain_id': DEFAULT_DOMAIN_ID}
             self.assignment_api.create_project(project['id'], project)
             project_ref = self.assignment_api.get_project(project['id'])
-            self.assertEqual(project_ref['enabled'], True)
+            self.assertEqual(True, project_ref['enabled'])
 
             # Strings are not valid boolean values
             project['enabled'] = "false"
@@ -2032,7 +2028,7 @@ class IdentityTests(object):
         self.identity_api.create_group(group1['id'], group1)
         self.identity_api.create_group(group2['id'], group2)
         groups = self.identity_api.list_groups()
-        self.assertEqual(len(groups), 2)
+        self.assertEqual(2, len(groups))
         group_ids = []
         for group in groups:
             group_ids.append(group.get('id'))
@@ -2045,7 +2041,7 @@ class IdentityTests(object):
         self.assignment_api.create_domain(domain1['id'], domain1)
         self.assignment_api.create_domain(domain2['id'], domain2)
         domains = self.assignment_api.list_domains()
-        self.assertEqual(len(domains), 3)
+        self.assertEqual(3, len(domains))
         domain_ids = []
         for domain in domains:
             domain_ids.append(domain.get('id'))
@@ -2055,7 +2051,7 @@ class IdentityTests(object):
 
     def test_list_projects(self):
         projects = self.assignment_api.list_projects()
-        self.assertEqual(len(projects), 4)
+        self.assertEqual(4, len(projects))
         project_ids = []
         for project in projects:
             project_ids.append(project.get('id'))
@@ -2066,7 +2062,7 @@ class IdentityTests(object):
         project_ids = ([x['id'] for x in
                        self.assignment_api.list_projects_in_domain(
                            DEFAULT_DOMAIN_ID)])
-        self.assertEqual(len(project_ids), 4)
+        self.assertEqual(4, len(project_ids))
         self.assertIn(self.tenant_bar['id'], project_ids)
         self.assertIn(self.tenant_baz['id'], project_ids)
         self.assertIn(self.tenant_mtu['id'], project_ids)
@@ -2084,7 +2080,7 @@ class IdentityTests(object):
         project_ids = ([x['id'] for x in
                        self.assignment_api.list_projects_in_domain(
                            domain1['id'])])
-        self.assertEqual(len(project_ids), 2)
+        self.assertEqual(2, len(project_ids))
         self.assertIn(project1['id'], project_ids)
         self.assertIn(project2['id'], project_ids)
 
@@ -2141,40 +2137,40 @@ class IdentityTests(object):
                 'domain_id': DEFAULT_DOMAIN_ID}
         self.identity_api.create_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], True)
+        self.assertEqual(True, user_ref['enabled'])
 
         user['enabled'] = False
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], user['enabled'])
+        self.assertEqual(user['enabled'], user_ref['enabled'])
 
         # If not present, enabled field should not be updated
         del user['enabled']
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], False)
+        self.assertEqual(False, user_ref['enabled'])
 
         user['enabled'] = True
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], user['enabled'])
+        self.assertEqual(user['enabled'], user_ref['enabled'])
 
         del user['enabled']
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], True)
+        self.assertEqual(True, user_ref['enabled'])
 
         # Integers are valid Python's booleans. Explicitly test it.
         user['enabled'] = 0
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], False)
+        self.assertEqual(False, user_ref['enabled'])
 
         # Any integers other than 0 are interpreted as True
         user['enabled'] = -42
         self.identity_api.update_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], True)
+        self.assertEqual(True, user_ref['enabled'])
 
     def test_update_user_name(self):
         user = {'id': uuid.uuid4().hex,
@@ -2198,14 +2194,14 @@ class IdentityTests(object):
         self.assertDictEqual(user_ref, updated_user)
 
         user_ref = self.identity_api.get_user(user_ref['id'])
-        self.assertEqual(user_ref['name'], changed_name)
+        self.assertEqual(changed_name, user_ref['name'])
 
     def test_update_user_enable_fails(self):
         user = {'id': 'fake1', 'name': 'fake1', 'enabled': True,
                 'domain_id': DEFAULT_DOMAIN_ID}
         self.identity_api.create_user('fake1', user)
         user_ref = self.identity_api.get_user('fake1')
-        self.assertEqual(user_ref['enabled'], True)
+        self.assertEqual(True, user_ref['enabled'])
 
         # Strings are not valid boolean values
         user['enabled'] = "false"
@@ -2219,28 +2215,28 @@ class IdentityTests(object):
                   'domain_id': DEFAULT_DOMAIN_ID}
         self.assignment_api.create_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['enabled'], True)
+        self.assertEqual(True, tenant_ref['enabled'])
 
         tenant['enabled'] = False
         self.assignment_api.update_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['enabled'], tenant['enabled'])
+        self.assertEqual(tenant['enabled'], tenant_ref['enabled'])
 
         # If not present, enabled field should not be updated
         del tenant['enabled']
         self.assignment_api.update_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['enabled'], False)
+        self.assertEqual(False, tenant_ref['enabled'])
 
         tenant['enabled'] = True
         self.assignment_api.update_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['enabled'], tenant['enabled'])
+        self.assertEqual(tenant['enabled'], tenant_ref['enabled'])
 
         del tenant['enabled']
         self.assignment_api.update_project('fake1', tenant)
         tenant_ref = self.assignment_api.get_project('fake1')
-        self.assertEqual(tenant_ref['enabled'], True)
+        self.assertEqual(True, tenant_ref['enabled'])
 
     def test_add_user_to_group(self):
         domain = self._get_domain_fixture()
@@ -2280,6 +2276,11 @@ class IdentityTests(object):
                           uuid.uuid4().hex,
                           new_group['id'])
 
+        self.assertRaises(exception.NotFound,
+                          self.identity_api.add_user_to_group,
+                          uuid.uuid4().hex,
+                          uuid.uuid4().hex)
+
     def test_check_user_in_group(self):
         domain = self._get_domain_fixture()
         new_group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
@@ -2313,10 +2314,6 @@ class IdentityTests(object):
             'domain_id': DEFAULT_DOMAIN_ID,
             'name': uuid.uuid4().hex}
         self.identity_api.create_group(new_group['id'], new_group)
-        self.assertRaises(exception.UserNotFound,
-                          self.identity_api.check_user_in_group,
-                          uuid.uuid4().hex,
-                          new_group['id'])
 
         new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
                     'password': uuid.uuid4().hex, 'enabled': True,
@@ -2328,6 +2325,33 @@ class IdentityTests(object):
                           new_user['id'],
                           new_group['id'])
 
+    def test_check_user_in_group_404(self):
+        new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
+                    'password': uuid.uuid4().hex, 'enabled': True,
+                    'domain_id': DEFAULT_DOMAIN_ID}
+        self.identity_api.create_user(new_user['id'], new_user)
+
+        new_group = {
+            'id': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'name': uuid.uuid4().hex}
+        self.identity_api.create_group(new_group['id'], new_group)
+
+        self.assertRaises(exception.UserNotFound,
+                          self.identity_api.check_user_in_group,
+                          uuid.uuid4().hex,
+                          new_group['id'])
+
+        self.assertRaises(exception.GroupNotFound,
+                          self.identity_api.check_user_in_group,
+                          new_user['id'],
+                          uuid.uuid4().hex)
+
+        self.assertRaises(exception.NotFound,
+                          self.identity_api.check_user_in_group,
+                          uuid.uuid4().hex,
+                          uuid.uuid4().hex)
+
     def test_list_users_in_group(self):
         domain = self._get_domain_fixture()
         new_group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
@@ -2335,7 +2359,7 @@ class IdentityTests(object):
         self.identity_api.create_group(new_group['id'], new_group)
         # Make sure we get an empty list back on a new group, not an error.
         user_refs = self.identity_api.list_users_in_group(new_group['id'])
-        self.assertEqual(user_refs, [])
+        self.assertEqual([], user_refs)
         # Make sure we get the correct users back once they have been added
         # to the group.
         new_user = {'id': uuid.uuid4().hex, 'name': 'new_user',
@@ -2351,6 +2375,11 @@ class IdentityTests(object):
                 found = True
             self.assertNotIn('password', x)
         self.assertTrue(found)
+
+    def test_list_users_in_group_404(self):
+        self.assertRaises(exception.GroupNotFound,
+                          self.identity_api.list_users_in_group,
+                          uuid.uuid4().hex)
 
     def test_list_groups_for_user(self):
         domain = self._get_domain_fixture()
@@ -2371,7 +2400,7 @@ class IdentityTests(object):
         for x in range(0, USER_COUNT):
             group_refs = self.identity_api.list_groups_for_user(
                 test_users[x]['id'])
-            self.assertEqual(len(group_refs), 0)
+            self.assertEqual(0, len(group_refs))
 
         for x in range(0, GROUP_COUNT):
             before_count = x
@@ -2382,43 +2411,42 @@ class IdentityTests(object):
             self.identity_api.create_group(new_group['id'], new_group)
             test_groups.append(new_group)
 
-            #add the user to the group and ensure that the
-            #group count increases by one for each
+            # add the user to the group and ensure that the
+            # group count increases by one for each
             group_refs = self.identity_api.list_groups_for_user(
                 positive_user['id'])
-            self.assertEqual(len(group_refs), before_count)
+            self.assertEqual(before_count, len(group_refs))
             self.identity_api.add_user_to_group(
                 positive_user['id'],
                 new_group['id'])
             group_refs = self.identity_api.list_groups_for_user(
                 positive_user['id'])
-            self.assertEqual(len(group_refs), after_count)
+            self.assertEqual(after_count, len(group_refs))
 
-            #Make sure the group count for the unrelated user
-            #did not change
+            # Make sure the group count for the unrelated user did not change
             group_refs = self.identity_api.list_groups_for_user(
                 negative_user['id'])
-            self.assertEqual(len(group_refs), 0)
+            self.assertEqual(0, len(group_refs))
 
-        #remove the user from each group and ensure that
-        #the group count reduces by one for each
+        # remove the user from each group and ensure that
+        # the group count reduces by one for each
         for x in range(0, 3):
             before_count = GROUP_COUNT - x
             after_count = GROUP_COUNT - x - 1
             group_refs = self.identity_api.list_groups_for_user(
                 positive_user['id'])
-            self.assertEqual(len(group_refs), before_count)
+            self.assertEqual(before_count, len(group_refs))
             self.identity_api.remove_user_from_group(
                 positive_user['id'],
                 test_groups[x]['id'])
             group_refs = self.identity_api.list_groups_for_user(
                 positive_user['id'])
-            self.assertEqual(len(group_refs), after_count)
-            #Make sure the group count for the unrelated user
-            #did not change
+            self.assertEqual(after_count, len(group_refs))
+            # Make sure the group count for the unrelated user
+            # did not change
             group_refs = self.identity_api.list_groups_for_user(
                 negative_user['id'])
-            self.assertEqual(len(group_refs), 0)
+            self.assertEqual(0, len(group_refs))
 
     def test_remove_user_from_group(self):
         domain = self._get_domain_fixture()
@@ -2447,12 +2475,12 @@ class IdentityTests(object):
         new_group = {'id': uuid.uuid4().hex, 'domain_id': domain['id'],
                      'name': uuid.uuid4().hex}
         self.identity_api.create_group(new_group['id'], new_group)
-        self.assertRaises(exception.NotFound,
+        self.assertRaises(exception.GroupNotFound,
                           self.identity_api.remove_user_from_group,
                           new_user['id'],
                           uuid.uuid4().hex)
 
-        self.assertRaises(exception.NotFound,
+        self.assertRaises(exception.UserNotFound,
                           self.identity_api.remove_user_from_group,
                           uuid.uuid4().hex,
                           new_group['id'])
@@ -2641,9 +2669,9 @@ class IdentityTests(object):
         def assert_key_equals(value):
             project_ref = self.assignment_api.update_project(
                 project['id'], project)
-            self.assertEqual(project_ref[key], value)
+            self.assertEqual(value, project_ref[key])
             project_ref = self.assignment_api.get_project(project['id'])
-            self.assertEqual(project_ref[key], value)
+            self.assertEqual(value, project_ref[key])
 
         def assert_get_key_is(value):
             project_ref = self.assignment_api.update_project(
@@ -2707,7 +2735,7 @@ class IdentityTests(object):
                  'enabled': True}
         self.identity_api.create_user(user1['id'], user1)
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
-        self.assertEqual(len(user_projects), 0)
+        self.assertEqual(0, len(user_projects))
         self.assignment_api.create_grant(user_id=user1['id'],
                                          project_id=self.tenant_bar['id'],
                                          role_id=self.role_member['id'])
@@ -2715,7 +2743,7 @@ class IdentityTests(object):
                                          project_id=self.tenant_baz['id'],
                                          role_id=self.role_member['id'])
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
-        self.assertEqual(len(user_projects), 2)
+        self.assertEqual(2, len(user_projects))
 
     def test_list_projects_for_user_with_grants(self):
         # Create two groups each with a role on a different project, and
@@ -2753,7 +2781,7 @@ class IdentityTests(object):
                                          project_id=project2['id'],
                                          role_id=self.role_admin['id'])
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
-        self.assertEqual(len(user_projects), 3)
+        self.assertEqual(3, len(user_projects))
 
     @tests.skip_if_cache_disabled('assignment')
     def test_cache_layer_domain_crud(self):
@@ -2920,7 +2948,7 @@ class IdentityTests(object):
 
         user = self.identity_api.create_user(user_data['id'], user_data)
 
-        self.assertEqual(user['arbitrary_attr'], attr_value)
+        self.assertEqual(attr_value, user['arbitrary_attr'])
 
     def test_arbitrary_attributes_are_returned_from_get_user(self):
         attr_value = uuid.uuid4().hex
@@ -2929,7 +2957,7 @@ class IdentityTests(object):
         self.identity_api.create_user(user_data['id'], user_data)
 
         user = self.identity_api.get_user(user_data['id'])
-        self.assertEqual(user['arbitrary_attr'], attr_value)
+        self.assertEqual(attr_value, user['arbitrary_attr'])
 
     def test_new_arbitrary_attributes_are_returned_from_update_user(self):
         user_data = self.create_user_dict()
@@ -2939,7 +2967,7 @@ class IdentityTests(object):
         user['arbitrary_attr'] = attr_value
         updated_user = self.identity_api.update_user(user['id'], user)
 
-        self.assertEqual(updated_user['arbitrary_attr'], attr_value)
+        self.assertEqual(attr_value, updated_user['arbitrary_attr'])
 
     def test_updated_arbitrary_attributes_are_returned_from_update_user(self):
         attr_value = uuid.uuid4().hex
@@ -2950,7 +2978,7 @@ class IdentityTests(object):
         user['arbitrary_attr'] = new_attr_value
         updated_user = self.identity_api.update_user(user['id'], user)
 
-        self.assertEqual(updated_user['arbitrary_attr'], new_attr_value)
+        self.assertEqual(new_attr_value, updated_user['arbitrary_attr'])
 
     def test_create_grant_no_user(self):
         # If call create_grant with a user that doesn't exist, doesn't fail.
@@ -2973,7 +3001,7 @@ class IdentityTests(object):
         self.assignment_api.create_domain(domain['id'], domain)
 
         domain_ref = self.assignment_api.get_domain_by_name(domain_name)
-        self.assertEqual(domain_ref, domain)
+        self.assertEqual(domain, domain_ref)
 
     def test_get_not_default_domain_by_name(self):
         domain_name = 'foo'
@@ -2981,15 +3009,60 @@ class IdentityTests(object):
                           self.assignment_api.get_domain_by_name,
                           domain_name)
 
+    def test_project_update_and_project_get_return_same_response(self):
+        project = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': CONF.identity.default_domain_id,
+            'description': uuid.uuid4().hex,
+            'enabled': True}
+
+        self.assignment_api.create_project(project['id'], project)
+
+        updated_project = {'enabled': False}
+        updated_project_ref = self.assignment_api.update_project(
+            project['id'], updated_project)
+
+        # SQL backend adds 'extra' field
+        updated_project_ref.pop('extra', None)
+
+        self.assertIs(False, updated_project_ref['enabled'])
+
+        project_ref = self.assignment_api.get_project(project['id'])
+        self.assertDictEqual(project_ref, updated_project_ref)
+
+    def test_user_update_and_user_get_return_same_response(self):
+        user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': CONF.identity.default_domain_id,
+            'description': uuid.uuid4().hex,
+            'enabled': True}
+
+        self.identity_api.create_user(user['id'], user)
+
+        updated_user = {'enabled': False}
+        updated_user_ref = self.identity_api.update_user(
+            user['id'], updated_user)
+
+        # SQL backend adds 'extra' field
+        updated_user_ref.pop('extra', None)
+
+        self.assertIs(False, updated_user_ref['enabled'])
+
+        user_ref = self.identity_api.get_user(user['id'])
+        self.assertDictEqual(user_ref, updated_user_ref)
+
 
 class TokenTests(object):
     def _create_token_id(self):
-        # Token must start with MII here otherwise it fails the asn1 test
-        # and is not hashed in a SQL backend.
-        token_id = "MII"
+        # Use a token signed by the cms module
+        token_id = ""
         for i in range(1, 20):
             token_id += uuid.uuid4().hex
-        return token_id
+        return cms.cms_sign_token(token_id,
+                                  CONF.signing.certfile,
+                                  CONF.signing.keyfile)
 
     def test_token_crud(self):
         token_id = self._create_token_id()
@@ -3010,7 +3083,7 @@ class TokenTests(object):
         new_data_ref.pop('user_id')
         new_data_ref.pop('id')
 
-        self.assertEqual(new_data_ref, data)
+        self.assertEqual(data, new_data_ref)
 
         self.token_api.delete_token(token_id)
         self.assertRaises(exception.TokenNotFound,
@@ -3053,7 +3126,7 @@ class TokenTests(object):
 
     def test_delete_tokens(self):
         tokens = self.token_api._list_tokens('testuserid')
-        self.assertEqual(len(tokens), 0)
+        self.assertEqual(0, len(tokens))
         token_id1, data = self.create_token_sample_data(
             tenant_id='testtenantid')
         token_id2, data = self.create_token_sample_data(
@@ -3062,13 +3135,13 @@ class TokenTests(object):
             tenant_id='testtenantid',
             user_id='testuserid1')
         tokens = self.token_api._list_tokens('testuserid')
-        self.assertEqual(len(tokens), 2)
+        self.assertEqual(2, len(tokens))
         self.assertIn(token_id2, tokens)
         self.assertIn(token_id1, tokens)
         self.token_api.delete_tokens(user_id='testuserid',
                                      tenant_id='testtenantid')
         tokens = self.token_api._list_tokens('testuserid')
-        self.assertEqual(len(tokens), 0)
+        self.assertEqual(0, len(tokens))
         self.assertRaises(exception.TokenNotFound,
                           self.token_api.get_token, token_id1)
         self.assertRaises(exception.TokenNotFound,
@@ -3078,7 +3151,7 @@ class TokenTests(object):
 
     def test_delete_tokens_trust(self):
         tokens = self.token_api._list_tokens(user_id='testuserid')
-        self.assertEqual(len(tokens), 0)
+        self.assertEqual(0, len(tokens))
         token_id1, data = self.create_token_sample_data(
             tenant_id='testtenantid',
             trust_id='testtrustid')
@@ -3087,7 +3160,7 @@ class TokenTests(object):
             user_id='testuserid1',
             trust_id='testtrustid1')
         tokens = self.token_api._list_tokens('testuserid')
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(1, len(tokens))
         self.assertIn(token_id1, tokens)
         self.token_api.delete_tokens(user_id='testuserid',
                                      tenant_id='testtenantid',
@@ -3098,14 +3171,14 @@ class TokenTests(object):
 
     def _test_token_list(self, token_list_fn):
         tokens = token_list_fn('testuserid')
-        self.assertEqual(len(tokens), 0)
+        self.assertEqual(0, len(tokens))
         token_id1, data = self.create_token_sample_data()
         tokens = token_list_fn('testuserid')
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(1, len(tokens))
         self.assertIn(token_id1, tokens)
         token_id2, data = self.create_token_sample_data()
         tokens = token_list_fn('testuserid')
-        self.assertEqual(len(tokens), 2)
+        self.assertEqual(2, len(tokens))
         self.assertIn(token_id2, tokens)
         self.assertIn(token_id1, tokens)
         self.token_api.delete_token(token_id1)
@@ -3125,14 +3198,14 @@ class TokenTests(object):
         # test for existing but empty tenant (LP:1078497)
         token_id5, data = self.create_token_sample_data(tenant_id=NULL_OBJECT)
         tokens = token_list_fn('testuserid')
-        self.assertEqual(len(tokens), 3)
+        self.assertEqual(3, len(tokens))
         self.assertNotIn(token_id1, tokens)
         self.assertNotIn(token_id2, tokens)
         self.assertIn(token_id3, tokens)
         self.assertIn(token_id4, tokens)
         self.assertIn(token_id5, tokens)
         tokens = token_list_fn('testuserid', tenant2)
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(1, len(tokens))
         self.assertNotIn(token_id1, tokens)
         self.assertNotIn(token_id2, tokens)
         self.assertNotIn(token_id3, tokens)
@@ -3150,7 +3223,7 @@ class TokenTests(object):
         trust_id = uuid.uuid4().hex
         token_id5, data = self.create_token_sample_data(trust_id=trust_id)
         tokens = self.token_api._list_tokens('testuserid', trust_id=trust_id)
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(1, len(tokens))
         self.assertIn(token_id5, tokens)
 
     def test_get_token_404(self):
@@ -3217,7 +3290,7 @@ class TokenTests(object):
 
     def test_list_revoked_tokens_returns_empty_list(self):
         revoked_ids = [x['id'] for x in self.token_api.list_revoked_tokens()]
-        self.assertEqual(revoked_ids, [])
+        self.assertEqual([], revoked_ids)
 
     def test_list_revoked_tokens_for_single_token(self):
         self.check_list_revoked_tokens([self.delete_token()])
@@ -3249,7 +3322,7 @@ class TokenTests(object):
 
         self.token_api.flush_expired_tokens()
         tokens = self.token_api._list_tokens('testuserid')
-        self.assertEqual(len(tokens), 1)
+        self.assertEqual(1, len(tokens))
         self.assertIn(token_id, tokens)
 
     @tests.skip_if_cache_disabled('token')
@@ -3288,9 +3361,9 @@ class TokenTests(object):
         self.assertIn(token_id, revoked_tokens)
         self.assertIn(token2_id, revoked_tokens)
 
-    def test_predictable_revoked_pki_token_id(self):
+    def _test_predictable_revoked_pki_token_id(self, hash_fn):
         token_id = self._create_token_id()
-        token_id_hash = hashlib.md5(token_id).hexdigest()
+        token_id_hash = hash_fn(token_id).hexdigest()
         token = {'user': {'id': uuid.uuid4().hex}}
 
         self.token_api.create_token(token_id, token)
@@ -3301,6 +3374,13 @@ class TokenTests(object):
         self.assertNotIn(token_id, revoked_ids)
         for t in self.token_api.list_revoked_tokens():
             self.assertIn('expires', t)
+
+    def test_predictable_revoked_pki_token_id_default(self):
+        self._test_predictable_revoked_pki_token_id(hashlib.md5)
+
+    def test_predictable_revoked_pki_token_id_sha256(self):
+        self.config_fixture.config(group='token', hash_algorithm='sha256')
+        self._test_predictable_revoked_pki_token_id(hashlib.sha256)
 
     def test_predictable_revoked_uuid_token_id(self):
         token_id = uuid.uuid4().hex
@@ -3505,25 +3585,25 @@ class TrustTests(object):
         for i in range(3):
             self.create_sample_trust(uuid.uuid4().hex)
         trusts = self.trust_api.list_trusts_for_trustee(self.trustee['id'])
-        self.assertEqual(len(trusts), 3)
+        self.assertEqual(3, len(trusts))
         self.assertEqual(trusts[0]["trustee_user_id"], self.trustee['id'])
         trusts = self.trust_api.list_trusts_for_trustee(self.trustor['id'])
-        self.assertEqual(len(trusts), 0)
+        self.assertEqual(0, len(trusts))
 
     def test_list_trust_by_trustor(self):
         for i in range(3):
             self.create_sample_trust(uuid.uuid4().hex)
         trusts = self.trust_api.list_trusts_for_trustor(self.trustor['id'])
-        self.assertEqual(len(trusts), 3)
+        self.assertEqual(3, len(trusts))
         self.assertEqual(trusts[0]["trustor_user_id"], self.trustor['id'])
         trusts = self.trust_api.list_trusts_for_trustor(self.trustee['id'])
-        self.assertEqual(len(trusts), 0)
+        self.assertEqual(0, len(trusts))
 
     def test_list_trusts(self):
         for i in range(3):
             self.create_sample_trust(uuid.uuid4().hex)
         trusts = self.trust_api.list_trusts()
-        self.assertEqual(len(trusts), 3)
+        self.assertEqual(3, len(trusts))
 
     def test_trust_has_remaining_uses_positive(self):
         # create a trust with limited uses, check that we have uses left
@@ -3960,7 +4040,7 @@ class InheritanceTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
 
         # Create the first two roles - the domain one is not inherited
         self.assignment_api.create_grant(user_id=user1['id'],
@@ -3974,7 +4054,7 @@ class InheritanceTests(object):
         # should only include the direct role assignment on the project
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 1)
+        self.assertEqual(1, len(combined_list))
         self.assertIn(role_list[0]['id'], combined_list)
 
         # Now add an inherited role on the domain
@@ -3987,7 +4067,7 @@ class InheritanceTests(object):
         # should now include the inherited role on the domain
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 2)
+        self.assertEqual(2, len(combined_list))
         self.assertIn(role_list[0]['id'], combined_list)
         self.assertIn(role_list[2]['id'], combined_list)
 
@@ -3995,7 +4075,7 @@ class InheritanceTests(object):
         # directly assigned role on the domain itself
         combined_role_list = self.assignment_api.get_roles_for_user_and_domain(
             user1['id'], domain1['id'])
-        self.assertEqual(len(combined_role_list), 1)
+        self.assertEqual(1, len(combined_role_list))
         self.assertIn(role_list[1]['id'], combined_role_list)
 
     def test_inherited_role_grants_for_group(self):
@@ -4046,7 +4126,7 @@ class InheritanceTests(object):
         roles_ref = self.assignment_api.list_grants(
             user_id=user1['id'],
             project_id=project1['id'])
-        self.assertEqual(len(roles_ref), 0)
+        self.assertEqual(0, len(roles_ref))
 
         # Create two roles - the domain one is not inherited
         self.assignment_api.create_grant(user_id=user1['id'],
@@ -4060,7 +4140,7 @@ class InheritanceTests(object):
         # should only include the direct role assignment on the project
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 1)
+        self.assertEqual(1, len(combined_list))
         self.assertIn(role_list[0]['id'], combined_list)
 
         # Now add to more group roles, both inherited, to the domain
@@ -4077,7 +4157,7 @@ class InheritanceTests(object):
         # should now include the inherited roles on the domain
         combined_list = self.assignment_api.get_roles_for_user_and_project(
             user1['id'], project1['id'])
-        self.assertEqual(len(combined_list), 3)
+        self.assertEqual(3, len(combined_list))
         self.assertIn(role_list[0]['id'], combined_list)
         self.assertIn(role_list[2]['id'], combined_list)
         self.assertIn(role_list[3]['id'], combined_list)
@@ -4120,7 +4200,7 @@ class InheritanceTests(object):
         # Should get back all three projects, one by virtue of the direct
         # grant, plus both projects in the domain
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
-        self.assertEqual(len(user_projects), 3)
+        self.assertEqual(3, len(user_projects))
 
     def test_list_projects_for_user_with_inherited_group_grants(self):
         """Test inherited group roles.
@@ -4186,7 +4266,7 @@ class InheritanceTests(object):
         # Should get back all five projects, but without a duplicate for
         # project3 (since it has both a direct user role and an inherited role)
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
-        self.assertEqual(len(user_projects), 5)
+        self.assertEqual(5, len(user_projects))
 
 
 class FilterTests(filtering.FilterTests):
@@ -4204,7 +4284,7 @@ class FilterTests(filtering.FilterTests):
             hints = driver_hints.Hints()
             hints.add_filter('domain_id', domain1['id'])
             entities = self._list_entities(entity)(hints=hints)
-            self.assertEqual(len(entities), 14)
+            self.assertEqual(14, len(entities))
             self._match_with_list(entities, domain1_entity_list)
             # Check the driver has removed the filter from the list hints
             self.assertFalse(hints.get_exact_filter_by_name('domain_id'))
@@ -4213,7 +4293,7 @@ class FilterTests(filtering.FilterTests):
             hints = driver_hints.Hints()
             hints.add_filter('name', domain1_entity_list[10]['name'])
             entities = self._list_entities(entity)(hints=hints)
-            self.assertEqual(len(entities), 1)
+            self.assertEqual(1, len(entities))
             self.assertEqual(entities[0]['id'], domain1_entity_list[10]['id'])
             # Check the driver has removed the filter from the list hints
             self.assertFalse(hints.get_exact_filter_by_name('name'))
@@ -4247,26 +4327,26 @@ class FilterTests(filtering.FilterTests):
         hints = driver_hints.Hints()
         hints.add_filter('name', 'ministry', comparator='contains')
         users = self.identity_api.list_users(hints=hints)
-        self.assertEqual(len(users), 5)
+        self.assertEqual(5, len(users))
         self._match_with_list(users, user_list,
                               list_start=6, list_end=11)
-        #TODO(henry-nash) Check inexact filter has been removed.
+        # TODO(henry-nash) Check inexact filter has been removed.
 
         hints = driver_hints.Hints()
         hints.add_filter('name', 'The', comparator='startswith')
         users = self.identity_api.list_users(hints=hints)
-        self.assertEqual(len(users), 6)
+        self.assertEqual(6, len(users))
         self._match_with_list(users, user_list,
                               list_start=5, list_end=11)
-        #TODO(henry-nash) Check inexact filter has been removed.
+        # TODO(henry-nash) Check inexact filter has been removed.
 
         hints = driver_hints.Hints()
         hints.add_filter('name', 'of', comparator='endswith')
         users = self.identity_api.list_users(hints=hints)
-        self.assertEqual(len(users), 2)
-        self.assertEqual(users[0]['id'], user_list[7]['id'])
-        self.assertEqual(users[1]['id'], user_list[10]['id'])
-        #TODO(henry-nash) Check inexact filter has been removed.
+        self.assertEqual(2, len(users))
+        self.assertEqual(user_list[7]['id'], users[0]['id'])
+        self.assertEqual(user_list[10]['id'], users[1]['id'])
+        # TODO(henry-nash) Check inexact filter has been removed.
 
         # TODO(henry-nash): Add some case sensitive tests.  The issue
         # is that MySQL 0.7, by default, is installed in case
@@ -4293,7 +4373,7 @@ class FilterTests(filtering.FilterTests):
         hints = driver_hints.Hints()
         hints.add_filter('name', "anything' or 'x'='x")
         users = self.identity_api.list_users(hints=hints)
-        self.assertEqual(len(users), 0)
+        self.assertEqual(0, len(users))
 
         # See if we can add a SQL command...use the group table instead of the
         # user table since 'user' is reserved word for SQLAlchemy.
@@ -4304,7 +4384,7 @@ class FilterTests(filtering.FilterTests):
         hints = driver_hints.Hints()
         hints.add_filter('name', "x'; drop table group")
         groups = self.identity_api.list_groups(hints=hints)
-        self.assertEqual(len(groups), 0)
+        self.assertEqual(0, len(groups))
 
         groups = self.identity_api.list_groups()
         self.assertTrue(len(groups) > 0)
@@ -4352,8 +4432,8 @@ class LimitTests(filtering.FilterTests):
         hints = driver_hints.Hints()
         hints.add_filter('domain_id', self.domain1['id'])
         entities = self._list_entities(entity)(hints=hints)
-        self.assertEqual(len(entities), hints.get_limit()['limit'])
-        self.assertTrue(hints.get_limit()['truncated'])
+        self.assertEqual(hints.limit['limit'], len(entities))
+        self.assertTrue(hints.limit['truncated'])
         self._match_with_list(entities, self.domain1_entity_lists[entity])
 
         # Override with driver specific limit
@@ -4366,7 +4446,7 @@ class LimitTests(filtering.FilterTests):
         hints = driver_hints.Hints()
         hints.add_filter('domain_id', self.domain1['id'])
         entities = self._list_entities(entity)(hints=hints)
-        self.assertEqual(len(entities), hints.get_limit()['limit'])
+        self.assertEqual(hints.limit['limit'], len(entities))
         self._match_with_list(entities, self.domain1_entity_lists[entity])
 
         # Finally, let's pretend we want to get the full list of entities,

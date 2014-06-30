@@ -288,8 +288,8 @@ class MongoApi(object):
             if ssl_ca_certs:
                 self.conn_kwargs['ssl_ca_certs'] = ssl_ca_certs
             if ssl_cert_reqs:
-                self.conn_kwargs['ssl_cert_reqs'] = \
-                    self._ssl_cert_req_type(ssl_cert_reqs)
+                self.conn_kwargs['ssl_cert_reqs'] = (
+                    self._ssl_cert_req_type(ssl_cert_reqs))
 
         # rest of arguments are passed to mongo crud calls
         self.meth_kwargs = arguments
@@ -360,8 +360,8 @@ class MongoApi(object):
 
             self._assign_data_mainpulator()
             if self.read_preference:
-                self.read_preference = pymongo.read_preferences.\
-                    mongos_enum(self.read_preference)
+                self.read_preference = pymongo.read_preferences.mongos_enum(
+                    self.read_preference)
                 coll.read_preference = self.read_preference
             if self.w > -1:
                 coll.write_concern['w'] = self.w
@@ -528,7 +528,7 @@ class BaseTransform(AbstractManipulator):
 
     Note: Custom manipulator needs to always override ``transform_incoming``
     and ``transform_outgoing`` methods. MongoDB manipulator logic specifically
-    checks that overriden method in instance and its super are different.
+    checks that overridden method in instance and its super are different.
     """
 
     def transform_incoming(self, son, collection):

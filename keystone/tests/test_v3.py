@@ -24,10 +24,12 @@ from keystone.common import authorization
 from keystone.common import cache
 from keystone.common import serializer
 from keystone import config
+from keystone import exception
 from keystone import middleware
 from keystone.openstack.common import timeutils
 from keystone.policy.backends import rules
 from keystone import tests
+from keystone.tests.ksfixtures import database
 from keystone.tests import rest
 
 
@@ -43,11 +45,11 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
         return config_files
 
-    def setup_database(self):
-        tests.setup_database()
-
-    def teardown_database(self):
-        tests.teardown_database()
+    def get_extensions(self):
+        extensions = set(['revoke'])
+        if hasattr(self, 'EXTENSION_NAME'):
+            extensions.add(self.EXTENSION_NAME)
+        return extensions
 
     def generate_paste_config(self):
         new_paste_file = None
@@ -75,18 +77,16 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         if new_paste_file:
             app_conf = 'config:%s' % (new_paste_file)
 
+        self.useFixture(database.Database(self.get_extensions()))
+
         super(RestfulTestCase, self).setUp(app_conf=app_conf)
 
         self.empty_context = {'environment': {}}
 
-        #drop the policy rules
+        # drop the policy rules
         self.addCleanup(rules.reset)
 
-        self.addCleanup(self.teardown_database)
-
     def load_backends(self):
-        self.setup_database()
-
         # ensure the cache region instance is setup
         cache.configure_cache_region(cache.REGION)
 
@@ -95,7 +95,25 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def load_fixtures(self, fixtures):
         self.load_sample_data()
 
+    def _populate_default_domain(self):
+        if CONF.database.connection == tests.IN_MEM_DB_CONN_STRING:
+            # NOTE(morganfainberg): If an in-memory db is being used, be sure
+            # to populate the default domain, this is typically done by
+            # a migration, but the in-mem db uses model definitions  to create
+            # the schema (no migrations are run).
+            try:
+                self.assignment_api.get_domain(DEFAULT_DOMAIN_ID)
+            except exception.DomainNotFound:
+                domain = {'description': (u'Owns users and tenants (i.e. '
+                                          u'projects) available on Identity '
+                                          u'API v2.'),
+                          'enabled': True,
+                          'id': DEFAULT_DOMAIN_ID,
+                          'name': u'Default'}
+                self.assignment_api.create_domain(DEFAULT_DOMAIN_ID, domain)
+
     def load_sample_data(self):
+        self._populate_default_domain()
         self.domain_id = uuid.uuid4().hex
         self.domain = self.new_domain_ref()
         self.domain['id'] = self.domain_id
@@ -332,7 +350,19 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
             body=auth)
         return r.headers.get('X-Subject-Token')
 
+    def v3_noauth_request(self, path, **kwargs):
+        # request does not require auth token header
+        path = '/v3' + path
+        return self.admin_request(path=path, **kwargs)
+
     def v3_request(self, path, **kwargs):
+        # TODO(gyee): need to fix all the v3 auth tests. They should not
+        # require the token header.
+
+        # check to see if caller requires token for the API call.
+        if kwargs.pop('noauth', None):
+            return self.v3_noauth_request(path, **kwargs)
+
         # Check if the caller has passed in auth details for
         # use in requesting the token
         auth_arg = kwargs.pop('auth', None)
@@ -618,14 +648,14 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     # region validation
 
     def assertValidRegionListResponse(self, resp, *args, **kwargs):
-        #NOTE(jaypipes): I have to pass in a blank keys_to_check parameter
-        #                below otherwise the base assertValidEntity method
-        #                tries to find a "name" and an "enabled" key in the
-        #                returned ref dicts. The issue is, I don't understand
-        #                how the service and endpoint entity assertions below
-        #                actually work (they don't raise assertions), since
-        #                AFAICT, the service and endpoint tables don't have
-        #                a "name" column either... :(
+        # NOTE(jaypipes): I have to pass in a blank keys_to_check parameter
+        #                 below otherwise the base assertValidEntity method
+        #                 tries to find a "name" and an "enabled" key in the
+        #                 returned ref dicts. The issue is, I don't understand
+        #                 how the service and endpoint entity assertions below
+        #                 actually work (they don't raise assertions), since
+        #                 AFAICT, the service and endpoint tables don't have
+        #                 a "name" column either... :(
         return self.assertValidListResponse(
             resp,
             'regions',
@@ -994,6 +1024,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def assertValidTrust(self, entity, ref=None, summary=False):
         self.assertIsNotNone(entity.get('trustor_user_id'))
         self.assertIsNotNone(entity.get('trustee_user_id'))
+        self.assertIsNotNone(entity.get('impersonation'))
 
         self.assertIn('expires_at', entity)
         if entity['expires_at'] is not None:
@@ -1121,7 +1152,7 @@ class VersionTestCase(RestfulTestCase):
         pass
 
 
-#NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
+# NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
 # because we need the token
 class AuthContextMiddlewareTestCase(RestfulTestCase):
     def _mock_request_object(self, token_id):

@@ -135,7 +135,7 @@ The communication of the filter details between the controller level and its
 drivers is handled by the passing of a reference to a Hints object,
 which is a list of dicts describing the filters. A driver that satisfies a
 filter must delete the filter from the Hints object so that when it is returned
-back to the controller level, it knows to only execute any unsatisfied
+to the controller level, it knows to only execute any unsatisfied
 filters.
 
 The contract for a driver for ``list_{entity}`` methods is therefore:
@@ -213,6 +213,23 @@ you'll normally only want to run the test that hits your breakpoint::
 
 For reference, the ``debug`` tox environment implements the instructions
 here: https://wiki.openstack.org/wiki/Testr#Debugging_.28pdb.29_Tests
+
+Disabling Stream Capture
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The stdout, stderr and log messages generated during a test are captured and
+in the event of a test failure those streams will be printed to the terminal
+along with the traceback. The data is discarded for passing tests.
+
+Each stream has an environment variable that can be used to force captured
+data to be discarded even if the test fails: `OS_STDOUT_CAPTURE` for stdout,
+`OS_STDERR_CAPTURE` for stderr and `OS_LOG_CAPTURE` for logging. If the value
+of the environment variable is not one of (True, true, 1, yes) the stream will
+be discarded. All three variables default to 1.
+
+For example, to discard logging data during a test run::
+
+    $ OS_LOG_CAPTURE=0 tox -e py27
 
 Test Structure
 ==============
@@ -457,7 +474,7 @@ backend of the KVS system. The implementation allows for the use of any normal `
 cache backends to be used as a store. All interfacing to the KVS system happens via the
 ``KeyValueStore`` object located at ``keystone.common.kvs.KeyValueStore``.
 
-To utilize the KVS system an instantiation of the ``KeyValueStore`` class is needed. To accquire
+To utilize the KVS system an instantiation of the ``KeyValueStore`` class is needed. To acquire
 a KeyValueStore instantiation use the ``keystone.common.kvs.get_key_value_store`` factory
 function. This factory will either create a new ``KeyValueStore`` object or retrieve the
 already instantiated ``KeyValueStore`` object by the name passed as an argument. The object must
@@ -639,7 +656,7 @@ is similar to other dogpile caching backends as it implements the same dogpile A
 Building the Documentation
 --------------------------
 
-The documentation is generated with Sphinx uning the tox command.  To create HTML docs and man pages::
+The documentation is generated with Sphinx using the tox command.  To create HTML docs and man pages::
 
     $ tox -e docs
 

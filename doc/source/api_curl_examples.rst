@@ -14,10 +14,13 @@
       License for the specific language governing permissions and limitations
       under the License.
 
+=======================
+API Examples using Curl
+=======================
 
-===============================
+-------------------------------
 Service API Examples Using Curl
-===============================
+-------------------------------
 
 The service API is defined to be a subset of the Admin API and, by
 default, runs on port 5000.
@@ -67,9 +70,9 @@ Returns::
         ]
     }
 
-=============================
+-----------------------------
 Admin API Examples Using Curl
-=============================
+-----------------------------
 
 These examples assume a default port value of 35357, and depend on the
 ``sampledata`` bundled with keystone.
@@ -101,18 +104,8 @@ Returns::
                 {
                     "rel":"describedby",
                     "type":"text/html",
-                    "href":"http://docs.openstack.org/api/openstack-identity-service/2.0/content/"
+                    "href":"http://docs.openstack.org/"
                 },
-                {
-                    "rel":"describedby",
-                    "type":"application/pdf",
-                    "href":"http://docs.openstack.org/api/openstack-identity-service/2.0/identity-dev-guide-2.0.pdf"
-                },
-                {
-                    "rel":"describedby",
-                    "type":"application/vnd.sun.wadl+xml",
-                    "href":"http://127.0.0.1:35357/v2.0/identity-admin.wadl"
-                }
             ],
             "media-types":[
                 {

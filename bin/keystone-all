@@ -41,14 +41,14 @@ from keystone.openstack.common import gettextutils
 # gettextutils._() is called at import time.
 gettextutils.enable_lazy()
 
+from keystone import backends
 from keystone.common import dependency
 from keystone.common import environment
 from keystone.common import sql
 from keystone.common import utils
 from keystone import config
 from keystone.openstack.common.gettextutils import _
-from keystone.openstack.common import importutils
-from keystone import service
+from keystone.openstack.common import systemd
 
 
 CONF = config.CONF
@@ -83,15 +83,7 @@ def serve(*servers):
             raise
 
     # notify calling process we are ready to serve
-    if CONF.onready:
-        try:
-            notifier = importutils.import_module(CONF.onready)
-            notifier.notify()
-        except ImportError:
-            try:
-                utils.check_output(CONF.onready.split())
-            except Exception:
-                logging.exception('Failed to execute onready command')
+    systemd.notify_once()
 
     for name, server in servers:
         server.wait()
@@ -131,7 +123,7 @@ if __name__ == '__main__':
         monkeypatch_thread = False
     environment.use_eventlet(monkeypatch_thread)
 
-    service.load_backends()
+    backends.load_backends()
 
     servers = []
     servers.append(create_server(paste_config,

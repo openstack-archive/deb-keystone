@@ -79,12 +79,10 @@ def _matches(event, token_values):
 
     # The token has two attributes that can match the domain_id
     if event.domain_id is not None:
-        dom_id_matched = False
         for attribute_name in ['user_domain_id', 'project_domain_id']:
             if event.domain_id == token_values[attribute_name]:
-                dom_id_matched = True
                 break
-        if not dom_id_matched:
+        else:
             return False
 
     # If any one check does not match, the while token does
@@ -102,12 +100,10 @@ def _matches(event, token_values):
 
     if event.role_id is not None:
         roles = token_values['roles']
-        role_found = False
         for role in roles:
             if event.role_id == role:
-                role_found = True
                 break
-        if not role_found:
+        else:
             return False
     if token_values['issued_at'] > event.issued_before:
         return False
@@ -167,7 +163,7 @@ class RevokeTests(object):
         # 'synchronize' should now be exercised and remove old expired events
         mock_utcnow.return_value = now_plus_2h
         self.revoke_api.revoke_by_expiration(_new_id(), now_plus_2h)
-        #should no longer throw an exception
+        # should no longer throw an exception
         self.revoke_api.check_token(token_values)
 
 
@@ -441,11 +437,23 @@ class RevokeTreeTests(tests.TestCase):
     def test_cleanup(self):
         events = self.events
         self._assertEmpty(self.tree.revoke_map)
+        expiry_base_time = _future_time()
         for i in range(0, 10):
             events.append(
                 self._revoke_by_user(_new_id()))
+
+            args = (_new_id(),
+                    expiry_base_time + datetime.timedelta(seconds=i))
             events.append(
-                self._revoke_by_expiration(_new_id(), _future_time()))
+                self._revoke_by_expiration(*args))
+
+            self.assertEqual(i + 2, len(self.tree.revoke_map
+                                        ['trust_id=*']
+                                        ['consumer_id=*']
+                                        ['access_token_id=*']),
+                             'adding %s to %s' % (args,
+                                                  self.tree.revoke_map))
+
             events.append(
                 self._revoke_by_project_role_assignment(_new_id(), _new_id()))
             events.append(

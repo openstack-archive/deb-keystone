@@ -43,7 +43,7 @@ class IdentityTestFilteredCase(filtering.FilterTests,
         _unused, self.tmpfilename = tempfile.mkstemp()
         self.config_fixture.config(policy_file=self.tmpfilename)
 
-        #drop the policy rules
+        # drop the policy rules
         self.addCleanup(rules.reset)
 
     def load_sample_data(self):
@@ -62,6 +62,7 @@ class IdentityTestFilteredCase(filtering.FilterTests,
 
         """
         # Start by creating a few domains
+        self._populate_default_domain()
         self.domainA = self.new_domain_ref()
         self.assignment_api.create_domain(self.domainA['id'], self.domainA)
         self.domainB = self.new_domain_ref()

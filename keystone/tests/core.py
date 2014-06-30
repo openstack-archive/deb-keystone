@@ -26,13 +26,13 @@ import warnings
 
 import fixtures
 import logging
+import oslotest.base as oslotest
+from oslotest import mockpatch
 from paste import deploy
 import six
-import testtools
 from testtools import testcase
 import webob
 
-from keystone.openstack.common.fixture import mockpatch
 from keystone.openstack.common import gettextutils
 
 # NOTE(ayoung)
@@ -42,21 +42,17 @@ from keystone.common import environment
 environment.use_eventlet()
 
 from keystone import auth
+from keystone import backends
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
-from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone.common import utils as common_utils
 from keystone import config
 from keystone import exception
 from keystone import notifications
-from keystone.openstack.common.db import options as db_options
-from keystone.openstack.common.db.sqlalchemy import migration
 from keystone.openstack.common.fixture import config as config_fixture
 from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
-from keystone import service
 from keystone.tests import ksfixtures
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
@@ -87,6 +83,8 @@ def _calc_tmpdir():
 TMPDIR = _calc_tmpdir()
 
 CONF = config.CONF
+
+IN_MEM_DB_CONN_STRING = 'sqlite://'
 
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 os.makedirs(TMPDIR)
@@ -119,19 +117,6 @@ class dirs:
 DEFAULT_TEST_DB_FILE = dirs.tmp('test.db')
 
 
-def _initialize_sql_session():
-    # Make sure the DB is located in the correct location, in this case set
-    # the default value, as this should be able to be overridden in some
-    # test cases.
-    db_file = DEFAULT_TEST_DB_FILE
-    db_options.set_defaults(
-        sql_connection='sqlite:///%s' % db_file,
-        sqlite_db=db_file)
-
-
-_initialize_sql_session()
-
-
 def checkout_vendor(repo, rev):
     # TODO(termie): this function is a good target for some optimizations :PERF
     name = repo.split('/')[-1]
@@ -162,25 +147,6 @@ def checkout_vendor(repo, rev):
         LOG.warning(_('Failed to checkout %s'), repo)
     os.chdir(working_dir)
     return revdir
-
-
-def setup_database():
-    db = dirs.tmp('test.db')
-    pristine = dirs.tmp('test.db.pristine')
-
-    if os.path.exists(db):
-        os.unlink(db)
-    if not os.path.exists(pristine):
-        migration.db_sync(sql.get_engine(),
-                          migration_helpers.find_migrate_repo())
-        migration_helpers.sync_database_to_version(extension='revoke')
-        shutil.copyfile(db, pristine)
-    else:
-        shutil.copyfile(pristine, db)
-
-
-def teardown_database():
-    sql.cleanup()
 
 
 @atexit.register
@@ -329,7 +295,7 @@ class NoModule(object):
         sys.meta_path.insert(0, finder)
 
 
-class BaseTestCase(testtools.TestCase):
+class BaseTestCase(oslotest.BaseTestCase):
     """Light weight base test class.
 
     This is a placeholder that will eventually go away once thc
@@ -446,8 +412,8 @@ class TestCase(BaseTestCase):
         self.addCleanup(kvs.INMEMDB.clear)
 
         # Ensure Notification subscriotions and resource types are empty
-        self.addCleanup(notifications.SUBSCRIBERS.clear)
-        self.addCleanup(notifications._reset_notifier)
+        self.addCleanup(notifications.clear_subscribers)
+        self.addCleanup(notifications.reset_notifier)
 
         # Reset the auth-plugin registry
         self.addCleanup(self.clear_auth_plugin_registry)
@@ -470,22 +436,13 @@ class TestCase(BaseTestCase):
         kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
 
         self.clear_auth_plugin_registry()
-        drivers = service.load_backends()
+        drivers = backends.load_backends()
 
         drivers.update(dependency.resolve_future_dependencies())
 
         for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
         self.addCleanup(self.cleanup_instance(*drivers.keys()))
-
-        # The credential backend only supports SQL, so we always have to load
-        # the tables.
-        self.engine = sql.get_engine()
-        self.addCleanup(sql.cleanup)
-        self.addCleanup(self.cleanup_instance('engine'))
-
-        sql.ModelBase.metadata.create_all(bind=self.engine)
-        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.

@@ -17,27 +17,45 @@
 #    under the License.
 
 import calendar
+import collections
 import grp
 import hashlib
-import json
 import os
 import pwd
 
 import passlib.hash
 import six
+from six import moves
 
 from keystone.common import config
 from keystone.common import environment
 from keystone import exception
 from keystone.openstack.common.gettextutils import _
+from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import strutils
-from six import moves
 
 
 CONF = config.CONF
 
 LOG = log.getLogger(__name__)
+
+
+def flatten_dict(d, parent_key=''):
+    """Flatten a nested dictionary
+
+    Converts a dictionary with nested values to a single level flat
+    dictionary, with dotted notation for each key.
+
+    """
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + '.' + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten_dict(v, new_key).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 
 def read_cached_file(filename, cache_info, reload_func=None):
@@ -60,7 +78,7 @@ def read_cached_file(filename, cache_info, reload_func=None):
     return cache_info['data']
 
 
-class SmarterEncoder(json.JSONEncoder):
+class SmarterEncoder(jsonutils.json.JSONEncoder):
     """Help for JSON encoding dict-like objects."""
     def default(self, obj):
         if not isinstance(obj, dict) and hasattr(obj, 'iteritems'):
@@ -95,34 +113,11 @@ def hash_user_password(user):
     return dict(user, password=hash_password(password))
 
 
-def hash_ldap_user_password(user):
-    """Hash a user dict's password without modifying the passed-in dict."""
-    password = user.get('password')
-    if password is None:
-        return user
-
-    return dict(user, password=ldap_hash_password(password))
-
-
 def hash_password(password):
     """Hash a password. Hard."""
     password_utf8 = trunc_password(password).encode('utf-8')
     return passlib.hash.sha512_crypt.encrypt(
         password_utf8, rounds=CONF.crypt_strength)
-
-
-def ldap_hash_password(password):
-    """Hash a password. Hard."""
-    password_utf8 = trunc_password(password).encode('utf-8')
-    h = passlib.hash.ldap_salted_sha1.encrypt(password_utf8)
-    return h
-
-
-def ldap_check_password(password, hashed):
-    if password is None:
-        return False
-    password_utf8 = trunc_password(password).encode('utf-8')
-    return passlib.hash.ldap_salted_sha1.verify(password_utf8, hashed)
 
 
 def check_password(password, hashed):
@@ -189,7 +184,7 @@ def check_output(*popenargs, **kwargs):
 
 def get_blob_from_credential(credential):
     try:
-        blob = json.loads(credential.blob)
+        blob = jsonutils.loads(credential.blob)
     except (ValueError, TypeError):
         raise exception.ValidationError(
             message=_('Invalid blob in credential'))
@@ -205,9 +200,9 @@ def convert_ec2_to_v3_credential(ec2credential):
     return {'id': hash_access_key(ec2credential.access),
             'user_id': ec2credential.user_id,
             'project_id': ec2credential.tenant_id,
-            'blob': json.dumps(blob),
+            'blob': jsonutils.dumps(blob),
             'type': 'ec2',
-            'extra': json.dumps({})}
+            'extra': jsonutils.dumps({})}
 
 
 def convert_v3_to_ec2_credential(credential):

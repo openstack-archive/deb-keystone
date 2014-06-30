@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
 import sys
 
 import six
@@ -23,9 +22,9 @@ from keystone import config
 from keystone.contrib import federation
 from keystone import exception
 from keystone.openstack.common.gettextutils import _
+from keystone.openstack.common import jsonutils
 from keystone import token
 from keystone.token import provider
-from keystone import trust
 
 
 from keystone.openstack.common import log
@@ -136,8 +135,8 @@ class V2TokenDataHelper(object):
 class V3TokenDataHelper(object):
     """Token data helper."""
     def __init__(self):
-        if CONF.trust.enabled:
-            self.trust_api = trust.Manager()
+        # Keep __init__ around to ensure dependency injection works.
+        super(V3TokenDataHelper, self).__init__()
 
     def _get_filtered_domain(self, domain_id):
         domain_ref = self.assignment_api.get_domain(domain_id)
@@ -241,7 +240,7 @@ class V3TokenDataHelper(object):
 
         if access_token:
             filtered_roles = []
-            authed_role_ids = json.loads(access_token['role_ids'])
+            authed_role_ids = jsonutils.loads(access_token['role_ids'])
             all_roles = self.assignment_api.list_roles()
             for role in all_roles:
                 for authed_role in authed_role_ids:
@@ -254,7 +253,7 @@ class V3TokenDataHelper(object):
         if CONF.trust.enabled and trust:
             token_user_id = trust['trustor_user_id']
             token_project_id = trust['project_id']
-            #trusts do not support domains yet
+            # trusts do not support domains yet
             token_domain_id = None
         else:
             token_user_id = user_id
@@ -306,12 +305,8 @@ class V3TokenDataHelper(object):
         if CONF.trust.enabled and trust:
             user_id = trust['trustor_user_id']
         if project_id or domain_id:
-            try:
-                service_catalog = self.catalog_api.get_v3_catalog(
-                    user_id, project_id)
-            except exception.NotImplemented:
-                service_catalog = {}
-            # TODO(gyee): v3 service catalog is not quite completed yet
+            service_catalog = self.catalog_api.get_v3_catalog(
+                user_id, project_id)
             # TODO(ayoung): Enforce Endpoints for trust
             token_data['catalog'] = service_catalog
 
@@ -361,8 +356,6 @@ class V3TokenDataHelper(object):
 class BaseProvider(provider.Provider):
     def __init__(self, *args, **kwargs):
         super(BaseProvider, self).__init__(*args, **kwargs)
-        if CONF.trust.enabled:
-            self.trust_api = trust.Manager()
         self.v3_token_data_helper = V3TokenDataHelper()
         self.v2_token_data_helper = V2TokenDataHelper()
 

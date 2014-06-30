@@ -32,7 +32,7 @@ Prerequisites
 
 This document assumes you are using:
 
-- Ubuntu 12.04, Fedora 15, or Mac OS X Lion
+- Ubuntu, Fedora, or Mac OS X
 - `Python 2.7`_
 
 .. _`Python 2.7`: http://www.python.org/
@@ -42,6 +42,7 @@ And that you have the following tools available on your system:
 - git_
 - setuptools_
 - pip_
+- msgfmt (part of the gettext package)
 
 **Reminder**: If you're successfully using a different platform, or a
 different version of the above, please document your configuration here!
@@ -87,19 +88,19 @@ Ubuntu 12.04::
 
 Fedora 15::
 
-    $ sudo yum install python-sqlite2 python-lxml python-greenlet-devel python-ldap
+    $ sudo yum install python-sqlite2 python-lxml python-greenlet-devel python-ldap sqlite-devel openldap-devel
 
-Mac OS X Lion (requires MacPorts_)::
+Mac OS X 10.9 (requires Homebrew_)::
 
-    $ sudo port install py-ldap
+    $ brew install python openssl
 
-.. _MacPorts: http://www.macports.org/
+.. _Homebrew: http://brew.sh/
 
 PyPi Packages and VirtualEnv
 ----------------------------
 
 We recommend establishing a virtualenv to run keystone within. Virtualenv
-limits the python environment to just what you're installing as depdendencies,
+limits the python environment to just what you're installing as dependencies,
 useful to keep a clean environment for working on Keystone. The tools directory
 in keystone has a script already created to make this very simple::
 
@@ -151,26 +152,3 @@ without issue::
 
 If you can import keystone successfully, you should be ready to move on to
 :doc:`developing`.
-
-Troubleshooting
-===============
-
-Eventlet segfaults on RedHat / Fedora
--------------------------------------
-
-[*If this is no longer an issue, please remove this section, thanks!*]
-
-On some OSes, specifically Fedora 15, the current versions of
-greenlet/eventlet segfault when running keystone. To fix this, install
-the development versions of greenlet and eventlet::
-
-    $ pip uninstall greenlet eventlet
-    $ cd <appropriate working directory>
-    $ hg clone https://bitbucket.org/ambroff/greenlet
-    $ cd greenlet
-    $ sudo python setup.py install
-
-    $ cd <appropriate working directory>
-    $ hg clone https://bitbucket.org/which_linden/eventlet
-    $ cd greenlet
-    $ sudo python setup.py install

@@ -19,7 +19,6 @@ import shutil
 from keystone.common import openssl
 from keystone import exception
 from keystone import tests
-from keystone.tests import default_fixtures
 from keystone.tests import rest
 from keystone import token
 
@@ -37,9 +36,6 @@ class CertSetupTestCase(rest.RestfulTestCase):
 
     def setUp(self):
         super(CertSetupTestCase, self).setUp()
-        self.load_backends()
-        self.load_fixtures(default_fixtures)
-        self.controller = token.controllers.Auth()
 
         def cleanup_ssldir():
             try:
@@ -68,6 +64,8 @@ class CertSetupTestCase(rest.RestfulTestCase):
             keyfile=os.path.join(KEYDIR, 'keystonekey.pem'))
 
     def test_can_handle_missing_certs(self):
+        controller = token.controllers.Auth()
+
         self.config_fixture.config(group='signing', certfile='invalid')
         user = {
             'id': 'fake1',
@@ -83,7 +81,7 @@ class CertSetupTestCase(rest.RestfulTestCase):
         }
         self.identity_api.create_user(user['id'], user)
         self.assertRaises(exception.UnexpectedError,
-                          self.controller.authenticate,
+                          controller.authenticate,
                           {}, body_dict)
 
     def test_create_pki_certs(self):
@@ -115,10 +113,10 @@ class CertSetupTestCase(rest.RestfulTestCase):
                                    method='GET', expected_status=200)
 
         with open(CONF.signing.certfile) as f:
-            self.assertEqual(signing_resp.text, f.read())
+            self.assertEqual(f.read(), signing_resp.text)
 
         with open(CONF.signing.ca_certs) as f:
-            self.assertEqual(cacert_resp.text, f.read())
+            self.assertEqual(f.read(), cacert_resp.text)
 
         # NOTE(jamielennox): This is weird behaviour that we need to enforce.
         # It doesn't matter what you ask for it's always going to give text
@@ -131,7 +129,7 @@ class CertSetupTestCase(rest.RestfulTestCase):
                                     expected_status=200,
                                     headers=headers)
 
-                self.assertEqual(resp.content_type, 'text/html')
+                self.assertEqual('text/html', resp.content_type)
 
     def test_failure(self):
         for path in ['/v2.0/certificates/signing', '/v2.0/certificates/ca']:
