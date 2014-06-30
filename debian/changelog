@@ -1,6 +1,7 @@
 keystone (2014.2~b1-1) experimental; urgency=medium
 
   * New upstream release.
+  * New (build-)depends for this release.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 30 Jun 2014 23:07:59 +0800
 
