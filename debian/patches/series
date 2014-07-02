@@ -2,3 +2,4 @@ fixes-keystone-default-catalog.patch
 fix-missing-gettextutil.py-import.patch
 fixes-default-connection.patch
 cve-2014-3476-Block-delegation-escalation-of-privilege.patch
+cve-2014-3520-Ensure_that_in_v2_auth_tenant_id_matches_trust.patch
