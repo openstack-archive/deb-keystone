@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenStack Identity service
+Documentation=man:keystone(1p) http://docs.openstack.org/
+After=network.service mysql.service postgresql.service slapd.service rabbitmq-server.service ntp.service
+
+[Service]
+User=keystone
+Group=keystone
+ExecStart=/usr/bin/keystone-all
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
