@@ -20,8 +20,13 @@ DESC="OpenStack Identity service"
 NAME=keystone
 DAEMON=/usr/bin/keystone-all
 DAEMON_ARGS=""             # Arguments to run the daemon with
-PIDFILE=/var/run/$NAME.pid
+PIDFILE=/var/run/$NAME/${NAME}.pid
 SCRIPTNAME=/etc/init.d/$NAME
+PID_DIR=/var/run/${NAME}
+# if you use systemd as init and change $KEYSTONE_USER and $KEYSTONE_GROUP you 
+# will need to copy /usr/lib/tmpfiles.d/keystone.conf to /etc/tmpfiles.d and edit it
+KEYSTONE_USER="keystone"
+KEYSTONE_GROUP="keystone"
 
 # Exit if the package is not installed
 [ -x $DAEMON ] || exit 0
@@ -36,16 +41,19 @@ SCRIPTNAME=/etc/init.d/$NAME
 # Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
 . /lib/lsb/init-functions
 
+mkdir -p ${PID_DIR}
+chown ${KEYSTONE_USER}:${KEYSTONE_GROUP} ${PID_DIR}
+
 #
 # Function that starts the daemon/service
 #
 do_start()
 {
 	start-stop-daemon --start --quiet --pidfile $PIDFILE \
-            --background --make-pidfile --startas $DAEMON --test > /dev/null \
+            --background --make-pidfile --chuid ${KEYSTONE_USER}:${KEYSTONE_GROUP} --startas $DAEMON --test > /dev/null \
 	    || return 1
 	start-stop-daemon --start --quiet --pidfile $PIDFILE \
-            --background --make-pidfile --startas $DAEMON -- \
+            --background --make-pidfile --chuid ${KEYSTONE_USER}:${KEYSTONE_GROUP} --startas $DAEMON -- \
 	    $DAEMON_ARGS \
 	    || return 2
 }
@@ -104,6 +112,12 @@ case "$1" in
 		;;
 	esac
 	;;
+  systemd-start)
+    do_start
+    ;;
+  systemd-stop)
+    do_stop
+    ;;
   *)
 	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
 	exit 3
