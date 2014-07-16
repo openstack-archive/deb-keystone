@@ -6,8 +6,11 @@ After=network.service mysql.service postgresql.service slapd.service rabbitmq-se
 [Service]
 User=keystone
 Group=keystone
-ExecStart=/usr/bin/keystone-all
+ExecStart=/etc/init.d/keystone systemd-start
+ExecStop=/etc/init.d/keystone systemd-stop
+PIDFile=/var/run/keystone/keystone.pid
 Restart=on-failure
+Type=forking
 
 [Install]
 WantedBy=multi-user.target
