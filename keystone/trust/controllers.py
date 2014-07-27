@@ -21,7 +21,7 @@ from keystone.common import controller
 from keystone.common import dependency
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -124,6 +124,14 @@ class TrustV3(controller.V3Controller):
         The user creating the trust must be the trustor.
 
         """
+        # Explicitly prevent a trust token from creating a new trust.
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+        if auth_context.get('is_delegated_auth'):
+            raise exception.Forbidden(
+                _('Cannot create a trust'
+                  ' with a token issued via delegation.'))
+
         if not trust:
             raise exception.ValidationError(attribute='trust',
                                             target='request')

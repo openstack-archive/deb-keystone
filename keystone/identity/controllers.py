@@ -14,14 +14,11 @@
 
 """Workflow Logic the Identity service."""
 
-import functools
-import uuid
-
 from keystone.common import controller
 from keystone.common import dependency
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
@@ -47,7 +44,8 @@ class User(controller.V2Controller):
                 context, context['query_string'].get('name'))
 
         self.assert_admin(context)
-        user_list = self.identity_api.list_users()
+        user_list = self.identity_api.list_users(
+            CONF.identity.default_domain_id)
         return {'users': self.v3_to_v2_user(user_list)}
 
     @controller.v2_deprecated
@@ -78,15 +76,14 @@ class User(controller.V2Controller):
             self.assignment_api.get_project(default_project_id)
             user['default_project_id'] = default_project_id
 
-        user_id = uuid.uuid4().hex
+        # The manager layer will generate the unique ID for users
         user_ref = self._normalize_domain_id(context, user.copy())
-        user_ref['id'] = user_id
         new_user_ref = self.v3_to_v2_user(
-            self.identity_api.create_user(user_id, user_ref))
+            self.identity_api.create_user(user_ref))
 
         if default_project_id is not None:
             self.assignment_api.add_user_to_project(default_project_id,
-                                                    user_id)
+                                                    new_user_ref['id'])
         return {'user': new_user_ref}
 
     @controller.v2_deprecated
@@ -209,76 +206,57 @@ class UserV3(controller.V3Controller):
     def create_user(self, context, user):
         self._require_attribute(user, 'name')
 
-        ref = self._assign_unique_id(self._normalize_dict(user))
+        # The manager layer will generate the unique ID for users
+        ref = self._normalize_dict(user)
         ref = self._normalize_domain_id(context, ref)
-        ref = self.identity_api.create_user(ref['id'], ref)
+        ref = self.identity_api.create_user(ref)
         return UserV3.wrap_member(context, ref)
 
     @controller.filterprotected('domain_id', 'enabled', 'name')
     def list_users(self, context, filters):
         hints = UserV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_users(
-            domain_scope=self._get_domain_id_for_request(context),
+            domain_scope=self._get_domain_id_for_list_request(context),
             hints=hints)
         return UserV3.wrap_collection(context, refs, hints=hints)
 
     @controller.filterprotected('domain_id', 'enabled', 'name')
     def list_users_in_group(self, context, filters, group_id):
         hints = UserV3.build_driver_hints(context, filters)
-        refs = self.identity_api.list_users_in_group(
-            group_id,
-            domain_scope=self._get_domain_id_for_request(context),
-            hints=hints)
+        refs = self.identity_api.list_users_in_group(group_id, hints=hints)
         return UserV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_user(self, context, user_id):
-        ref = self.identity_api.get_user(
-            user_id,
-            domain_scope=self._get_domain_id_for_request(context))
+        ref = self.identity_api.get_user(user_id)
         return UserV3.wrap_member(context, ref)
 
-    def _update_user(self, context, user_id, user, domain_scope):
+    def _update_user(self, context, user_id, user):
         self._require_matching_id(user_id, user)
         self._require_matching_domain_id(
-            user_id, user,
-            functools.partial(self.identity_api.get_user,
-                              domain_scope=domain_scope))
-        ref = self.identity_api.update_user(
-            user_id, user, domain_scope=domain_scope)
+            user_id, user, self.identity_api.get_user)
+        ref = self.identity_api.update_user(user_id, user)
         return UserV3.wrap_member(context, ref)
 
     @controller.protected()
     def update_user(self, context, user_id, user):
-        domain_scope = self._get_domain_id_for_request(context)
-        return self._update_user(context, user_id, user, domain_scope)
+        return self._update_user(context, user_id, user)
 
     @controller.protected(callback=_check_user_and_group_protection)
     def add_user_to_group(self, context, user_id, group_id):
-        self.identity_api.add_user_to_group(
-            user_id, group_id,
-            domain_scope=self._get_domain_id_for_request(context))
+        self.identity_api.add_user_to_group(user_id, group_id)
 
     @controller.protected(callback=_check_user_and_group_protection)
     def check_user_in_group(self, context, user_id, group_id):
-        self.identity_api.check_user_in_group(
-            user_id, group_id,
-            domain_scope=self._get_domain_id_for_request(context))
+        return self.identity_api.check_user_in_group(user_id, group_id)
 
     @controller.protected(callback=_check_user_and_group_protection)
     def remove_user_from_group(self, context, user_id, group_id):
-        self.identity_api.remove_user_from_group(
-            user_id, group_id,
-            domain_scope=self._get_domain_id_for_request(context))
+        self.identity_api.remove_user_from_group(user_id, group_id)
 
     @controller.protected()
     def delete_user(self, context, user_id):
-        # Make sure any tokens are marked as deleted
-        domain_id = self._get_domain_id_for_request(context)
-        # Finally delete the user itself - the backend is
-        # responsible for deleting any role assignments related
-        # to this user
-        return self.identity_api.delete_user(user_id, domain_scope=domain_id)
+        return self.identity_api.delete_user(user_id)
 
     @controller.protected()
     def change_password(self, context, user_id, user):
@@ -291,11 +269,9 @@ class UserV3(controller.V3Controller):
         if password is None:
             raise exception.ValidationError(target='user',
                                             attribute='password')
-
-        domain_scope = self._get_domain_id_for_request(context)
         try:
             self.identity_api.change_password(
-                context, user_id, original_password, password, domain_scope)
+                context, user_id, original_password, password)
         except AssertionError:
             raise exception.Unauthorized()
 
@@ -313,49 +289,39 @@ class GroupV3(controller.V3Controller):
     def create_group(self, context, group):
         self._require_attribute(group, 'name')
 
-        ref = self._assign_unique_id(self._normalize_dict(group))
+        # The manager layer will generate the unique ID for groups
+        ref = self._normalize_dict(group)
         ref = self._normalize_domain_id(context, ref)
-        ref = self.identity_api.create_group(ref['id'], ref)
+        ref = self.identity_api.create_group(ref)
         return GroupV3.wrap_member(context, ref)
 
     @controller.filterprotected('domain_id', 'name')
     def list_groups(self, context, filters):
         hints = GroupV3.build_driver_hints(context, filters)
         refs = self.identity_api.list_groups(
-            domain_scope=self._get_domain_id_for_request(context),
+            domain_scope=self._get_domain_id_for_list_request(context),
             hints=hints)
         return GroupV3.wrap_collection(context, refs, hints=hints)
 
     @controller.filterprotected('name')
     def list_groups_for_user(self, context, filters, user_id):
         hints = GroupV3.build_driver_hints(context, filters)
-        refs = self.identity_api.list_groups_for_user(
-            user_id,
-            domain_scope=self._get_domain_id_for_request(context),
-            hints=hints)
+        refs = self.identity_api.list_groups_for_user(user_id, hints=hints)
         return GroupV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_group(self, context, group_id):
-        ref = self.identity_api.get_group(
-            group_id,
-            domain_scope=self._get_domain_id_for_request(context))
+        ref = self.identity_api.get_group(group_id)
         return GroupV3.wrap_member(context, ref)
 
     @controller.protected()
     def update_group(self, context, group_id, group):
         self._require_matching_id(group_id, group)
-        domain_scope = self._get_domain_id_for_request(context)
         self._require_matching_domain_id(
-            group_id, group,
-            functools.partial(self.identity_api.get_group,
-                              domain_scope=domain_scope))
-        ref = self.identity_api.update_group(
-            group_id, group,
-            domain_scope=domain_scope)
+            group_id, group, self.identity_api.get_group)
+        ref = self.identity_api.update_group(group_id, group)
         return GroupV3.wrap_member(context, ref)
 
     @controller.protected()
     def delete_group(self, context, group_id):
-        domain_id = self._get_domain_id_for_request(context)
-        self.identity_api.delete_group(group_id, domain_scope=domain_id)
+        self.identity_api.delete_group(group_id)

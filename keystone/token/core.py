@@ -16,9 +16,7 @@
 
 import abc
 import copy
-import datetime
 
-from keystoneclient.common import cms
 import six
 
 from keystone.common import cache
@@ -26,10 +24,11 @@ from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 from keystone.openstack.common import versionutils
+from keystone.token import provider
 
 
 CONF = config.CONF
@@ -41,18 +40,18 @@ EXPIRATION_TIME = lambda: CONF.token.cache_time
 REVOCATION_CACHE_EXPIRATION_TIME = lambda: CONF.token.revocation_cache_time
 
 
+@versionutils.deprecated(
+    as_of=versionutils.deprecated.JUNO,
+    in_favor_of='keystone.token.provider.default_expire_time',
+    what='keystone.token.default_expire_time',
+    remove_in=+1)
 def default_expire_time():
-    """Determine when a fresh token should expire.
-
-    Expiration time varies based on configuration (see ``[token] expiration``).
-
-    :returns: a naive UTC datetime.datetime object
-
-    """
-    expire_delta = datetime.timedelta(seconds=CONF.token.expiration)
-    return timeutils.utcnow() + expire_delta
+    return provider.default_expire_time()
 
 
+@versionutils.deprecated(as_of=versionutils.deprecated.JUNO,
+                         what='keystone.token.core.validate_auth_info',
+                         remove_in=+1)
 def validate_auth_info(self, user_ref, tenant_ref):
     """Validate user and tenant auth info.
 
@@ -112,17 +111,12 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.token.driver)
 
+    @versionutils.deprecated(as_of=versionutils.deprecated.JUNO,
+                             in_favor_of='token_provider_api.unique_id',
+                             remove_in=+1,
+                             what='token_api.unique_id')
     def unique_id(self, token_id):
-        """Return a unique ID for a token.
-
-        The returned value is useful as the primary key of a database table,
-        memcache store, or other lookup table.
-
-        :returns: Given a PKI token, returns it's hashed value. Otherwise,
-                  returns the passed-in value (such as a UUID token ID or an
-                  existing hash).
-        """
-        return cms.cms_hash_token(token_id, mode=CONF.token.hash_algorithm)
+        return self.token_provider_api.unique_id(token_id)
 
     def _assert_valid(self, token_id, token_ref):
         """Raise TokenNotFound if the token is expired."""
@@ -137,7 +131,7 @@ class Manager(manager.Manager):
             # context['token_id'] will in-fact be None. This also saves
             # a round-trip to the backend if we don't have a token_id.
             raise exception.TokenNotFound(token_id='')
-        unique_id = self.unique_id(token_id)
+        unique_id = self.token_provider_api.unique_id(token_id)
         token_ref = self._get_token(unique_id)
         # NOTE(morganfainberg): Lift expired checking to the manager, there is
         # no reason to make the drivers implement this check. With caching,
@@ -153,7 +147,7 @@ class Manager(manager.Manager):
         return self.driver.get_token(token_id)
 
     def create_token(self, token_id, data):
-        unique_id = self.unique_id(token_id)
+        unique_id = self.token_provider_api.unique_id(token_id)
         data_copy = copy.deepcopy(data)
         data_copy['id'] = unique_id
         ret = self.driver.create_token(unique_id, data_copy)
@@ -167,7 +161,7 @@ class Manager(manager.Manager):
     def delete_token(self, token_id):
         if not CONF.token.revoke_by_id:
             return
-        unique_id = self.unique_id(token_id)
+        unique_id = self.token_provider_api.unique_id(token_id)
         self.driver.delete_token(unique_id)
         self._invalidate_individual_token_cache(unique_id)
         self.invalidate_revocation_list()
@@ -180,7 +174,7 @@ class Manager(manager.Manager):
                                               consumer_id)
         self.driver.delete_tokens(user_id, tenant_id, trust_id, consumer_id)
         for token_id in token_list:
-            unique_id = self.unique_id(token_id)
+            unique_id = self.token_provider_api.unique_id(token_id)
             self._invalidate_individual_token_cache(unique_id)
         self.invalidate_revocation_list()
 
@@ -260,31 +254,6 @@ class Manager(manager.Manager):
         self._get_token.invalidate(self, token_id)
         self.token_provider_api.invalidate_individual_token_cache(token_id)
 
-    @versionutils.deprecated(versionutils.deprecated.ICEHOUSE, remove_in=+1)
-    def list_tokens(self, user_id, tenant_id=None, trust_id=None,
-                    consumer_id=None):
-        """Returns a list of current token_id's for a user
-
-        This is effectively a private method only used by the ``delete_tokens``
-        method and should not be called by anything outside of the
-        ``token_api`` manager or the token driver itself.
-
-        :param user_id: identity of the user
-        :type user_id: string
-        :param tenant_id: identity of the tenant
-        :type tenant_id: string
-        :param trust_id: identity of the trust
-        :type trust_id: string
-        :param consumer_id: identity of the consumer
-        :type consumer_id: string
-        :returns: list of token_id's
-
-        """
-        return self.driver._list_tokens(user_id,
-                                        tenant_id=tenant_id,
-                                        trust_id=trust_id,
-                                        consumer_id=consumer_id)
-
 
 @six.add_metaclass(abc.ABCMeta)
 class Driver(object):
@@ -300,7 +269,7 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_token(self, token_id, data):
@@ -324,7 +293,7 @@ class Driver(object):
         :returns: token_ref or None.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_token(self, token_id):
@@ -336,7 +305,7 @@ class Driver(object):
         :raises: keystone.exception.TokenNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
@@ -397,7 +366,7 @@ class Driver(object):
         :returns: list of token_id's
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_revoked_tokens(self):
@@ -406,10 +375,10 @@ class Driver(object):
         :returns: list of token_id's
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def flush_expired_tokens(self):
         """Archive or delete tokens that have expired.
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover

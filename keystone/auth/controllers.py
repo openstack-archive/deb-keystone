@@ -12,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import sys
+
 from keystoneclient.common import cms
 import six
 
@@ -21,7 +23,7 @@ from keystone.common import wsgi
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _, _LI
 from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
@@ -105,9 +107,10 @@ class AuthContext(dict):
                 # special treatment for 'expires_at', we are going to take
                 # the earliest expiration instead.
                 if existing_val != val:
-                    msg = _('"expires_at" has conflicting values %(existing)s '
-                            'and %(new)s.  Will use the earliest value.')
-                    LOG.info(msg, {'existing': existing_val, 'new': val})
+                    LOG.info(_LI('"expires_at" has conflicting values '
+                                 '%(existing)s and %(new)s.  Will use the '
+                                 'earliest value.'),
+                             {'existing': existing_val, 'new': val})
                 if existing_val is None or val is None:
                     val = existing_val or val
                 else:
@@ -148,16 +151,24 @@ class AuthInfo(object):
 
     def _assert_project_is_enabled(self, project_ref):
         # ensure the project is enabled
-        if not project_ref.get('enabled', True):
-            msg = _('Project is disabled: %s') % project_ref['id']
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
+        try:
+            self.assignment_api.assert_project_enabled(
+                project_id=project_ref['id'],
+                project=project_ref)
+        except AssertionError as e:
+            LOG.warning(e)
+            six.reraise(exception.Unauthorized, exception.Unauthorized(e),
+                        sys.exc_info()[2])
 
     def _assert_domain_is_enabled(self, domain_ref):
-        if not domain_ref.get('enabled'):
-            msg = _('Domain is disabled: %s') % (domain_ref['id'])
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
+        try:
+            self.assignment_api.assert_domain_enabled(
+                domain_id=domain_ref['id'],
+                domain=domain_ref)
+        except AssertionError as e:
+            LOG.warning(e)
+            six.reraise(exception.Unauthorized, exception.Unauthorized(e),
+                        sys.exc_info()[2])
 
     def _lookup_domain(self, domain_info):
         domain_id = domain_info.get('id')
@@ -451,10 +462,19 @@ class Auth(controller.V3Controller):
     def authenticate(self, context, auth_info, auth_context):
         """Authenticate user."""
 
-        # user has been authenticated externally
+        # The 'external' method allows any 'REMOTE_USER' based authentication
         if 'REMOTE_USER' in context['environment']:
-            external = get_auth_method('external')
-            external.authenticate(context, auth_info, auth_context)
+            try:
+                external = get_auth_method('external')
+                external.authenticate(context, auth_info, auth_context)
+            except exception.AuthMethodNotSupported:
+                # This will happen there is no 'external' plugin registered
+                # and the container is performing authentication.
+                # The 'kerberos'  and 'saml' methods will be used this way.
+                # In those cases, it is correct to not register an
+                # 'external' plugin;  if there is both an 'external' and a
+                # 'kerberos' plugin, it would run the check on identity twice.
+                pass
 
         # need to aggregate the results in case two or more methods
         # are specified
@@ -479,7 +499,12 @@ class Auth(controller.V3Controller):
     @controller.protected()
     def check_token(self, context):
         token_id = context.get('subject_token_id')
-        self.token_provider_api.check_v3_token(token_id)
+        token_data = self.token_provider_api.validate_v3_token(
+            token_id)
+        # NOTE(morganfainberg): The code in
+        # ``keystone.common.wsgi.render_response`` will remove the content
+        # body.
+        return render_token_data_response(token_id, token_data)
 
     @controller.protected()
     def revoke_token(self, context):

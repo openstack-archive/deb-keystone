@@ -220,7 +220,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_create_group(self):
         group_ref = self.new_group_ref(domain_id=self.domain_id)
-        self.identity_api.create_group(group_ref['id'], group_ref)
+        group_ref = self.identity_api.create_group(group_ref)
         self._assertLastNotify(group_ref['id'], CREATED_OPERATION, 'group')
 
     def test_create_project(self):
@@ -236,14 +236,14 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_create_user(self):
         user_ref = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(user_ref['id'], user_ref)
+        user_ref = self.identity_api.create_user(user_ref)
         self._assertLastNotify(user_ref['id'], CREATED_OPERATION, 'user')
 
     def test_create_trust(self):
         trustor = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(trustor['id'], trustor)
+        trustor = self.identity_api.create_user(trustor)
         trustee = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(trustee['id'], trustee)
+        trustee = self.identity_api.create_user(trustee)
         role_ref = self.new_role_ref()
         self.assignment_api.create_role(role_ref['id'], role_ref)
         trust_ref = self.new_trust_ref(trustor['id'],
@@ -256,7 +256,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_delete_group(self):
         group_ref = self.new_group_ref(domain_id=self.domain_id)
-        self.identity_api.create_group(group_ref['id'], group_ref)
+        group_ref = self.identity_api.create_group(group_ref)
         self.identity_api.delete_group(group_ref['id'])
         self._assertLastNotify(group_ref['id'], DELETED_OPERATION, 'group')
 
@@ -275,7 +275,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_delete_user(self):
         user_ref = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(user_ref['id'], user_ref)
+        user_ref = self.identity_api.create_user(user_ref)
         self.identity_api.delete_user(user_ref['id'])
         self._assertLastNotify(user_ref['id'], DELETED_OPERATION, 'user')
 
@@ -288,9 +288,9 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_delete_trust(self):
         trustor = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(trustor['id'], trustor)
+        trustor = self.identity_api.create_user(trustor)
         trustee = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(trustee['id'], trustee)
+        trustee = self.identity_api.create_user(trustee)
         role_ref = self.new_role_ref()
         trust_ref = self.new_trust_ref(trustor['id'], trustee['id'])
         self.trust_api.create_trust(trust_ref['id'],
@@ -316,9 +316,19 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
         self._assertNotifySent(domain_ref['id'], 'disabled', 'domain',
                                public=False)
 
+    def test_disable_of_disabled_domain_does_not_notify(self):
+        domain_ref = self.new_domain_ref()
+        domain_ref['enabled'] = False
+        self.assignment_api.create_domain(domain_ref['id'], domain_ref)
+        # The domain_ref above is not changed during the create process. We
+        # can use the same ref to perform the update.
+        self.assignment_api.update_domain(domain_ref['id'], domain_ref)
+        self._assertNotifyNotSent(domain_ref['id'], 'disabled', 'domain',
+                                  public=False)
+
     def test_update_group(self):
         group_ref = self.new_group_ref(domain_id=self.domain_id)
-        self.identity_api.create_group(group_ref['id'], group_ref)
+        group_ref = self.identity_api.create_group(group_ref)
         self.identity_api.update_group(group_ref['id'], group_ref)
         self._assertLastNotify(group_ref['id'], UPDATED_OPERATION, 'group')
 
@@ -337,6 +347,16 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
         self._assertNotifySent(project_ref['id'], 'disabled', 'project',
                                public=False)
 
+    def test_disable_of_disabled_project_does_not_notify(self):
+        project_ref = self.new_project_ref(domain_id=self.domain_id)
+        project_ref['enabled'] = False
+        self.assignment_api.create_project(project_ref['id'], project_ref)
+        # The project_ref above is not changed during the create process. We
+        # can use the same ref to perform the update.
+        self.assignment_api.update_project(project_ref['id'], project_ref)
+        self._assertNotifyNotSent(project_ref['id'], 'disabled', 'project',
+                                  public=False)
+
     def test_update_project_does_not_send_disable(self):
         project_ref = self.new_project_ref(domain_id=self.domain_id)
         self.assignment_api.create_project(project_ref['id'], project_ref)
@@ -354,7 +374,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_update_user(self):
         user_ref = self.new_user_ref(domain_id=self.domain_id)
-        self.identity_api.create_user(user_ref['id'], user_ref)
+        user_ref = self.identity_api.create_user(user_ref)
         self.identity_api.update_user(user_ref['id'], user_ref)
         self._assertLastNotify(user_ref['id'], UPDATED_OPERATION, 'user')
 

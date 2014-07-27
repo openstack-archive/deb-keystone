@@ -41,8 +41,13 @@ FILE_OPTIONS = {
                    help='The IP address of the network interface for the '
                         'admin service to listen on.'),
         cfg.IntOpt('compute_port', default=8774,
-                   help='The port which the OpenStack Compute service '
-                        'listens on.'),
+                   help='(Deprecated) The port which the OpenStack Compute '
+                        'service listens on. This option was only used for '
+                        'string replacement in the templated catalog backend. '
+                        'Templated catalogs should replace the '
+                        '"$(compute_port)s" substitution with the static port '
+                        'of the compute service. As of Juno, this option is '
+                        'deprecated and will be removed in the L release.'),
         cfg.IntOpt('admin_port', default=35357,
                    help='The port number which the admin service listens '
                         'on.'),
@@ -69,6 +74,12 @@ FILE_OPTIONS = {
                         'to set this value if the base URL contains a path '
                         '(e.g. /prefix/v2.0) or the endpoint should be found '
                         'on a different server.'),
+        cfg.IntOpt('public_workers', default=1,
+                   help='The number of worker processes to serve the public '
+                        'WSGI application'),
+        cfg.IntOpt('admin_workers', default=1,
+                   help='The number of worker processes to serve the admin '
+                        'WSGI application'),
         # default max request size is 112k
         cfg.IntOpt('max_request_body_size', default=114688,
                    help='Enforced by optional sizelimit middleware '
@@ -83,15 +94,14 @@ FILE_OPTIONS = {
                    default='9fe2ff9ee4384b1894a90878d3e92bab',
                    help='During a SQL upgrade member_role_id will be used '
                         'to create a new role that will replace records in '
-                        'the user_tenant_membership table with explicit '
-                        'role grants. After migration, the member_role_id '
-                        'will be used in the API add_user_to_project.'),
+                        'the assignment table with explicit role grants. '
+                        'After migration, the member_role_id will be used in '
+                        'the API add_user_to_project.'),
         cfg.StrOpt('member_role_name', default='_member_',
                    help='During a SQL upgrade member_role_name will be used '
                         'to create a new role that will replace records in '
-                        'the user_tenant_membership table with explicit '
-                        'role grants. After migration, member_role_name will '
-                        'be ignored.'),
+                        'the assignment table with explicit role grants. '
+                        'After migration, member_role_name will be ignored.'),
         cfg.IntOpt('crypt_strength', default=40000,
                    help='The value passed as the keyword "rounds" to '
                         'passlib\'s encrypt method.'),
@@ -105,7 +115,7 @@ FILE_OPTIONS = {
                    help='Sets the value of TCP_KEEPIDLE in seconds for each '
                         'server socket. Only applies if tcp_keepalive is '
                         'true. Not supported on OS X.'),
-        cfg.IntOpt('list_limit', default=None,
+        cfg.IntOpt('list_limit',
                    help='The maximum number of entities that will be '
                         'returned in a collection, with no limit set by '
                         'default. This global limit may be then overridden '
@@ -119,7 +129,13 @@ FILE_OPTIONS = {
                          'recommended if the scope of a domain admin is being '
                          'restricted by use of an appropriate policy file '
                          '(see policy.v3cloudsample as an example).'),
-    ],
+        cfg.BoolOpt('strict_password_check', default=False,
+                    help='If set to true, strict password length checking is '
+                         'performed for password manipulation. If a password '
+                         'exceeds the maximum length, the operation will fail '
+                         'with an HTTP 403 Forbidden error. If set to false, '
+                         'passwords are automatically truncated to the '
+                         'maximum length.')],
     'identity': [
         cfg.StrOpt('default_domain_id', default='default',
                    help='This references the domain to use for all '
@@ -153,9 +169,43 @@ FILE_OPTIONS = {
         cfg.IntOpt('max_password_length', default=4096,
                    help='Maximum supported length for user passwords; '
                         'decrease to improve performance.'),
-        cfg.IntOpt('list_limit', default=None,
+        cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned in '
                         'an identity collection.'),
+    ],
+    'identity_mapping': [
+        cfg.StrOpt('driver',
+                   default=('keystone.identity.mapping_backends'
+                            '.sql.Mapping'),
+                   help='Keystone Identity Mapping backend driver.'),
+        cfg.StrOpt('generator',
+                   default=('keystone.identity.id_generators'
+                            '.sha256.Generator'),
+                   help='Public ID generator for user and group entities. '
+                        'The Keystone identity mapper only supports '
+                        'generators that produce no more than 64 characters.'),
+        cfg.BoolOpt('backward_compatible_ids',
+                    default=True,
+                    help='The format of user and group IDs changed '
+                         'in Juno for backends that do not generate UUIDs '
+                         '(e.g. LDAP), with keystone providing a hash mapping '
+                         'to the underlying attribute in LDAP. By default '
+                         'this mapping is disabled, which ensures that '
+                         'existing IDs will not change. Even when the '
+                         'mapping is enabled by using domain specific '
+                         'drivers, any users and groups from the default '
+                         'domain being handled by LDAP will still not be '
+                         'mapped to ensure their IDs remain backward '
+                         'compatible. Setting this value to False will '
+                         'enable the mapping for even the default LDAP '
+                         'driver. It is only safe to do this if you do not '
+                         'already have assignments for users and '
+                         'groups from the default LDAP domain, and it is '
+                         'acceptable for Keystone to provide the different '
+                         'IDs to clients than it did previously.  Typically '
+                         'this means that the only time you can set this '
+                         'value to False is when configuring a fresh '
+                         'installation.'),
     ],
     'trust': [
         cfg.BoolOpt('enabled', default=True,
@@ -182,10 +232,11 @@ FILE_OPTIONS = {
         cfg.IntOpt('expiration', default=3600,
                    help='Amount of time a token should remain valid '
                         '(in seconds).'),
-        cfg.StrOpt('provider', default=None,
+        cfg.StrOpt('provider',
                    help='Controls the token construction, validation, and '
                         'revocation operations. Core providers are '
-                        '"keystone.token.providers.[pki|uuid].Provider".'),
+                        '"keystone.token.providers.[pkiz|pki|uuid].'
+                        'Provider". The default provider is pkiz.'),
         cfg.StrOpt('driver',
                    default='keystone.token.backends.sql.Token',
                    help='Token persistence backend driver.'),
@@ -197,7 +248,7 @@ FILE_OPTIONS = {
                         'events if revoke extension is enabled (in seconds). '
                         'This has no effect unless global and token '
                         'caching are enabled.'),
-        cfg.IntOpt('cache_time', default=None,
+        cfg.IntOpt('cache_time',
                    help='Time to cache tokens (in seconds). This has no '
                         'effect unless global and token caching are '
                         'enabled.'),
@@ -256,11 +307,6 @@ FILE_OPTIONS = {
                         'deployments.  Small workloads (single process) '
                         'like devstack can use the dogpile.cache.memory '
                         'backend.'),
-        cfg.BoolOpt('use_key_mangler', default=True,
-                    help='Use a key-mangling function (sha1) to ensure '
-                         'fixed length cache-keys. This is toggle-able for '
-                         'debugging purposes, it is highly recommended to '
-                         'always leave this set to true.'),
         cfg.MultiStrOpt('backend_argument', default=[],
                         help='Arguments supplied to the backend module. '
                              'Specify this option once per argument to be '
@@ -315,7 +361,7 @@ FILE_OPTIONS = {
                         'certificate).'),
     ],
     'signing': [
-        cfg.StrOpt('token_format', default=None,
+        cfg.StrOpt('token_format',
                    help='Deprecated in favor of provider in the '
                         '[token] section.'),
         cfg.StrOpt('certfile',
@@ -349,15 +395,15 @@ FILE_OPTIONS = {
         # assignment has no default for backward compatibility reasons.
         # If assignment driver is not specified, the identity driver chooses
         # the backend
-        cfg.StrOpt('driver', default=None,
+        cfg.StrOpt('driver',
                    help='Assignment backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for assignment caching. This has no effect '
                          'unless global caching is enabled.'),
-        cfg.IntOpt('cache_time', default=None,
+        cfg.IntOpt('cache_time',
                    help='TTL (in seconds) to cache assignment data. This has '
                         'no effect unless global caching is enabled.'),
-        cfg.IntOpt('list_limit', default=None,
+        cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in an assignment collection.'),
     ],
@@ -389,7 +435,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='keystone.policy.backends.sql.Policy',
                    help='Policy backend driver.'),
-        cfg.IntOpt('list_limit', default=None,
+        cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a policy collection.'),
     ],
@@ -416,9 +462,9 @@ FILE_OPTIONS = {
     'ldap': [
         cfg.StrOpt('url', default='ldap://localhost',
                    help='URL for connecting to the LDAP server.'),
-        cfg.StrOpt('user', default=None,
+        cfg.StrOpt('user',
                    help='User BindDN to query the LDAP server.'),
-        cfg.StrOpt('password', secret=True, default=None,
+        cfg.StrOpt('password', secret=True,
                    help='Password for the BindDN to query the LDAP server.'),
         cfg.StrOpt('suffix', default='cn=example,cn=com',
                    help='LDAP server suffix'),
@@ -446,17 +492,17 @@ FILE_OPTIONS = {
                         '"finding" or "default". The "default" option falls '
                         'back to using default dereferencing configured by '
                         'your ldap.conf.'),
-        cfg.IntOpt('debug_level', default=None,
+        cfg.IntOpt('debug_level',
                    help='Sets the LDAP debugging level for LDAP calls. '
                         'A value of 0 means that debugging is not enabled. '
                         'This value is a bitmask, consult your LDAP '
                         'documentation for possible values.'),
-        cfg.BoolOpt('chase_referrals', default=None,
+        cfg.BoolOpt('chase_referrals',
                     help='Override the system\'s default referral chasing '
                          'behavior for queries.'),
-        cfg.StrOpt('user_tree_dn', default=None,
+        cfg.StrOpt('user_tree_dn',
                    help='Search base for users.'),
-        cfg.StrOpt('user_filter', default=None,
+        cfg.StrOpt('user_filter',
                    help='LDAP search filter for users.'),
         cfg.StrOpt('user_objectclass', default='inetOrgPerson',
                    help='LDAP objectclass for users.'),
@@ -489,7 +535,7 @@ FILE_OPTIONS = {
                     default=['default_project_id', 'tenants'],
                     help='List of attributes stripped off the user on '
                          'update.'),
-        cfg.StrOpt('user_default_project_id_attribute', default=None,
+        cfg.StrOpt('user_default_project_id_attribute',
                    help='LDAP attribute mapped to default_project_id for '
                         'users.'),
         cfg.BoolOpt('user_allow_create', default=True,
@@ -503,7 +549,7 @@ FILE_OPTIONS = {
                          'determine if a user is enabled or not by checking '
                          'if they are a member of the '
                          '"user_enabled_emulation_dn" group.'),
-        cfg.StrOpt('user_enabled_emulation_dn', default=None,
+        cfg.StrOpt('user_enabled_emulation_dn',
                    help='DN of the group entry to hold enabled users when '
                         'using enabled emulation.'),
         cfg.ListOpt('user_additional_attribute_mapping',
@@ -514,44 +560,76 @@ FILE_OPTIONS = {
                          'ldap_attr is the attribute in the LDAP entry and '
                          'user_attr is the Identity API attribute.'),
 
-        cfg.StrOpt('tenant_tree_dn', default=None,
+        cfg.StrOpt('project_tree_dn',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_tree_dn', group='ldap')],
                    help='Search base for projects'),
-        cfg.StrOpt('tenant_filter', default=None,
+        cfg.StrOpt('project_filter',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_filter', group='ldap')],
                    help='LDAP search filter for projects.'),
-        cfg.StrOpt('tenant_objectclass', default='groupOfNames',
+        cfg.StrOpt('project_objectclass', default='groupOfNames',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_objectclass', group='ldap')],
                    help='LDAP objectclass for projects.'),
-        cfg.StrOpt('tenant_id_attribute', default='cn',
+        cfg.StrOpt('project_id_attribute', default='cn',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_id_attribute', group='ldap')],
                    help='LDAP attribute mapped to project id.'),
-        cfg.StrOpt('tenant_member_attribute', default='member',
+        cfg.StrOpt('project_member_attribute', default='member',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_member_attribute', group='ldap')],
                    help='LDAP attribute mapped to project membership for '
                         'user.'),
-        cfg.StrOpt('tenant_name_attribute', default='ou',
+        cfg.StrOpt('project_name_attribute', default='ou',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_name_attribute', group='ldap')],
                    help='LDAP attribute mapped to project name.'),
-        cfg.StrOpt('tenant_desc_attribute', default='description',
+        cfg.StrOpt('project_desc_attribute', default='description',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_desc_attribute', group='ldap')],
                    help='LDAP attribute mapped to project description.'),
-        cfg.StrOpt('tenant_enabled_attribute', default='enabled',
+        cfg.StrOpt('project_enabled_attribute', default='enabled',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_enabled_attribute', group='ldap')],
                    help='LDAP attribute mapped to project enabled.'),
-        cfg.StrOpt('tenant_domain_id_attribute',
+        cfg.StrOpt('project_domain_id_attribute',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_domain_id_attribute', group='ldap')],
                    default='businessCategory',
                    help='LDAP attribute mapped to project domain_id.'),
-        cfg.ListOpt('tenant_attribute_ignore', default=[],
+        cfg.ListOpt('project_attribute_ignore', default=[],
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_attribute_ignore', group='ldap')],
                     help='List of attributes stripped off the project on '
                          'update.'),
-        cfg.BoolOpt('tenant_allow_create', default=True,
+        cfg.BoolOpt('project_allow_create', default=True,
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_allow_create', group='ldap')],
                     help='Allow project creation in LDAP backend.'),
-        cfg.BoolOpt('tenant_allow_update', default=True,
+        cfg.BoolOpt('project_allow_update', default=True,
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_allow_update', group='ldap')],
                     help='Allow project update in LDAP backend.'),
-        cfg.BoolOpt('tenant_allow_delete', default=True,
+        cfg.BoolOpt('project_allow_delete', default=True,
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_allow_delete', group='ldap')],
                     help='Allow project deletion in LDAP backend.'),
-        cfg.BoolOpt('tenant_enabled_emulation', default=False,
+        cfg.BoolOpt('project_enabled_emulation', default=False,
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_enabled_emulation', group='ldap')],
                     help='If true, Keystone uses an alternative method to '
                          'determine if a project is enabled or not by '
                          'checking if they are a member of the '
-                         '"tenant_enabled_emulation_dn" group.'),
-        cfg.StrOpt('tenant_enabled_emulation_dn', default=None,
+                         '"project_enabled_emulation_dn" group.'),
+        cfg.StrOpt('project_enabled_emulation_dn',
+                   deprecated_opts=[cfg.DeprecatedOpt(
+                       'tenant_enabled_emulation_dn', group='ldap')],
                    help='DN of the group entry to hold enabled projects when '
                         'using enabled emulation.'),
-        cfg.ListOpt('tenant_additional_attribute_mapping',
+        cfg.ListOpt('project_additional_attribute_mapping',
+                    deprecated_opts=[cfg.DeprecatedOpt(
+                        'tenant_additional_attribute_mapping', group='ldap')],
                     default=[],
                     help='Additional attribute mappings for projects. '
                          'Attribute mapping format is '
@@ -559,9 +637,9 @@ FILE_OPTIONS = {
                          'attribute in the LDAP entry and user_attr is the '
                          'Identity API attribute.'),
 
-        cfg.StrOpt('role_tree_dn', default=None,
+        cfg.StrOpt('role_tree_dn',
                    help='Search base for roles.'),
-        cfg.StrOpt('role_filter', default=None,
+        cfg.StrOpt('role_filter',
                    help='LDAP search filter for roles.'),
         cfg.StrOpt('role_objectclass', default='organizationalRole',
                    help='LDAP objectclass for roles.'),
@@ -587,9 +665,9 @@ FILE_OPTIONS = {
                          'ldap_attr is the attribute in the LDAP entry and '
                          'user_attr is the Identity API attribute.'),
 
-        cfg.StrOpt('group_tree_dn', default=None,
+        cfg.StrOpt('group_tree_dn',
                    help='Search base for groups.'),
-        cfg.StrOpt('group_filter', default=None,
+        cfg.StrOpt('group_filter',
                    help='LDAP search filter for groups.'),
         cfg.StrOpt('group_objectclass', default='groupOfNames',
                    help='LDAP objectclass for groups.'),
@@ -617,10 +695,10 @@ FILE_OPTIONS = {
                          'ldap_attr is the attribute in the LDAP entry and '
                          'user_attr is the Identity API attribute.'),
 
-        cfg.StrOpt('tls_cacertfile', default=None,
+        cfg.StrOpt('tls_cacertfile',
                    help='CA certificate file path for communicating with '
                         'LDAP servers.'),
-        cfg.StrOpt('tls_cacertdir', default=None,
+        cfg.StrOpt('tls_cacertdir',
                    help='CA certificate directory path for communicating with '
                         'LDAP servers.'),
         cfg.BoolOpt('use_tls', default=False,
@@ -664,7 +742,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='keystone.catalog.backends.sql.Catalog',
                    help='Catalog backend driver.'),
-        cfg.IntOpt('list_limit', default=None,
+        cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a catalog collection.'),
     ],
@@ -708,10 +786,10 @@ def configure(conf=None):
         cfg.BoolOpt('standard-threads', default=False,
                     help='Do not monkey-patch threading system modules.'))
     conf.register_cli_opt(
-        cfg.StrOpt('pydev-debug-host', default=None,
+        cfg.StrOpt('pydev-debug-host',
                    help='Host to connect to for remote debugger.'))
     conf.register_cli_opt(
-        cfg.IntOpt('pydev-debug-port', default=None,
+        cfg.IntOpt('pydev-debug-port',
                    help='Port to connect to for remote debugger.'))
 
     for section in FILE_OPTIONS:

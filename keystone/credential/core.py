@@ -22,7 +22,6 @@ from keystone.common import dependency
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -55,7 +54,7 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_credentials(self, **filters):
@@ -64,7 +63,7 @@ class Driver(object):
         :returns: a list of credential_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_credential(self, credential_id):
@@ -74,7 +73,7 @@ class Driver(object):
         :raises: keystone.exception.CredentialNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_credential(self, credential_id, credential):
@@ -84,7 +83,7 @@ class Driver(object):
                  keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_credential(self, credential_id):
@@ -93,7 +92,7 @@ class Driver(object):
         :raises: keystone.exception.CredentialNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_credentials_for_project(self, project_id):
@@ -117,5 +116,5 @@ class Driver(object):
                 try:
                     self.credential_api.delete_credential(cr['id'])
                 except exception.CredentialNotFound:
-                    LOG.debug(_('Deletion of credential is not required: %s'),
+                    LOG.debug('Deletion of credential is not required: %s',
                               cr['id'])

@@ -25,13 +25,12 @@ from pycadf import cadftype
 from pycadf import eventfactory
 from pycadf import resource
 
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
 notifier_opts = [
     cfg.StrOpt('default_publisher_id',
-               default=None,
                help='Default publisher_id for outgoing notifications'),
 ]
 
@@ -62,11 +61,12 @@ class ManagerNotificationWrapper(object):
 
     """
     def __init__(self, operation, resource_type, public=True,
-                 resource_id_arg_index=1):
+                 resource_id_arg_index=1, result_id_arg_attr=None):
         self.operation = operation
         self.resource_type = resource_type
         self.public = public
         self.resource_id_arg_index = resource_id_arg_index
+        self.result_id_arg_attr = result_id_arg_attr
 
     def __call__(self, f):
         def wrapper(*args, **kwargs):
@@ -76,7 +76,10 @@ class ManagerNotificationWrapper(object):
             except Exception:
                 raise
             else:
-                resource_id = args[self.resource_id_arg_index]
+                if self.result_id_arg_attr is not None:
+                    resource_id = result[self.result_id_arg_attr]
+                else:
+                    resource_id = args[self.resource_id_arg_index]
                 _send_notification(
                     self.operation,
                     self.resource_type,
@@ -153,9 +156,9 @@ def notify_event_callbacks(service, resource_type, operation, payload):
                               'resource_type': resource_type,
                               'operation': operation,
                               'payload': payload}
-                LOG.debug(_('Invoking callback %(cb_name)s for event '
-                            '%(service)s %(resource_type)s %(operation)s for'
-                            '%(payload)s'), subst_dict)
+                LOG.debug(('Invoking callback %(cb_name)s for event '
+                           '%(service)s %(resource_type)s %(operation)s for'
+                           '%(payload)s'), subst_dict)
                 cb(service, resource_type, operation, payload)
 
 
@@ -290,7 +293,7 @@ def _send_audit_notification(action, initiator, outcome):
 
     context = {}
     payload = event.as_dict()
-    LOG.debug(_('CADF Event: %s'), payload)
+    LOG.debug('CADF Event: %s', payload)
     service = 'identity'
     event_type = '%(service)s.%(action)s' % {'service': service,
                                              'action': action}

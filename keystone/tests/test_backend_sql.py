@@ -16,6 +16,8 @@
 import uuid
 
 import mock
+from oslo.db import exception as db_exception
+from oslo.db import options
 import sqlalchemy
 from sqlalchemy import exc
 
@@ -23,7 +25,6 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
-from keystone.openstack.common.db import exception as db_exception
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import database
@@ -127,11 +128,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertNotEqual(user_ref['password'], self.user_foo['password'])
 
     def test_delete_user_with_project_association(self):
-        user = {'id': uuid.uuid4().hex,
-                'name': uuid.uuid4().hex,
+        user = {'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': uuid.uuid4().hex}
-        self.identity_api.create_user(user['id'], user)
+        user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
         self.identity_api.delete_user(user['id'])
@@ -140,17 +140,12 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                           user['id'])
 
     def test_create_null_user_name(self):
-        user = {'id': uuid.uuid4().hex,
-                'name': None,
+        user = {'name': None,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': uuid.uuid4().hex}
         self.assertRaises(exception.ValidationError,
                           self.identity_api.create_user,
-                          user['id'],
                           user)
-        self.assertRaises(exception.UserNotFound,
-                          self.identity_api.get_user,
-                          user['id'])
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user_by_name,
                           user['name'],
@@ -175,7 +170,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_create_null_role_name(self):
         role = {'id': uuid.uuid4().hex,
                 'name': None}
-        self.assertRaises(exception.Conflict,
+        self.assertRaises(exception.UnexpectedError,
                           self.assignment_api.create_role,
                           role['id'],
                           role)
@@ -184,11 +179,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                           role['id'])
 
     def test_delete_project_with_user_association(self):
-        user = {'id': 'fake',
-                'name': 'fakeuser',
+        user = {'name': 'fakeuser',
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_api.create_user('fake', user)
+        user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
         self.assignment_api.delete_project(self.tenant_bar['id'])
@@ -198,11 +192,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_metadata_removed_on_delete_user(self):
         # A test to check that the internal representation
         # or roles is correctly updated when a user is deleted
-        user = {'id': uuid.uuid4().hex,
-                'name': uuid.uuid4().hex,
+        user = {'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_api.create_user(user['id'], user)
+        user = self.identity_api.create_user(user)
         role = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex}
         self.assignment_api.create_role(role['id'], role)
@@ -222,11 +215,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_metadata_removed_on_delete_project(self):
         # A test to check that the internal representation
         # or roles is correctly updated when a project is deleted
-        user = {'id': uuid.uuid4().hex,
-                'name': uuid.uuid4().hex,
+        user = {'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
                 'password': 'passwd'}
-        self.identity_api.create_user(user['id'], user)
+        user = self.identity_api.create_user(user)
         role = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex}
         self.assignment_api.create_role(role['id'], role)
@@ -280,40 +272,36 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         This behavior is specific to the SQL driver.
 
         """
-        user_id = uuid.uuid4().hex
         arbitrary_key = uuid.uuid4().hex
         arbitrary_value = uuid.uuid4().hex
         user = {
-            'id': user_id,
             'name': uuid.uuid4().hex,
             'domain_id': DEFAULT_DOMAIN_ID,
             'password': uuid.uuid4().hex,
             arbitrary_key: arbitrary_value}
-        ref = self.identity_api.create_user(user_id, user)
+        ref = self.identity_api.create_user(user)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('password'))
         self.assertIsNone(ref.get('extra'))
 
         user['name'] = uuid.uuid4().hex
         user['password'] = uuid.uuid4().hex
-        ref = self.identity_api.update_user(user_id, user)
+        ref = self.identity_api.update_user(ref['id'], user)
         self.assertIsNone(ref.get('password'))
         self.assertIsNone(ref['extra'].get('password'))
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
     def test_sql_user_to_dict_null_default_project_id(self):
-        user_id = uuid.uuid4().hex
         user = {
-            'id': user_id,
             'name': uuid.uuid4().hex,
             'domain_id': DEFAULT_DOMAIN_ID,
             'password': uuid.uuid4().hex}
 
-        self.identity_api.create_user(user_id, user)
+        user = self.identity_api.create_user(user)
         session = sql.get_session()
         query = session.query(identity_sql.User)
-        query = query.filter_by(id=user_id)
+        query = query.filter_by(id=user['id'])
         raw_user_ref = query.one()
         self.assertIsNone(raw_user_ref.default_project_id)
         user_ref = raw_user_ref.to_dict()
@@ -388,7 +376,7 @@ class SqlToken(SqlTests, test_backend.TokenTests):
 
 
 class SqlCatalog(SqlTests, test_backend.CatalogTests):
-    def test_malformed_catalog_throws_error(self):
+    def test_catalog_ignored_malformed_urls(self):
         service = {
             'id': uuid.uuid4().hex,
             'type': uuid.uuid4().hex,
@@ -397,7 +385,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         }
         self.catalog_api.create_service(service['id'], service.copy())
 
-        malformed_url = "http://192.168.1.104:$(compute_port)s/v2/$(tenant)s"
+        malformed_url = "http://192.168.1.104:8774/v2/$(tenant)s"
         endpoint = {
             'id': uuid.uuid4().hex,
             'region': uuid.uuid4().hex,
@@ -407,10 +395,9 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         }
         self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
 
-        self.assertRaises(exception.MalformedEndpoint,
-                          self.catalog_api.get_catalog,
-                          'fake-user',
-                          'fake-tenant')
+        # NOTE(dstanek): there are no valid URLs, so nothing is in the catalog
+        catalog = self.catalog_api.get_catalog('fake-user', 'fake-tenant')
+        self.assertEqual({}, catalog)
 
     def test_get_catalog_with_empty_public_url(self):
         service = {
@@ -520,7 +507,17 @@ class SqlDecorators(tests.TestCase):
 
     def test_conflict_happend(self):
         self.assertRaises(exception.Conflict, FakeTable().insert)
-        self.assertRaises(exception.Conflict, FakeTable().update)
+        self.assertRaises(exception.UnexpectedError, FakeTable().update)
 
     def test_not_conflict_error(self):
         self.assertRaises(KeyError, FakeTable().lookup)
+
+
+class SqlModuleInitialization(tests.TestCase):
+
+    @mock.patch.object(sql.core, 'CONF')
+    @mock.patch.object(options, 'set_defaults')
+    def test_initialize_module(self, set_defaults, CONF):
+        sql.initialize()
+        set_defaults.assert_called_with(CONF,
+                                        connection='sqlite:///keystone.db')

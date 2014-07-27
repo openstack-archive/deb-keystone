@@ -24,6 +24,43 @@ from keystone.tests import test_v3
 class CatalogTestCase(test_v3.RestfulTestCase):
     """Test service & endpoint CRUD."""
 
+    def test_get_catalog_project_scoped_token(self):
+        """Call ``GET /catalog`` with a project-scoped token."""
+        r = self.get(
+            '/catalog',
+            expected_status=200)
+        self.assertValidCatalogResponse(r)
+
+    def test_get_catalog_domain_scoped_token(self):
+        """Call ``GET /catalog`` with a domain-scoped token."""
+        # grant a domain role to a user
+        self.put(path='/domains/%s/users/%s/roles/%s' % (
+            self.domain['id'], self.user['id'], self.role['id']))
+
+        self.get(
+            '/catalog',
+            auth=self.build_authentication_request(
+                user_id=self.user['id'],
+                password=self.user['password'],
+                domain_id=self.domain['id']),
+            expected_status=403)
+
+    def test_get_catalog_unscoped_token(self):
+        """Call ``GET /catalog`` with an unscoped token."""
+        self.get(
+            '/catalog',
+            auth=self.build_authentication_request(
+                user_id=self.default_domain_user['id'],
+                password=self.default_domain_user['password']),
+            expected_status=403)
+
+    def test_get_catalog_no_token(self):
+        """Call ``GET /catalog`` without a token."""
+        self.get(
+            '/catalog',
+            noauth=True,
+            expected_status=401)
+
     # region crud tests
 
     def test_create_region_with_id(self):
@@ -358,9 +395,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             body={'endpoint': ref},
             expected_status=400)
 
-    def assertValidErrorResponse(self, response):
-        self.assertIn(response.status_code, [400, 409])
-
     def test_create_endpoint_400(self):
         """Call ``POST /endpoints``."""
         ref = self.new_endpoint_ref(service_id=self.service_id)
@@ -464,21 +498,21 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         # test the endpoint on v3
         r = self.get('/endpoints')
         endpoints = self.assertValidEndpointListResponse(r)
-        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(1, len(endpoints))
         endpoint_v3 = endpoints.pop()
 
-        # these attributes are identical between both API's
-        self.assertEqual(endpoint_v3['region'], ref['region'])
-        self.assertEqual(endpoint_v3['service_id'], ref['service_id'])
-        self.assertEqual(endpoint_v3['description'], ref['description'])
+        # these attributes are identical between both APIs
+        self.assertEqual(ref['region'], endpoint_v3['region'])
+        self.assertEqual(ref['service_id'], endpoint_v3['service_id'])
+        self.assertEqual(ref['description'], endpoint_v3['description'])
 
         # a v2 endpoint is not quite the same concept as a v3 endpoint, so they
         # receive different identifiers
         self.assertNotEqual(endpoint_v2['id'], endpoint_v3['id'])
 
         # v2 has a publicurl; v3 has a url + interface type
-        self.assertEqual(endpoint_v3['url'], ref['publicurl'])
-        self.assertEqual(endpoint_v3['interface'], 'public')
+        self.assertEqual(ref['publicurl'], endpoint_v3['url'])
+        self.assertEqual('public', endpoint_v3['interface'])
 
         # tests for bug 1152632 -- these attributes were being returned by v3
         self.assertNotIn('publicurl', endpoint_v3)

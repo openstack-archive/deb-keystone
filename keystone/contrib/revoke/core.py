@@ -22,8 +22,8 @@ from keystone.common import manager
 from keystone import config
 from keystone.contrib.revoke import model
 from keystone import exception
+from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -192,7 +192,7 @@ class Driver(object):
                   for tokens issued after the expiration cutoff.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def revoke(self, event):
@@ -202,4 +202,4 @@ class Driver(object):
             keystone.contrib.revoke.model.RevocationEvent
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover

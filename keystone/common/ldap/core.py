@@ -22,7 +22,7 @@ import ldap.filter
 import six
 
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 LOG = log.getLogger(__name__)
@@ -46,6 +46,15 @@ _utf8_encoder = codecs.getencoder('utf-8')
 
 
 def utf8_encode(value):
+    """Encode a basestring to UTF-8.
+
+    If the string is unicode encode it to UTF-8, if the string is
+    str then assume it's already encoded. Otherwise raise a TypeError.
+
+    :param value: A basestring
+    :returns: UTF-8 encoded version of value
+    :raises: TypeError if value is not basestring
+    """
     if isinstance(value, six.text_type):
         return _utf8_encoder(value)[0]
     elif isinstance(value, six.binary_type):
@@ -58,12 +67,32 @@ _utf8_decoder = codecs.getdecoder('utf-8')
 
 
 def utf8_decode(value):
+    """Decode a from UTF-8 into unicode.
+
+    If the value is a binary string assume it's UTF-8 encoded and decode
+    it into a unicode string. Otherwise convert the value from its
+    type into a unicode string.
+
+    :param value: value to be returned as unicode
+    :returns: value as unicode
+    :raises: UnicodeDecodeError for invalid UTF-8 encoding
+    """
     if isinstance(value, six.binary_type):
         return _utf8_decoder(value)[0]
     return six.text_type(value)
 
 
 def py2ldap(val):
+    """Type convert a Python value to a type accepted by LDAP (unicode).
+
+    The LDAP API only accepts strings for values therefore convert
+    the value's type to a unicode string. A subsequent type conversion
+    will encode the unicode as UTF-8 as required by the python-ldap API,
+    but for now we just want a string representation of the value.
+
+    :param val: The value to convert to a LDAP string representation
+    :returns: unicode string representation of value.
+    """
     if isinstance(val, bool):
         return u'TRUE' if val else u'FALSE'
     else:
@@ -71,6 +100,15 @@ def py2ldap(val):
 
 
 def ldap2py(val):
+    """Convert an LDAP formatted value to Python type used by OpenStack.
+
+    Virtually all LDAP values are stored as UTF-8 encoded strings.
+    OpenStack prefers values which are Python types, e.g. unicode,
+    boolean, integer, etc.
+
+    :param val: LDAP formatted value
+    :returns: val converted to preferred Python type
+    """
     try:
         return LDAP_VALUES[val]
     except KeyError:
@@ -83,6 +121,23 @@ def ldap2py(val):
 
 
 def convert_ldap_result(ldap_result):
+    """Convert LDAP search result to Python types used by OpenStack.
+
+    Each result tuple is of the form (dn, attrs), where dn is a string
+    containing the DN (distinguished name) of the entry, and attrs is
+    a dictionary containing the attributes associated with the
+    entry. The keys of attrs are strings, and the associated values
+    are lists of strings.
+
+    OpenStack wants to use Python types of its choosing. Strings will
+    be unicode, truth values boolean, whole numbers int's, etc. DN's will
+    also be decoded from UTF-8 to unicode.
+
+    :param ldap_result: LDAP search result
+    :returns: list of 2-tuples containing (dn, attrs) where dn is unicode
+              and attrs is a dict whose values are type converted to
+              OpenStack preferred types.
+    """
     py_result = []
     at_least_one_referral = False
     for dn, attrs in ldap_result:
@@ -95,8 +150,8 @@ def convert_ldap_result(ldap_result):
                           dict((kind, [ldap2py(x) for x in values])
                                for kind, values in six.iteritems(attrs))))
     if at_least_one_referral:
-        LOG.debug(_('Referrals were returned and ignored. Enable referral '
-                    'chasing in keystone.conf via [ldap] chase_referrals'))
+        LOG.debug(('Referrals were returned and ignored. Enable referral '
+                   'chasing in keystone.conf via [ldap] chase_referrals'))
 
     return py_result
 
@@ -350,57 +405,57 @@ class LDAPHandler(object):
     def connect(self, url, page_size=0, alias_dereferencing=None,
                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
                 tls_req_cert='demand', chase_referrals=None, debug_level=None):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def set_option(self, option, invalue):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_option(self, option):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def simple_bind_s(self, who='', cred='',
                       serverctrls=None, clientctrls=None):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def unbind_s(self):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def add_s(self, dn, modlist):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def search_s(self, base, scope,
                  filterstr='(objectClass=*)', attrlist=None, attrsonly=0):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def search_ext(self, base, scope,
                    filterstr='(objectClass=*)', attrlist=None, attrsonly=0,
                    serverctrls=None, clientctrls=None,
                    timeout=-1, sizelimit=0):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def result3(self, msgid=ldap.RES_ANY, all=1, timeout=None,
                 resp_ctrl_classes=None):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def modify_s(self, dn, modlist):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_s(self, dn):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_ext_s(self, dn, serverctrls=None, clientctrls=None):
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
 
 class PythonLDAPHandler(LDAPHandler):
@@ -463,7 +518,7 @@ class PythonLDAPHandler(LDAPHandler):
             if tls_req_cert in LDAP_TLS_CERTS.values():
                 ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, tls_req_cert)
             else:
-                LOG.debug(_("LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s"),
+                LOG.debug("LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s",
                           tls_req_cert)
 
         self.conn = ldap.initialize(url)
@@ -954,7 +1009,12 @@ class BaseLdap(object):
                 continue
 
             try:
-                v = lower_res[self.attribute_mapping.get(k, k).lower()]
+                map_attr = self.attribute_mapping.get(k, k)
+                if map_attr is None:
+                    # Ignore attributes that are mapped to None.
+                    continue
+
+                v = lower_res[map_attr.lower()]
             except KeyError:
                 pass
             else:

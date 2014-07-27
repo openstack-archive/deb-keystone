@@ -15,7 +15,7 @@
 import six
 
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 
 
 def check_length(property_name, value, min_length=1, max_length=64):
@@ -61,6 +61,10 @@ def check_name(property_name, name, min_length=1, max_length=64):
 
 def domain_name(name):
     return check_name('Domain', name)
+
+
+def domain_enabled(enabled):
+    return check_enabled('Domain', enabled)
 
 
 def project_name(name):

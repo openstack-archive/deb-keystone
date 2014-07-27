@@ -25,8 +25,8 @@ from keystone.common import models
 from keystone.common import utils
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone import identity
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -47,6 +47,9 @@ class Identity(identity.Driver):
         return "keystone.assignment.backends.ldap.Assignment"
 
     def is_domain_aware(self):
+        return False
+
+    def generates_uuids(self):
         return False
 
     # Identity interface
@@ -93,8 +96,6 @@ class Identity(identity.Driver):
 
     def update_user(self, user_id, user):
         self.user.check_allow_update()
-        if 'id' in user and user['id'] != user_id:
-            raise exception.ValidationError(_('Cannot change user ID'))
         old_obj = self.user.get(user_id)
         if 'name' in user and old_obj.get('name') != user['name']:
             raise exception.Conflict(_('Cannot change user name'))
@@ -160,9 +161,9 @@ class Identity(identity.Driver):
             try:
                 users.append(self.user.get_filtered(user_id))
             except exception.UserNotFound:
-                LOG.debug(_("Group member '%(user_dn)s' not found in"
-                            " '%(group_id)s'. The user should be removed"
-                            " from the group. The user will be ignored."),
+                LOG.debug(("Group member '%(user_dn)s' not found in"
+                           " '%(group_id)s'. The user should be removed"
+                           " from the group. The user will be ignored."),
                           dict(user_dn=user_dn, group_id=group_id))
         return users
 

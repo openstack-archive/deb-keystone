@@ -24,7 +24,7 @@ from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
@@ -37,17 +37,19 @@ def format_url(url, data):
     try:
         result = url.replace('$(', '%(') % data
     except AttributeError:
-        return None
+        LOG.error(_('Malformed endpoint - %(url)r is not a string'),
+                  {"url": url})
+        raise exception.MalformedEndpoint(endpoint=url)
     except KeyError as e:
         LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
                   {"url": url,
                    "keyerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except TypeError as e:
-        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"
-                    "(are you missing brackets ?)"),
+        LOG.error(_("Malformed endpoint '%(url)s'. The following type error "
+                    "occurred during string substitution: %(typeerror)s"),
                   {"url": url,
-                   "keyerror": e})
+                   "typeerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except ValueError as e:
         LOG.error(_("Malformed endpoint %s - incomplete format "
@@ -165,7 +167,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound (if parent region invalid)
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_regions(self):
@@ -174,7 +176,7 @@ class Driver(object):
         :returns: list of region_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_region(self, region_id):
@@ -184,7 +186,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_region(self, region_id):
@@ -194,7 +196,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_region(self, region_id):
@@ -203,7 +205,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_service(self, service_id, service_ref):
@@ -212,7 +214,7 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_services(self, hints):
@@ -225,7 +227,7 @@ class Driver(object):
         :returns: list of service_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_service(self, service_id):
@@ -235,7 +237,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_service(self, service_id):
@@ -245,7 +247,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_service(self, service_id):
@@ -254,7 +256,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_endpoint(self, endpoint_id, endpoint_ref):
@@ -264,7 +266,7 @@ class Driver(object):
                  keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_endpoint(self, endpoint_id):
@@ -274,7 +276,7 @@ class Driver(object):
         :raises: keystone.exception.EndpointNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_endpoints(self, hints):
@@ -287,7 +289,7 @@ class Driver(object):
         :returns: list of endpoint_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_endpoint(self, endpoint_id, endpoint_ref):
@@ -298,7 +300,7 @@ class Driver(object):
                  keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_endpoint(self, endpoint_id):
@@ -307,7 +309,7 @@ class Driver(object):
         :raises: keystone.exception.EndpointNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_catalog(self, user_id, tenant_id, metadata=None):
@@ -332,7 +334,7 @@ class Driver(object):
         :raises: keystone.exception.NotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     def get_v3_catalog(self, user_id, tenant_id, metadata=None):
         """Retrieve and format the current V3 service catalog.

@@ -21,7 +21,7 @@ from keystone import config
 from keystone.contrib.oauth1 import core as oauth1
 from keystone.contrib.oauth1 import validator
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 
@@ -95,6 +95,12 @@ class AccessTokenCrudV3(controller.V3Controller):
 
     @controller.protected()
     def list_access_tokens(self, context, user_id):
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+        if auth_context.get('is_delegated_auth'):
+            raise exception.Forbidden(
+                _('Cannot list request tokens'
+                  ' with a token issued via delegation.'))
         refs = self.oauth_api.list_access_tokens(user_id)
         formatted_refs = ([self._format_token_entity(context, x)
                            for x in refs])
@@ -310,6 +316,12 @@ class OAuthControllerV3(controller.V3Controller):
         there is not another easy way to make sure the user knows which roles
         are being requested before authorizing.
         """
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+        if auth_context.get('is_delegated_auth'):
+            raise exception.Forbidden(
+                _('Cannot authorize a request token'
+                  ' with a token issued via delegation.'))
 
         req_token = self.oauth_api.get_request_token(request_token_id)
 

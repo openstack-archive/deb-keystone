@@ -33,8 +33,6 @@ import six
 from testtools import testcase
 import webob
 
-from keystone.openstack.common import gettextutils
-
 # NOTE(ayoung)
 # environment.use_eventlet must run before any of the code that will
 # call the eventlet monkeypatching.
@@ -49,9 +47,9 @@ from keystone.common.kvs import core as kvs_core
 from keystone.common import utils as common_utils
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone import notifications
 from keystone.openstack.common.fixture import config as config_fixture
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.tests import ksfixtures
 
@@ -329,6 +327,9 @@ class TestCase(BaseTestCase):
         return copy.copy(self._config_file_list)
 
     def config_overrides(self):
+        # Exercise multiple worker process code paths
+        self.config_fixture.config(public_workers=2)
+        self.config_fixture.config(admin_workers=2)
         self.config_fixture.config(policy_file=dirs.etc('policy.json'))
         self.config_fixture.config(
             group='auth',
@@ -370,6 +371,20 @@ class TestCase(BaseTestCase):
         self.config_fixture.config(
             group='trust',
             driver='keystone.trust.backends.kvs.Trust')
+        self.config_fixture.config(
+            default_log_levels=[
+                'amqp=WARN',
+                'amqplib=WARN',
+                'boto=WARN',
+                'qpid=WARN',
+                'sqlalchemy=WARN',
+                'suds=INFO',
+                'oslo.messaging=INFO',
+                'iso8601=WARN',
+                'requests.packages.urllib3.connectionpool=WARN',
+                'routes.middleware=INFO',
+                'stevedore.extension=INFO',
+            ])
 
     def setUp(self):
         super(TestCase, self).setUp()
@@ -402,6 +417,21 @@ class TestCase(BaseTestCase):
         self.config_overrides()
 
         self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+
+        # NOTE(morganfainberg): This code is a copy from the oslo-incubator
+        # log module. This is not in a function or otherwise available to use
+        # without having a CONF object to setup logging. This should help to
+        # reduce the log size by limiting what we log (similar to how Keystone
+        # would run under mod_wsgi or eventlet).
+        for pair in CONF.default_log_levels:
+            mod, _sep, level_name = pair.partition('=')
+            logger = logging.getLogger(mod)
+            if sys.version_info < (2, 7):
+                level = logging.getLevelName(level_name)
+                logger.setLevel(level)
+            else:
+                logger.setLevel(level_name)
+
         warnings.filterwarnings('ignore', category=DeprecationWarning)
         self.useFixture(ksfixtures.Cache())
 
@@ -471,11 +501,15 @@ class TestCase(BaseTestCase):
                 fixtures_to_cleanup.append(attrname)
 
             for tenant in fixtures.TENANTS:
-                try:
-                    rv = self.assignment_api.create_project(
-                        tenant['id'], tenant)
-                except exception.Conflict:
-                    rv = self.assignment_api.get_project(tenant['id'])
+                if hasattr(self, 'tenant_%s' % tenant['id']):
+                    try:
+                        # This will clear out any roles on the project as well
+                        self.assignment_api.delete_project(tenant['id'])
+                    except exception.ProjectNotFound:
+                        pass
+                rv = self.assignment_api.create_project(
+                    tenant['id'], tenant)
+
                 attrname = 'tenant_%s' % tenant['id']
                 setattr(self, attrname, rv)
                 fixtures_to_cleanup.append(attrname)
@@ -493,15 +527,28 @@ class TestCase(BaseTestCase):
                 user_copy = user.copy()
                 tenants = user_copy.pop('tenants')
                 try:
-                    self.identity_api.create_user(user['id'], user_copy)
-                except exception.Conflict:
+                    existing_user = getattr(self, 'user_%s' % user['id'], None)
+                    if existing_user is not None:
+                        self.identity_api.delete_user(existing_user['id'])
+                except exception.UserNotFound:
                     pass
+
+                # For users, the manager layer will generate the ID
+                user_copy = self.identity_api.create_user(user_copy)
+                # Our tests expect that the password is still in the user
+                # record so that they can reference it, so put it back into
+                # the dict returned.
+                user_copy['password'] = user['password']
+
                 for tenant_id in tenants:
                     try:
-                        self.assignment_api.add_user_to_project(tenant_id,
-                                                                user['id'])
+                        self.assignment_api.add_user_to_project(
+                            tenant_id, user_copy['id'])
                     except exception.Conflict:
                         pass
+                # Use the ID from the fixture as the attribute name, so
+                # that our tests can easily reference each user dict, while
+                # the ID in the dict will be the real public ID.
                 attrname = 'user_%s' % user['id']
                 setattr(self, attrname, user_copy)
                 fixtures_to_cleanup.append(attrname)
@@ -558,11 +605,11 @@ class TestCase(BaseTestCase):
             if isinstance(expected_regexp, six.string_types):
                 expected_regexp = re.compile(expected_regexp)
 
-            if isinstance(exc_value.args[0], gettextutils.Message):
-                if not expected_regexp.search(six.text_type(exc_value)):
+            if isinstance(exc_value.args[0], unicode):
+                if not expected_regexp.search(unicode(exc_value)):
                     raise self.failureException(
                         '"%s" does not match "%s"' %
-                        (expected_regexp.pattern, six.text_type(exc_value)))
+                        (expected_regexp.pattern, unicode(exc_value)))
             else:
                 if not expected_regexp.search(str(exc_value)):
                     raise self.failureException(

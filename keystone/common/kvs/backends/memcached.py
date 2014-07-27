@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright 2013 Metacloud, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -27,7 +25,7 @@ from dogpile.cache.backends import memcached
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 

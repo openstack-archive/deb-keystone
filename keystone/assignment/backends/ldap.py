@@ -25,8 +25,8 @@ from keystone.common import ldap as common_ldap
 from keystone.common import models
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone.identity.backends import ldap as ldap_identity
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -83,6 +83,18 @@ class Assignment(assignment.Driver):
         if 'name' in tenant:
             tenant['name'] = clean.project_name(tenant['name'])
         return self._set_default_domain(self.project.update(tenant_id, tenant))
+
+    def get_group_project_roles(self, groups, project_id, project_domain_id):
+        self.get_project(project_id)
+        group_dns = [self.group._id_to_dn(group_id) for group_id in groups]
+        role_list = [self.role._dn_to_id(role_assignment.role_dn)
+                     for role_assignment in self.role.get_role_assignments
+                     (self.project._id_to_dn(project_id))
+                     if role_assignment.user_dn.upper() in group_dns]
+        # NOTE(morganfainberg): Does not support OS-INHERIT as domain
+        # metadata/roles are not supported by LDAP backend. Skip OS-INHERIT
+        # logic.
+        return role_list
 
     def _get_metadata(self, user_id=None, tenant_id=None,
                       domain_id=None, group_id=None):
@@ -409,7 +421,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
     NotFound = exception.ProjectNotFound
     notfound_arg = 'project_id'  # NOTE(yorik-sar): while options_name = tenant
-    options_name = 'tenant'
+    options_name = 'project'
     attribute_options_names = {'name': 'name',
                                'description': 'desc',
                                'enabled': 'enabled',
@@ -419,7 +431,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
 
     def __init__(self, conf):
         super(ProjectApi, self).__init__(conf)
-        self.member_attribute = (getattr(conf.ldap, 'tenant_member_attribute')
+        self.member_attribute = (getattr(conf.ldap, 'project_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
 
     def create(self, values):
@@ -574,7 +586,7 @@ class RoleApi(common_ldap.BaseLdap):
         except ldap.NO_SUCH_OBJECT:
             roles = []
         res = []
-        for role_dn, _ in roles:
+        for role_dn, _role_attrs in roles:
             # ldap.dn.dn2str returns an array, where the first
             # element is the first segment.
             # For a role assignment, this contains the role ID,
@@ -608,7 +620,7 @@ class RoleApi(common_ldap.BaseLdap):
             conn.unbind_s()
 
         res = []
-        for role_dn, _ in roles:
+        for role_dn, _role_attrs in roles:
             # ldap.dn.str2dn returns a list, where the first
             # element is the first RDN.
             # For a role assignment, this contains the role ID,

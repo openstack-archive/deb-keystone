@@ -22,7 +22,7 @@ from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
@@ -49,20 +49,19 @@ def v2_deprecated(f):
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
-    LOG.debug(_('RBAC: Authorizing %(action)s(%(kwargs)s)'), {
+    LOG.debug('RBAC: Authorizing %(action)s(%(kwargs)s)', {
         'action': action,
         'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
     # see if auth context has already been created. If so use it.
     if ('environment' in context and
             authorization.AUTH_CONTEXT_ENV in context['environment']):
-        LOG.debug(_('RBAC: using auth context from the request environment'))
+        LOG.debug('RBAC: using auth context from the request environment')
         return context['environment'].get(authorization.AUTH_CONTEXT_ENV)
 
     # now build the auth context from the incoming auth token
     try:
-        LOG.debug(_('RBAC: building auth context from the incoming '
-                    'auth token'))
+        LOG.debug('RBAC: building auth context from the incoming auth token')
         # TODO(ayoung): These two functions return the token in different
         # formats.  However, the call
         # to get_token hits the caching layer, and does not validate the
@@ -148,7 +147,7 @@ def protected(callback=None):
                 self.policy_api.enforce(creds,
                                         action,
                                         utils.flatten_dict(policy_dict))
-                LOG.debug(_('RBAC: Authorization granted'))
+                LOG.debug('RBAC: Authorization granted')
             return f(self, context, *args, **kwargs)
         return inner
     return wrapper
@@ -178,7 +177,7 @@ def filterprotected(*filters):
                         if item in context['query_string']:
                             target[item] = context['query_string'][item]
 
-                    LOG.debug(_('RBAC: Adding query filter params (%s)'), (
+                    LOG.debug('RBAC: Adding query filter params (%s)', (
                         ', '.join(['%s=%s' % (item, target[item])
                                   for item in target])))
 
@@ -190,7 +189,7 @@ def filterprotected(*filters):
                                         action,
                                         utils.flatten_dict(target))
 
-                LOG.debug(_('RBAC: Authorization granted'))
+                LOG.debug('RBAC: Authorization granted')
             else:
                 LOG.warning(_('RBAC: Bypassing authorization'))
             return f(self, context, filters, **kwargs)
@@ -549,14 +548,46 @@ class V3Controller(wsgi.Application):
         ref['id'] = uuid.uuid4().hex
         return ref
 
-    def _get_domain_id_for_request(self, context):
-        """Get the domain_id for a v3 call."""
+    def _get_domain_id_for_list_request(self, context):
+        """Get the domain_id for a v3 list call.
 
-        if context['is_admin']:
-            return CONF.identity.default_domain_id
+        If we running with multiple domain drivers, then the caller must
+        specify a domain_id either as a filter or as part of the token scope.
 
-        # Fish the domain_id out of the token
-        #
+        """
+        if not CONF.identity.domain_specific_drivers_enabled:
+            # We don't need to specify a domain ID in this case
+            return
+
+        if context['query_string'].get('domain_id') is not None:
+            return context['query_string'].get('domain_id')
+
+        try:
+            token_ref = self.token_api.get_token(context['token_id'])
+            token = token_ref['token_data']['token']
+        except exception.KeyError:
+            raise exception.ValidationError(
+                _('domain_id is required as part of entity'))
+        except exception.TokenNotFound:
+            LOG.warning(_('Invalid token found while getting domain ID '
+                          'for list request'))
+            raise exception.Unauthorized()
+
+        if 'domain' in token:
+            return token['domain']['id']
+        else:
+            LOG.warning(
+                _('No domain information specified as part of list request'))
+            raise exception.Unauthorized()
+
+    def _get_domain_id_from_token(self, context):
+        """Get the domain_id for a v3 create call.
+
+        In the case of a v3 create entity call that does not specify a domain
+        ID, the spec says that we should use the domain scoping from the token
+        being used.
+
+        """
         # We could make this more efficient by loading the domain_id
         # into the context in the wrapper function above (since
         # this version of normalize_domain will only be called inside
@@ -564,19 +595,30 @@ class V3Controller(wsgi.Application):
         # worth the duplication of state
         try:
             token_ref = self.token_api.get_token(context['token_id'])
+        except exception.KeyError:
+            # This might happen if we use the Admin token, for instance
+            raise exception.ValidationError(
+                _('A domain-scoped token must be used'))
         except exception.TokenNotFound:
-            LOG.warning(_('Invalid token in _get_domain_id_for_request'))
+            LOG.warning(_('Invalid token found while getting domain ID '
+                          'for list request'))
             raise exception.Unauthorized()
 
-        if 'domain' in token_ref:
-            return token_ref['domain']['id']
+        if token_ref.get('token_data', {}).get('token', {}).get('domain', {}):
+            return token_ref['token_data']['token']['domain']['id']
         else:
+            # TODO(henry-nash): We should issue an exception here since if
+            # a v3 call does not explicitly specify the domain_id in the
+            # entity, it should be using a domain scoped token.  However,
+            # the current tempest heat tests issue a v3 call without this.
+            # This is raised as bug #1283539.  Once this is fixed, we
+            # should remove the line below and replace it with an error.
             return CONF.identity.default_domain_id
 
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id if not specified in a v3 call."""
         if 'domain_id' not in ref:
-            ref['domain_id'] = self._get_domain_id_for_request(context)
+            ref['domain_id'] = self._get_domain_id_from_token(context)
         return ref
 
     @staticmethod
@@ -612,7 +654,7 @@ class V3Controller(wsgi.Application):
             self.policy_api.enforce(creds,
                                     action,
                                     utils.flatten_dict(policy_dict))
-            LOG.debug(_('RBAC: Authorization granted'))
+            LOG.debug('RBAC: Authorization granted')
 
     @classmethod
     def check_immutable_params(cls, ref):

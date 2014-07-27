@@ -15,6 +15,7 @@
 import copy
 import datetime
 import operator
+from testtools import testcase
 import uuid
 
 from keystoneclient.common import cms
@@ -31,12 +32,10 @@ from keystone.tests import test_v3
 CONF = config.CONF
 
 
-class TestAuthInfo(test_v3.RestfulTestCase):
-    # TODO(henry-nash) These tests are somewhat inefficient, since by
-    # using the test_v3.RestfulTestCase class to gain access to the auth
-    # building helper functions, they cause backend databases and fixtures
-    # to be loaded unnecessarily.  Separating out the helper functions from
-    # this base class would improve efficiency (Bug #1134836)
+class TestAuthInfo(test_v3.AuthTestMixin, testcase.TestCase):
+    def setUp(self):
+        super(TestAuthInfo, self).setUp()
+        auth.controllers.load_auth_methods()
 
     def test_missing_auth_methods(self):
         auth_data = {'identity': {}}
@@ -181,17 +180,15 @@ class TokenAPITests(object):
         self.assignment_api.create_domain(new_domain_id, new_domain)
 
         # 2) Create user in new domain.
-        new_user_id = uuid.uuid4().hex
         new_user_password = uuid.uuid4().hex
         new_user = {
-            'id': new_user_id,
             'name': uuid.uuid4().hex,
             'domain_id': new_domain_id,
             'password': new_user_password,
             'email': uuid.uuid4().hex,
         }
 
-        self.identity_api.create_user(new_user_id, new_user)
+        new_user = self.identity_api.create_user(new_user)
 
         # 3) Update the default_domain_id config option to the new domain
 
@@ -201,7 +198,7 @@ class TokenAPITests(object):
         # 4) Get a token using v3 api.
 
         auth_data = self.build_authentication_request(
-            user_id=new_user_id,
+            user_id=new_user['id'],
             password=new_user_password)
         resp = self.post('/auth/tokens', body=auth_data)
         token = resp.headers.get('X-Subject-Token')
@@ -379,7 +376,7 @@ class TokenAPITests(object):
         self.assertEqual(expires, r.result['token']['expires_at'])
 
     def test_check_token(self):
-        self.head('/auth/tokens', headers=self.headers, expected_status=204)
+        self.head('/auth/tokens', headers=self.headers, expected_status=200)
 
     def test_validate_token(self):
         r = self.get('/auth/tokens', headers=self.headers)
@@ -468,13 +465,15 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.assignment_api.create_domain(self.domainA['id'], self.domainA)
 
         self.userAdminA = self.new_user_ref(domain_id=self.domainA['id'])
-        self.userAdminA['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.userAdminA['id'], self.userAdminA)
+        password = self.userAdminA['password']
+        self.userAdminA = self.identity_api.create_user(self.userAdminA)
+        self.userAdminA['password'] = password
 
         self.userNormalA = self.new_user_ref(
             domain_id=self.domainA['id'])
-        self.userNormalA['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.userNormalA['id'], self.userNormalA)
+        password = self.userNormalA['password']
+        self.userNormalA = self.identity_api.create_user(self.userNormalA)
+        self.userNormalA['password'] = password
 
         self.assignment_api.create_grant(self.role['id'],
                                          user_id=self.userAdminA['id'],
@@ -510,9 +509,9 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
                 domain_name=self.domainA['name']))
         adminA_token = r.headers.get('X-Subject-Token')
 
-        self.head('/auth/tokens', headers=headers, expected_status=204,
+        self.head('/auth/tokens', headers=headers, expected_status=200,
                   token=adminA_token)
-        self.head('/auth/tokens', headers=headers, expected_status=204,
+        self.head('/auth/tokens', headers=headers, expected_status=200,
                   token=user_token)
         self.delete('/auth/tokens', headers=headers, expected_status=204,
                     token=user_token)
@@ -549,9 +548,9 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
                 domain_name=self.domainA['name']))
         adminA_token = r.headers.get('X-Subject-Token')
 
-        self.head('/auth/tokens', headers=headers, expected_status=204,
+        self.head('/auth/tokens', headers=headers, expected_status=200,
                   token=adminA_token)
-        self.head('/auth/tokens', headers=headers, expected_status=204,
+        self.head('/auth/tokens', headers=headers, expected_status=200,
                   token=user_token)
         self.delete('/auth/tokens', headers=headers, expected_status=204,
                     token=adminA_token)
@@ -570,8 +569,9 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         self.domainB = self.new_domain_ref()
         self.assignment_api.create_domain(self.domainB['id'], self.domainB)
         self.userAdminB = self.new_user_ref(domain_id=self.domainB['id'])
-        self.userAdminB['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.userAdminB['id'], self.userAdminB)
+        password = self.userAdminB['password']
+        self.userAdminB = self.identity_api.create_user(self.userAdminB)
+        self.userAdminB['password'] = password
         self.assignment_api.create_grant(self.role['id'],
                                          user_id=self.userAdminB['id'],
                                          domain_id=self.domainB['id'])
@@ -651,30 +651,33 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Now create some users
         self.user1 = self.new_user_ref(
             domain_id=self.domainA['id'])
-        self.user1['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user1['id'], self.user1)
+        password = self.user1['password']
+        self.user1 = self.identity_api.create_user(self.user1)
+        self.user1['password'] = password
 
         self.user2 = self.new_user_ref(
             domain_id=self.domainB['id'])
-        self.user2['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user2['id'], self.user2)
+        password = self.user2['password']
+        self.user2 = self.identity_api.create_user(self.user2)
+        self.user2['password'] = password
 
         self.user3 = self.new_user_ref(
             domain_id=self.domainB['id'])
-        self.user3['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user3['id'], self.user3)
+        password = self.user3['password']
+        self.user3 = self.identity_api.create_user(self.user3)
+        self.user3['password'] = password
 
         self.group1 = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(self.group1['id'], self.group1)
+        self.group1 = self.identity_api.create_group(self.group1)
 
         self.group2 = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(self.group2['id'], self.group2)
+        self.group2 = self.identity_api.create_group(self.group2)
 
         self.group3 = self.new_group_ref(
             domain_id=self.domainB['id'])
-        self.identity_api.create_group(self.group3['id'], self.group3)
+        self.group3 = self.identity_api.create_group(self.group3)
 
         self.identity_api.add_user_to_group(self.user1['id'],
                                             self.group1['id'])
@@ -722,10 +725,10 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # confirm both tokens are valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': unscoped_token},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': scoped_token},
-                  expected_status=204)
+                  expected_status=200)
 
         # create a new role
         role = self.new_role_ref()
@@ -741,10 +744,10 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # both tokens should remain valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': unscoped_token},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': scoped_token},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_deleting_user_grant_revokes_token(self):
         """Test deleting a user grant revokes token.
@@ -765,7 +768,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm token is valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
         # Delete the grant, which should invalidate the token
         grant_url = (
             '/projects/%(project_id)s/users/%(user_id)s/'
@@ -782,16 +785,19 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.projectC = self.new_project_ref(domain_id=self.domainA['id'])
         self.assignment_api.create_project(self.projectC['id'], self.projectC)
         self.user4 = self.new_user_ref(domain_id=self.domainB['id'])
-        self.user4['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user4['id'], self.user4)
+        password = self.user4['password']
+        self.user4 = self.identity_api.create_user(self.user4)
+        self.user4['password'] = password
         self.user5 = self.new_user_ref(
             domain_id=self.domainA['id'])
-        self.user5['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user5['id'], self.user5)
+        password = self.user5['password']
+        self.user5 = self.identity_api.create_user(self.user5)
+        self.user5['password'] = password
         self.user6 = self.new_user_ref(
             domain_id=self.domainA['id'])
-        self.user6['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(self.user6['id'], self.user6)
+        password = self.user6['password']
+        self.user6 = self.identity_api.create_user(self.user6)
+        self.user6['password'] = password
         self.identity_api.add_user_to_group(self.user5['id'],
                                             self.group1['id'])
         self.assignment_api.create_grant(self.role1['id'],
@@ -869,19 +875,19 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm tokens are valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenA},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenB},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenC},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenD},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenE},
-                  expected_status=204)
+                  expected_status=200)
 
         # Delete the role, which should invalidate the tokens
         role_url = '/roles/%s' % self.role1['id']
@@ -904,7 +910,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # ...but the one using role2 is still valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': tokenC},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_domain_user_role_assignment_maintains_token(self):
         """Test user-domain role assignment maintains existing token.
@@ -925,7 +931,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm token is valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
         # Assign a role, which should not affect the token
         grant_url = (
             '/domains/%(domain_id)s/users/%(user_id)s/'
@@ -936,7 +942,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.put(grant_url)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_disabling_project_revokes_token(self):
         resp = self.post(
@@ -950,7 +956,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # confirm token is valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
 
         # disable the project, which should invalidate the token
         self.patch(
@@ -981,7 +987,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # confirm token is valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
 
         # delete the project, which should invalidate the token
         self.delete(
@@ -1034,13 +1040,13 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm tokens are valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token1},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token2},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token3},
-                  expected_status=204)
+                  expected_status=200)
         # Delete the group grant, which should invalidate the
         # tokens for user1 and user2
         grant_url = (
@@ -1059,7 +1065,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # But user3's token should still be valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token3},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_domain_group_role_assignment_maintains_token(self):
         """Test domain-group role assignment maintains existing token.
@@ -1080,7 +1086,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm token is valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
         # Delete the grant, which should invalidate the token
         grant_url = (
             '/domains/%(domain_id)s/groups/%(group_id)s/'
@@ -1091,7 +1097,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.put(grant_url)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_group_membership_changes_revokes_token(self):
         """Test add/removal to/from group revokes token.
@@ -1123,10 +1129,10 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # Confirm tokens are valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token1},
-                  expected_status=204)
+                  expected_status=200)
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token2},
-                  expected_status=204)
+                  expected_status=200)
         # Remove user1 from group1, which should invalidate
         # the token
         self.delete('/groups/%(group_id)s/users/%(user_id)s' % {
@@ -1138,14 +1144,14 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # But user2's token should still be valid
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token2},
-                  expected_status=204)
+                  expected_status=200)
         # Adding user2 to a group should not invalidate token
         self.put('/groups/%(group_id)s/users/%(user_id)s' % {
             'group_id': self.group2['id'],
             'user_id': self.user2['id']})
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token2},
-                  expected_status=204)
+                  expected_status=200)
 
     def test_removing_role_assignment_does_not_affect_other_users(self):
         """Revoking a role from one user should not affect other users."""
@@ -1192,7 +1198,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         # authorization for the second user should still succeed
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': user3_token},
-                  expected_status=204)
+                  expected_status=200)
         self.post(
             '/auth/tokens',
             body=self.build_authentication_request(
@@ -1273,7 +1279,7 @@ class TestTokenRevokeApi(TestTokenRevokeById):
     def test_revoke_token(self):
         scoped_token = self.get_scoped_token()
         headers = {'X-Subject-Token': scoped_token}
-        self.head('/auth/tokens', headers=headers, expected_status=204)
+        self.head('/auth/tokens', headers=headers, expected_status=200)
         self.delete('/auth/tokens', headers=headers, expected_status=204)
         self.head('/auth/tokens', headers=headers, expected_status=404)
         events_response = self.get('/OS-REVOKE/events',
@@ -1295,7 +1301,7 @@ class TestTokenRevokeApi(TestTokenRevokeById):
     def test_revoke_v2_token(self):
         token = self.get_v2_token()
         headers = {'X-Subject-Token': token}
-        self.head('/auth/tokens', headers=headers, expected_status=204)
+        self.head('/auth/tokens', headers=headers, expected_status=200)
         self.delete('/auth/tokens', headers=headers, expected_status=204)
         self.head('/auth/tokens', headers=headers, expected_status=404)
         events_response = self.get('/OS-REVOKE/events',
@@ -1363,11 +1369,11 @@ class TestTokenRevokeApi(TestTokenRevokeById):
         scoped_token = self.get_scoped_token()
         headers_unrevoked = {'X-Subject-Token': scoped_token}
 
-        self.head('/auth/tokens', headers=headers, expected_status=204)
-        self.head('/auth/tokens', headers=headers2, expected_status=204)
-        self.head('/auth/tokens', headers=headers3, expected_status=204)
+        self.head('/auth/tokens', headers=headers, expected_status=200)
+        self.head('/auth/tokens', headers=headers2, expected_status=200)
+        self.head('/auth/tokens', headers=headers3, expected_status=200)
         self.head('/auth/tokens', headers=headers_unrevoked,
-                  expected_status=204)
+                  expected_status=200)
 
         self.delete('/auth/tokens', headers=headers, expected_status=204)
         # NOTE(ayoung): not deleting token3, as it should be deleted
@@ -1384,7 +1390,7 @@ class TestTokenRevokeApi(TestTokenRevokeById):
         self.head('/auth/tokens', headers=headers2, expected_status=404)
         self.head('/auth/tokens', headers=headers3, expected_status=404)
         self.head('/auth/tokens', headers=headers_unrevoked,
-                  expected_status=204)
+                  expected_status=200)
 
     def test_list_with_filter(self):
 
@@ -1522,6 +1528,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
 
     def config_overrides(self):
         super(TestAuthExternalDomain, self).config_overrides()
+        self.kerberos = False
         self.config_fixture.config(
             group='auth',
             methods=['keystone.auth.plugins.external.Domain',
@@ -1533,7 +1540,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         remote_user = self.user['name']
         remote_domain = self.domain['name']
         context, auth_info, auth_context = self.build_external_auth_request(
-            remote_user, remote_domain=remote_domain)
+            remote_user, remote_domain=remote_domain, kerberos=self.kerberos)
 
         api.authenticate(context, auth_info, auth_context)
         self.assertEqual(auth_context['user_id'], self.user['id'])
@@ -1544,7 +1551,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         self.identity_api.update_user(self.user['id'], user)
         remote_user = user['name']
         context, auth_info, auth_context = self.build_external_auth_request(
-            remote_user, remote_domain=remote_domain)
+            remote_user, remote_domain=remote_domain, kerberos=self.kerberos)
 
         api.authenticate(context, auth_info, auth_context)
         self.assertEqual(auth_context['user_id'], self.user['id'])
@@ -1552,7 +1559,8 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
     def test_project_id_scoped_with_remote_user(self):
         CONF.token.bind = ['kerberos']
         auth_data = self.build_authentication_request(
-            project_id=self.project['id'])
+            project_id=self.project['id'],
+            kerberos=self.kerberos)
         remote_user = self.user['name']
         remote_domain = self.domain['name']
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
@@ -1564,7 +1572,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
 
     def test_unscoped_bind_with_remote_user(self):
         CONF.token.bind = ['kerberos']
-        auth_data = self.build_authentication_request()
+        auth_data = self.build_authentication_request(kerberos=self.kerberos)
         remote_user = self.user['name']
         remote_domain = self.domain['name']
         self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
@@ -1573,6 +1581,19 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         r = self.post('/auth/tokens', body=auth_data)
         token = self.assertValidUnscopedTokenResponse(r)
         self.assertEqual(token['bind']['kerberos'], self.user['name'])
+
+
+class TestAuthKerberos(TestAuthExternalDomain):
+
+    def config_overrides(self):
+        super(TestAuthKerberos, self).config_overrides()
+        self.kerberos = True
+
+        self.config_fixture.config(
+            group='auth',
+            methods=['keystone.auth.plugins.external.KerberosDomain',
+                     'keystone.auth.plugins.password.Password',
+                     'keystone.auth.plugins.token.Token'])
 
 
 class TestAuthJSON(test_v3.RestfulTestCase):
@@ -1790,21 +1811,23 @@ class TestAuthJSON(test_v3.RestfulTestCase):
 
         user1 = self.new_user_ref(
             domain_id=domainA['id'])
-        user1['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(user1['id'], user1)
+        password = user1['password']
+        user1 = self.identity_api.create_user(user1)
+        user1['password'] = password
 
         user2 = self.new_user_ref(
             domain_id=domainA['id'])
-        user2['password'] = uuid.uuid4().hex
-        self.identity_api.create_user(user2['id'], user2)
+        password = user2['password']
+        user2 = self.identity_api.create_user(user2)
+        user2['password'] = password
 
         group1 = self.new_group_ref(
             domain_id=domainA['id'])
-        self.identity_api.create_group(group1['id'], group1)
+        group1 = self.identity_api.create_group(group1)
 
         group2 = self.new_group_ref(
             domain_id=domainA['id'])
-        self.identity_api.create_group(group2['id'], group2)
+        group2 = self.identity_api.create_group(group2)
 
         self.identity_api.add_user_to_group(user1['id'],
                                             group1['id'])
@@ -1987,11 +2010,9 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertValidDomainScopedTokenResponse(r)
 
     def test_domain_scope_token_with_group_role(self):
-        group_id = uuid.uuid4().hex
         group = self.new_group_ref(
             domain_id=self.domain_id)
-        group['id'] = group_id
-        self.identity_api.create_group(group_id, group)
+        group = self.identity_api.create_group(group)
 
         # add user to group
         self.identity_api.add_user_to_group(self.user['id'], group['id'])
@@ -2266,7 +2287,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
     def test_authenticating_a_user_with_no_password(self):
         user = self.new_user_ref(domain_id=self.domain['id'])
         user.pop('password', None)  # can't have a password for this test
-        self.identity_api.create_user(user['id'], user)
+        user = self.identity_api.create_user(user)
 
         auth_data = self.build_authentication_request(
             user_id=user['id'],
@@ -2373,6 +2394,23 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.post('/auth/tokens', body=auth_data, expected_status=401)
 
 
+class TestAuthJSONExternal(test_v3.RestfulTestCase):
+    content_type = 'json'
+
+    def config_overrides(self):
+        self.config_fixture.config(group='auth', methods='')
+
+    def test_remote_user_no_method(self):
+        api = auth.controllers.Auth()
+        context, auth_info, auth_context = self.build_external_auth_request(
+            self.default_domain_user['name'])
+        self.assertRaises(exception.Unauthorized,
+                          api.authenticate,
+                          context,
+                          auth_info,
+                          auth_context)
+
+
 class TestAuthXML(TestAuthJSON):
     content_type = 'xml'
 
@@ -2403,7 +2441,7 @@ class TestTrustOptional(test_v3.RestfulTestCase):
 
 
 @dependency.requires('revoke_api')
-class TestTrustAuth(TestAuthInfo):
+class TestTrustAuth(test_v3.RestfulTestCase):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
 
@@ -2422,10 +2460,11 @@ class TestTrustAuth(TestAuthInfo):
         super(TestTrustAuth, self).setUp()
 
         # create a trustee to delegate stuff to
-        self.trustee_user_id = uuid.uuid4().hex
         self.trustee_user = self.new_user_ref(domain_id=self.domain_id)
-        self.trustee_user['id'] = self.trustee_user_id
-        self.identity_api.create_user(self.trustee_user_id, self.trustee_user)
+        password = self.trustee_user['password']
+        self.trustee_user = self.identity_api.create_user(self.trustee_user)
+        self.trustee_user['password'] = password
+        self.trustee_user_id = self.trustee_user['id']
 
     def test_create_trust_400(self):
         # The server returns a 403 Forbidden rather than a 400, see bug 1133435
@@ -2604,7 +2643,7 @@ class TestTrustAuth(TestAuthInfo):
             '/OS-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
                 'trust_id': trust['id'],
                 'role_id': self.role['id']},
-            expected_status=204)
+            expected_status=200)
         r = self.get(
             '/OS-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {
                 'trust_id': trust['id'],
@@ -2759,10 +2798,11 @@ class TestTrustAuth(TestAuthInfo):
 
     def test_v3_v2_intermix_project_not_in_default_domaini_failed(self):
         # create a trustee in default domain to delegate stuff to
-        trustee_user_id = uuid.uuid4().hex
         trustee_user = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
-        trustee_user['id'] = trustee_user_id
-        self.identity_api.create_user(trustee_user_id, trustee_user)
+        password = trustee_user['password']
+        trustee_user = self.identity_api.create_user(trustee_user)
+        trustee_user['password'] = password
+        trustee_user_id = trustee_user['id']
 
         ref = self.new_trust_ref(
             trustor_user_id=self.default_domain_user_id,
@@ -2799,10 +2839,11 @@ class TestTrustAuth(TestAuthInfo):
 
     def test_v3_v2_intermix(self):
         # create a trustee in default domain to delegate stuff to
-        trustee_user_id = uuid.uuid4().hex
         trustee_user = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
-        trustee_user['id'] = trustee_user_id
-        self.identity_api.create_user(trustee_user_id, trustee_user)
+        password = trustee_user['password']
+        trustee_user = self.identity_api.create_user(trustee_user)
+        trustee_user['password'] = password
+        trustee_user_id = trustee_user['id']
 
         ref = self.new_trust_ref(
             trustor_user_id=self.default_domain_user_id,
@@ -2897,6 +2938,42 @@ class TestTrustAuth(TestAuthInfo):
                          self.project['id'])
         self.assertEqual(r.result['token']['project']['name'],
                          self.project['name'])
+
+    def test_impersonation_token_cannot_create_new_trust(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+
+        trust_token = r.headers['X-Subject-Token']
+
+        # Build second trust
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': ref},
+                  token=trust_token,
+                  expected_status=403)
 
     def assertTrustTokensRevoked(self, trust_id):
         revocation_response = self.get('/OS-REVOKE/events',
@@ -3060,7 +3137,7 @@ class TestTrustAuth(TestAuthInfo):
                 'trust_id': trust['id'],
                 'role_id': self.role['id']},
             auth=auth_data,
-            expected_status=204)
+            expected_status=200)
 
         r = self.get(
             '/OS-TRUST/trusts/%(trust_id)s/roles/%(role_id)s' % {

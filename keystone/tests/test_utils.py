@@ -31,11 +31,15 @@ import datetime
 import functools
 import os
 import time
+import uuid
 
 from keystone.common import utils
+from keystone import config
+from keystone import exception
 from keystone import service
 from keystone import tests
 
+CONF = config.CONF
 
 TZ = None
 
@@ -70,10 +74,40 @@ class UtilsTestCase(tests.TestCase):
         self.assertTrue(utils.check_password(password, hashed))
         self.assertFalse(utils.check_password(wrong, hashed))
 
-    def test_hash_long_password(self):
-        bigboy = '0' * 9999999
-        hashed = utils.hash_password(bigboy)
-        self.assertTrue(utils.check_password(bigboy, hashed))
+    def test_verify_normal_password_strict(self):
+        self.config_fixture.config(strict_password_check=False)
+        normal_password = uuid.uuid4().hex
+        verified = utils.verify_length_and_trunc_password(normal_password)
+        self.assertEqual(normal_password, verified)
+
+    def test_verify_long_password_strict(self):
+        self.config_fixture.config(strict_password_check=False)
+        self.config_fixture.config(group='identity', max_password_length=5)
+        max_length = CONF.identity.max_password_length
+        invalid_password = 'passw0rd'
+        truncated = utils.verify_length_and_trunc_password(invalid_password)
+        self.assertEqual(invalid_password[:max_length], truncated)
+
+    def test_verify_long_password_strict_raises_exception(self):
+        self.config_fixture.config(strict_password_check=True)
+        self.config_fixture.config(group='identity', max_password_length=5)
+        invalid_password = 'passw0rd'
+        self.assertRaises(exception.PasswordVerificationError,
+                          utils.verify_length_and_trunc_password,
+                          invalid_password)
+
+    def test_hash_long_password_truncation(self):
+        self.config_fixture.config(strict_password_check=False)
+        invalid_length_password = '0' * 9999999
+        hashed = utils.hash_password(invalid_length_password)
+        self.assertTrue(utils.check_password(invalid_length_password, hashed))
+
+    def test_hash_long_password_strict(self):
+        self.config_fixture.config(strict_password_check=True)
+        invalid_length_password = '0' * 9999999
+        self.assertRaises(exception.PasswordVerificationError,
+                          utils.hash_password,
+                          invalid_length_password)
 
     def _create_test_user(self, password=OPTIONAL):
         user = {"name": "hthtest"}
@@ -155,11 +189,11 @@ class LimitingReaderTests(tests.TestCase):
         data = FakeData()
         utils.LimitingReader(data, 100)
 
-        self.assertEqual(data.read(), 'helloworld')
-        self.assertEqual(len(data.read_args), 0)
-        self.assertEqual(len(data.read_kwargs), 0)
+        self.assertEqual('helloworld', data.read())
+        self.assertEqual(0, len(data.read_args))
+        self.assertEqual(0, len(data.read_kwargs))
 
-        self.assertEqual(data.read(10), 'helloworld')
-        self.assertEqual(len(data.read_args), 1)
-        self.assertEqual(len(data.read_kwargs), 0)
-        self.assertEqual(data.read_args[0], 10)
+        self.assertEqual('helloworld', data.read(10))
+        self.assertEqual(1, len(data.read_args))
+        self.assertEqual(0, len(data.read_kwargs))
+        self.assertEqual(10, data.read_args[0])

@@ -726,36 +726,14 @@ class TestTokenProvider(tests.TestCase):
                           self.token_provider_api.get_token_version,
                           'bogus')
 
-    def test_token_format_provider_mismatch(self):
-        self.config_fixture.config(group='signing', token_format='UUID')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.PKI_PROVIDER)
-        self.assertRaises(exception.UnexpectedError, token.provider.Manager)
-
-        self.config_fixture.config(group='signing', token_format='PKI')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        self.assertRaises(exception.UnexpectedError, token.provider.Manager)
-
-        # should be OK as token_format and provider aligns
-        self.config_fixture.config(group='signing', token_format='PKI')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.PKI_PROVIDER)
-        token.provider.Manager()
-
-        self.config_fixture.config(group='signing', token_format='UUID')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        token.provider.Manager()
-
     def test_default_token_format(self):
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.PKI_PROVIDER)
+        self.assertEqual(token.provider.PKIZ_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_uuid_token_format_and_no_provider(self):
         self.config_fixture.config(group='signing', token_format='UUID')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_default_providers_without_token_format(self):
         self.config_fixture.config(group='token',
@@ -766,6 +744,10 @@ class TestTokenProvider(tests.TestCase):
                                    provider=token.provider.PKI_PROVIDER)
         token.provider.Manager()
 
+        self.config_fixture.config(group='token',
+                                   provider=token.provider.PKIZ_PROVIDER)
+        token.provider.Manager()
+
     def test_unsupported_token_format(self):
         self.config_fixture.config(group='signing', token_format='CUSTOM')
         self.assertRaises(exception.UnexpectedError,
@@ -774,33 +756,33 @@ class TestTokenProvider(tests.TestCase):
     def test_uuid_provider(self):
         self.config_fixture.config(group='token',
                                    provider=token.provider.UUID_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_provider_override_token_format(self):
         self.config_fixture.config(
             group='token',
             provider='keystone.token.providers.pki.Test')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         'keystone.token.providers.pki.Test')
+        self.assertEqual('keystone.token.providers.pki.Test',
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='UUID')
         self.config_fixture.config(group='token',
                                    provider=token.provider.UUID_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='PKI')
         self.config_fixture.config(group='token',
                                    provider=token.provider.PKI_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.PKI_PROVIDER)
+        self.assertEqual(token.provider.PKI_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='CUSTOM')
         self.config_fixture.config(group='token',
                                    provider='my.package.MyProvider')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         'my.package.MyProvider')
+        self.assertRaises(exception.UnexpectedError,
+                          token.provider.Manager.get_token_provider)
 
     def test_provider_token_expiration_validation(self):
         self.assertRaises(exception.TokenNotFound,
@@ -836,10 +818,11 @@ class TestTokenProviderOAuth1(tests.TestCase):
                           self.user_foo['id'], ['oauth1'])
 
 
-class TestPKIProvider(object):
+# NOTE(ayoung): renamed to avoid automatic test detection
+class PKIProviderTests(object):
 
     def setUp(self):
-        super(TestPKIProvider, self).setUp()
+        super(PKIProviderTests, self).setUp()
 
         from keystoneclient.common import cms
         self.cms = cms
@@ -870,7 +853,7 @@ class TestPKIProvider(object):
                           token_data)
 
 
-class TestPKIProviderWithEventlet(TestPKIProvider, tests.TestCase):
+class TestPKIProviderWithEventlet(PKIProviderTests, tests.TestCase):
 
     def setUp(self):
         # force keystoneclient.common.cms to use eventlet's subprocess
@@ -880,7 +863,7 @@ class TestPKIProviderWithEventlet(TestPKIProvider, tests.TestCase):
         super(TestPKIProviderWithEventlet, self).setUp()
 
 
-class TestPKIProviderWithStdlib(TestPKIProvider, tests.TestCase):
+class TestPKIProviderWithStdlib(PKIProviderTests, tests.TestCase):
 
     def setUp(self):
         # force keystoneclient.common.cms to use the stdlib subprocess
