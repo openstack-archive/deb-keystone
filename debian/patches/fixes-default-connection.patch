@@ -6,14 +6,14 @@ Last-Update: 2014-03-28
 
 Index: keystone/etc/keystone.conf.sample
 ===================================================================
---- keystone.orig/etc/keystone.conf.sample	2014-06-30 23:51:56.000000000 +0800
-+++ keystone/etc/keystone.conf.sample	2014-06-30 23:52:08.000000000 +0800
-@@ -596,7 +596,7 @@
+--- keystone.orig/etc/keystone.conf.sample	2014-07-28 00:11:37.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2014-07-28 00:11:40.000000000 +0800
+@@ -626,7 +626,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
  # Deprecated group/name - [sql]/connection
 -#connection=<None>
 +connection=sqlite:////var/lib/keystone/keystone.sqlite
  
- # The SQL mode to be used for MySQL sessions. This option,
- # including the default, overrides any server-set SQL mode. To
+ # The SQLAlchemy connection string to use to connect to the
+ # slave database. (string value)
