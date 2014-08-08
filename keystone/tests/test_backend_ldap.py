@@ -1287,46 +1287,6 @@ class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
         self.assertEqual(mock_ldap_get.return_value[1]['eMaIl'][0],
                          user['email'])
 
-    def test_user_extra_attribute_mapping_description_is_returned(self):
-        # Given a mapping like description:description, the description is
-        # returned.
-
-        self.config_fixture.config(
-            group='ldap',
-            user_additional_attribute_mapping=['description:description'])
-        self.load_backends()
-
-        description = uuid.uuid4().hex
-        user = {
-            'id': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': description,
-            'password': uuid.uuid4().hex,
-            'domain_id': CONF.identity.default_domain_id
-        }
-        self.identity_api.create_user(user['id'], user)
-        res = self.identity_api.driver.user.get_all()
-
-        new_user = [u for u in res if u['id'] == user['id']][0]
-        self.assertThat(new_user['description'], matchers.Equals(description))
-
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
-    def test_user_mixed_case_attribute(self, mock_ldap_get):
-        # Mock the search results to return attribute names
-        # with unexpected case.
-        mock_ldap_get.return_value = (
-            'cn=junk,dc=example,dc=com',
-            {
-                'sN': [uuid.uuid4().hex],
-                'eMaIl': [uuid.uuid4().hex]
-            }
-        )
-        user = self.identity_api.get_user('junk')
-        self.assertEqual(mock_ldap_get.return_value[1]['sN'][0],
-                         user['name'])
-        self.assertEqual(mock_ldap_get.return_value[1]['eMaIl'][0],
-                         user['email'])
-
     def test_parse_extra_attribute_mapping(self):
         option_list = ['description:name', 'gecos:password',
                        'fake:invalid', 'invalid1', 'invalid2:',
