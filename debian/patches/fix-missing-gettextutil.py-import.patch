@@ -5,11 +5,11 @@ Last-Update: 2014-01-29
 
 Index: keystone/keystone/common/utils.py
 ===================================================================
---- keystone.orig/keystone/common/utils.py	2014-03-28 14:35:45.000000000 +0800
-+++ keystone/keystone/common/utils.py	2014-03-28 14:41:11.000000000 +0800
-@@ -34,6 +34,7 @@
+--- keystone.orig/keystone/common/utils.py	2014-08-07 03:10:58.000000000 +0800
++++ keystone/keystone/common/utils.py	2014-08-08 17:52:11.000000000 +0800
+@@ -35,6 +35,7 @@
+ from keystone.openstack.common import log
  from keystone.openstack.common import strutils
- from six import moves
  
 +from keystone.openstack.common.gettextutils import _
  
