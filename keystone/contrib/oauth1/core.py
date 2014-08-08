@@ -17,6 +17,7 @@
 from __future__ import absolute_import
 
 import abc
+import string
 
 import oauthlib.common
 from oauthlib import oauth1
@@ -39,6 +40,11 @@ AuthorizationEndpoint = oauth1.AuthorizationEndpoint
 SIG_HMAC = oauth1.SIGNATURE_HMAC
 RequestTokenEndpoint = oauth1.RequestTokenEndpoint
 oRequest = oauthlib.common.Request
+# The characters used to generate verifiers are limited to alphanumerical
+# values for ease of manual entry. Commonly confused characters are omitted.
+VERIFIER_CHARS = string.ascii_letters + string.digits
+CONFUSED_CHARS = 'jiIl1oO0'
+VERIFIER_CHARS = ''.join(c for c in VERIFIER_CHARS if c not in CONFUSED_CHARS)
 
 
 class Token(object):
@@ -186,7 +192,7 @@ class Driver(object):
         :returns: consumer_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_consumer(self, consumer_id, consumer_ref):
@@ -199,7 +205,7 @@ class Driver(object):
         :returns: consumer_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_consumers(self):
@@ -208,7 +214,7 @@ class Driver(object):
         :returns: list of consumers
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_consumer(self, consumer_id):
@@ -220,7 +226,7 @@ class Driver(object):
         :returns: consumer_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_consumer_with_secret(self, consumer_id):
@@ -235,7 +241,7 @@ class Driver(object):
         :returns: consumer_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_consumer(self, consumer_id):
@@ -246,7 +252,7 @@ class Driver(object):
         :returns: None.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_access_tokens(self, user_id):
@@ -257,7 +263,7 @@ class Driver(object):
         :returns: list of access tokens the user has authorized
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_access_token(self, user_id, access_token_id):
@@ -270,7 +276,7 @@ class Driver(object):
         :returns: None
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_request_token(self, consumer_id, requested_project,
@@ -286,7 +292,7 @@ class Driver(object):
         :returns: request_token_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_request_token(self, request_token_id):
@@ -297,7 +303,7 @@ class Driver(object):
         :returns: request_token_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_access_token(self, access_token_id):
@@ -308,7 +314,7 @@ class Driver(object):
         :returns: access_token_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def authorize_request_token(self, request_id, user_id, role_ids):
@@ -323,7 +329,7 @@ class Driver(object):
         :returns: verifier
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_access_token(self, request_id, access_token_duration):
@@ -336,4 +342,4 @@ class Driver(object):
         :returns: access_token_ref
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover

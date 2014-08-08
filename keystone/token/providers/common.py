@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
 import sys
 
 import six
@@ -22,10 +21,10 @@ from keystone.common import dependency
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
+from keystone.openstack.common import jsonutils
 from keystone import token
 from keystone.token import provider
-from keystone import trust
 
 
 from keystone.openstack.common import log
@@ -44,7 +43,7 @@ class V2TokenDataHelper(object):
         metadata_ref = token_ref['metadata']
         if roles_ref is None:
             roles_ref = []
-        expires = token_ref.get('expires', token.default_expire_time())
+        expires = token_ref.get('expires', provider.default_expire_time())
         if expires is not None:
             if not isinstance(expires, six.text_type):
                 expires = timeutils.isotime(expires)
@@ -136,8 +135,8 @@ class V2TokenDataHelper(object):
 class V3TokenDataHelper(object):
     """Token data helper."""
     def __init__(self):
-        if CONF.trust.enabled:
-            self.trust_api = trust.Manager()
+        # Keep __init__ around to ensure dependency injection works.
+        super(V3TokenDataHelper, self).__init__()
 
     def _get_filtered_domain(self, domain_id):
         domain_ref = self.assignment_api.get_domain(domain_id)
@@ -241,7 +240,7 @@ class V3TokenDataHelper(object):
 
         if access_token:
             filtered_roles = []
-            authed_role_ids = json.loads(access_token['role_ids'])
+            authed_role_ids = jsonutils.loads(access_token['role_ids'])
             all_roles = self.assignment_api.list_roles()
             for role in all_roles:
                 for authed_role in authed_role_ids:
@@ -254,7 +253,7 @@ class V3TokenDataHelper(object):
         if CONF.trust.enabled and trust:
             token_user_id = trust['trustor_user_id']
             token_project_id = trust['project_id']
-            #trusts do not support domains yet
+            # trusts do not support domains yet
             token_domain_id = None
         else:
             token_user_id = user_id
@@ -306,27 +305,25 @@ class V3TokenDataHelper(object):
         if CONF.trust.enabled and trust:
             user_id = trust['trustor_user_id']
         if project_id or domain_id:
-            try:
-                service_catalog = self.catalog_api.get_v3_catalog(
-                    user_id, project_id)
-            except exception.NotImplemented:
-                service_catalog = {}
-            # TODO(gyee): v3 service catalog is not quite completed yet
+            service_catalog = self.catalog_api.get_v3_catalog(
+                user_id, project_id)
             # TODO(ayoung): Enforce Endpoints for trust
             token_data['catalog'] = service_catalog
 
-    def _populate_token_dates(self, token_data, expires=None, trust=None):
+    def _populate_token_dates(self, token_data, expires=None, trust=None,
+                              issued_at=None):
         if not expires:
-            expires = token.default_expire_time()
+            expires = provider.default_expire_time()
         if not isinstance(expires, six.string_types):
             expires = timeutils.isotime(expires, subsecond=True)
         token_data['expires_at'] = expires
-        token_data['issued_at'] = timeutils.isotime(subsecond=True)
+        token_data['issued_at'] = (issued_at or
+                                   timeutils.isotime(subsecond=True))
 
     def get_token_data(self, user_id, method_names, extras,
                        domain_id=None, project_id=None, expires=None,
                        trust=None, token=None, include_catalog=True,
-                       bind=None, access_token=None):
+                       bind=None, access_token=None, issued_at=None):
         token_data = {'methods': method_names,
                       'extras': extras}
 
@@ -350,7 +347,8 @@ class V3TokenDataHelper(object):
         if include_catalog:
             self._populate_service_catalog(token_data, user_id, domain_id,
                                            project_id, trust)
-        self._populate_token_dates(token_data, expires=expires, trust=trust)
+        self._populate_token_dates(token_data, expires=expires, trust=trust,
+                                   issued_at=issued_at)
         self._populate_oauth_section(token_data, access_token)
         return {'token': token_data}
 
@@ -361,10 +359,23 @@ class V3TokenDataHelper(object):
 class BaseProvider(provider.Provider):
     def __init__(self, *args, **kwargs):
         super(BaseProvider, self).__init__(*args, **kwargs)
-        if CONF.trust.enabled:
-            self.trust_api = trust.Manager()
         self.v3_token_data_helper = V3TokenDataHelper()
         self.v2_token_data_helper = V2TokenDataHelper()
+
+    def _create_token(self, token_id, token_data):
+        try:
+            if isinstance(token_data['expires'], six.string_types):
+                token_data['expires'] = timeutils.normalize_time(
+                    timeutils.parse_isotime(token_data['expires']))
+            self.token_api.create_token(token_id, token_data)
+        except Exception:
+            exc_info = sys.exc_info()
+            # an identical token may have been created already.
+            # if so, return the token_data as it is also identical
+            try:
+                self.token_api.get_token(token_id)
+            except exception.TokenNotFound:
+                six.reraise(*exc_info)
 
     def get_token_version(self, token_data):
         if token_data and isinstance(token_data, dict):
@@ -379,7 +390,7 @@ class BaseProvider(provider.Provider):
                 return token.provider.V2
             if 'token' in token_data and 'methods' in token_data['token']:
                 return token.provider.V3
-        raise token.provider.UnsupportedTokenVersionException()
+        raise exception.UnsupportedTokenVersionException()
 
     def issue_v2_token(self, token_ref, roles_ref=None,
                        catalog_ref=None):
@@ -387,30 +398,18 @@ class BaseProvider(provider.Provider):
             token_ref, roles_ref, catalog_ref)
         token_id = self._get_token_id(token_data)
         token_data['access']['token']['id'] = token_id
-        try:
-            expiry = token_data['access']['token']['expires']
-            if isinstance(expiry, six.string_types):
-                expiry = timeutils.normalize_time(
-                    timeutils.parse_isotime(expiry))
-            data = dict(key=token_id,
-                        id=token_id,
-                        expires=expiry,
-                        user=token_ref['user'],
-                        tenant=token_ref['tenant'],
-                        metadata=token_ref['metadata'],
-                        token_data=token_data,
-                        bind=token_ref.get('bind'),
-                        trust_id=token_ref['metadata'].get('trust_id'),
-                        token_version=token.provider.V2)
-            self.token_api.create_token(token_id, data)
-        except Exception:
-            exc_info = sys.exc_info()
-            # an identical token may have been created already.
-            # if so, return the token_data as it is also identical
-            try:
-                self.token_api.get_token(token_id)
-            except exception.TokenNotFound:
-                raise exc_info[0], exc_info[1], exc_info[2]
+        expiry = token_data['access']['token']['expires']
+        data = dict(key=token_id,
+                    id=token_id,
+                    expires=expiry,
+                    user=token_ref['user'],
+                    tenant=token_ref['tenant'],
+                    metadata=token_ref['metadata'],
+                    token_data=token_data,
+                    bind=token_ref.get('bind'),
+                    trust_id=token_ref['metadata'].get('trust_id'),
+                    token_version=token.provider.V2)
+        self._create_token(token_id, data)
 
         return (token_id, token_data)
 
@@ -449,42 +448,31 @@ class BaseProvider(provider.Provider):
             access_token=access_token)
 
         token_id = self._get_token_id(token_data)
-        try:
-            expiry = token_data['token']['expires_at']
-            if isinstance(expiry, six.string_types):
-                expiry = timeutils.normalize_time(
-                    timeutils.parse_isotime(expiry))
-            # FIXME(gyee): is there really a need to store roles in metadata?
-            role_ids = []
-            if metadata_ref is None:
-                metadata_ref = {}
-            if 'project' in token_data['token']:
-                # project-scoped token, fill in the v2 token data
-                # all we care are the role IDs
-                role_ids = [r['id'] for r in token_data['token']['roles']]
-                metadata_ref = {'roles': role_ids}
-            if trust:
-                metadata_ref.setdefault('trust_id', trust['id'])
-                metadata_ref.setdefault('trustee_user_id',
-                                        trust['trustee_user_id'])
-            data = dict(key=token_id,
-                        id=token_id,
-                        expires=expiry,
-                        user=token_data['token']['user'],
-                        tenant=token_data['token'].get('project'),
-                        metadata=metadata_ref,
-                        token_data=token_data,
-                        trust_id=trust['id'] if trust else None,
-                        token_version=token.provider.V3)
-            self.token_api.create_token(token_id, data)
-        except Exception:
-            exc_info = sys.exc_info()
-            # an identical token may have been created already.
-            # if so, return the token_data as it is also identical
-            try:
-                self.token_api.get_token(token_id)
-            except exception.TokenNotFound:
-                raise exc_info[0], exc_info[1], exc_info[2]
+
+        expiry = token_data['token']['expires_at']
+        # FIXME(gyee): is there really a need to store roles in metadata?
+        role_ids = []
+        if metadata_ref is None:
+            metadata_ref = {}
+        if 'project' in token_data['token']:
+            # project-scoped token, fill in the v2 token data
+            # all we care are the role IDs
+            role_ids = [r['id'] for r in token_data['token']['roles']]
+            metadata_ref = {'roles': role_ids}
+        if trust:
+            metadata_ref.setdefault('trust_id', trust['id'])
+            metadata_ref.setdefault('trustee_user_id',
+                                    trust['trustee_user_id'])
+        data = dict(key=token_id,
+                    id=token_id,
+                    expires=expiry,
+                    user=token_data['token']['user'],
+                    tenant=token_data['token'].get('project'),
+                    metadata=metadata_ref,
+                    token_data=token_data,
+                    trust_id=trust['id'] if trust else None,
+                    token_version=token.provider.V3)
+        self._create_token(token_id, data)
 
         return (token_id, token_data)
 
@@ -532,10 +520,18 @@ class BaseProvider(provider.Provider):
             if version == provider.V3:
                 user_id = token['user']['id']
                 expires_at = token['expires']
+
+                token_data = token['token_data']['token']
+                project_id = token_data.get('project', {}).get('id')
+                domain_id = token_data.get('domain', {}).get('id')
             elif version == provider.V2:
                 user_id = token['user_id']
                 expires_at = token['expires']
-            self.revoke_api.revoke_by_expiration(user_id, expires_at)
+                project_id = (token.get('tenant') or {}).get('id')
+                domain_id = None  # A V2 token can't be scoped to a domain.
+            self.revoke_api.revoke_by_expiration(user_id, expires_at,
+                                                 project_id=project_id,
+                                                 domain_id=domain_id)
 
         if CONF.token.revoke_by_id:
             self.token_api.delete_token(token_id=token_id)
@@ -648,13 +644,17 @@ class BaseProvider(provider.Provider):
             project_ref = token_ref.get('tenant')
             if project_ref:
                 project_id = project_ref['id']
+
+            issued_at = token_ref['token_data']['access']['token']['issued_at']
+
             token_data = self.v3_token_data_helper.get_token_data(
                 token_ref['user']['id'],
                 ['password', 'token'],
                 {},
                 project_id=project_id,
                 bind=token_ref.get('bind'),
-                expires=token_ref['expires'])
+                expires=token_ref['expires'],
+                issued_at=issued_at)
         return token_data
 
     def validate_token(self, token_id):
@@ -664,4 +664,4 @@ class BaseProvider(provider.Provider):
             return self._validate_v3_token_ref(token_ref)
         elif version == token.provider.V2:
             return self._validate_v2_token_ref(token_ref)
-        raise token.provider.UnsupportedTokenVersionException()
+        raise exception.UnsupportedTokenVersionException()

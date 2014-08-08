@@ -16,11 +16,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import collections
-
 from keystone.contrib import federation
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
@@ -43,23 +41,6 @@ It is a dictionary with the following attributes:
 LOG = log.getLogger(__name__)
 
 
-def flatten(d, parent_key=''):
-    """Flatten a nested dictionary
-
-    Converts a dictionary with nested values to a single level flat
-    dictionary, with dotted notation for each key.
-
-    """
-    items = []
-    for k, v in d.items():
-        new_key = parent_key + '.' + k if parent_key else k
-        if isinstance(v, collections.MutableMapping):
-            items.extend(flatten(v, new_key).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
-
-
 def is_v3_token(token):
     # V3 token data are encapsulated into "token" key while
     # V2 token data are encapsulated into "access" key.
@@ -67,7 +48,7 @@ def is_v3_token(token):
 
 
 def v3_token_to_auth_context(token):
-    creds = {}
+    creds = {'is_delegated_auth': False}
     token_data = token['token']
     try:
         creds['user_id'] = token_data['user']['id']
@@ -77,7 +58,7 @@ def v3_token_to_auth_context(token):
     if 'project' in token_data:
         creds['project_id'] = token_data['project']['id']
     else:
-        LOG.debug(_('RBAC: Proceeding without project'))
+        LOG.debug('RBAC: Proceeding without project')
     if 'domain' in token_data:
         creds['domain_id'] = token_data['domain']['id']
     if 'roles' in token_data:
@@ -87,11 +68,31 @@ def v3_token_to_auth_context(token):
     creds['group_ids'] = [
         g['id'] for g in token_data['user'].get(federation.FEDERATION, {}).get(
             'groups', [])]
+
+    trust = token_data.get('OS-TRUST:trust')
+    if trust is None:
+        creds['trust_id'] = None
+        creds['trustor_id'] = None
+        creds['trustee_id'] = None
+    else:
+        creds['trust_id'] = trust['id']
+        creds['trustor_id'] = trust['trustor_user']['id']
+        creds['trustee_id'] = trust['trustee_user']['id']
+        creds['is_delegated_auth'] = True
+
+    oauth1 = token_data.get('OS-OAUTH1')
+    if oauth1 is None:
+        creds['consumer_id'] = None
+        creds['access_token_id'] = None
+    else:
+        creds['consumer_id'] = oauth1['consumer_id']
+        creds['access_token_id'] = oauth1['access_token_id']
+        creds['is_delegated_auth'] = True
     return creds
 
 
 def v2_token_to_auth_context(token):
-    creds = {}
+    creds = {'is_delegated_auth': False}
     token_data = token['access']
     try:
         creds['user_id'] = token_data['user']['id']
@@ -101,10 +102,22 @@ def v2_token_to_auth_context(token):
     if 'tenant' in token_data['token']:
         creds['project_id'] = token_data['token']['tenant']['id']
     else:
-        LOG.debug(_('RBAC: Proceeding without tenant'))
+        LOG.debug('RBAC: Proceeding without tenant')
     if 'roles' in token_data['user']:
         creds['roles'] = [role['name'] for
                           role in token_data['user']['roles']]
+
+    trust = token_data.get('trust')
+    if trust is None:
+        creds['trust_id'] = None
+        creds['trustor_id'] = None
+        creds['trustee_id'] = None
+    else:
+        creds['trust_id'] = trust.get('id')
+        creds['trustor_id'] = trust.get('trustor_id')
+        creds['trustee_id'] = trust.get('trustee_id')
+        creds['is_delegated_auth'] = True
+
     return creds
 
 

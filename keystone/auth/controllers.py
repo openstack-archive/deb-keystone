@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
+import sys
 
 from keystoneclient.common import cms
 import six
@@ -23,8 +23,9 @@ from keystone.common import wsgi
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _, _LI
 from keystone.openstack.common import importutils
+from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -85,6 +86,45 @@ def get_auth_method(method_name):
     return AUTH_METHODS[method_name]
 
 
+class AuthContext(dict):
+    """Retrofitting auth_context to reconcile identity attributes.
+
+    The identity attributes must not have conflicting values among the
+    auth plug-ins. The only exception is `expires_at`, which is set to its
+    earliest value.
+
+    """
+
+    # identity attributes need to be reconciled among the auth plugins
+    IDENTITY_ATTRIBUTES = frozenset(['user_id', 'project_id',
+                                     'access_token_id', 'domain_id',
+                                     'expires_at'])
+
+    def __setitem__(self, key, val):
+        if key in self.IDENTITY_ATTRIBUTES and key in self:
+            existing_val = self[key]
+            if key == 'expires_at':
+                # special treatment for 'expires_at', we are going to take
+                # the earliest expiration instead.
+                if existing_val != val:
+                    LOG.info(_LI('"expires_at" has conflicting values '
+                                 '%(existing)s and %(new)s.  Will use the '
+                                 'earliest value.'),
+                             {'existing': existing_val, 'new': val})
+                if existing_val is None or val is None:
+                    val = existing_val or val
+                else:
+                    val = min(existing_val, val)
+            elif existing_val != val:
+                msg = _('Unable to reconcile identity attribute %(attribute)s '
+                        'as it has conflicting values %(new)s and %(old)s') % (
+                            {'attribute': key,
+                             'new': val,
+                             'old': existing_val})
+                raise exception.Unauthorized(msg)
+        return super(AuthContext, self).__setitem__(key, val)
+
+
 # TODO(blk-u): this class doesn't use identity_api directly, but makes it
 # available for consumers. Consumers should probably not be getting
 # identity_api from this since it's available in global registry, then
@@ -111,16 +151,24 @@ class AuthInfo(object):
 
     def _assert_project_is_enabled(self, project_ref):
         # ensure the project is enabled
-        if not project_ref.get('enabled', True):
-            msg = _('Project is disabled: %s') % project_ref['id']
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
+        try:
+            self.assignment_api.assert_project_enabled(
+                project_id=project_ref['id'],
+                project=project_ref)
+        except AssertionError as e:
+            LOG.warning(e)
+            six.reraise(exception.Unauthorized, exception.Unauthorized(e),
+                        sys.exc_info()[2])
 
     def _assert_domain_is_enabled(self, domain_ref):
-        if not domain_ref.get('enabled'):
-            msg = _('Domain is disabled: %s') % (domain_ref['id'])
-            LOG.warning(msg)
-            raise exception.Unauthorized(msg)
+        try:
+            self.assignment_api.assert_domain_enabled(
+                domain_id=domain_ref['id'],
+                domain=domain_ref)
+        except AssertionError as e:
+            LOG.warning(e)
+            six.reraise(exception.Unauthorized, exception.Unauthorized(e),
+                        sys.exc_info()[2])
 
     def _lookup_domain(self, domain_info):
         domain_id = domain_info.get('id')
@@ -158,6 +206,10 @@ class AuthInfo(object):
                     project_name, domain_ref['id'])
             else:
                 project_ref = self.assignment_api.get_project(project_id)
+                # NOTE(morganfainberg): The _lookup_domain method will raise
+                # exception.Unauthorized if the domain isn't found or is
+                # disabled.
+                self._lookup_domain({'id': project_ref['domain_id']})
         except exception.ProjectNotFound as e:
             LOG.exception(e)
             raise exception.Unauthorized(e)
@@ -197,7 +249,7 @@ class AuthInfo(object):
             trust_ref = self._lookup_trust(
                 self.auth['scope']['OS-TRUST:trust'])
             # TODO(ayoung): when trusts support domains, fill in domain data
-            if 'project_id' in trust_ref:
+            if trust_ref.get('project_id') is not None:
                 project_ref = self._lookup_project(
                     {'id': trust_ref['project_id']})
                 self._scope_data = (None, project_ref['id'], trust_ref)
@@ -319,15 +371,14 @@ class Auth(controller.V3Controller):
 
         try:
             auth_info = AuthInfo.create(context, auth=auth)
-            auth_context = {'extras': {}, 'method_names': [], 'bind': {}}
+            auth_context = AuthContext(extras={},
+                                       method_names=[],
+                                       bind={})
             self.authenticate(context, auth_info, auth_context)
             if auth_context.get('access_token_id'):
                 auth_info.set_scope(None, auth_context['project_id'], None)
             self._check_and_set_default_scoping(auth_info, auth_context)
             (domain_id, project_id, trust) = auth_info.get_scope()
-
-            if trust:
-                self.trust_api.consume_use(trust['id'])
 
             method_names = auth_info.get_method_names()
             method_names += auth_context.get('method_names', [])
@@ -341,6 +392,11 @@ class Auth(controller.V3Controller):
             (token_id, token_data) = self.token_provider_api.issue_v3_token(
                 auth_context['user_id'], method_names, expires_at, project_id,
                 domain_id, auth_context, trust, metadata_ref, include_catalog)
+
+            # NOTE(wanghong): We consume a trust use only when we are using
+            # trusts and have successfully issued a token.
+            if trust:
+                self.trust_api.consume_use(trust['id'])
 
             return render_token_data_response(token_id, token_data,
                                               created=True)
@@ -408,10 +464,19 @@ class Auth(controller.V3Controller):
     def authenticate(self, context, auth_info, auth_context):
         """Authenticate user."""
 
-        # user has been authenticated externally
+        # The 'external' method allows any 'REMOTE_USER' based authentication
         if 'REMOTE_USER' in context['environment']:
-            external = get_auth_method('external')
-            external.authenticate(context, auth_info, auth_context)
+            try:
+                external = get_auth_method('external')
+                external.authenticate(context, auth_info, auth_context)
+            except exception.AuthMethodNotSupported:
+                # This will happen there is no 'external' plugin registered
+                # and the container is performing authentication.
+                # The 'kerberos'  and 'saml' methods will be used this way.
+                # In those cases, it is correct to not register an
+                # 'external' plugin;  if there is both an 'external' and a
+                # 'kerberos' plugin, it would run the check on identity twice.
+                pass
 
         # need to aggregate the results in case two or more methods
         # are specified
@@ -436,7 +501,12 @@ class Auth(controller.V3Controller):
     @controller.protected()
     def check_token(self, context):
         token_id = context.get('subject_token_id')
-        self.token_provider_api.check_v3_token(token_id)
+        token_data = self.token_provider_api.validate_v3_token(
+            token_id)
+        # NOTE(morganfainberg): The code in
+        # ``keystone.common.wsgi.render_response`` will remove the content
+        # body.
+        return render_token_data_response(token_id, token_data)
 
     @controller.protected()
     def revoke_token(self, context):
@@ -464,7 +534,7 @@ class Auth(controller.V3Controller):
             if not (expires and isinstance(expires, six.text_type)):
                     t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
-        json_data = json.dumps(data)
+        json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,
                                         CONF.signing.certfile,
                                         CONF.signing.keyfile)
@@ -472,7 +542,7 @@ class Auth(controller.V3Controller):
         return {'signed': signed_text}
 
 
-#FIXME(gyee): not sure if it belongs here or keystone.common. Park it here
+# FIXME(gyee): not sure if it belongs here or keystone.common. Park it here
 # for now.
 def render_token_data_response(token_id, token_data, created=False):
     """Render token data HTTP response.

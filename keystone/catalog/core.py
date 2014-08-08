@@ -19,17 +19,22 @@ import abc
 
 import six
 
+from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
+from keystone import notifications
 from keystone.openstack.common import log
 
 
 CONF = config.CONF
 LOG = log.getLogger(__name__)
+SHOULD_CACHE = cache.should_cache_fn('catalog')
+
+EXPIRATION_TIME = lambda: CONF.catalog.cache_time
 
 
 def format_url(url, data):
@@ -37,17 +42,19 @@ def format_url(url, data):
     try:
         result = url.replace('$(', '%(') % data
     except AttributeError:
-        return None
+        LOG.error(_('Malformed endpoint - %(url)r is not a string'),
+                  {"url": url})
+        raise exception.MalformedEndpoint(endpoint=url)
     except KeyError as e:
         LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
                   {"url": url,
                    "keyerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except TypeError as e:
-        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"
-                    "(are you missing brackets ?)"),
+        LOG.error(_("Malformed endpoint '%(url)s'. The following type error "
+                    "occurred during string substitution: %(typeerror)s"),
                   {"url": url,
-                   "keyerror": e})
+                   "typeerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except ValueError as e:
         LOG.error(_("Malformed endpoint %s - incomplete format "
@@ -64,6 +71,7 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+    _ENDPOINT = 'endpoint'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.catalog.driver)
@@ -78,12 +86,18 @@ class Manager(manager.Manager):
             msg = _('Duplicate ID, %s.') % region_ref['id']
             raise exception.Conflict(type='region', details=msg)
 
+        # NOTE(lbragstad): The description column of the region database
+        # can not be null. So if the user doesn't pass in a description then
+        # set it to an empty string.
+        region_ref.setdefault('description', '')
         try:
             return self.driver.create_region(region_ref)
         except exception.NotFound:
             parent_region_id = region_ref.get('parent_region_id')
             raise exception.RegionNotFound(region_id=parent_region_id)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_region(self, region_id):
         try:
             return self.driver.get_region(region_id)
@@ -92,7 +106,9 @@ class Manager(manager.Manager):
 
     def delete_region(self, region_id):
         try:
-            return self.driver.delete_region(region_id)
+            ret = self.driver.delete_region(region_id)
+            self.get_region.invalidate(self, region_id)
+            return ret
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
 
@@ -100,6 +116,8 @@ class Manager(manager.Manager):
         service_ref.setdefault('enabled', True)
         return self.driver.create_service(service_id, service_ref)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_service(self, service_id):
         try:
             return self.driver.get_service(service_id)
@@ -108,7 +126,13 @@ class Manager(manager.Manager):
 
     def delete_service(self, service_id):
         try:
-            return self.driver.delete_service(service_id)
+            endpoints = self.list_endpoints()
+            ret = self.driver.delete_service(service_id)
+            self.get_service.invalidate(self, service_id)
+            for endpoint in endpoints:
+                if endpoint['service_id'] == service_id:
+                    self.get_endpoint.invalidate(self, endpoint['id'])
+            return ret
         except exception.NotFound:
             raise exception.ServiceNotFound(service_id=service_id)
 
@@ -123,12 +147,17 @@ class Manager(manager.Manager):
             service_id = endpoint_ref.get('service_id')
             raise exception.ServiceNotFound(service_id=service_id)
 
+    @notifications.deleted(_ENDPOINT, public=False)
     def delete_endpoint(self, endpoint_id):
         try:
-            return self.driver.delete_endpoint(endpoint_id)
+            ret = self.driver.delete_endpoint(endpoint_id)
+            self.get_endpoint.invalidate(self, endpoint_id)
+            return ret
         except exception.NotFound:
             raise exception.EndpointNotFound(endpoint_id=endpoint_id)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_endpoint(self, endpoint_id):
         try:
             return self.driver.get_endpoint(endpoint_id)
@@ -161,7 +190,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound (if parent region invalid)
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_regions(self):
@@ -170,7 +199,7 @@ class Driver(object):
         :returns: list of region_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_region(self, region_id):
@@ -180,7 +209,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_region(self, region_id):
@@ -190,7 +219,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_region(self, region_id):
@@ -199,7 +228,7 @@ class Driver(object):
         :raises: keystone.exception.RegionNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_service(self, service_id, service_ref):
@@ -208,16 +237,20 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def list_services(self):
+    def list_services(self, hints):
         """List all services.
+
+        :param hints: contains the list of filters yet to be satisfied.
+                      Any filters satisfied here will be removed so that
+                      the caller will know if any filters remain.
 
         :returns: list of service_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_service(self, service_id):
@@ -227,7 +260,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_service(self, service_id):
@@ -237,7 +270,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_service(self, service_id):
@@ -246,7 +279,7 @@ class Driver(object):
         :raises: keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def create_endpoint(self, endpoint_id, endpoint_ref):
@@ -256,7 +289,7 @@ class Driver(object):
                  keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_endpoint(self, endpoint_id):
@@ -266,16 +299,20 @@ class Driver(object):
         :raises: keystone.exception.EndpointNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def list_endpoints(self):
+    def list_endpoints(self, hints):
         """List all endpoints.
+
+        :param hints: contains the list of filters yet to be satisfied.
+                      Any filters satisfied here will be removed so that
+                      the caller will know if any filters remain.
 
         :returns: list of endpoint_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_endpoint(self, endpoint_id, endpoint_ref):
@@ -286,7 +323,7 @@ class Driver(object):
                  keystone.exception.ServiceNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_endpoint(self, endpoint_id):
@@ -295,7 +332,7 @@ class Driver(object):
         :raises: keystone.exception.EndpointNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_catalog(self, user_id, tenant_id, metadata=None):
@@ -320,11 +357,12 @@ class Driver(object):
         :raises: keystone.exception.NotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
-    @abc.abstractmethod
     def get_v3_catalog(self, user_id, tenant_id, metadata=None):
         """Retrieve and format the current V3 service catalog.
+
+        The default implementation builds the V3 catalog from the V2 catalog.
 
         Example::
 
@@ -351,4 +389,35 @@ class Driver(object):
         :raises: keystone.exception.NotFound
 
         """
-        raise exception.NotImplemented()
+        v2_catalog = self.get_catalog(user_id, tenant_id, metadata=metadata)
+        v3_catalog = []
+
+        for region_name, region in six.iteritems(v2_catalog):
+            for service_type, service in six.iteritems(region):
+                service_v3 = {
+                    'type': service_type,
+                    'endpoints': []
+                }
+
+                for attr, value in six.iteritems(service):
+                    # Attributes that end in URL are interfaces. In the V2
+                    # catalog, these are internalURL, publicURL, and adminURL.
+                    # For example, <region_name>.publicURL=<URL> in the V2
+                    # catalog becomes the V3 interface for the service:
+                    # { 'interface': 'public', 'url': '<URL>', 'region':
+                    #   'region: '<region_name>' }
+                    if attr.endswith('URL'):
+                        v3_interface = attr[:-len('URL')]
+                        service_v3['endpoints'].append({
+                            'interface': v3_interface,
+                            'region': region_name,
+                            'url': value,
+                        })
+                        continue
+
+                    # Other attributes are copied to the service.
+                    service_v3[attr] = value
+
+                v3_catalog.append(service_v3)
+
+        return v3_catalog

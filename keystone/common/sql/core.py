@@ -22,6 +22,10 @@ import contextlib
 import functools
 
 from oslo.config import cfg
+from oslo.db import exception as db_exception
+from oslo.db import options as db_options
+from oslo.db.sqlalchemy import models
+from oslo.db.sqlalchemy import session as db_session
 import six
 import sqlalchemy as sql
 from sqlalchemy.ext import declarative
@@ -30,15 +34,13 @@ from sqlalchemy import types as sql_types
 
 from keystone.common import utils
 from keystone import exception
-from keystone.openstack.common.db import exception as db_exception
-from keystone.openstack.common.db import options as db_options
-from keystone.openstack.common.db.sqlalchemy import models
-from keystone.openstack.common.db.sqlalchemy import session as db_session
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import jsonutils
+from keystone.openstack.common import log
 
 
 CONF = cfg.CONF
+LOG = log.getLogger(__name__)
 
 ModelBase = declarative.declarative_base()
 
@@ -68,8 +70,8 @@ def initialize():
     """Initialize the module."""
 
     db_options.set_defaults(
-        sql_connection="sqlite:///keystone.db",
-        sqlite_db="keystone.db")
+        CONF,
+        connection="sqlite:///keystone.db")
 
 
 def initialize_decorator(init):
@@ -94,8 +96,7 @@ def initialize_decorator(init):
                     if isinstance(column.type, String):
                         if not isinstance(v, six.text_type):
                             v = six.text_type(v)
-                        if column.type.length and \
-                                column.type.length < len(v):
+                        if column.type.length and column.type.length < len(v):
                             raise exception.StringLengthExceeded(
                                 string=v, type=k, length=column.type.length)
 
@@ -172,8 +173,7 @@ def _get_engine_facade():
     global _engine_facade
 
     if not _engine_facade:
-        _engine_facade = db_session.EngineFacade.from_config(
-            CONF.database.connection, CONF)
+        _engine_facade = db_session.EngineFacade.from_config(CONF)
 
     return _engine_facade
 
@@ -214,17 +214,16 @@ def truncated(f):
     """
     @functools.wraps(f)
     def wrapper(self, hints, *args, **kwargs):
-        if not hasattr(hints, 'get_limit'):
+        if not hasattr(hints, 'limit'):
             raise exception.UnexpectedError(
                 _('Cannot truncate a driver call without hints list as '
                   'first parameter after self '))
 
-        limit_dict = hints.get_limit()
-        if limit_dict is None:
+        if hints.limit is None:
             return f(self, hints, *args, **kwargs)
 
         # A limit is set, so ask for one more entry than we need
-        list_limit = limit_dict['limit']
+        list_limit = hints.limit['limit']
         hints.set_limit(list_limit + 1)
         ref_list = f(self, hints, *args, **kwargs)
 
@@ -288,7 +287,7 @@ def _filter(model, query, hints):
             # work out if they need to do something with it.
             return query
 
-        hints.remove(filter_)
+        hints.filters.remove(filter_)
         return query.filter(query_term)
 
     def exact_filter(model, filter_, cumulative_filter_dict, hints):
@@ -312,12 +311,12 @@ def _filter(model, query, hints):
                 utils.attr_as_boolean(filter_['value']))
         else:
             cumulative_filter_dict[key] = filter_['value']
-        hints.remove(filter_)
+        hints.filters.remove(filter_)
         return cumulative_filter_dict
 
     filter_dict = {}
 
-    for filter_ in hints.filters():
+    for filter_ in hints.filters:
         # TODO(henry-nash): Check if name is valid column, if not skip
         if filter_['comparator'] == 'equals':
             filter_dict = exact_filter(model, filter_, filter_dict, hints)
@@ -344,9 +343,8 @@ def _limit(query, hints):
     # we would expand this method to support pagination and limiting.
 
     # If we satisfied all the filters, set an upper limit if supplied
-    list_limit = hints.get_limit()
-    if list_limit:
-        query = query.limit(list_limit['limit'])
+    if hints.limit:
+        query = query.limit(hints.limit['limit'])
     return query
 
 
@@ -377,7 +375,7 @@ def filter_limit_query(model, query, hints):
     # unsatisfied filters, we have to leave any limiting to the controller
     # as well.
 
-    if not hints.filters():
+    if not hints.filters:
         return _limit(query, hints)
     else:
         return query
@@ -385,20 +383,38 @@ def filter_limit_query(model, query, hints):
 
 def handle_conflicts(conflict_type='object'):
     """Converts select sqlalchemy exceptions into HTTP 409 Conflict."""
+    _conflict_msg = 'Conflict %(conflict_type)s: %(details)s'
+
     def decorator(method):
         @functools.wraps(method)
         def wrapper(*args, **kwargs):
             try:
                 return method(*args, **kwargs)
             except db_exception.DBDuplicateEntry as e:
+                # LOG the exception for debug purposes, do not send the
+                # exception details out with the raised Conflict exception
+                # as it can contain raw SQL.
+                LOG.debug(_conflict_msg, {'conflict_type': conflict_type,
+                                          'details': six.text_type(e)})
                 raise exception.Conflict(type=conflict_type,
-                                         details=six.text_type(e))
+                                         details=_('Duplicate Entry'))
             except db_exception.DBError as e:
                 # TODO(blk-u): inspecting inner_exception breaks encapsulation;
                 # oslo.db should provide exception we need.
                 if isinstance(e.inner_exception, IntegrityError):
-                    raise exception.Conflict(type=conflict_type,
-                                             details=six.text_type(e))
+                    # LOG the exception for debug purposes, do not send the
+                    # exception details out with the raised Conflict exception
+                    # as it can contain raw SQL.
+                    LOG.debug(_conflict_msg, {'conflict_type': conflict_type,
+                                              'details': six.text_type(e)})
+                    # NOTE(morganfainberg): This is really a case where the SQL
+                    # failed to store the data. This is not something that the
+                    # user has done wrong. Example would be a ForeignKey is
+                    # missing; the code that is executed before reaching the
+                    # SQL writing to the DB should catch the issue.
+                    raise exception.UnexpectedError(
+                        _('An unexpected error occurred when trying to '
+                          'store %s') % conflict_type)
                 raise
 
         return wrapper

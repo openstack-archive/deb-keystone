@@ -29,7 +29,7 @@ import eventlet.backdoor
 import greenlet
 from oslo.config import cfg
 
-from keystone.openstack.common.gettextutils import _  # noqa
+from keystone.openstack.common.gettextutils import _LI
 from keystone.openstack.common import log as logging
 
 help_for_backdoor_port = (
@@ -41,7 +41,6 @@ help_for_backdoor_port = (
     "chosen port is displayed in the service's log file.")
 eventlet_backdoor_opts = [
     cfg.StrOpt('backdoor_port',
-               default=None,
                help="Enable eventlet backdoor.  %s" % help_for_backdoor_port)
 ]
 
@@ -64,7 +63,7 @@ def _dont_use_this():
 
 
 def _find_objects(t):
-    return filter(lambda o: isinstance(o, t), gc.get_objects())
+    return [o for o in gc.get_objects() if isinstance(o, t)]
 
 
 def _print_greenthreads():
@@ -137,8 +136,10 @@ def initialize_if_enabled():
     # In the case of backdoor port being zero, a port number is assigned by
     # listen().  In any case, pull the port number out here.
     port = sock.getsockname()[1]
-    LOG.info(_('Eventlet backdoor listening on %(port)s for process %(pid)d') %
-             {'port': port, 'pid': os.getpid()})
+    LOG.info(
+        _LI('Eventlet backdoor listening on %(port)s for process %(pid)d') %
+        {'port': port, 'pid': os.getpid()}
+    )
     eventlet.spawn_n(eventlet.backdoor.backdoor_server, sock,
                      locals=backdoor_locals)
     return port

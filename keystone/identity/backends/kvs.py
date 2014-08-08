@@ -15,8 +15,8 @@
 from keystone.common import kvs
 from keystone.common import utils
 from keystone import exception
+from keystone.i18n import _
 from keystone import identity
-from keystone.openstack.common.gettextutils import _
 
 
 class _UserIdToDomainId(object):
@@ -59,9 +59,6 @@ class Identity(kvs.Base, identity.Driver):
 
     def default_assignment_driver(self):
         return "keystone.assignment.backends.kvs.Assignment"
-
-    def is_domain_aware(self):
-        return True
 
     # Public interface
     def authenticate(self, user_id, password):
@@ -156,8 +153,6 @@ class Identity(kvs.Base, identity.Driver):
         new_user = old_user.copy()
         user = utils.hash_user_password(user)
         new_user.update(user)
-        if new_user['id'] != user_id:
-            raise exception.ValidationError('Cannot change user ID')
         self.db.delete(self._calc_user_name_key(old_user['name'], domain_id))
         self.db.set('user-%s' % user_id, new_user)
         user_name_key = self._calc_user_name_key(new_user['name'], domain_id)

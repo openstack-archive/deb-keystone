@@ -16,9 +16,13 @@
 
 import logging
 import os
-import signal
 import socket
 import sys
+
+from oslo import i18n
+from paste import deploy
+import pbr.version
+
 
 # If ../keystone/__init__.py exists, add ../ to Python search path, so that
 # it will override what happens to be installed in /usr/(local/)lib/python...
@@ -30,31 +34,45 @@ if os.path.exists(os.path.join(possible_topdir,
                                '__init__.py')):
     sys.path.insert(0, possible_topdir)
 
-
-from paste import deploy
-import pbr.version
-
-from keystone.openstack.common import gettextutils
-# NOTE(dstanek): gettextutils.enable_lazy() must be called before
-# gettextutils._() is called to ensure it has the desired lazy lookup
+# NOTE(dstanek): i18n.enable_lazy() must be called before
+# keystone.i18n._() is called to ensure it has the desired lazy lookup
 # behavior. This includes cases, like keystone.exceptions, where
-# gettextutils._() is called at import time.
-gettextutils.enable_lazy()
+# keystone.i18n._() is called at import time.
+i18n.enable_lazy()
 
+
+from keystone import backends
 from keystone.common import dependency
 from keystone.common import environment
 from keystone.common import sql
 from keystone.common import utils
 from keystone import config
-from keystone.openstack.common.gettextutils import _
-from keystone.openstack.common import importutils
-from keystone import service
+from keystone.i18n import _
+from keystone.openstack.common import service
+from keystone.openstack.common import systemd
 
 
 CONF = config.CONF
 
 
-def create_server(conf, name, host, port):
+class ServerWrapper(object):
+    """Wraps a Server with some launching info & capabilities."""
+
+    def __init__(self, server, workers):
+        self.server = server
+        self.workers = workers
+
+    def launch_with(self, launcher):
+        self.server.listen()
+        if self.workers > 1:
+            # Use multi-process launcher
+            launcher.launch_service(self.server, self.workers)
+        else:
+            # Use single process launcher
+            launcher.launch_service(self.server)
+
+
+def create_server(conf, name, host, port, workers):
     app = deploy.loadapp('config:%s' % conf, name=name)
     server = environment.Server(app, host=host, port=port,
                                 keepalive=CONF.tcp_keepalive,
@@ -62,39 +80,28 @@ def create_server(conf, name, host, port):
     if CONF.ssl.enable:
         server.set_ssl(CONF.ssl.certfile, CONF.ssl.keyfile,
                        CONF.ssl.ca_certs, CONF.ssl.cert_required)
-    return name, server
-
-
-def sigint_handler(signal, frame):
-    """Exits at SIGINT signal."""
-    logging.debug('SIGINT received, stopping servers.')
-    sys.exit(0)
+    return name, ServerWrapper(server, workers)
 
 
 def serve(*servers):
-    signal.signal(signal.SIGINT, sigint_handler)
+    if max([server[1].workers for server in servers]) > 1:
+        launcher = service.ProcessLauncher()
+    else:
+        launcher = service.ServiceLauncher()
 
     for name, server in servers:
         try:
-            server.start()
+            server.launch_with(launcher)
         except socket.error:
             logging.exception(_('Failed to start the %(name)s server') % {
                 'name': name})
             raise
 
     # notify calling process we are ready to serve
-    if CONF.onready:
-        try:
-            notifier = importutils.import_module(CONF.onready)
-            notifier.notify()
-        except ImportError:
-            try:
-                utils.check_output(CONF.onready.split())
-            except Exception:
-                logging.exception('Failed to execute onready command')
+    systemd.notify_once()
 
     for name, server in servers:
-        server.wait()
+        launcher.wait()
 
 
 if __name__ == '__main__':
@@ -131,17 +138,19 @@ if __name__ == '__main__':
         monkeypatch_thread = False
     environment.use_eventlet(monkeypatch_thread)
 
-    service.load_backends()
+    backends.load_backends()
 
     servers = []
     servers.append(create_server(paste_config,
                                  'admin',
                                  CONF.admin_bind_host,
-                                 int(CONF.admin_port)))
+                                 int(CONF.admin_port),
+                                 CONF.admin_workers))
     servers.append(create_server(paste_config,
                                  'main',
                                  CONF.public_bind_host,
-                                 int(CONF.public_port)))
+                                 int(CONF.public_port),
+                                 CONF.public_workers))
 
     dependency.resolve_future_dependencies()
     serve(*servers)

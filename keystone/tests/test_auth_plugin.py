@@ -18,7 +18,6 @@ from keystone import auth
 from keystone.common import config
 from keystone import exception
 from keystone import tests
-from keystone import token
 
 
 # for testing purposes only
@@ -59,10 +58,6 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
         super(TestAuthPlugin, self).setUp()
         self.load_backends()
 
-        # need to register the token provider first because auth controller
-        # depends on it
-        token.provider.Manager()
-
         self.api = auth.controllers.Auth()
 
     def config_files(self):
@@ -100,10 +95,10 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
         try:
             self.api.authenticate({'environment': {}}, auth_info, auth_context)
         except exception.AdditionalAuthRequired as e:
-            self.assertTrue('methods' in e.authentication)
-            self.assertTrue(METHOD_NAME in e.authentication['methods'])
-            self.assertTrue(METHOD_NAME in e.authentication)
-            self.assertTrue('challenge' in e.authentication[METHOD_NAME])
+            self.assertIn('methods', e.authentication)
+            self.assertIn(METHOD_NAME, e.authentication['methods'])
+            self.assertIn(METHOD_NAME, e.authentication)
+            self.assertIn('challenge', e.authentication[METHOD_NAME])
 
         # test correct response
         auth_data = {'methods': [METHOD_NAME]}
@@ -113,7 +108,7 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
         auth_info = auth.controllers.AuthInfo.create(None, auth_data)
         auth_context = {'extras': {}, 'method_names': []}
         self.api.authenticate({'environment': {}}, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'], DEMO_USER_ID)
+        self.assertEqual(DEMO_USER_ID, auth_context['user_id'])
 
         # test incorrect response
         auth_data = {'methods': [METHOD_NAME]}

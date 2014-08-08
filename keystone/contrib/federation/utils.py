@@ -17,11 +17,14 @@ import re
 import jsonschema
 import six
 
+from keystone.common import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
+from keystone.openstack.common import timeutils
 
 
+CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -112,6 +115,30 @@ def validate_mapping_structure(ref):
 
         if messages:
             raise exception.ValidationError(messages)
+
+
+def validate_expiration(token_ref):
+    if timeutils.utcnow() > token_ref['expires']:
+        raise exception.Unauthorized(_('Federation token is expired'))
+
+
+def validate_groups(group_ids, mapping_id, identity_api):
+    if not group_ids:
+        raise exception.MissingGroups(mapping_id=mapping_id)
+
+    for group_id in group_ids:
+        try:
+            identity_api.get_group(group_id)
+        except exception.GroupNotFound:
+            raise exception.MappedGroupNotFound(
+                group_id=group_id, mapping_id=mapping_id)
+
+
+def get_assertion_params_from_env(context):
+    prefix = CONF.federation.assertion_prefix
+    for k, v in context['environment'].items():
+        if k.startswith(prefix):
+            yield (k, v)
 
 
 class RuleProcessor(object):
@@ -376,7 +403,11 @@ class RuleProcessor(object):
             return False
 
         if regex:
-            return re.search(values[0], assertion_values[0])
+            for value in values:
+                for assertion_value in assertion_values:
+                    if re.search(value, assertion_value):
+                        return True
+            return False
 
         any_match = bool(set(values).intersection(set(assertion_values)))
         if any_match and eval_type == self._EvalType.ANY_ONE_OF:

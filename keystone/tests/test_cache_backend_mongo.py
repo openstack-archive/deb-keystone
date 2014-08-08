@@ -20,10 +20,10 @@ import uuid
 from dogpile.cache import api
 from dogpile.cache import region as dp_region
 import six
-import testtools
 
 from keystone.common.cache.backends import mongo
 from keystone import exception
+from keystone import tests
 
 
 # Mock database structure sample where 'ks_cache' is database and
@@ -139,7 +139,7 @@ class MockCollection(object):
                 if self._apply_filter(document, spec))
 
     def _apply_filter(self, document, query):
-        for key, search in query.iteritems():
+        for key, search in six.iteritems(query):
             doc_val = document.get(key)
             if isinstance(search, dict):
                 op_dict = {'$in': lambda dv, sv: dv in sv}
@@ -277,7 +277,7 @@ class MyTransformer(mongo.BaseTransform):
         return super(MyTransformer, self).transform_outgoing(son, collection)
 
 
-class MongoCache(testtools.TestCase):
+class MongoCache(tests.BaseTestCase):
     def setUp(self):
         super(MongoCache, self).setUp()
         global COLLECTIONS
@@ -507,7 +507,7 @@ class MongoCache(testtools.TestCase):
 
         random_key = uuid.uuid4().hex
         region.set(random_key, None)
-        self.assertEqual(None, region.get(random_key))
+        self.assertIsNone(region.get(random_key))
 
     def test_backend_set_blank_as_data(self):
 
@@ -629,7 +629,7 @@ class MongoCache(testtools.TestCase):
         # should return NO_VALUE as key does not exist in cache
         self.assertEqual(api.NO_VALUE, region.get(random_key))
         self.assertEqual("dummyValue1", region.get(random_key1))
-        self.assertEqual(None, region.get(random_key2))
+        self.assertIsNone(region.get(random_key2))
         self.assertEqual("", region.get(random_key3))
         self.assertEqual("dummyValue4", region.get(random_key4))
 
@@ -639,7 +639,7 @@ class MongoCache(testtools.TestCase):
         # should return NO_VALUE as key does not exist in cache
         self.assertEqual(api.NO_VALUE, results[0])
         self.assertEqual("dummyValue1", results[1])
-        self.assertEqual(None, results[2])
+        self.assertIsNone(results[2])
         self.assertEqual("", results[3])
         self.assertEqual("dummyValue4", results[4])
 

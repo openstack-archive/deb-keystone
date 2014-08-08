@@ -22,8 +22,8 @@ from keystone.common import manager
 from keystone import config
 from keystone.contrib.revoke import model
 from keystone import exception
+from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 from keystone.openstack.common import timeutils
 
@@ -128,10 +128,21 @@ class Manager(manager.Manager):
     def revoke_by_user(self, user_id):
         return self.revoke(model.RevokeEvent(user_id=user_id))
 
-    def revoke_by_expiration(self, user_id, expires_at):
+    def revoke_by_expiration(self, user_id, expires_at,
+                             domain_id=None, project_id=None):
+
+        if domain_id is not None and project_id is not None:
+            msg = _('The call to keystone.contrib.revoke.Manager '
+                    'revoke_by_expiration() must not have both domain_id and '
+                    'project_id. This is a bug in the keystone server. The '
+                    'current request is aborted.')
+            raise exception.UnexpectedError(exception=msg)
+
         self.revoke(
             model.RevokeEvent(user_id=user_id,
-                              expires_at=expires_at))
+                              expires_at=expires_at,
+                              domain_id=domain_id,
+                              project_id=project_id))
 
     def revoke_by_grant(self, role_id, user_id=None,
                         domain_id=None, project_id=None):
@@ -192,7 +203,7 @@ class Driver(object):
                   for tokens issued after the expiration cutoff.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def revoke(self, event):
@@ -202,4 +213,4 @@ class Driver(object):
             keystone.contrib.revoke.model.RevocationEvent
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover

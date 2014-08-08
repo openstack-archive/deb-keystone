@@ -19,12 +19,9 @@ import uuid
 import six
 
 from keystone.common import sql
-from keystone.common.sql import migration_helpers
-from keystone.contrib import oauth1
 from keystone.contrib.oauth1 import core
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 
@@ -85,10 +82,6 @@ class AccessToken(sql.ModelBase, sql.DictBase):
 
 
 class OAuth1(object):
-    def db_sync(self):
-        migration.db_sync(sql.get_engine(),
-                          migration_helpers.find_migrate_repo(oauth1))
-
     def _get_consumer(self, session, consumer_id):
         consumer_ref = session.query(Consumer).get(consumer_id)
         if consumer_ref is None:
@@ -116,9 +109,6 @@ class OAuth1(object):
 
     def _delete_consumer(self, session, consumer_id):
         consumer_ref = self._get_consumer(session, consumer_id)
-        q = session.query(Consumer)
-        q = q.filter_by(id=consumer_id)
-        q.delete(False)
         session.delete(consumer_ref)
 
     def _delete_request_tokens(self, session, consumer_id):
@@ -127,9 +117,6 @@ class OAuth1(object):
         req_tokens_list = set([x.id for x in req_tokens])
         for token_id in req_tokens_list:
             token_ref = self._get_request_token(session, token_id)
-            q = session.query(RequestToken)
-            q = q.filter_by(id=token_id)
-            q.delete(False)
             session.delete(token_ref)
 
     def _delete_access_tokens(self, session, consumer_id):
@@ -138,9 +125,6 @@ class OAuth1(object):
         acc_tokens_list = set([x.id for x in acc_tokens])
         for token_id in acc_tokens_list:
             token_ref = self._get_access_token(session, token_id)
-            q = session.query(AccessToken)
-            q = q.filter_by(id=token_id)
-            q.delete(False)
             session.delete(token_ref)
 
     def delete_consumer(self, consumer_id):
@@ -211,7 +195,8 @@ class OAuth1(object):
             token_ref = self._get_request_token(session, request_token_id)
             token_dict = token_ref.to_dict()
             token_dict['authorizing_user_id'] = user_id
-            token_dict['verifier'] = str(random.randint(1000, 9999))
+            token_dict['verifier'] = ''.join(random.sample(core.VERIFIER_CHARS,
+                                                           8))
             token_dict['role_ids'] = jsonutils.dumps(role_ids)
 
             new_token = RequestToken.from_dict(token_dict)
@@ -252,9 +237,6 @@ class OAuth1(object):
             session.add(token_ref)
 
             # remove request token, it's been used
-            q = session.query(RequestToken)
-            q = q.filter_by(id=request_token_id)
-            q.delete(False)
             session.delete(req_token_ref)
 
         return token_ref.to_dict()
@@ -283,9 +265,5 @@ class OAuth1(object):
             token_dict = token_ref.to_dict()
             if token_dict['authorizing_user_id'] != user_id:
                 raise exception.Unauthorized(_('User IDs do not match'))
-
-            q = session.query(AccessToken)
-            q = q.filter_by(id=access_token_id)
-            q.delete(False)
 
             session.delete(token_ref)

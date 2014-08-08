@@ -57,7 +57,7 @@ Interacting with Keystone
 You can interact with Keystone through the command line using
 :doc:`man/keystone-manage` which allows you to initialize keystone, etc.
 
-You can also interact with Keystone through its REST API. There is a python
+You can also interact with Keystone through its REST API. There is a Python
 keystone client library `python-keystoneclient`_ which interacts exclusively
 through the REST API, and which keystone itself uses to provide its
 command-line interface.
@@ -69,6 +69,16 @@ place::
     $ bin/keystone-manage db_sync
 
 .. _`python-keystoneclient`: https://github.com/openstack/python-keystoneclient
+
+If the above commands result in a ``KeyError``, or they fail on a
+``.pyc`` file with the message, ``You can only have one Python script per
+version``, then it is possible that there are out-of-date compiled Python
+bytecode files in the Keystone directory tree that are causing problems. This
+can occur if you have previously installed and ran older versions of Keystone.
+These out-of-date files can be easily removed by running a command like the
+following from the Keystone root project directory::
+
+    $ find . -name "*.pyc" -delete
 
 Database Schema Migrations
 --------------------------
@@ -135,7 +145,7 @@ The communication of the filter details between the controller level and its
 drivers is handled by the passing of a reference to a Hints object,
 which is a list of dicts describing the filters. A driver that satisfies a
 filter must delete the filter from the Hints object so that when it is returned
-back to the controller level, it knows to only execute any unsatisfied
+to the controller level, it knows to only execute any unsatisfied
 filters.
 
 The contract for a driver for ``list_{entity}`` methods is therefore:
@@ -143,7 +153,9 @@ The contract for a driver for ``list_{entity}`` methods is therefore:
 * It MUST return a list of entities of the specified type
 * It MAY either just return all such entities, or alternatively reduce the
   list by filtering for one or more of the specified filters in the passed
-  Hints reference, and removing any such satisfied filters.
+  Hints reference, and removing any such satisfied filters. An exception to
+  this is that for identity drivers that support domains, then they should
+  at least support filtering by domain_id.
 
 Entity list truncation by drivers
 ---------------------------------
@@ -159,6 +171,27 @@ individual drivers as part of the Hints list object. A driver should try and
 honor any such limit if possible, but if it is unable to do so then it may
 ignore it (and the truncation of the returned list of entities will happen at
 the controller level).
+
+Identity entity ID management between controllers and drivers
+-------------------------------------------------------------
+
+Keystone supports the option of having domain-specific backends for the
+identity driver (i.e. for user and group storage), allowing, for example,
+a different LDAP server for each domain. To ensure that Keystone can determine
+to which backend it should route an API call, starting with Juno, the
+identity manager will, provided that domain-specific backends are enabled,
+build on-the-fly a persistent mapping table between Keystone Public IDs that
+are presented to the controller and the domain that holds the entity, along
+with whatever local ID is understood by the driver.  This hides, for instance,
+the LDAP specifics of whatever ID is being used.
+
+To ensure backward compatibility, the default configuration of either a
+single SQL or LDAP backend for Identity will not use the mapping table,
+meaning that public facing IDs will be the unchanged. If keeping these IDs
+the same for the default LDAP backend is not required, then setting the
+configuration variable ``backward_compatible_ids`` to ``False`` will enable
+the mapping for the default LDAP driver, hence hiding the LDAP specifics of the
+IDs being used.
 
 Testing
 -------
@@ -213,6 +246,23 @@ you'll normally only want to run the test that hits your breakpoint::
 
 For reference, the ``debug`` tox environment implements the instructions
 here: https://wiki.openstack.org/wiki/Testr#Debugging_.28pdb.29_Tests
+
+Disabling Stream Capture
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The stdout, stderr and log messages generated during a test are captured and
+in the event of a test failure those streams will be printed to the terminal
+along with the traceback. The data is discarded for passing tests.
+
+Each stream has an environment variable that can be used to force captured
+data to be discarded even if the test fails: `OS_STDOUT_CAPTURE` for stdout,
+`OS_STDERR_CAPTURE` for stderr and `OS_LOG_CAPTURE` for logging. If the value
+of the environment variable is not one of (True, true, 1, yes) the stream will
+be discarded. All three variables default to 1.
+
+For example, to discard logging data during a test run::
+
+    $ OS_LOG_CAPTURE=0 tox -e py27
 
 Test Structure
 ==============
@@ -304,9 +354,11 @@ and set environment variables ``KEYSTONE_IDENTITY_BACKEND=ldap`` and
 ``KEYSTONE_CLEAR_LDAP=yes`` in your ``localrc`` file.
 
 The unit tests can be run against a live server with
-``keystone/tests/test_ldap_livetest.py``.  The default password is ``test`` but if you have
-installed devstack with a different LDAP password, modify the file
-``keystone/tests/backend_liveldap.conf`` to reflect your password.
+``keystone/tests/test_ldap_livetest.py`` and
+``keystone/tests/test_ldap_pool_livetest.py``. The default password is ``test``
+but if you have installed devstack with a different LDAP password, modify the
+file ``keystone/tests/config_files/backend_liveldap.conf`` and
+``keystone/tests/config_files/backend_pool_liveldap.conf`` to reflect your password.
 
 .. NOTE::
     To run the live tests you need to set the environment variable ``ENABLE_LDAP_LIVE_TEST``
@@ -457,7 +509,7 @@ backend of the KVS system. The implementation allows for the use of any normal `
 cache backends to be used as a store. All interfacing to the KVS system happens via the
 ``KeyValueStore`` object located at ``keystone.common.kvs.KeyValueStore``.
 
-To utilize the KVS system an instantiation of the ``KeyValueStore`` class is needed. To accquire
+To utilize the KVS system an instantiation of the ``KeyValueStore`` class is needed. To acquire
 a KeyValueStore instantiation use the ``keystone.common.kvs.get_key_value_store`` factory
 function. This factory will either create a new ``KeyValueStore`` object or retrieve the
 already instantiated ``KeyValueStore`` object by the name passed as an argument. The object must
@@ -639,7 +691,7 @@ is similar to other dogpile caching backends as it implements the same dogpile A
 Building the Documentation
 --------------------------
 
-The documentation is generated with Sphinx uning the tox command.  To create HTML docs and man pages::
+The documentation is generated with Sphinx using the tox command.  To create HTML docs and man pages::
 
     $ tox -e docs
 

@@ -32,7 +32,7 @@ Prerequisites
 
 This document assumes you are using:
 
-- Ubuntu 12.04, Fedora 15, or Mac OS X Lion
+- Ubuntu, Fedora, or Mac OS X
 - `Python 2.7`_
 
 .. _`Python 2.7`: http://www.python.org/
@@ -42,6 +42,8 @@ And that you have the following tools available on your system:
 - git_
 - setuptools_
 - pip_
+- msgfmt (part of the gettext package)
+- virtualenv_
 
 **Reminder**: If you're successfully using a different platform, or a
 different version of the above, please document your configuration here!
@@ -70,7 +72,7 @@ Keystone maintains two lists of dependencies::
 
 The first is the list of dependencies needed for running keystone, the second list includes dependencies used for active development and testing of keystone itself.
 
-These dependencies can be installed from PyPi_ using the python tool pip_.
+These dependencies can be installed from PyPi_ using the Python tool pip_.
 
 .. _PyPi: http://pypi.python.org/
 .. _pip: http://pypi.python.org/pypi/pip
@@ -85,21 +87,21 @@ Ubuntu 12.04::
     $ sudo apt-get install python-dev libxml2-dev libxslt1-dev libsasl2-dev libsqlite3-dev libssl-dev libldap2-dev libffi-dev
 
 
-Fedora 15::
+Fedora 19+::
 
-    $ sudo yum install python-sqlite2 python-lxml python-greenlet-devel python-ldap
+    $ sudo yum install python-sqlite2 python-lxml python-greenlet-devel python-ldap sqlite-devel openldap-devel python-devel libxslt-devel openssl-devel
 
-Mac OS X Lion (requires MacPorts_)::
+Mac OS X 10.9 (requires Homebrew_)::
 
-    $ sudo port install py-ldap
+    $ brew install python openssl gettext
 
-.. _MacPorts: http://www.macports.org/
+.. _Homebrew: http://brew.sh/
 
 PyPi Packages and VirtualEnv
 ----------------------------
 
-We recommend establishing a virtualenv to run keystone within. Virtualenv
-limits the python environment to just what you're installing as depdendencies,
+We recommend establishing a virtualenv to run keystone within. virtualenv
+limits the Python environment to just what you're installing as dependencies,
 useful to keep a clean environment for working on Keystone. The tools directory
 in keystone has a script already created to make this very simple::
 
@@ -129,7 +131,7 @@ dependencies directly into your system from the requires files::
     # Install the dependencies for developing, testing, and running keystone
     $ pip install -r test-requirements.txt
 
-    # Use python setup.py to link Keystone into python's site-packages
+    # Use 'python setup.py' to link Keystone into Python's site-packages
     $ python setup.py develop
 
 
@@ -137,7 +139,7 @@ Verifying Keystone is set up
 ============================
 
 Once set up, either directly or within a virtualenv, you should be able to
-invoke python and import the libraries. If you're using a virtualenv, don't
+invoke Python and import the libraries. If you're using a virtualenv, don't
 forget to activate it::
 
     $ source .venv/bin/activate
@@ -151,26 +153,3 @@ without issue::
 
 If you can import keystone successfully, you should be ready to move on to
 :doc:`developing`.
-
-Troubleshooting
-===============
-
-Eventlet segfaults on RedHat / Fedora
--------------------------------------
-
-[*If this is no longer an issue, please remove this section, thanks!*]
-
-On some OSes, specifically Fedora 15, the current versions of
-greenlet/eventlet segfault when running keystone. To fix this, install
-the development versions of greenlet and eventlet::
-
-    $ pip uninstall greenlet eventlet
-    $ cd <appropriate working directory>
-    $ hg clone https://bitbucket.org/ambroff/greenlet
-    $ cd greenlet
-    $ sudo python setup.py install
-
-    $ cd <appropriate working directory>
-    $ hg clone https://bitbucket.org/which_linden/eventlet
-    $ cd greenlet
-    $ sudo python setup.py install

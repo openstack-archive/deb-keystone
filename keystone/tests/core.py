@@ -26,14 +26,13 @@ import warnings
 
 import fixtures
 import logging
+from oslo.config import fixture as config_fixture
+import oslotest.base as oslotest
+from oslotest import mockpatch
 from paste import deploy
 import six
-import testtools
 from testtools import testcase
 import webob
-
-from keystone.openstack.common.fixture import mockpatch
-from keystone.openstack.common import gettextutils
 
 # NOTE(ayoung)
 # environment.use_eventlet must run before any of the code that will
@@ -42,21 +41,16 @@ from keystone.common import environment
 environment.use_eventlet()
 
 from keystone import auth
+from keystone import backends
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
-from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone.common import utils as common_utils
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common.db import options as db_options
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.fixture import config as config_fixture
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
-from keystone import service
 from keystone.tests import ksfixtures
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
@@ -87,6 +81,8 @@ def _calc_tmpdir():
 TMPDIR = _calc_tmpdir()
 
 CONF = config.CONF
+
+IN_MEM_DB_CONN_STRING = 'sqlite://'
 
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 os.makedirs(TMPDIR)
@@ -119,19 +115,6 @@ class dirs:
 DEFAULT_TEST_DB_FILE = dirs.tmp('test.db')
 
 
-def _initialize_sql_session():
-    # Make sure the DB is located in the correct location, in this case set
-    # the default value, as this should be able to be overridden in some
-    # test cases.
-    db_file = DEFAULT_TEST_DB_FILE
-    db_options.set_defaults(
-        sql_connection='sqlite:///%s' % db_file,
-        sqlite_db=db_file)
-
-
-_initialize_sql_session()
-
-
 def checkout_vendor(repo, rev):
     # TODO(termie): this function is a good target for some optimizations :PERF
     name = repo.split('/')[-1]
@@ -162,25 +145,6 @@ def checkout_vendor(repo, rev):
         LOG.warning(_('Failed to checkout %s'), repo)
     os.chdir(working_dir)
     return revdir
-
-
-def setup_database():
-    db = dirs.tmp('test.db')
-    pristine = dirs.tmp('test.db.pristine')
-
-    if os.path.exists(db):
-        os.unlink(db)
-    if not os.path.exists(pristine):
-        migration.db_sync(sql.get_engine(),
-                          migration_helpers.find_migrate_repo())
-        migration_helpers.sync_database_to_version(extension='revoke')
-        shutil.copyfile(db, pristine)
-    else:
-        shutil.copyfile(pristine, db)
-
-
-def teardown_database():
-    sql.cleanup()
 
 
 @atexit.register
@@ -329,7 +293,7 @@ class NoModule(object):
         sys.meta_path.insert(0, finder)
 
 
-class BaseTestCase(testtools.TestCase):
+class BaseTestCase(oslotest.BaseTestCase):
     """Light weight base test class.
 
     This is a placeholder that will eventually go away once thc
@@ -363,6 +327,9 @@ class TestCase(BaseTestCase):
         return copy.copy(self._config_file_list)
 
     def config_overrides(self):
+        # Exercise multiple worker process code paths
+        self.config_fixture.config(public_workers=2)
+        self.config_fixture.config(admin_workers=2)
         self.config_fixture.config(policy_file=dirs.etc('policy.json'))
         self.config_fixture.config(
             group='auth',
@@ -400,10 +367,24 @@ class TestCase(BaseTestCase):
             ca_certs='examples/pki/certs/cacert.pem')
         self.config_fixture.config(
             group='token',
-            driver='keystone.token.backends.kvs.Token')
+            driver='keystone.token.persistence.backends.kvs.Token')
         self.config_fixture.config(
             group='trust',
             driver='keystone.trust.backends.kvs.Trust')
+        self.config_fixture.config(
+            default_log_levels=[
+                'amqp=WARN',
+                'amqplib=WARN',
+                'boto=WARN',
+                'qpid=WARN',
+                'sqlalchemy=WARN',
+                'suds=INFO',
+                'oslo.messaging=INFO',
+                'iso8601=WARN',
+                'requests.packages.urllib3.connectionpool=WARN',
+                'routes.middleware=INFO',
+                'stevedore.extension=INFO',
+            ])
 
     def setUp(self):
         super(TestCase, self).setUp()
@@ -436,6 +417,21 @@ class TestCase(BaseTestCase):
         self.config_overrides()
 
         self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+
+        # NOTE(morganfainberg): This code is a copy from the oslo-incubator
+        # log module. This is not in a function or otherwise available to use
+        # without having a CONF object to setup logging. This should help to
+        # reduce the log size by limiting what we log (similar to how Keystone
+        # would run under mod_wsgi or eventlet).
+        for pair in CONF.default_log_levels:
+            mod, _sep, level_name = pair.partition('=')
+            logger = logging.getLogger(mod)
+            if sys.version_info < (2, 7):
+                level = logging.getLevelName(level_name)
+                logger.setLevel(level)
+            else:
+                logger.setLevel(level_name)
+
         warnings.filterwarnings('ignore', category=DeprecationWarning)
         self.useFixture(ksfixtures.Cache())
 
@@ -446,8 +442,8 @@ class TestCase(BaseTestCase):
         self.addCleanup(kvs.INMEMDB.clear)
 
         # Ensure Notification subscriotions and resource types are empty
-        self.addCleanup(notifications.SUBSCRIBERS.clear)
-        self.addCleanup(notifications._reset_notifier)
+        self.addCleanup(notifications.clear_subscribers)
+        self.addCleanup(notifications.reset_notifier)
 
         # Reset the auth-plugin registry
         self.addCleanup(self.clear_auth_plugin_registry)
@@ -470,22 +466,13 @@ class TestCase(BaseTestCase):
         kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
 
         self.clear_auth_plugin_registry()
-        drivers = service.load_backends()
+        drivers = backends.load_backends()
 
         drivers.update(dependency.resolve_future_dependencies())
 
         for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
         self.addCleanup(self.cleanup_instance(*drivers.keys()))
-
-        # The credential backend only supports SQL, so we always have to load
-        # the tables.
-        self.engine = sql.get_engine()
-        self.addCleanup(sql.cleanup)
-        self.addCleanup(self.cleanup_instance('engine'))
-
-        sql.ModelBase.metadata.create_all(bind=self.engine)
-        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -514,11 +501,15 @@ class TestCase(BaseTestCase):
                 fixtures_to_cleanup.append(attrname)
 
             for tenant in fixtures.TENANTS:
-                try:
-                    rv = self.assignment_api.create_project(
-                        tenant['id'], tenant)
-                except exception.Conflict:
-                    rv = self.assignment_api.get_project(tenant['id'])
+                if hasattr(self, 'tenant_%s' % tenant['id']):
+                    try:
+                        # This will clear out any roles on the project as well
+                        self.assignment_api.delete_project(tenant['id'])
+                    except exception.ProjectNotFound:
+                        pass
+                rv = self.assignment_api.create_project(
+                    tenant['id'], tenant)
+
                 attrname = 'tenant_%s' % tenant['id']
                 setattr(self, attrname, rv)
                 fixtures_to_cleanup.append(attrname)
@@ -536,15 +527,28 @@ class TestCase(BaseTestCase):
                 user_copy = user.copy()
                 tenants = user_copy.pop('tenants')
                 try:
-                    self.identity_api.create_user(user['id'], user_copy)
-                except exception.Conflict:
+                    existing_user = getattr(self, 'user_%s' % user['id'], None)
+                    if existing_user is not None:
+                        self.identity_api.delete_user(existing_user['id'])
+                except exception.UserNotFound:
                     pass
+
+                # For users, the manager layer will generate the ID
+                user_copy = self.identity_api.create_user(user_copy)
+                # Our tests expect that the password is still in the user
+                # record so that they can reference it, so put it back into
+                # the dict returned.
+                user_copy['password'] = user['password']
+
                 for tenant_id in tenants:
                     try:
-                        self.assignment_api.add_user_to_project(tenant_id,
-                                                                user['id'])
+                        self.assignment_api.add_user_to_project(
+                            tenant_id, user_copy['id'])
                     except exception.Conflict:
                         pass
+                # Use the ID from the fixture as the attribute name, so
+                # that our tests can easily reference each user dict, while
+                # the ID in the dict will be the real public ID.
                 attrname = 'user_%s' % user['id']
                 setattr(self, attrname, user_copy)
                 fixtures_to_cleanup.append(attrname)
@@ -601,11 +605,11 @@ class TestCase(BaseTestCase):
             if isinstance(expected_regexp, six.string_types):
                 expected_regexp = re.compile(expected_regexp)
 
-            if isinstance(exc_value.args[0], gettextutils.Message):
-                if not expected_regexp.search(six.text_type(exc_value)):
+            if isinstance(exc_value.args[0], unicode):
+                if not expected_regexp.search(unicode(exc_value)):
                     raise self.failureException(
                         '"%s" does not match "%s"' %
-                        (expected_regexp.pattern, six.text_type(exc_value)))
+                        (expected_regexp.pattern, unicode(exc_value)))
             else:
                 if not expected_regexp.search(str(exc_value)):
                     raise self.failureException(
@@ -755,7 +759,7 @@ class SQLDriverOverrides(object):
             driver='keystone.contrib.revoke.backends.sql.Revoke')
         self.config_fixture.config(
             group='token',
-            driver='keystone.token.backends.sql.Token')
+            driver='keystone.token.persistence.backends.sql.Token')
         self.config_fixture.config(
             group='trust',
             driver='keystone.trust.backends.sql.Trust')

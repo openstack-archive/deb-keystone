@@ -13,19 +13,18 @@
 # under the License.
 
 import copy
+import os
+import tempfile
 import uuid
 
 from six.moves import urllib
 
-from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone import config
-from keystone import contrib
 from keystone.contrib import oauth1
 from keystone.contrib.oauth1 import controllers
+from keystone.contrib.oauth1 import core
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common import importutils
+from keystone.openstack.common import jsonutils
 from keystone.tests import test_v3
 
 
@@ -38,14 +37,6 @@ class OAuth1Tests(test_v3.RestfulTestCase):
     EXTENSION_TO_ADD = 'oauth1_extension'
 
     CONSUMER_URL = '/OS-OAUTH1/consumers'
-
-    def setup_database(self):
-        super(OAuth1Tests, self).setup_database()
-        package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
-        package = importutils.import_module(package_name)
-        abs_path = migration_helpers.find_migrate_repo(package)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        migration.db_sync(sql.get_engine(), abs_path)
 
     def setUp(self):
         super(OAuth1Tests, self).setUp()
@@ -258,7 +249,9 @@ class OAuthFlowTests(OAuth1Tests):
 
         url, headers = self._create_request_token(self.consumer,
                                                   self.project_id)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -269,11 +262,15 @@ class OAuthFlowTests(OAuth1Tests):
         body = {'roles': [{'id': self.role_id}]}
         resp = self.put(url, body=body, expected_status=200)
         self.verifier = resp.result['token']['oauth_verifier']
+        self.assertTrue(all(i in core.VERIFIER_CHARS for i in self.verifier))
+        self.assertEqual(8, len(self.verifier))
 
         self.request_token.set_verifier(self.verifier)
         url, headers = self._create_access_token(self.consumer,
                                                  self.request_token)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         access_key = credentials['oauth_token'][0]
         access_secret = credentials['oauth_token_secret'][0]
@@ -304,12 +301,15 @@ class AccessTokenCRUDTests(OAuthFlowTests):
 
     def test_get_single_access_token(self):
         self.test_oauth_flow()
-        resp = self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
-                        % {'user_id': self.user_id,
-                           'key': self.access_token.key})
+        url = '/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s' % {
+              'user_id': self.user_id,
+              'key': self.access_token.key
+        }
+        resp = self.get(url)
         entity = resp.result['access_token']
         self.assertEqual(entity['id'], self.access_token.key)
         self.assertEqual(entity['consumer_id'], self.consumer['key'])
+        self.assertEqual('http://localhost/v3' + url, entity['links']['self'])
 
     def test_get_access_token_dne(self):
         self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
@@ -466,7 +466,7 @@ class AuthTokenTests(OAuthFlowTests):
     def test_token_chaining_is_not_allowed(self):
         self.test_oauth_flow()
 
-        #attempt to re-authenticate (token chain) with the given token
+        # attempt to re-authenticate (token chain) with the given token
         path = '/v3/auth/tokens/'
         auth_data = self.build_authentication_request(
             token=self.keystone_token_id)
@@ -486,6 +486,100 @@ class AuthTokenTests(OAuthFlowTests):
         self.assertRaises(exception.TokenNotFound, self.token_api.get_token,
                           self.keystone_token_id)
 
+    def _create_trust_get_token(self):
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            trust_id=trust['id'])
+
+        return self.get_requested_token(auth_data)
+
+    def _approve_request_token_url(self):
+        consumer = self._create_single_consumer()
+        consumer_id = consumer['id']
+        consumer_secret = consumer['secret']
+        self.consumer = {'key': consumer_id, 'secret': consumer_secret}
+        self.assertIsNotNone(self.consumer['secret'])
+
+        url, headers = self._create_request_token(self.consumer,
+                                                  self.project_id)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
+        credentials = urllib.parse.parse_qs(content.result)
+        request_key = credentials['oauth_token'][0]
+        request_secret = credentials['oauth_token_secret'][0]
+        self.request_token = oauth1.Token(request_key, request_secret)
+        self.assertIsNotNone(self.request_token.key)
+
+        url = self._authorize_request_token(request_key)
+
+        return url
+
+    def test_oauth_token_cannot_create_new_trust(self):
+        self.test_oauth_flow()
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.user_id,
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': ref},
+                  token=self.keystone_token_id,
+                  expected_status=403)
+
+    def test_oauth_token_cannot_authorize_request_token(self):
+        self.test_oauth_flow()
+        url = self._approve_request_token_url()
+        body = {'roles': [{'id': self.role_id}]}
+        self.put(url, body=body, token=self.keystone_token_id,
+                 expected_status=403)
+
+    def test_oauth_token_cannot_list_request_tokens(self):
+        self._set_policy({"identity:list_access_tokens": [],
+                          "identity:create_consumer": [],
+                          "identity:authorize_request_token": []})
+        self.test_oauth_flow()
+        url = '/users/%s/OS-OAUTH1/access_tokens' % self.user_id
+        self.get(url, token=self.keystone_token_id,
+                 expected_status=403)
+
+    def _set_policy(self, new_policy):
+        _unused, self.tmpfilename = tempfile.mkstemp()
+        self.config_fixture.config(policy_file=self.tmpfilename)
+        with open(self.tmpfilename, "w") as policyfile:
+            policyfile.write(jsonutils.dumps(new_policy))
+        self.addCleanup(os.remove, self.tmpfilename)
+
+    def test_trust_token_cannot_authorize_request_token(self):
+        trust_token = self._create_trust_get_token()
+        url = self._approve_request_token_url()
+        body = {'roles': [{'id': self.role_id}]}
+        self.put(url, body=body, token=trust_token, expected_status=403)
+
+    def test_trust_token_cannot_list_request_tokens(self):
+        self._set_policy({"identity:list_access_tokens": [],
+                          "identity:create_trust": []})
+        trust_token = self._create_trust_get_token()
+        url = '/users/%s/OS-OAUTH1/access_tokens' % self.user_id
+        self.get(url, token=trust_token, expected_status=403)
+
 
 class MaliciousOAuth1Tests(OAuth1Tests):
 
@@ -502,7 +596,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         consumer_secret = consumer['secret']
         consumer = {'key': consumer_id, 'secret': consumer_secret}
         url, headers = self._create_request_token(consumer, self.project_id)
-        self.post(url, headers=headers)
+        self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         url = self._authorize_request_token(uuid.uuid4().hex)
         body = {'roles': [{'id': self.role_id}]}
         self.put(url, body=body, expected_status=404)
@@ -514,7 +610,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         consumer = {'key': consumer_id, 'secret': consumer_secret}
 
         url, headers = self._create_request_token(consumer, self.project_id)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -537,7 +635,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         consumer = {'key': consumer_id, 'secret': consumer_secret}
 
         url, headers = self._create_request_token(consumer, self.project_id)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         request_key = credentials['oauth_token'][0]
 
@@ -559,7 +659,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
 
         url, headers = self._create_request_token(self.consumer,
                                                   self.project_id)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -580,7 +682,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
 
         url, headers = self._create_request_token(self.consumer,
                                                   self.project_id)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -595,7 +699,9 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         self.request_token.set_verifier(self.verifier)
         url, headers = self._create_access_token(self.consumer,
                                                  self.request_token)
-        content = self.post(url, headers=headers)
+        content = self.post(
+            url, headers=headers,
+            response_content_type='application/x-www-urlformencoded')
         credentials = urllib.parse.parse_qs(content.result)
         access_key = credentials['oauth_token'][0]
         access_secret = credentials['oauth_token_secret'][0]

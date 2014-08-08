@@ -29,8 +29,8 @@ CONF = config.CONF
 class ExceptionTestCase(tests.TestCase):
     def assertValidJsonRendering(self, e):
         resp = wsgi.render_exception(e)
-        self.assertEqual(resp.status_int, e.code)
-        self.assertEqual(resp.status, '%s %s' % (e.code, e.title))
+        self.assertEqual(e.code, resp.status_int)
+        self.assertEqual('%s %s' % (e.code, e.title), resp.status)
 
         j = jsonutils.loads(resp.body)
         self.assertIsNotNone(j.get('error'))
@@ -81,7 +81,7 @@ class ExceptionTestCase(tests.TestCase):
         e = exception.Error(message)
 
         try:
-            self.assertEqual(six.text_type(e), message)
+            self.assertEqual(message, six.text_type(e))
         except UnicodeEncodeError:
             self.fail("unicode error message not supported")
 
@@ -89,15 +89,15 @@ class ExceptionTestCase(tests.TestCase):
         e = exception.ValidationError(attribute='xx',
                                       target='Long \xe2\x80\x93 Dash')
 
-        self.assertIn(u'\u2013', e.message)
+        self.assertIn(u'\u2013', six.text_type(e))
 
     def test_invalid_unicode_string(self):
         # NOTE(jamielennox): This is a complete failure case so what is
-        # returned in the e.message is not that important so long as there is
-        # an error with a message
+        # returned in the exception message is not that important so long
+        # as there is an error with a message
         e = exception.ValidationError(attribute='xx',
                                       target='\xe7a va')
-        self.assertIn('%(attribute)', e.message)
+        self.assertIn('%(attribute)', six.text_type(e))
 
 
 class UnexpectedExceptionTestCase(ExceptionTestCase):
@@ -133,7 +133,10 @@ class UnexpectedExceptionTestCase(ExceptionTestCase):
 
         e = subclass(debug_info=self.exc_str)
         expected = subclass.debug_message_format % {'debug_info': self.exc_str}
-        self.assertEqual(expected, six.text_type(e))
+        translated_amendment = six.text_type(exception.SecurityError.amendment)
+        self.assertEqual(
+            expected + six.text_type(' ') + translated_amendment,
+            six.text_type(e))
 
     def test_unexpected_error_custom_message_no_debug(self):
         self.config_fixture.config(debug=False)
@@ -144,8 +147,10 @@ class UnexpectedExceptionTestCase(ExceptionTestCase):
     def test_unexpected_error_custom_message_debug(self):
         self.config_fixture.config(debug=True)
         e = exception.UnexpectedError(self.exc_str)
-        self.assertEqual(self.exc_str,
-                         six.text_type(e))
+        translated_amendment = six.text_type(exception.SecurityError.amendment)
+        self.assertEqual(
+            self.exc_str + six.text_type(' ') + translated_amendment,
+            six.text_type(e))
 
 
 class SecurityErrorTestCase(ExceptionTestCase):

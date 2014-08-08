@@ -18,6 +18,7 @@ Helpers for comparing version strings.
 """
 
 import functools
+
 import pkg_resources
 
 from keystone.openstack.common.gettextutils import _
@@ -30,19 +31,19 @@ LOG = logging.getLogger(__name__)
 class deprecated(object):
     """A decorator to mark callables as deprecated.
 
-    deprecated logs a deprecation message when the callable it decorates
-    is used. The message will include the release where the callable was
-    deprecated, the release where is may be removed and possibly an
-    optional replacement.
+    This decorator logs a deprecation message when the callable it decorates is
+    used. The message will include the release where the callable was
+    deprecated, the release where it may be removed and possibly an optional
+    replacement.
 
     Examples:
 
-    1. Specifing the required deprecated release
+    1. Specifying the required deprecated release
 
     >>> @deprecated(as_of=deprecated.ICEHOUSE)
     ... def a(): pass
 
-    2. Specifing a replacement:
+    2. Specifying a replacement:
 
     >>> @deprecated(as_of=deprecated.ICEHOUSE, in_favor_of='f()')
     ... def b(): pass
@@ -54,16 +55,24 @@ class deprecated(object):
 
     """
 
+    # NOTE(morganfainberg): Bexar is used for unit test purposes, it is
+    # expected we maintain a gap between Bexar and Folsom in this list.
+    BEXAR = 'B'
     FOLSOM = 'F'
     GRIZZLY = 'G'
     HAVANA = 'H'
     ICEHOUSE = 'I'
+    JUNO = 'J'
 
     _RELEASES = {
+        # NOTE(morganfainberg): Bexar is used for unit test purposes, it is
+        # expected we maintain a gap between Bexar and Folsom in this list.
+        'B': 'Bexar',
         'F': 'Folsom',
         'G': 'Grizzly',
         'H': 'Havana',
         'I': 'Icehouse',
+        'J': 'Juno',
     }
 
     _deprecated_msg_with_alternative = _(

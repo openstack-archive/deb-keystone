@@ -22,7 +22,7 @@ from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 
 
@@ -49,20 +49,19 @@ def v2_deprecated(f):
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
-    LOG.debug(_('RBAC: Authorizing %(action)s(%(kwargs)s)'), {
+    LOG.debug('RBAC: Authorizing %(action)s(%(kwargs)s)', {
         'action': action,
         'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
 
     # see if auth context has already been created. If so use it.
     if ('environment' in context and
             authorization.AUTH_CONTEXT_ENV in context['environment']):
-        LOG.debug(_('RBAC: using auth context from the request environment'))
+        LOG.debug('RBAC: using auth context from the request environment')
         return context['environment'].get(authorization.AUTH_CONTEXT_ENV)
 
     # now build the auth context from the incoming auth token
     try:
-        LOG.debug(_('RBAC: building auth context from the incoming '
-                    'auth token'))
+        LOG.debug('RBAC: building auth context from the incoming auth token')
         # TODO(ayoung): These two functions return the token in different
         # formats.  However, the call
         # to get_token hits the caching layer, and does not validate the
@@ -147,8 +146,8 @@ def protected(callback=None):
                 policy_dict.update(kwargs)
                 self.policy_api.enforce(creds,
                                         action,
-                                        authorization.flatten(policy_dict))
-                LOG.debug(_('RBAC: Authorization granted'))
+                                        utils.flatten_dict(policy_dict))
+                LOG.debug('RBAC: Authorization granted')
             return f(self, context, *args, **kwargs)
         return inner
     return wrapper
@@ -178,7 +177,7 @@ def filterprotected(*filters):
                         if item in context['query_string']:
                             target[item] = context['query_string'][item]
 
-                    LOG.debug(_('RBAC: Adding query filter params (%s)'), (
+                    LOG.debug('RBAC: Adding query filter params (%s)', (
                         ', '.join(['%s=%s' % (item, target[item])
                                   for item in target])))
 
@@ -188,9 +187,9 @@ def filterprotected(*filters):
 
                 self.policy_api.enforce(creds,
                                         action,
-                                        authorization.flatten(target))
+                                        utils.flatten_dict(target))
 
-                LOG.debug(_('RBAC: Authorization granted'))
+                LOG.debug('RBAC: Authorization granted')
             else:
                 LOG.warning(_('RBAC: Bypassing authorization'))
             return f(self, context, filters, **kwargs)
@@ -313,6 +312,14 @@ class V3Controller(wsgi.Application):
         return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
 
     @classmethod
+    def full_url(cls, context, path=None):
+        url = cls.base_url(context, path)
+        if context['environment'].get('QUERY_STRING'):
+            url = '%s?%s' % (url, context['environment']['QUERY_STRING'])
+
+        return url
+
+    @classmethod
     def _add_self_referential_link(cls, context, ref):
         ref.setdefault('links', {})
         ref['links']['self'] = cls.base_url(context) + '/' + ref['id']
@@ -355,7 +362,7 @@ class V3Controller(wsgi.Application):
         container = {cls.collection_name: refs}
         container['links'] = {
             'next': None,
-            'self': cls.base_url(context, path=context['path']),
+            'self': cls.full_url(context, path=context['path']),
             'previous': None}
 
         if list_limited:
@@ -381,19 +388,18 @@ class V3Controller(wsgi.Application):
         NOT_LIMITED = False
         LIMITED = True
 
-        if hints is None or hints.get_limit() is None:
+        if hints is None or hints.limit is None:
             # No truncation was requested
             return NOT_LIMITED, refs
 
-        list_limit = hints.get_limit()
-        if list_limit.get('truncated', False):
+        if hints.limit.get('truncated', False):
             # The driver did truncate the list
             return LIMITED, refs
 
-        if len(refs) > list_limit['limit']:
+        if len(refs) > hints.limit['limit']:
             # The driver layer wasn't able to truncate it for us, so we must
             # do it here
-            return LIMITED, refs[:list_limit['limit']]
+            return LIMITED, refs[:hints.limit['limit']]
 
         return NOT_LIMITED, refs
 
@@ -447,12 +453,12 @@ class V3Controller(wsgi.Application):
 
             return False
 
-        for filter in hints.filters():
+        for filter in hints.filters:
             if filter['comparator'] == 'equals':
                 attr = filter['name']
                 value = filter['value']
                 refs = [r for r in refs if _attr_match(
-                    authorization.flatten(r).get(attr), value)]
+                    utils.flatten_dict(r).get(attr), value)]
             else:
                 # It might be an inexact filter
                 refs = [r for r in refs if _inexact_attr_match(
@@ -545,19 +551,51 @@ class V3Controller(wsgi.Application):
                 raise exception.ValidationError(_('Cannot change Domain ID'))
 
     def _assign_unique_id(self, ref):
-        """Generates and assigns a unique identifer to a reference."""
+        """Generates and assigns a unique identifier to a reference."""
         ref = ref.copy()
         ref['id'] = uuid.uuid4().hex
         return ref
 
-    def _get_domain_id_for_request(self, context):
-        """Get the domain_id for a v3 call."""
+    def _get_domain_id_for_list_request(self, context):
+        """Get the domain_id for a v3 list call.
 
-        if context['is_admin']:
-            return CONF.identity.default_domain_id
+        If we running with multiple domain drivers, then the caller must
+        specify a domain_id either as a filter or as part of the token scope.
 
-        # Fish the domain_id out of the token
-        #
+        """
+        if not CONF.identity.domain_specific_drivers_enabled:
+            # We don't need to specify a domain ID in this case
+            return
+
+        if context['query_string'].get('domain_id') is not None:
+            return context['query_string'].get('domain_id')
+
+        try:
+            token_ref = self.token_api.get_token(context['token_id'])
+            token = token_ref['token_data']['token']
+        except KeyError:
+            raise exception.ValidationError(
+                _('domain_id is required as part of entity'))
+        except exception.TokenNotFound:
+            LOG.warning(_('Invalid token found while getting domain ID '
+                          'for list request'))
+            raise exception.Unauthorized()
+
+        if 'domain' in token:
+            return token['domain']['id']
+        else:
+            LOG.warning(
+                _('No domain information specified as part of list request'))
+            raise exception.Unauthorized()
+
+    def _get_domain_id_from_token(self, context):
+        """Get the domain_id for a v3 create call.
+
+        In the case of a v3 create entity call that does not specify a domain
+        ID, the spec says that we should use the domain scoping from the token
+        being used.
+
+        """
         # We could make this more efficient by loading the domain_id
         # into the context in the wrapper function above (since
         # this version of normalize_domain will only be called inside
@@ -565,19 +603,30 @@ class V3Controller(wsgi.Application):
         # worth the duplication of state
         try:
             token_ref = self.token_api.get_token(context['token_id'])
+        except KeyError:
+            # This might happen if we use the Admin token, for instance
+            raise exception.ValidationError(
+                _('A domain-scoped token must be used'))
         except exception.TokenNotFound:
-            LOG.warning(_('Invalid token in _get_domain_id_for_request'))
+            LOG.warning(_('Invalid token found while getting domain ID '
+                          'for list request'))
             raise exception.Unauthorized()
 
-        if 'domain' in token_ref:
-            return token_ref['domain']['id']
+        if token_ref.get('token_data', {}).get('token', {}).get('domain', {}):
+            return token_ref['token_data']['token']['domain']['id']
         else:
+            # TODO(henry-nash): We should issue an exception here since if
+            # a v3 call does not explicitly specify the domain_id in the
+            # entity, it should be using a domain scoped token.  However,
+            # the current tempest heat tests issue a v3 call without this.
+            # This is raised as bug #1283539.  Once this is fixed, we
+            # should remove the line below and replace it with an error.
             return CONF.identity.default_domain_id
 
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id if not specified in a v3 call."""
         if 'domain_id' not in ref:
-            ref['domain_id'] = self._get_domain_id_for_request(context)
+            ref['domain_id'] = self._get_domain_id_from_token(context)
         return ref
 
     @staticmethod
@@ -612,8 +661,8 @@ class V3Controller(wsgi.Application):
             policy_dict.update(prep_info['input_attr'])
             self.policy_api.enforce(creds,
                                     action,
-                                    authorization.flatten(policy_dict))
-            LOG.debug(_('RBAC: Authorization granted'))
+                                    utils.flatten_dict(policy_dict))
+            LOG.debug('RBAC: Authorization granted')
 
     @classmethod
     def check_immutable_params(cls, ref):
@@ -632,40 +681,12 @@ class V3Controller(wsgi.Application):
         blocked_keys = ref_keys.difference(cls._mutable_parameters)
 
         if not blocked_keys:
-            #No immutable parameters changed
+            # No immutable parameters changed
             return
 
         exception_args = {'target': cls.__name__,
-                          'attribute': blocked_keys.pop()}
+                          'attributes': ', '.join(blocked_keys)}
         raise exception.ImmutableAttributeError(**exception_args)
-
-    @classmethod
-    def check_required_params(cls, ref):
-        """Raise exception when required parameter is not in ref.
-
-        Check whether the ref dictionary representing a request has the
-        required parameters to fulfill the request. If not, raise an
-        exception. This method checks only root-level keys from a ref
-        dictionary.
-
-        :param ref: a dictionary representing deserialized request to be
-                    stored
-        :raises: :class:`keystone.exception.ValidationError`
-
-        """
-        ref_keys = set(ref.keys())
-        missing_args = []
-
-        for required in cls._required_parameters:
-            if required not in ref_keys:
-                missing_args.append(required)
-
-        if len(missing_args) > 0:
-            exception_args = {'target': cls.__name__,
-                              'attribute': missing_args.pop()}
-            raise exception.ValidationError(**exception_args)
-        else:
-            return
 
     @classmethod
     def filter_params(cls, ref):

@@ -15,14 +15,12 @@
 import six
 import sqlalchemy
 
-from keystone import assignment
+from keystone import assignment as keystone_assignment
 from keystone import clean
 from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 
 
 CONF = config.CONF
@@ -35,13 +33,7 @@ class AssignmentType:
     GROUP_DOMAIN = 'GroupDomain'
 
 
-class Assignment(assignment.Driver):
-
-    # Internal interface to manage the database
-    def db_sync(self, version=None):
-        migration.db_sync(
-            sql.get_engine(), migration_helpers.find_migrate_repo(),
-            version=version)
+class Assignment(keystone_assignment.Driver):
 
     def _get_project(self, session, project_id):
         project_ref = session.query(Project).get(project_id)
@@ -320,6 +312,28 @@ class Assignment(assignment.Driver):
                 sql_constraints).distinct()
         return [role.to_dict() for role in query.all()]
 
+    def get_group_project_roles(self, groups, project_id, project_domain_id):
+        sql_constraints = sqlalchemy.and_(
+            RoleAssignment.type == AssignmentType.GROUP_PROJECT,
+            RoleAssignment.target_id == project_id)
+        if CONF.os_inherit.enabled:
+            sql_constraints = sqlalchemy.or_(
+                sql_constraints,
+                sqlalchemy.and_(
+                    RoleAssignment.type == AssignmentType.GROUP_DOMAIN,
+                    RoleAssignment.inherited,
+                    RoleAssignment.target_id == project_domain_id))
+        sql_constraints = sqlalchemy.and_(sql_constraints,
+                                          RoleAssignment.actor_id.in_(groups))
+
+        # NOTE(morganfainberg): Only select the columns we actually care about
+        # here, in this case role_id.
+        with sql.transaction() as session:
+            query = session.query(RoleAssignment.role_id).filter(
+                sql_constraints).distinct()
+
+        return [result.role_id for result in query.all()]
+
     def _list_entities_for_groups(self, group_ids, entity):
         if entity == Domain:
             assignment_type = AssignmentType.GROUP_DOMAIN
@@ -588,7 +602,7 @@ class Role(sql.ModelBase, sql.DictBase):
     __tablename__ = 'role'
     attributes = ['id', 'name']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(255), nullable=False)
+    name = sql.Column(sql.String(255), unique=True, nullable=False)
     extra = sql.Column(sql.JsonBlob())
     __table_args__ = (sql.UniqueConstraint('name'), {})
 

@@ -44,6 +44,7 @@ Getting Started
     setup
     installing
     configuration
+    configure_federation
     configuringservices
     community
 
@@ -64,6 +65,7 @@ Developers Documentation
    developing
    architecture
    middlewarearchitecture
+   http-api
    api_curl_examples
    apache-httpd
    external-auth

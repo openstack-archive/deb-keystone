@@ -20,11 +20,16 @@ from keystone import exception
 from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests.ksfixtures import database
 from keystone.tests import test_backend
 
 
 class KvsIdentity(tests.TestCase, test_backend.IdentityTests):
     def setUp(self):
+        # NOTE(dstanek): setup the database for subsystems that only have a
+        # SQL backend (like credentials)
+        self.useFixture(database.Database())
+
         super(KvsIdentity, self).setUp()
         self.load_backends()
         self.load_fixtures(default_fixtures)
@@ -34,6 +39,12 @@ class KvsIdentity(tests.TestCase, test_backend.IdentityTests):
         self.config_fixture.config(
             group='identity',
             driver='keystone.identity.backends.kvs.Identity')
+
+    def test_password_hashed(self):
+        driver = self.identity_api._select_identity_driver(
+            self.user_foo['domain_id'])
+        user_ref = driver._get_user(self.user_foo['id'])
+        self.assertNotEqual(user_ref['password'], self.user_foo['password'])
 
     def test_list_projects_for_user_with_grants(self):
         self.skipTest('kvs backend is now deprecated')
@@ -103,8 +114,7 @@ class KvsToken(tests.TestCase, test_backend.TokenTests):
         expire_delta = datetime.timedelta(seconds=86400)
 
         # NOTE(morganfainberg): Directly access the data cache since we need to
-        # get expired tokens as well as valid tokens. token_api.list_tokens()
-        # will not return any expired tokens in the list.
+        # get expired tokens as well as valid tokens.
         user_key = self.token_api.driver._prefix_user_id(user_id)
         user_token_list = self.token_api.driver._store.get(user_key)
         valid_token_ref = self.token_api.get_token(valid_token_id)
@@ -213,8 +223,11 @@ class KvsCatalog(tests.TestCase, test_backend.CatalogTests):
         self.assertRaises(exception.NotFound, f)
 
     def test_get_v3_catalog_endpoint_disabled(self):
+        # There's no need to have disabled endpoints in the kvs catalog. Those
+        # endpoints should just be removed from the store. This just tests
+        # what happens currently when the super impl is called.
         f = super(KvsCatalog, self).test_get_v3_catalog_endpoint_disabled
-        self.assertRaises(exception.NotImplemented, f)
+        self.assertRaises(exception.NotFound, f)
 
 
 class KvsTokenCacheInvalidation(tests.TestCase,
@@ -232,3 +245,14 @@ class KvsTokenCacheInvalidation(tests.TestCase,
         self.config_fixture.config(
             group='token',
             driver='keystone.token.backends.kvs.Token')
+
+
+class KvsInheritanceTests(tests.TestCase, test_backend.InheritanceTests):
+    def setUp(self):
+        # NOTE(dstanek): setup the database for subsystems that only have a
+        # SQL backend (like credentials)
+        self.useFixture(database.Database())
+
+        super(KvsInheritanceTests, self).setUp()
+        self.load_backends()
+        self.load_fixtures(default_fixtures)

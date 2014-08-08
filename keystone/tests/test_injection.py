@@ -12,13 +12,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import testtools
 import uuid
 
 from keystone.common import dependency
+from keystone import tests
 
 
-class TestDependencyInjection(testtools.TestCase):
+class TestDependencyInjection(tests.BaseTestCase):
     def setUp(self):
         super(TestDependencyInjection, self).setUp()
         self.addCleanup(dependency.reset)
@@ -144,14 +144,14 @@ class TestDependencyInjection(testtools.TestCase):
 
         # dependencies should be naturally inherited
         self.assertEqual(
-            ParentConsumer._dependencies,
-            set(['first_api']))
+            set(['first_api']),
+            ParentConsumer._dependencies)
         self.assertEqual(
-            ChildConsumer._dependencies,
-            set(['first_api', 'second_api']))
+            set(['first_api', 'second_api']),
+            ChildConsumer._dependencies)
         self.assertEqual(
-            consumer._dependencies,
-            set(['first_api', 'second_api']))
+            set(['first_api', 'second_api']),
+            consumer._dependencies)
 
         # the expected dependencies should be available to the consumer
         self.assertIs(consumer.first_api, first_api)

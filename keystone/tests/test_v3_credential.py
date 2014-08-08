@@ -209,10 +209,11 @@ class TestCredentialTrustScoped(test_v3.RestfulTestCase):
     def setUp(self):
         super(TestCredentialTrustScoped, self).setUp()
 
-        self.trustee_user_id = uuid.uuid4().hex
         self.trustee_user = self.new_user_ref(domain_id=self.domain_id)
-        self.trustee_user['id'] = self.trustee_user_id
-        self.identity_api.create_user(self.trustee_user_id, self.trustee_user)
+        password = self.trustee_user['password']
+        self.trustee_user = self.identity_api.create_user(self.trustee_user)
+        self.trustee_user['password'] = password
+        self.trustee_user_id = self.trustee_user['id']
 
     def config_overrides(self):
         super(TestCredentialTrustScoped, self).config_overrides()
@@ -237,7 +238,7 @@ class TestCredentialTrustScoped(test_v3.RestfulTestCase):
             user_id=self.trustee_user['id'],
             password=self.trustee_user['password'],
             trust_id=trust['id'])
-        r = self.post('/auth/tokens', body=auth_data)
+        r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectTrustScopedTokenResponse(r, self.user)
         trust_id = r.result['token']['OS-TRUST:trust']['id']
         token_id = r.headers.get('X-Subject-Token')

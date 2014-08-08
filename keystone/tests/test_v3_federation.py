@@ -16,15 +16,10 @@ import uuid
 from keystone.auth import controllers as auth_controllers
 from keystone.common import dependency
 from keystone.common import serializer
-from keystone.common import sql
-from keystone.common.sql import migration_helpers
 from keystone import config
-from keystone import contrib
 from keystone.contrib.federation import controllers as federation_controllers
 from keystone.contrib.federation import utils as mapping_utils
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.tests import mapping_fixtures
@@ -44,14 +39,6 @@ class FederationTests(test_v3.RestfulTestCase):
 
     EXTENSION_NAME = 'federation'
     EXTENSION_TO_ADD = 'federation_extension'
-
-    def setup_database(self):
-        super(FederationTests, self).setup_database()
-        package_name = '.'.join((contrib.__name__, self.EXTENSION_NAME))
-        package = importutils.import_module(package_name)
-        abs_path = migration_helpers.find_migrate_repo(package)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        migration.db_sync(sql.get_engine(), abs_path)
 
 
 class FederatedIdentityProviderTests(FederationTests):
@@ -84,7 +71,7 @@ class FederatedIdentityProviderTests(FederationTests):
         return (idp_id, idp)
 
     def _get_idp(self, idp_id):
-        """Fetch IdP entity based on it's id."""
+        """Fetch IdP entity based on its id."""
         url = self.base_url(suffix=idp_id)
         resp = self.get(url)
         return resp
@@ -622,6 +609,28 @@ class MappingRuleEngineTests(FederationTests):
         self.assertRaises(exception.Unauthorized,
                           rp.process, assertion)
 
+    def test_rule_engine_regex_many_groups(self):
+        """Should return group CONTRACTOR_GROUP_ID.
+
+        The TESTER_ASSERTION should successfully have a match in
+        MAPPING_TESTER_REGEX. This will test the case where many groups
+        are in the assertion, and a regex value is used to try and find
+        a match.
+
+        """
+
+        mapping = mapping_fixtures.MAPPING_TESTER_REGEX
+        assertion = mapping_fixtures.TESTER_ASSERTION
+        rp = mapping_utils.RuleProcessor(mapping['rules'])
+        values = rp.process(assertion)
+
+        user_name = assertion.get('UserName')
+        group_ids = values.get('group_ids')
+        name = values.get('name')
+
+        self.assertEqual(user_name, name)
+        self.assertIn(mapping_fixtures.TESTER_GROUP_ID, group_ids)
+
     def test_rule_engine_any_one_of_many_rules(self):
         """Should return group CONTRACTOR_GROUP_ID.
 
@@ -761,11 +770,8 @@ class FederatedTokenTests(FederationTests):
         }
     }
 
-    AUTH_URL = '/auth/tokens'
-
-    def setUp(self):
-        super(FederationTests, self).setUp()
-        self.load_sample_data()
+    def load_fixtures(self, fixtures):
+        super(FederationTests, self).load_fixtures(fixtures)
         self.load_federation_sample_data()
 
     def idp_ref(self, id=None):
@@ -876,7 +882,7 @@ class FederatedTokenTests(FederationTests):
         # Remove 'extras' if empty or None,
         # as JSON and XML (de)serializers treat
         # them differently, making dictionaries
-        # comparisions fail.
+        # comparisons fail.
         if not token_resp['token'].get('extras'):
             token_resp['token'].pop('extras')
         self._assertSerializeToXML(token_resp)
@@ -909,8 +915,8 @@ class FederatedTokenTests(FederationTests):
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_scope_to_project_once(self):
-        r = self.post(self.AUTH_URL,
-                      body=self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
+        r = self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
         token_resp = r.result['token']
         project_id = token_resp['project']['id']
         self.assertEqual(project_id, self.proj_employees['id'])
@@ -922,9 +928,9 @@ class FederatedTokenTests(FederationTests):
     def test_scope_to_bad_project(self):
         """Scope unscoped token with a project we don't have access to."""
 
-        self.post(self.AUTH_URL,
-                  body=self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_CUSTOMER,
-                  expected_status=401)
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_CUSTOMER,
+            expected_status=401)
 
     def test_scope_to_project_multiple_times(self):
         """Try to scope the unscoped token multiple times.
@@ -941,7 +947,7 @@ class FederatedTokenTests(FederationTests):
         project_ids = (self.proj_employees['id'],
                        self.proj_customers['id'])
         for body, project_id_ref in zip(bodies, project_ids):
-            r = self.post(self.AUTH_URL, body=body)
+            r = self.v3_authenticate_token(body)
             token_resp = r.result['token']
             project_id = token_resp['project']['id']
             self.assertEqual(project_id, project_id_ref)
@@ -949,9 +955,9 @@ class FederatedTokenTests(FederationTests):
 
     def test_scope_token_from_nonexistent_unscoped_token(self):
         """Try to scope token from non-existent unscoped token."""
-        self.post(self.AUTH_URL,
-                  body=self.TOKEN_SCOPE_PROJECT_FROM_NONEXISTENT_TOKEN,
-                  expected_status=404)
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_FROM_NONEXISTENT_TOKEN,
+            expected_status=404)
 
     def test_issue_token_from_rules_without_user(self):
         api = auth_controllers.Auth()
@@ -973,8 +979,7 @@ class FederatedTokenTests(FederationTests):
                           assertion='CONTRACTOR_ASSERTION')
 
     def test_scope_to_domain_once(self):
-        r = self.post(self.AUTH_URL,
-                      body=self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER)
+        r = self.v3_authenticate_token(self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER)
         token_resp = r.result['token']
         domain_id = token_resp['domain']['id']
         self.assertEqual(domain_id, self.domainA['id'])
@@ -998,7 +1003,7 @@ class FederatedTokenTests(FederationTests):
                       self.domainC['id'])
 
         for body, domain_id_ref in zip(bodies, domain_ids):
-            r = self.post(self.AUTH_URL, body=body)
+            r = self.v3_authenticate_token(body)
             token_resp = r.result['token']
             domain_id = token_resp['domain']['id']
             self.assertEqual(domain_id, domain_id_ref)
@@ -1064,7 +1069,7 @@ class FederatedTokenTests(FederationTests):
         v3_scope_request = self._scope_request(employee_unscoped_token_id,
                                                'project', project['id'])
 
-        r = self.post(self.AUTH_URL, body=v3_scope_request)
+        r = self.v3_authenticate_token(v3_scope_request)
         token_resp = r.result['token']
         project_id = token_resp['project']['id']
         self.assertEqual(project_id, project['id'])
@@ -1086,8 +1091,7 @@ class FederatedTokenTests(FederationTests):
         # create group and role
         group = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(group['id'],
-                                       group)
+        group = self.identity_api.create_group(group)
         role = self.new_role_ref()
         self.assignment_api.create_role(role['id'],
                                         role)
@@ -1140,9 +1144,7 @@ class FederatedTokenTests(FederationTests):
             token_id, 'project',
             self.project_all['id'])
 
-        self.post(self.AUTH_URL,
-                  body=scoped_token,
-                  expected_status=500)
+        self.v3_authenticate_token(scoped_token, expected_status=500)
 
     def test_assertion_prefix_parameter(self):
         """Test parameters filtering based on the prefix.
@@ -1209,18 +1211,17 @@ class FederatedTokenTests(FederationTests):
         # Create and add groups
         self.group_employees = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(self.group_employees['id'],
-                                       self.group_employees)
+        self.group_employees = (
+            self.identity_api.create_group(self.group_employees))
 
         self.group_customers = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(self.group_customers['id'],
-                                       self.group_customers)
+        self.group_customers = (
+            self.identity_api.create_group(self.group_customers))
 
         self.group_admins = self.new_group_ref(
             domain_id=self.domainA['id'])
-        self.identity_api.create_group(self.group_admins['id'],
-                                       self.group_admins)
+        self.group_admins = self.identity_api.create_group(self.group_admins)
 
         # Create and add roles
         self.role_employee = self.new_role_ref()

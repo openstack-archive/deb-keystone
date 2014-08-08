@@ -22,7 +22,7 @@ from keystone import auth
 from keystone.common import config
 from keystone.common import dependency
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import versionutils
 
 
@@ -94,6 +94,18 @@ class Domain(Base):
 
         user_ref = self.identity_api.get_user_by_name(username, domain_id)
         return user_ref
+
+
+@dependency.requires('assignment_api', 'identity_api')
+class KerberosDomain(Domain):
+    """Allows `kerberos` as a method."""
+    method = 'kerberos'
+
+    def _authenticate(self, remote_user, context):
+        auth_type = context['environment'].get('AUTH_TYPE')
+        if auth_type != 'Negotiate':
+            raise exception.Unauthorized(_("auth_type is not Negotiate"))
+        return super(KerberosDomain, self)._authenticate(remote_user, context)
 
 
 class ExternalDefault(DefaultDomain):

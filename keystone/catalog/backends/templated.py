@@ -20,7 +20,7 @@ from keystone.catalog.backends import kvs
 from keystone.catalog import core
 from keystone import config
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
 
@@ -115,14 +115,15 @@ class Catalog(kvs.Catalog):
         for region, region_ref in six.iteritems(self.templates):
             o[region] = {}
             for service, service_ref in six.iteritems(region_ref):
-                o[region][service] = {}
-                for k, v in six.iteritems(service_ref):
-                    o[region][service][k] = core.format_url(v, d)
+                service_data = {}
+                try:
+                    for k, v in six.iteritems(service_ref):
+                        service_data[k] = core.format_url(v, d)
+                except exception.MalformedEndpoint:
+                    continue  # this failure is already logged in format_url()
+                o[region][service] = service_data
 
         return o
-
-    def get_v3_catalog(self, user_id, tenant_id, metadata=None):
-        raise exception.NotImplemented()
 
 
 @versionutils.deprecated(

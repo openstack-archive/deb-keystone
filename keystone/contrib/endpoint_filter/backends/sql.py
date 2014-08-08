@@ -13,11 +13,8 @@
 # under the License.
 
 from keystone.common import sql
-from keystone.common.sql import migration_helpers
-from keystone.contrib import endpoint_filter
 from keystone import exception
-from keystone.openstack.common.db.sqlalchemy import migration
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 
 
 class ProjectEndpoint(sql.ModelBase, sql.DictBase):
@@ -33,11 +30,6 @@ class ProjectEndpoint(sql.ModelBase, sql.DictBase):
 
 
 class EndpointFilter(object):
-    # Internal interface to manage the database
-
-    def db_sync(self, version=None):
-        abs_path = migration_helpers.find_migrate_repo(endpoint_filter)
-        migration.db_sync(sql.get_engine(), abs_path, version=version)
 
     @sql.handle_conflicts(conflict_type='project_endpoint')
     def add_endpoint_to_project(self, endpoint_id, project_id):
@@ -81,3 +73,17 @@ class EndpointFilter(object):
         query = query.filter_by(endpoint_id=endpoint_id)
         endpoint_filter_refs = query.all()
         return endpoint_filter_refs
+
+    def delete_association_by_endpoint(self, endpoint_id):
+        session = sql.get_session()
+        with session.begin():
+            query = session.query(ProjectEndpoint)
+            query = query.filter_by(endpoint_id=endpoint_id)
+            query.delete(synchronize_session=False)
+
+    def delete_association_by_project(self, project_id):
+        session = sql.get_session()
+        with session.begin():
+            query = session.query(ProjectEndpoint)
+            query = query.filter_by(project_id=project_id)
+            query.delete(synchronize_session=False)

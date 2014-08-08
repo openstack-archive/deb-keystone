@@ -21,16 +21,16 @@ class Cache(fixtures.Fixture):
     """
 
     def setUp(self):
+        super(Cache, self).setUp()
+
         # NOTE(dstanek):  We must remove the existing cache backend in the
         # setUp instead of the tearDown because it defaults to a no-op cache
         # and we want the configure call below to create the correct backend.
 
         # NOTE(morganfainberg):  The only way to reconfigure the CacheRegion
         # object on each setUp() call is to remove the .backend property.
-        if hasattr(cache.REGION, 'backend'):
+        if cache.REGION.is_configured:
             del cache.REGION.backend
 
         # ensure the cache region instance is setup
         cache.configure_cache_region(cache.REGION)
-
-        super(Cache, self).setUp()

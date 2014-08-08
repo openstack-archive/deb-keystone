@@ -21,7 +21,7 @@ from keystone.common import serializer
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
@@ -131,6 +131,11 @@ class JsonBodyMiddleware(wsgi.Middleware):
             if not params_parsed:
                 params_parsed = {}
 
+        if not isinstance(params_parsed, dict):
+            e = exception.ValidationError(attribute='valid JSON object',
+                                          target='request body')
+            return wsgi.render_exception(e, request=request)
+
         params = {}
         for k, v in six.iteritems(params_parsed):
             if k in ('self', 'context'):
@@ -220,13 +225,13 @@ class RequestBodySizeLimiter(wsgi.Middleware):
 
     @webob.dec.wsgify()
     def __call__(self, req):
-
-        if req.content_length > CONF.max_request_body_size:
+        if req.content_length is None:
+            if req.is_body_readable:
+                limiter = utils.LimitingReader(req.body_file,
+                                               CONF.max_request_body_size)
+                req.body_file = limiter
+        elif req.content_length > CONF.max_request_body_size:
             raise exception.RequestTooLarge()
-        if req.content_length is None and req.is_body_readable:
-            limiter = utils.LimitingReader(req.body_file,
-                                           CONF.max_request_body_size)
-            req.body_file = limiter
         return self.application
 
 
@@ -268,8 +273,8 @@ class AuthContextMiddleware(wsgi.Middleware):
 
     def process_request(self, request):
         if AUTH_TOKEN_HEADER not in request.headers:
-            LOG.debug(_('Auth token not in the request header. '
-                        'Will not build auth context.'))
+            LOG.debug(('Auth token not in the request header. '
+                       'Will not build auth context.'))
             return
 
         if authorization.AUTH_CONTEXT_ENV in request.environ:
@@ -278,5 +283,5 @@ class AuthContextMiddleware(wsgi.Middleware):
             return
 
         auth_context = self._build_auth_context(request)
-        LOG.debug(_('RBAC: auth_context: %s'), auth_context)
+        LOG.debug('RBAC: auth_context: %s', auth_context)
         request.environ[authorization.AUTH_CONTEXT_ENV] = auth_context

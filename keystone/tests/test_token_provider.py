@@ -648,7 +648,8 @@ def create_v2_token():
     return {
         "access": {
             "token": {
-                "expires": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+                "expires": timeutils.isotime(timeutils.utcnow() +
+                                             FUTURE_DELTA),
                 "issued_at": "2013-05-21T00:02:43.941473Z",
                 "tenant": {
                     "enabled": True,
@@ -679,7 +680,7 @@ def create_v3_token():
     return {
         "token": {
             'methods': [],
-            "expires_at": timeutils.isotime(CURRENT_DATE + FUTURE_DELTA),
+            "expires_at": timeutils.isotime(timeutils.utcnow() + FUTURE_DELTA),
             "issued_at": "2013-05-21T00:02:43.941473Z",
         }
     }
@@ -721,50 +722,18 @@ class TestTokenProvider(tests.TestCase):
             token.provider.V3,
             self.token_provider_api.get_token_version(
                 SAMPLE_V3_TOKEN_WITH_EMBEDED_VERSION))
-        self.assertRaises(token.provider.UnsupportedTokenVersionException,
+        self.assertRaises(exception.UnsupportedTokenVersionException,
                           self.token_provider_api.get_token_version,
                           'bogus')
 
-    def test_token_format_provider_mismatch(self):
-        self.config_fixture.config(group='signing', token_format='UUID')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.PKI_PROVIDER)
-        try:
-            token.provider.Manager()
-            raise Exception(
-                'expecting ValueError on token provider misconfiguration')
-        except exception.UnexpectedError:
-            pass
-
-        self.config_fixture.config(group='signing', token_format='PKI')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        try:
-            token.provider.Manager()
-            raise Exception(
-                'expecting ValueError on token provider misconfiguration')
-        except exception.UnexpectedError:
-            pass
-
-        # should be OK as token_format and provider aligns
-        self.config_fixture.config(group='signing', token_format='PKI')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.PKI_PROVIDER)
-        token.provider.Manager()
-
-        self.config_fixture.config(group='signing', token_format='UUID')
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        token.provider.Manager()
-
     def test_default_token_format(self):
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.PKI_PROVIDER)
+        self.assertEqual(token.provider.PKIZ_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_uuid_token_format_and_no_provider(self):
         self.config_fixture.config(group='signing', token_format='UUID')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_default_providers_without_token_format(self):
         self.config_fixture.config(group='token',
@@ -775,6 +744,10 @@ class TestTokenProvider(tests.TestCase):
                                    provider=token.provider.PKI_PROVIDER)
         token.provider.Manager()
 
+        self.config_fixture.config(group='token',
+                                   provider=token.provider.PKIZ_PROVIDER)
+        token.provider.Manager()
+
     def test_unsupported_token_format(self):
         self.config_fixture.config(group='signing', token_format='CUSTOM')
         self.assertRaises(exception.UnexpectedError,
@@ -783,33 +756,33 @@ class TestTokenProvider(tests.TestCase):
     def test_uuid_provider(self):
         self.config_fixture.config(group='token',
                                    provider=token.provider.UUID_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
     def test_provider_override_token_format(self):
         self.config_fixture.config(
             group='token',
             provider='keystone.token.providers.pki.Test')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         'keystone.token.providers.pki.Test')
+        self.assertEqual('keystone.token.providers.pki.Test',
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='UUID')
         self.config_fixture.config(group='token',
                                    provider=token.provider.UUID_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.UUID_PROVIDER)
+        self.assertEqual(token.provider.UUID_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='PKI')
         self.config_fixture.config(group='token',
                                    provider=token.provider.PKI_PROVIDER)
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         token.provider.PKI_PROVIDER)
+        self.assertEqual(token.provider.PKI_PROVIDER,
+                         token.provider.Manager.get_token_provider())
 
         self.config_fixture.config(group='signing', token_format='CUSTOM')
         self.config_fixture.config(group='token',
                                    provider='my.package.MyProvider')
-        self.assertEqual(token.provider.Manager.get_token_provider(),
-                         'my.package.MyProvider')
+        self.assertRaises(exception.UnexpectedError,
+                          token.provider.Manager.get_token_provider)
 
     def test_provider_token_expiration_validation(self):
         self.assertRaises(exception.TokenNotFound,
@@ -821,28 +794,35 @@ class TestTokenProvider(tests.TestCase):
         self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api._is_valid_token,
                           SAMPLE_MALFORMED_TOKEN)
-        self.assertEqual(
-            None,
+        self.assertIsNone(
             self.token_provider_api._is_valid_token(create_v2_token()))
-        self.assertEqual(
-            None,
+        self.assertIsNone(
             self.token_provider_api._is_valid_token(create_v3_token()))
+
+
+class TestTokenProviderOAuth1(tests.TestCase):
+    def setUp(self):
+        super(TestTokenProviderOAuth1, self).setUp()
+        self.load_backends()
+
+    def config_overrides(self):
+        super(TestTokenProviderOAuth1, self).config_overrides()
+        self.config_fixture.config(group='token',
+                                   provider=token.provider.UUID_PROVIDER)
 
     def test_uuid_provider_no_oauth_fails_oauth(self):
         self.load_fixtures(default_fixtures)
-        self.config_fixture.config(group='token',
-                                   provider=token.provider.UUID_PROVIDER)
-        driver = token.provider.Manager().driver
-        driver.oauth_api = None
+        self.token_provider_api.driver.oauth_api = None
         self.assertRaises(exception.Forbidden,
-                          driver.issue_v3_token,
+                          self.token_provider_api.driver.issue_v3_token,
                           self.user_foo['id'], ['oauth1'])
 
 
-class TestPKIProvider(object):
+# NOTE(ayoung): renamed to avoid automatic test detection
+class PKIProviderTests(object):
 
     def setUp(self):
-        super(TestPKIProvider, self).setUp()
+        super(PKIProviderTests, self).setUp()
 
         from keystoneclient.common import cms
         self.cms = cms
@@ -873,7 +853,7 @@ class TestPKIProvider(object):
                           token_data)
 
 
-class TestPKIProviderWithEventlet(TestPKIProvider, tests.TestCase):
+class TestPKIProviderWithEventlet(PKIProviderTests, tests.TestCase):
 
     def setUp(self):
         # force keystoneclient.common.cms to use eventlet's subprocess
@@ -883,7 +863,7 @@ class TestPKIProviderWithEventlet(TestPKIProvider, tests.TestCase):
         super(TestPKIProviderWithEventlet, self).setUp()
 
 
-class TestPKIProviderWithStdlib(TestPKIProvider, tests.TestCase):
+class TestPKIProviderWithStdlib(PKIProviderTests, tests.TestCase):
 
     def setUp(self):
         # force keystoneclient.common.cms to use the stdlib subprocess

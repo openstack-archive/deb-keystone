@@ -25,12 +25,12 @@ from pycadf import cadftype
 from pycadf import eventfactory
 from pycadf import resource
 
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import log
+
 
 notifier_opts = [
     cfg.StrOpt('default_publisher_id',
-               default=None,
                help='Default publisher_id for outgoing notifications'),
 ]
 
@@ -39,7 +39,7 @@ LOG = log.getLogger(__name__)
 # a new action is supported.
 ACTIONS = frozenset(['created', 'deleted', 'disabled', 'updated'])
 # resource types that can be notified
-SUBSCRIBERS = {}
+_SUBSCRIBERS = {}
 _notifier = None
 
 
@@ -61,11 +61,12 @@ class ManagerNotificationWrapper(object):
 
     """
     def __init__(self, operation, resource_type, public=True,
-                 resource_id_arg_index=1):
+                 resource_id_arg_index=1, result_id_arg_attr=None):
         self.operation = operation
         self.resource_type = resource_type
         self.public = public
         self.resource_id_arg_index = resource_id_arg_index
+        self.result_id_arg_attr = result_id_arg_attr
 
     def __call__(self, f):
         def wrapper(*args, **kwargs):
@@ -75,7 +76,10 @@ class ManagerNotificationWrapper(object):
             except Exception:
                 raise
             else:
-                resource_id = args[self.resource_id_arg_index]
+                if self.result_id_arg_attr is not None:
+                    resource_id = result[self.result_id_arg_attr]
+                else:
+                    resource_id = args[self.resource_id_arg_index]
                 _send_notification(
                     self.operation,
                     self.resource_type,
@@ -129,8 +133,8 @@ def register_event_callback(event, resource_type, callbacks):
             msg = _('Method not callable: %s') % callback
             LOG.error(msg)
             raise TypeError(msg)
-        SUBSCRIBERS.setdefault(event, {}).setdefault(resource_type, set())
-        SUBSCRIBERS[event][resource_type].add(callback)
+        _SUBSCRIBERS.setdefault(event, {}).setdefault(resource_type, set())
+        _SUBSCRIBERS[event][resource_type].add(callback)
 
         if LOG.logger.getEffectiveLevel() <= logging.INFO:
             # Do this only if its going to appear in the logs.
@@ -144,18 +148,17 @@ def register_event_callback(event, resource_type, callbacks):
 
 def notify_event_callbacks(service, resource_type, operation, payload):
     """Sends a notification to registered extensions."""
-    if operation in SUBSCRIBERS:
-        if resource_type in SUBSCRIBERS[operation]:
-            for cb in SUBSCRIBERS[operation][resource_type]:
+    if operation in _SUBSCRIBERS:
+        if resource_type in _SUBSCRIBERS[operation]:
+            for cb in _SUBSCRIBERS[operation][resource_type]:
                 subst_dict = {'cb_name': cb.__name__,
                               'service': service,
                               'resource_type': resource_type,
                               'operation': operation,
                               'payload': payload}
-                LOG.debug(_('Invoking callback %(cb_name)s for event '
-                          '%(service)s %(resource_type)s %(operation)s for'
-                          '%(payload)s'),
-                          subst_dict)
+                LOG.debug(('Invoking callback %(cb_name)s for event '
+                           '%(service)s %(resource_type)s %(operation)s for'
+                           '%(payload)s'), subst_dict)
                 cb(service, resource_type, operation, payload)
 
 
@@ -181,7 +184,11 @@ def _get_notifier():
     return _notifier
 
 
-def _reset_notifier():
+def clear_subscribers():
+    _SUBSCRIBERS.clear()
+
+
+def reset_notifier():
     global _notifier
     _notifier = None
 
@@ -199,19 +206,19 @@ def _send_notification(operation, resource_type, resource_id, public=True):
                     if False, the event will only be sent via
                     notify_event_callbacks to in process listeners.
     """
-    context = {}
     payload = {'resource_info': resource_id}
     service = 'identity'
-    event_type = '%(service)s.%(resource_type)s.%(operation)s' % {
-        'service': service,
-        'resource_type': resource_type,
-        'operation': operation}
 
     notify_event_callbacks(service, resource_type, operation, payload)
 
     if public:
         notifier = _get_notifier()
         if notifier:
+            context = {}
+            event_type = '%(service)s.%(resource_type)s.%(operation)s' % {
+                'service': service,
+                'resource_type': resource_type,
+                'operation': operation}
             try:
                 notifier.info(context, event_type, payload)
             except Exception:
@@ -282,11 +289,10 @@ def _send_audit_notification(action, initiator, outcome):
         action=action,
         initiator=initiator,
         target=resource.Resource(typeURI=taxonomy.ACCOUNT_USER),
-        observer=resource.Resource(typeURI='service/security'))
+        observer=resource.Resource(typeURI=taxonomy.SERVICE_SECURITY))
 
     context = {}
     payload = event.as_dict()
-    LOG.debug(_('CADF Event: %s'), payload)
     service = 'identity'
     event_type = '%(service)s.%(action)s' % {'service': service,
                                              'action': action}

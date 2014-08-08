@@ -24,10 +24,12 @@ from keystone.common import authorization
 from keystone.common import cache
 from keystone.common import serializer
 from keystone import config
+from keystone import exception
 from keystone import middleware
 from keystone.openstack.common import timeutils
 from keystone.policy.backends import rules
 from keystone import tests
+from keystone.tests.ksfixtures import database
 from keystone.tests import rest
 
 
@@ -37,17 +39,94 @@ DEFAULT_DOMAIN_ID = 'default'
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 
-class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
+class AuthTestMixin(object):
+    """To hold auth building helper functions."""
+    def build_auth_scope(self, project_id=None, project_name=None,
+                         project_domain_id=None, project_domain_name=None,
+                         domain_id=None, domain_name=None, trust_id=None):
+        scope_data = {}
+        if project_id or project_name:
+            scope_data['project'] = {}
+            if project_id:
+                scope_data['project']['id'] = project_id
+            else:
+                scope_data['project']['name'] = project_name
+                if project_domain_id or project_domain_name:
+                    project_domain_json = {}
+                    if project_domain_id:
+                        project_domain_json['id'] = project_domain_id
+                    else:
+                        project_domain_json['name'] = project_domain_name
+                    scope_data['project']['domain'] = project_domain_json
+        if domain_id or domain_name:
+            scope_data['domain'] = {}
+            if domain_id:
+                scope_data['domain']['id'] = domain_id
+            else:
+                scope_data['domain']['name'] = domain_name
+        if trust_id:
+            scope_data['OS-TRUST:trust'] = {}
+            scope_data['OS-TRUST:trust']['id'] = trust_id
+        return scope_data
+
+    def build_password_auth(self, user_id=None, username=None,
+                            user_domain_id=None, user_domain_name=None,
+                            password=None):
+        password_data = {'user': {}}
+        if user_id:
+            password_data['user']['id'] = user_id
+        else:
+            password_data['user']['name'] = username
+            if user_domain_id or user_domain_name:
+                password_data['user']['domain'] = {}
+                if user_domain_id:
+                    password_data['user']['domain']['id'] = user_domain_id
+                else:
+                    password_data['user']['domain']['name'] = user_domain_name
+        password_data['user']['password'] = password
+        return password_data
+
+    def build_token_auth(self, token):
+        return {'id': token}
+
+    def build_authentication_request(self, token=None, user_id=None,
+                                     username=None, user_domain_id=None,
+                                     user_domain_name=None, password=None,
+                                     kerberos=False, **kwargs):
+        """Build auth dictionary.
+
+        It will create an auth dictionary based on all the arguments
+        that it receives.
+        """
+        auth_data = {}
+        auth_data['identity'] = {'methods': []}
+        if kerberos:
+            auth_data['identity']['methods'].append('kerberos')
+            auth_data['identity']['kerberos'] = {}
+        if token:
+            auth_data['identity']['methods'].append('token')
+            auth_data['identity']['token'] = self.build_token_auth(token)
+        if user_id or username:
+            auth_data['identity']['methods'].append('password')
+            auth_data['identity']['password'] = self.build_password_auth(
+                user_id, username, user_domain_id, user_domain_name, password)
+        if kwargs:
+            auth_data['scope'] = self.build_auth_scope(**kwargs)
+        return {'auth': auth_data}
+
+
+class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
+                      AuthTestMixin):
     def config_files(self):
         config_files = super(RestfulTestCase, self).config_files()
         config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
         return config_files
 
-    def setup_database(self):
-        tests.setup_database()
-
-    def teardown_database(self):
-        tests.teardown_database()
+    def get_extensions(self):
+        extensions = set(['revoke'])
+        if hasattr(self, 'EXTENSION_NAME'):
+            extensions.add(self.EXTENSION_NAME)
+        return extensions
 
     def generate_paste_config(self):
         new_paste_file = None
@@ -75,18 +154,16 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         if new_paste_file:
             app_conf = 'config:%s' % (new_paste_file)
 
+        self.useFixture(database.Database(self.get_extensions()))
+
         super(RestfulTestCase, self).setUp(app_conf=app_conf)
 
         self.empty_context = {'environment': {}}
 
-        #drop the policy rules
+        # drop the policy rules
         self.addCleanup(rules.reset)
 
-        self.addCleanup(self.teardown_database)
-
     def load_backends(self):
-        self.setup_database()
-
         # ensure the cache region instance is setup
         cache.configure_cache_region(cache.REGION)
 
@@ -95,7 +172,25 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def load_fixtures(self, fixtures):
         self.load_sample_data()
 
+    def _populate_default_domain(self):
+        if CONF.database.connection == tests.IN_MEM_DB_CONN_STRING:
+            # NOTE(morganfainberg): If an in-memory db is being used, be sure
+            # to populate the default domain, this is typically done by
+            # a migration, but the in-mem db uses model definitions  to create
+            # the schema (no migrations are run).
+            try:
+                self.assignment_api.get_domain(DEFAULT_DOMAIN_ID)
+            except exception.DomainNotFound:
+                domain = {'description': (u'Owns users and tenants (i.e. '
+                                          u'projects) available on Identity '
+                                          u'API v2.'),
+                          'enabled': True,
+                          'id': DEFAULT_DOMAIN_ID,
+                          'name': u'Default'}
+                self.assignment_api.create_domain(DEFAULT_DOMAIN_ID, domain)
+
     def load_sample_data(self):
+        self._populate_default_domain()
         self.domain_id = uuid.uuid4().hex
         self.domain = self.new_domain_ref()
         self.domain['id'] = self.domain_id
@@ -107,10 +202,11 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         self.project['id'] = self.project_id
         self.assignment_api.create_project(self.project_id, self.project)
 
-        self.user_id = uuid.uuid4().hex
         self.user = self.new_user_ref(domain_id=self.domain_id)
-        self.user['id'] = self.user_id
-        self.identity_api.create_user(self.user_id, self.user)
+        password = self.user['password']
+        self.user = self.identity_api.create_user(self.user)
+        self.user['password'] = password
+        self.user_id = self.user['id']
 
         self.default_domain_project_id = uuid.uuid4().hex
         self.default_domain_project = self.new_project_ref(
@@ -119,12 +215,13 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         self.assignment_api.create_project(self.default_domain_project_id,
                                            self.default_domain_project)
 
-        self.default_domain_user_id = uuid.uuid4().hex
         self.default_domain_user = self.new_user_ref(
             domain_id=DEFAULT_DOMAIN_ID)
-        self.default_domain_user['id'] = self.default_domain_user_id
-        self.identity_api.create_user(self.default_domain_user_id,
-                                      self.default_domain_user)
+        password = self.default_domain_user['password']
+        self.default_domain_user = (
+            self.identity_api.create_user(self.default_domain_user))
+        self.default_domain_user['password'] = password
+        self.default_domain_user_id = self.default_domain_user['id']
 
         # create & grant policy.json's default role for admin_required
         self.role_id = uuid.uuid4().hex
@@ -326,13 +423,25 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def get_requested_token(self, auth):
         """Request the specific token we want."""
 
-        r = self.admin_request(
-            method='POST',
-            path='/v3/auth/tokens',
-            body=auth)
+        r = self.v3_authenticate_token(auth)
         return r.headers.get('X-Subject-Token')
 
+    def v3_authenticate_token(self, auth, expected_status=201):
+        return self.admin_request(method='POST',
+                                  path='/v3/auth/tokens',
+                                  body=auth,
+                                  expected_status=expected_status)
+
+    def v3_noauth_request(self, path, **kwargs):
+        # request does not require auth token header
+        path = '/v3' + path
+        return self.admin_request(path=path, **kwargs)
+
     def v3_request(self, path, **kwargs):
+        # check to see if caller requires token for the API call.
+        if kwargs.pop('noauth', None):
+            return self.v3_noauth_request(path, **kwargs)
+
         # Check if the caller has passed in auth details for
         # use in requesting the token
         auth_arg = kwargs.pop('auth', None)
@@ -356,6 +465,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         r = self.v3_request(method='HEAD', path=path, **kwargs)
         if 'expected_status' not in kwargs:
             self.assertResponseStatus(r, 204)
+        self.assertEqual('', r.body)
         return r
 
     def post(self, path, **kwargs):
@@ -393,10 +503,13 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         self.assertIsNotNone(resp['error'].get('message'))
         self.assertEqual(int(resp['error']['code']), r.status_code)
 
-    def assertValidListLinks(self, links):
+    def assertValidListLinks(self, links, resource_url=None):
         self.assertIsNotNone(links)
         self.assertIsNotNone(links.get('self'))
         self.assertThat(links['self'], matchers.StartsWith('http://localhost'))
+
+        if resource_url:
+            self.assertThat(links['self'], matchers.EndsWith(resource_url))
 
         self.assertIn('next', links)
         if links['next'] is not None:
@@ -409,7 +522,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
                             matchers.StartsWith('http://localhost'))
 
     def assertValidListResponse(self, resp, key, entity_validator, ref=None,
-                                expected_length=None, keys_to_check=None):
+                                expected_length=None, keys_to_check=None,
+                                resource_url=None):
         """Make assertions common to all API list responses.
 
         If a reference is provided, it's ID will be searched for in the
@@ -426,7 +540,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
             self.assertNotEmpty(entities)
 
         # collections should have relational links
-        self.assertValidListLinks(resp.result.get('links'))
+        self.assertValidListLinks(resp.result.get('links'),
+                                  resource_url=resource_url)
 
         for entity in entities:
             self.assertIsNotNone(entity)
@@ -615,17 +730,46 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
 
         return self.assertDictEqual(normalize(a), normalize(b))
 
+    # catalog validation
+
+    def assertValidCatalogResponse(self, resp, *args, **kwargs):
+        self.assertEqual(['catalog', 'links'], resp.json.keys())
+        self.assertValidCatalog(resp.json['catalog'])
+        self.assertIn('links', resp.json)
+        self.assertIsInstance(resp.json['links'], dict)
+        self.assertEqual(['self'], resp.json['links'].keys())
+        self.assertEqual(
+            'http://localhost/v3/catalog',
+            resp.json['links']['self'])
+
+    def assertValidCatalog(self, entity):
+        self.assertIsInstance(entity, list)
+        self.assertTrue(len(entity) > 0)
+        for service in entity:
+            self.assertIsNotNone(service.get('id'))
+            self.assertIsNotNone(service.get('name'))
+            self.assertIsNotNone(service.get('type'))
+            self.assertNotIn('enabled', service)
+            self.assertTrue(len(service['endpoints']) > 0)
+            for endpoint in service['endpoints']:
+                self.assertIsNotNone(endpoint.get('id'))
+                self.assertIsNotNone(endpoint.get('interface'))
+                self.assertIsNotNone(endpoint.get('url'))
+                self.assertNotIn('enabled', endpoint)
+                self.assertNotIn('legacy_endpoint_id', endpoint)
+                self.assertNotIn('service_id', endpoint)
+
     # region validation
 
     def assertValidRegionListResponse(self, resp, *args, **kwargs):
-        #NOTE(jaypipes): I have to pass in a blank keys_to_check parameter
-        #                below otherwise the base assertValidEntity method
-        #                tries to find a "name" and an "enabled" key in the
-        #                returned ref dicts. The issue is, I don't understand
-        #                how the service and endpoint entity assertions below
-        #                actually work (they don't raise assertions), since
-        #                AFAICT, the service and endpoint tables don't have
-        #                a "name" column either... :(
+        # NOTE(jaypipes): I have to pass in a blank keys_to_check parameter
+        #                 below otherwise the base assertValidEntity method
+        #                 tries to find a "name" and an "enabled" key in the
+        #                 returned ref dicts. The issue is, I don't understand
+        #                 how the service and endpoint entity assertions below
+        #                 actually work (they don't raise assertions), since
+        #                 AFAICT, the service and endpoint tables don't have
+        #                 a "name" column either... :(
         return self.assertValidListResponse(
             resp,
             'regions',
@@ -864,7 +1008,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         return entity
 
     def assertValidRoleAssignmentListResponse(self, resp, ref=None,
-                                              expected_length=None):
+                                              expected_length=None,
+                                              resource_url=None):
 
         entities = resp.result.get('role_assignments')
 
@@ -875,7 +1020,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
             self.assertNotEmpty(entities)
 
         # collections should have relational links
-        self.assertValidListLinks(resp.result.get('links'))
+        self.assertValidListLinks(resp.result.get('links'),
+                                  resource_url=resource_url)
 
         for entity in entities:
             self.assertIsNotNone(entity)
@@ -994,6 +1140,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
     def assertValidTrust(self, entity, ref=None, summary=False):
         self.assertIsNotNone(entity.get('trustor_user_id'))
         self.assertIsNotNone(entity.get('trustee_user_id'))
+        self.assertIsNotNone(entity.get('impersonation'))
 
         self.assertIn('expires_at', entity)
         if entity['expires_at'] is not None:
@@ -1033,83 +1180,16 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
 
         return entity
 
-    def build_auth_scope(self, project_id=None, project_name=None,
-                         project_domain_id=None, project_domain_name=None,
-                         domain_id=None, domain_name=None, trust_id=None):
-        scope_data = {}
-        if project_id or project_name:
-            scope_data['project'] = {}
-            if project_id:
-                scope_data['project']['id'] = project_id
-            else:
-                scope_data['project']['name'] = project_name
-                if project_domain_id or project_domain_name:
-                    project_domain_json = {}
-                    if project_domain_id:
-                        project_domain_json['id'] = project_domain_id
-                    else:
-                        project_domain_json['name'] = project_domain_name
-                    scope_data['project']['domain'] = project_domain_json
-        if domain_id or domain_name:
-            scope_data['domain'] = {}
-            if domain_id:
-                scope_data['domain']['id'] = domain_id
-            else:
-                scope_data['domain']['name'] = domain_name
-        if trust_id:
-            scope_data['OS-TRUST:trust'] = {}
-            scope_data['OS-TRUST:trust']['id'] = trust_id
-        return scope_data
-
-    def build_password_auth(self, user_id=None, username=None,
-                            user_domain_id=None, user_domain_name=None,
-                            password=None):
-        password_data = {'user': {}}
-        if user_id:
-            password_data['user']['id'] = user_id
-        else:
-            password_data['user']['name'] = username
-            if user_domain_id or user_domain_name:
-                password_data['user']['domain'] = {}
-                if user_domain_id:
-                    password_data['user']['domain']['id'] = user_domain_id
-                else:
-                    password_data['user']['domain']['name'] = user_domain_name
-        password_data['user']['password'] = password
-        return password_data
-
-    def build_token_auth(self, token):
-        return {'id': token}
-
-    def build_authentication_request(self, token=None, user_id=None,
-                                     username=None, user_domain_id=None,
-                                     user_domain_name=None, password=None,
-                                     **kwargs):
-        """Build auth dictionary.
-
-        It will create an auth dictionary based on all the arguments
-        that it receives.
-        """
-        auth_data = {}
-        auth_data['identity'] = {'methods': []}
-        if token:
-            auth_data['identity']['methods'].append('token')
-            auth_data['identity']['token'] = self.build_token_auth(token)
-        if user_id or username:
-            auth_data['identity']['methods'].append('password')
-            auth_data['identity']['password'] = self.build_password_auth(
-                user_id, username, user_domain_id, user_domain_name, password)
-        if kwargs:
-            auth_data['scope'] = self.build_auth_scope(**kwargs)
-        return {'auth': auth_data}
-
     def build_external_auth_request(self, remote_user,
-                                    remote_domain=None, auth_data=None):
-        context = {'environment': {'REMOTE_USER': remote_user}}
+                                    remote_domain=None, auth_data=None,
+                                    kerberos=False):
+        context = {'environment': {'REMOTE_USER': remote_user,
+                                   'AUTH_TYPE': 'Negotiate'}}
         if remote_domain:
             context['environment']['REMOTE_DOMAIN'] = remote_domain
         if not auth_data:
-            auth_data = self.build_authentication_request()['auth']
+            auth_data = self.build_authentication_request(
+                kerberos=kerberos)['auth']
         no_context = None
         auth_info = auth.controllers.AuthInfo.create(no_context, auth_data)
         auth_context = {'extras': {}, 'method_names': []}
@@ -1121,7 +1201,7 @@ class VersionTestCase(RestfulTestCase):
         pass
 
 
-#NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
+# NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
 # because we need the token
 class AuthContextMiddlewareTestCase(RestfulTestCase):
     def _mock_request_object(self, token_id):

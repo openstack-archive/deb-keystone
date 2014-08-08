@@ -31,7 +31,7 @@ In general:
 * Clients making calls to the service will pass in an authentication token.
 * The Keystone middleware will look for and validate that token, taking the
   appropriate action.
-* It will also retrive additional information from the token such as user
+* It will also retrieve additional information from the token such as user
   name, id, tenant name, id, roles, etc...
 
 The middleware will pass those data down to the service as headers. More
@@ -47,7 +47,7 @@ Admin Token
 For a default installation of Keystone, before you can use the REST API, you
 need to define an authorization token. This is configured in ``keystone.conf``
 file under the section ``[DEFAULT]``. In the sample file provided with the
-keystone project, the line defining this token is::
+Keystone project, the line defining this token is::
 
     [DEFAULT]
     admin_token = ADMIN
@@ -62,10 +62,10 @@ Setting up tenants, users, and roles
 
 You need to minimally define a tenant, user, and role to link the tenant and
 user as the most basic set of details to get other services authenticating
-and authorizing with keystone.
+and authorizing with Keystone.
 
 You will also want to create service users for nova, glance, swift, etc. to
-be able to use to authenticate users against keystone. The ``auth_token``
+be able to use to authenticate users against Keystone. The ``auth_token``
 middleware supports using either the shared secret described above as
 `admin_token` or users for each service.
 
@@ -134,7 +134,7 @@ template, as described above - in which case everything is detailed in that
 template.
 
 The other is a SQL backend for the catalog service, in which case after
-keystone is online, you need to add the services to the catalog::
+Keystone is online, you need to add the services to the catalog::
 
     keystone service-create --name=nova \
                                    --type=compute \
@@ -166,7 +166,7 @@ get more details of the middleware in :doc:`middlewarearchitecture`.
 Configuring Nova to use Keystone
 --------------------------------
 
-When configuring Nova, it is important to create a admin service token for
+When configuring Nova, it is important to create an admin service token for
 the service (from the Configuration step above) and include that as the key
 'admin_token' in Nova's api-paste.ini [filter:authtoken] section or in
 nova.conf [keystone_authtoken] section.
@@ -174,7 +174,7 @@ nova.conf [keystone_authtoken] section.
 Configuring Swift to use Keystone
 ---------------------------------
 
-Similar to Nova, swift can be configured to use Keystone for authentication
+Similar to Nova, Swift can be configured to use Keystone for authentication
 rather than its built in 'tempauth'. Refer to the `overview_auth` documentation
 in Swift. 
 
@@ -184,7 +184,7 @@ Auth-Token Middleware with Username and Password
 It is also possible to configure Keystone's auth_token middleware using the
 'admin_user' and 'admin_password' options. When using the 'admin_user' and
 'admin_password' options the 'admin_token' parameter is optional. If
-'admin_token' is specified it will by used only if the specified token is
+'admin_token' is specified it will be used only if the specified token is
 still valid.
 
 Here is an example paste config filter that makes use of the 'admin_user' and
@@ -199,7 +199,7 @@ Here is an example paste config filter that makes use of the 'admin_user' and
     admin_password = keystone123
 
 It should be noted that when using this option an admin tenant/role
-relationship is required. The admin user is granted access to to the 'Admin'
+relationship is required. The admin user is granted access to the 'Admin'
 role to the 'admin' tenant.
 
 The auth_token middleware can also be configured in nova.conf

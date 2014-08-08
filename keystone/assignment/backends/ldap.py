@@ -16,6 +16,7 @@ from __future__ import absolute_import
 import uuid
 
 import ldap as ldap
+import ldap.filter
 
 from keystone import assignment
 from keystone import clean
@@ -24,8 +25,8 @@ from keystone.common import ldap as common_ldap
 from keystone.common import models
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone.identity.backends import ldap as ldap_identity
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -41,9 +42,9 @@ class Assignment(assignment.Driver):
         self.LDAP_PASSWORD = CONF.ldap.password
         self.suffix = CONF.ldap.suffix
 
-        #These are the only deep dependency from assignment back
-        #to identity.  The assumption is that if you are using
-        #LDAP for assignments, you are using it for Id as well.
+        # These are the only deep dependency from assignment back
+        # to identity.  The assumption is that if you are using
+        # LDAP for assignments, you are using it for Id as well.
         self.user = ldap_identity.UserApi(CONF)
         self.group = ldap_identity.GroupApi(CONF)
 
@@ -82,6 +83,18 @@ class Assignment(assignment.Driver):
         if 'name' in tenant:
             tenant['name'] = clean.project_name(tenant['name'])
         return self._set_default_domain(self.project.update(tenant_id, tenant))
+
+    def get_group_project_roles(self, groups, project_id, project_domain_id):
+        self.get_project(project_id)
+        group_dns = [self.group._id_to_dn(group_id) for group_id in groups]
+        role_list = [self.role._dn_to_id(role_assignment.role_dn)
+                     for role_assignment in self.role.get_role_assignments
+                     (self.project._id_to_dn(project_id))
+                     if role_assignment.user_dn.upper() in group_dns]
+        # NOTE(morganfainberg): Does not support OS-INHERIT as domain
+        # metadata/roles are not supported by LDAP backend. Skip OS-INHERIT
+        # logic.
+        return role_list
 
     def _get_metadata(self, user_id=None, tenant_id=None,
                       domain_id=None, group_id=None):
@@ -127,12 +140,16 @@ class Assignment(assignment.Driver):
         return self.role.get_all()
 
     def list_projects_for_user(self, user_id, group_ids, hints):
-        # NOTE(henry-nash): The LDAP backend is being deprecated, so no
-        # support is provided for projects that the user has a role on solely
-        # by virtue of group membership.
         user_dn = self.user._id_to_dn(user_id)
         associations = (self.role.list_project_roles_for_user
                         (user_dn, self.project.tree_dn))
+
+        for group_id in group_ids:
+            group_dn = self.group._id_to_dn(group_id)
+            for group_role in self.role.list_project_roles_for_group(
+                    group_dn, self.project.tree_dn):
+                associations.append(group_role)
+
         # Since the LDAP backend doesn't store the domain_id in the LDAP
         # records (and only supports the default domain), we fill in the
         # domain_id before we return the list.
@@ -221,17 +238,13 @@ class Assignment(assignment.Driver):
     def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
         role_dn = self._subrole_id_to_dn(role_id, tenant_id)
         return self.role.delete_user(role_dn,
-                                     self.user._id_to_dn(user_id),
-                                     self.project._id_to_dn(tenant_id),
-                                     user_id, role_id)
+                                     self.user._id_to_dn(user_id), role_id)
 
     def _remove_role_from_group_and_project(self, group_id, tenant_id,
                                             role_id):
         role_dn = self._subrole_id_to_dn(role_id, tenant_id)
         return self.role.delete_user(role_dn,
-                                     self.group._id_to_dn(group_id),
-                                     self.project._id_to_dn(tenant_id),
-                                     group_id, role_id)
+                                     self.group._id_to_dn(group_id), role_id)
 
     def update_role(self, role_id, role):
         self.role.check_allow_update()
@@ -259,36 +272,30 @@ class Assignment(assignment.Driver):
     def list_domains(self, hints):
         return [assignment.calc_default_domain()]
 
-#Bulk actions on User From identity
+# Bulk actions on User From identity
     def delete_user(self, user_id):
         user_dn = self.user._id_to_dn(user_id)
         for ref in self.role.list_global_roles_for_user(user_dn):
-            self.role.delete_user(ref.role_dn, ref.user_dn, ref.project_dn,
-                                  user_id, self.role._dn_to_id(ref.role_dn))
+            self.role.delete_user(ref.role_dn, ref.user_dn,
+                                  self.role._dn_to_id(ref.role_dn))
         for ref in self.role.list_project_roles_for_user(user_dn,
                                                          self.project.tree_dn):
-            self.role.delete_user(ref.role_dn, ref.user_dn, ref.project_dn,
-                                  user_id, self.role._dn_to_id(ref.role_dn))
+            self.role.delete_user(ref.role_dn, ref.user_dn,
+                                  self.role._dn_to_id(ref.role_dn))
 
-        user = self.user.get(user_id)
-        if hasattr(user, 'tenant_id'):
-            self.project.remove_user(user.tenant_id,
-                                     self.user._id_to_dn(user_id))
-
-    #LDAP assignments only supports LDAP identity.  Assignments under identity
-    #are already deleted
+    # LDAP assignments only supports LDAP identity.  Assignments under
+    # identity are already deleted
     def delete_group(self, group_id):
         if not self.group.subtree_delete_enabled:
             # TODO(spzala): this is only placeholder for group and domain
             # role support which will be added under bug 1101287
             query = '(objectClass=%s)' % self.group.object_class
-            dn = None
             dn = self.group._id_to_dn(group_id)
             if dn:
                 try:
                     conn = self.group.get_connection()
                     roles = conn.search_s(dn, ldap.SCOPE_ONELEVEL,
-                                          query, ['%s' % '1.1'])
+                                          query, ['1.1'])
                     for role_dn, i in roles:
                         conn.delete_s(role_dn)
                 except ldap.NO_SUCH_OBJECT:
@@ -385,7 +392,7 @@ class Assignment(assignment.Driver):
         except exception.MetadataNotFound:
             metadata_ref = {}
 
-        return [self.get_role(x) for x in
+        return [self.get_role(role_id) for role_id in
                 self._roles_from_role_dicts(metadata_ref.get('roles', []),
                                             inherited_to_projects)]
 
@@ -414,7 +421,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
     DEFAULT_MEMBER_ATTRIBUTE = 'member'
     NotFound = exception.ProjectNotFound
     notfound_arg = 'project_id'  # NOTE(yorik-sar): while options_name = tenant
-    options_name = 'tenant'
+    options_name = 'project'
     attribute_options_names = {'name': 'name',
                                'description': 'desc',
                                'enabled': 'enabled',
@@ -424,7 +431,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
 
     def __init__(self, conf):
         super(ProjectApi, self).__init__(conf)
-        self.member_attribute = (getattr(conf.ldap, 'tenant_member_attribute')
+        self.member_attribute = (getattr(conf.ldap, 'project_member_attribute')
                                  or self.DEFAULT_MEMBER_ATTRIBUTE)
 
     def create(self, values):
@@ -442,38 +449,10 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
             project_ids.add(self._dn_to_id(assoc.project_dn))
         projects = []
         for project_id in project_ids:
-            #slower to get them one at a time, but a huge list could blow out
-            #the connection.  This is the safer way
+            # slower to get them one at a time, but a huge list could blow out
+            # the connection.  This is the safer way
             projects.append(self.get(project_id))
         return projects
-
-    def add_user(self, tenant_id, user_dn):
-        conn = self.get_connection()
-        try:
-            conn.modify_s(
-                self._id_to_dn(tenant_id),
-                [(ldap.MOD_ADD,
-                  self.member_attribute,
-                  user_dn)])
-        except ldap.TYPE_OR_VALUE_EXISTS:
-            # As adding a user to a tenant is done implicitly in several
-            # places, and is not part of the exposed API, it's easier for us to
-            # just ignore this instead of raising exception.Conflict.
-            pass
-        finally:
-            conn.unbind_s()
-
-    def remove_user(self, tenant_id, user_dn, user_id):
-        conn = self.get_connection()
-        try:
-            conn.modify_s(self._id_to_dn(tenant_id),
-                          [(ldap.MOD_DELETE,
-                            self.member_attribute,
-                            user_dn)])
-        except ldap.NO_SUCH_ATTRIBUTE:
-            raise exception.NotFound(user_id)
-        finally:
-            conn.unbind_s()
 
     def get_user_dns(self, tenant_id, rolegrants, role_dn=None):
         tenant = self._ldap_get(tenant_id)
@@ -481,7 +460,7 @@ class ProjectApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
         if not role_dn:
             # Get users who have default tenant mapping
             for user_dn in tenant[1].get(self.member_attribute, []):
-                if self.use_dumb_member and user_dn == self.dumb_member:
+                if self._is_dumb_member(user_dn):
                     continue
                 res.add(user_dn)
 
@@ -541,16 +520,14 @@ class RoleApi(common_ldap.BaseLdap):
         return super(RoleApi, self).create(values)
 
     def add_user(self, role_id, role_dn, user_dn, user_id, tenant_id=None):
-        conn = self.get_connection()
         try:
-            conn.modify_s(role_dn, [(ldap.MOD_ADD,
-                                     self.member_attribute, user_dn)])
-        except ldap.TYPE_OR_VALUE_EXISTS:
+            super(RoleApi, self).add_member(user_dn, role_dn)
+        except exception.Conflict:
             msg = (_('User %(user_id)s already has role %(role_id)s in '
                      'tenant %(tenant_id)s') %
                    dict(user_id=user_id, role_id=role_id, tenant_id=tenant_id))
             raise exception.Conflict(type='role grant', details=msg)
-        except ldap.NO_SUCH_OBJECT:
+        except self.NotFound:
             if tenant_id is None or self.get(role_id) is None:
                 raise Exception(_("Role %s not found") % (role_id,))
 
@@ -559,37 +536,25 @@ class RoleApi(common_ldap.BaseLdap):
 
             if self.use_dumb_member:
                 attrs[1][1].append(self.dumb_member)
+            conn = self.get_connection()
             try:
                 conn.add_s(role_dn, attrs)
-            except Exception as inst:
-                    raise inst
-        finally:
-            conn.unbind_s()
+            finally:
+                conn.unbind_s()
 
-    def delete_user(self, role_dn, user_dn, tenant_dn,
-                    user_id, role_id):
-        conn = self.get_connection()
+    def delete_user(self, role_dn, user_dn, role_id):
         try:
-            conn.modify_s(role_dn, [(ldap.MOD_DELETE,
-                                     self.member_attribute, user_dn)])
-        except (ldap.NO_SUCH_OBJECT, ldap.NO_SUCH_ATTRIBUTE):
+            super(RoleApi, self).remove_member(user_dn, role_dn)
+        except (self.NotFound, ldap.NO_SUCH_ATTRIBUTE):
             raise exception.RoleNotFound(message=_(
                 'Cannot remove role that has not been granted, %s') %
                 role_id)
-        finally:
-            conn.unbind_s()
 
     def get_role_assignments(self, tenant_dn):
-        conn = self.get_connection()
-        query = '(objectClass=%s)' % self.object_class
-
         try:
-            roles = conn.search_s(tenant_dn, ldap.SCOPE_ONELEVEL, query)
+            roles = self._ldap_get_list(tenant_dn, ldap.SCOPE_ONELEVEL)
         except ldap.NO_SUCH_OBJECT:
-            return []
-        finally:
-            conn.unbind_s()
-
+            roles = []
         res = []
         for role_dn, attrs in roles:
             try:
@@ -597,7 +562,7 @@ class RoleApi(common_ldap.BaseLdap):
             except KeyError:
                 continue
             for user_dn in user_dns:
-                if self.use_dumb_member and user_dn == self.dumb_member:
+                if self._is_dumb_member(user_dn):
                     continue
                 res.append(UserRoleAssociation(
                     user_dn=user_dn,
@@ -607,31 +572,25 @@ class RoleApi(common_ldap.BaseLdap):
         return res
 
     def list_global_roles_for_user(self, user_dn):
-        roles = self.get_all('(%s=%s)' % (self.member_attribute, user_dn))
+        user_dn_esc = ldap.filter.escape_filter_chars(user_dn)
+        roles = self.get_all('(%s=%s)' % (self.member_attribute, user_dn_esc))
         return [UserRoleAssociation(
                 role_dn=role.dn,
                 user_dn=user_dn) for role in roles]
 
     def list_project_roles_for_user(self, user_dn, project_subtree):
-        conn = self.get_connection()
-        query = '(&(objectClass=%s)(%s=%s))' % (self.object_class,
-                                                self.member_attribute,
-                                                user_dn)
         try:
-            roles = conn.search_s(project_subtree,
-                                  ldap.SCOPE_SUBTREE,
-                                  query)
+            roles = self._ldap_get_list(project_subtree, ldap.SCOPE_SUBTREE,
+                                        query_params={
+                                            self.member_attribute: user_dn})
         except ldap.NO_SUCH_OBJECT:
-            return []
-        finally:
-            conn.unbind_s()
-
+            roles = []
         res = []
-        for role_dn, _ in roles:
-            #ldap.dn.dn2str returns an array, where the first
-            #element is the first segment.
-            #For a role assignment, this contains the role ID,
-            #The remainder is the DN of the tenant.
+        for role_dn, _role_attrs in roles:
+            # ldap.dn.dn2str returns an array, where the first
+            # element is the first segment.
+            # For a role assignment, this contains the role ID,
+            # The remainder is the DN of the tenant.
             tenant = ldap.dn.str2dn(role_dn)
             tenant.pop(0)
             tenant_dn = ldap.dn.dn2str(tenant)
@@ -641,20 +600,42 @@ class RoleApi(common_ldap.BaseLdap):
                 tenant_dn=tenant_dn))
         return res
 
-    def roles_delete_subtree_by_project(self, tenant_dn):
+    def list_project_roles_for_group(self, group_dn, project_subtree):
+        group_dn_esc = ldap.filter.escape_filter_chars(group_dn)
         conn = self.get_connection()
-        query = '(objectClass=%s)' % self.object_class
+        query = '(&(objectClass=%s)(%s=%s))' % (self.object_class,
+                                                self.member_attribute,
+                                                group_dn_esc)
         try:
-            roles = conn.search_s(tenant_dn, ldap.SCOPE_ONELEVEL, query)
-            for role_dn, _ in roles:
-                try:
-                    conn.delete_s(role_dn)
-                except Exception as inst:
-                    raise inst
+            roles = conn.search_s(project_subtree,
+                                  ldap.SCOPE_SUBTREE,
+                                  query,
+                                  attrlist=['1.1'])
         except ldap.NO_SUCH_OBJECT:
-            pass
+            # Return no roles rather than raise an exception if the project
+            # subtree entry doesn't exist because an empty subtree is not
+            # an error.
+            return []
         finally:
             conn.unbind_s()
+
+        res = []
+        for role_dn, _role_attrs in roles:
+            # ldap.dn.str2dn returns a list, where the first
+            # element is the first RDN.
+            # For a role assignment, this contains the role ID,
+            # the remainder is the DN of the project.
+            project = ldap.dn.str2dn(role_dn)
+            project.pop(0)
+            project_dn = ldap.dn.dn2str(project)
+            res.append(GroupRoleAssociation(
+                group_dn=group_dn,
+                role_dn=role_dn,
+                tenant_dn=project_dn))
+        return res
+
+    def roles_delete_subtree_by_project(self, tenant_dn):
+        self._delete_tree_nodes(tenant_dn, ldap.SCOPE_ONELEVEL)
 
     def update(self, role_id, role):
         try:
@@ -665,35 +646,18 @@ class RoleApi(common_ldap.BaseLdap):
         return super(RoleApi, self).update(role_id, role)
 
     def delete(self, role_id, tenant_dn):
-        conn = self.get_connection()
-        query = '(&(objectClass=%s)(%s=%s))' % (self.object_class,
-                                                self.id_attr, role_id)
-        try:
-            for role_dn, _ in conn.search_s(tenant_dn,
-                                            ldap.SCOPE_SUBTREE,
-                                            query):
-                conn.delete_s(role_dn)
-        except ldap.NO_SUCH_OBJECT:
-            pass
-        finally:
-            conn.unbind_s()
+        self._delete_tree_nodes(tenant_dn, ldap.SCOPE_SUBTREE, query_params={
+            self.id_attr: role_id})
         super(RoleApi, self).delete(role_id)
 
     def list_role_assignments(self, project_tree_dn):
         """Returns a list of all the role assignments linked to project_tree_dn
         attribute.
         """
-        conn = self.get_connection()
-        query = '(objectClass=%s)' % (self.object_class)
         try:
-            roles = conn.search_s(project_tree_dn,
-                                  ldap.SCOPE_SUBTREE,
-                                  query)
+            roles = self._ldap_get_list(project_tree_dn, ldap.SCOPE_SUBTREE)
         except ldap.NO_SUCH_OBJECT:
-            return []
-        finally:
-            conn.unbind_s()
-
+            roles = []
         res = []
         for role_dn, role in roles:
             tenant = ldap.dn.str2dn(role_dn)
@@ -702,15 +666,7 @@ class RoleApi(common_ldap.BaseLdap):
             # object.
             tenant_dn = ldap.dn.dn2str(tenant)
             for user_dn in role[self.member_attribute]:
-                # NOTE(nkinder): Ideally, this comparison would be aware of the
-                # Distinguished Name LDAP syntax. Since Keystone is responsible
-                # for setting the dumb member DN, we are relatively sure that
-                # it is returned in the same form. We still need to do a case
-                # insensitive comparison since attribute names will be upper
-                # case for AD. We already do this elsewhere in the LDAP
-                # driver, so it's OK until we decide to become syntax aware.
-                if (self.use_dumb_member and
-                        user_dn.lower() == self.dumb_member.lower()):
+                if self._is_dumb_member(user_dn):
                     continue
                 res.append(UserRoleAssociation(
                            user_dn=user_dn,

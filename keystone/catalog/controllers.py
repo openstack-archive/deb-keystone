@@ -17,11 +17,12 @@ import uuid
 
 import six
 
+from keystone.common import authorization
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 
 
 INTERFACES = ['public', 'internal', 'admin']
@@ -139,6 +140,36 @@ class Endpoint(controller.V2Controller):
 
 
 @dependency.requires('catalog_api')
+class CatalogV3(controller.V3Controller):
+    collection_name = 'catalog'
+
+    @controller.protected()
+    def get_catalog(self, context):
+        # TODO(dolphm): this method of accessing the auth context is terrible,
+        # but context needs to be refactored to always have reasonable values.
+        env_context = context.get('environment', {})
+        auth_context = env_context.get(authorization.AUTH_CONTEXT_ENV, {})
+        user_id = auth_context.get('user_id')
+        project_id = auth_context.get('project_id')
+
+        if not user_id or not project_id:
+            raise exception.Forbidden(
+                _('A project-scoped token is required to produce a service '
+                  'catalog.'))
+
+        # The V3Controller base methods mostly assume that you're returning
+        # either a collection or a single element from a collection, neither of
+        # which apply to the catalog. Because this is a special case, this
+        # re-implements a tiny bit of work done by the base controller (such as
+        # self-referential link building) to avoid overriding or refactoring
+        # several private methods.
+        return {
+            'catalog': self.catalog_api.get_v3_catalog(user_id, project_id),
+            'links': {
+                'self': CatalogV3.base_url(context)}}
+
+
+@dependency.requires('catalog_api')
 class RegionV3(controller.V3Controller):
     collection_name = 'regions'
     member_name = 'region'
@@ -162,7 +193,7 @@ class RegionV3(controller.V3Controller):
     def create_region(self, context, region):
         ref = self._normalize_dict(region)
 
-        if 'id' not in ref:
+        if not ref.get('id'):
             ref = self._assign_unique_id(ref)
 
         ref = self.catalog_api.create_region(ref)

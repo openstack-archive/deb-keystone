@@ -25,8 +25,8 @@ from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
+from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common.gettextutils import _
 from keystone.openstack.common import log
 
 
@@ -83,6 +83,27 @@ class Manager(manager.Manager):
                                          ret['domain_id'])
         return ret
 
+    def assert_domain_enabled(self, domain_id, domain=None):
+        """Assert the Domain is enabled.
+
+        :raise AssertionError if domain is disabled.
+        """
+        if domain is None:
+            domain = self.get_domain(domain_id)
+        if not domain.get('enabled', True):
+            raise AssertionError(_('Domain is disabled: %s') % domain_id)
+
+    def assert_project_enabled(self, project_id, project=None):
+        """Assert the project is enabled and its associated domain is enabled.
+
+        :raise AssertionError if the project or domain is disabled.
+        """
+        if project is None:
+            project = self.get_project(project_id)
+        self.assert_domain_enabled(domain_id=project['domain_id'])
+        if not project.get('enabled', True):
+            raise AssertionError(_('Project is disabled: %s') % project_id)
+
     @notifications.disabled(_PROJECT, public=False)
     def _disable_project(self, tenant_id):
         return self.token_api.delete_tokens_for_users(
@@ -91,15 +112,17 @@ class Manager(manager.Manager):
 
     @notifications.updated(_PROJECT)
     def update_project(self, tenant_id, tenant):
+        original_tenant = self.driver.get_project(tenant_id)
         tenant = tenant.copy()
         if 'enabled' in tenant:
             tenant['enabled'] = clean.project_enabled(tenant['enabled'])
-        if not tenant.get('enabled', True):
+        if (original_tenant.get('enabled', True) and
+                not tenant.get('enabled', True)):
             self._disable_project(tenant_id)
         ret = self.driver.update_project(tenant_id, tenant)
         self.get_project.invalidate(self, tenant_id)
-        self.get_project_by_name.invalidate(self, ret['name'],
-                                            ret['domain_id'])
+        self.get_project_by_name.invalidate(self, original_tenant['name'],
+                                            original_tenant['domain_id'])
         return ret
 
     @notifications.deleted(_PROJECT)
@@ -128,31 +151,14 @@ class Manager(manager.Manager):
 
         """
         def _get_group_project_roles(user_id, project_ref):
-            role_list = []
-            group_refs = self.identity_api.list_groups_for_user(user_id)
-            for x in group_refs:
-                try:
-                    metadata_ref = self._get_metadata(
-                        group_id=x['id'], tenant_id=project_ref['id'])
-                    role_list += self._roles_from_role_dicts(
-                        metadata_ref.get('roles', {}), False)
-                except exception.MetadataNotFound:
-                    # no group grant, skip
-                    pass
-
-                if CONF.os_inherit.enabled:
-                    # Now get any inherited group roles for the owning domain
-                    try:
-                        metadata_ref = self._get_metadata(
-                            group_id=x['id'],
-                            domain_id=project_ref['domain_id'])
-                        role_list += self._roles_from_role_dicts(
-                            metadata_ref.get('roles', {}), True)
-                    except (exception.MetadataNotFound,
-                            exception.NotImplemented):
-                        pass
-
-            return role_list
+            # TODO(morganfainberg): Implement a way to get only group_ids
+            # instead of the more expensive to_dict() call for each record.
+            group_ids = [group['id'] for group in
+                         self.identity_api.list_groups_for_user(user_id)]
+            return self.driver.get_group_project_roles(
+                group_ids,
+                project_ref['id'],
+                project_ref['domain_id'])
 
         def _get_user_project_roles(user_id, project_ref):
             role_list = []
@@ -245,7 +251,7 @@ class Manager(manager.Manager):
             role = {'id': CONF.member_role_id,
                     'name': CONF.member_role_name}
             self.driver.create_role(config.CONF.member_role_id, role)
-            #now that default role exists, the add should succeed
+            # now that default role exists, the add should succeed
             self.driver.add_role_to_user_and_project(
                 user_id,
                 tenant_id,
@@ -271,8 +277,7 @@ class Manager(manager.Manager):
                                                     project_id=tenant_id)
 
             except exception.RoleNotFound:
-                LOG.debug(_("Removing role %s failed because it does not "
-                            "exist."),
+                LOG.debug("Removing role %s failed because it does not exist.",
                           role_id)
 
     # TODO(henry-nash): We might want to consider list limiting this at some
@@ -302,6 +307,8 @@ class Manager(manager.Manager):
 
     @notifications.created('domain')
     def create_domain(self, domain_id, domain):
+        domain.setdefault('enabled', True)
+        domain['enabled'] = clean.domain_enabled(domain['enabled'])
         ret = self.driver.create_domain(domain_id, domain)
         if SHOULD_CACHE(ret):
             self.get_domain.set(ret, self, domain_id)
@@ -318,13 +325,17 @@ class Manager(manager.Manager):
 
     @notifications.updated('domain')
     def update_domain(self, domain_id, domain):
+        original_domain = self.driver.get_domain(domain_id)
+        if 'enabled' in domain:
+            domain['enabled'] = clean.domain_enabled(domain['enabled'])
         ret = self.driver.update_domain(domain_id, domain)
         # disable owned users & projects when the API user specifically set
         #     enabled=False
-        if not domain.get('enabled', True):
+        if (original_domain.get('enabled', True) and
+                not domain.get('enabled', True)):
             self._disable_domain(domain_id)
         self.get_domain.invalidate(self, domain_id)
-        self.get_domain_by_name.invalidate(self, ret['name'])
+        self.get_domain_by_name.invalidate(self, original_domain['name'])
         return ret
 
     @notifications.deleted('domain')
@@ -371,9 +382,9 @@ class Manager(manager.Manager):
         Users: Reference domains for grants
 
         """
-        user_refs = self.identity_api.list_users()
+        user_refs = self.identity_api.list_users(domain_scope=domain_id)
         proj_refs = self.list_projects()
-        group_refs = self.identity_api.list_groups()
+        group_refs = self.identity_api.list_groups(domain_scope=domain_id)
 
         # First delete the projects themselves
         for project in proj_refs:
@@ -381,9 +392,9 @@ class Manager(manager.Manager):
                 try:
                     self.delete_project(project['id'])
                 except exception.ProjectNotFound:
-                    LOG.debug(_('Project %(projectid)s not found when '
-                                'deleting domain contents for %(domainid)s, '
-                                'continuing with cleanup.'),
+                    LOG.debug(('Project %(projectid)s not found when '
+                               'deleting domain contents for %(domainid)s, '
+                               'continuing with cleanup.'),
                               {'projectid': project['id'],
                                'domainid': domain_id})
 
@@ -391,24 +402,22 @@ class Manager(manager.Manager):
             # Cleanup any existing groups.
             if group['domain_id'] == domain_id:
                 try:
-                    self.identity_api.delete_group(group['id'],
-                                                   domain_scope=domain_id)
+                    self.identity_api.delete_group(group['id'])
                 except exception.GroupNotFound:
-                    LOG.debug(_('Group %(groupid)s not found when deleting '
-                                'domain contents for %(domainid)s, continuing '
-                                'with cleanup.'),
+                    LOG.debug(('Group %(groupid)s not found when deleting '
+                               'domain contents for %(domainid)s, continuing '
+                               'with cleanup.'),
                               {'groupid': group['id'], 'domainid': domain_id})
 
         # And finally, delete the users themselves
         for user in user_refs:
             if user['domain_id'] == domain_id:
                 try:
-                    self.identity_api.delete_user(user['id'],
-                                                  domain_scope=domain_id)
+                    self.identity_api.delete_user(user['id'])
                 except exception.UserNotFound:
-                    LOG.debug(_('User %(userid)s not found when '
-                                'deleting domain contents for %(domainid)s, '
-                                'continuing with cleanup.'),
+                    LOG.debug(('User %(userid)s not found when '
+                               'deleting domain contents for %(domainid)s, '
+                               'continuing with cleanup.'),
                               {'userid': user['id'],
                                'domainid': domain_id})
 
@@ -518,7 +527,7 @@ class Manager(manager.Manager):
                                 user_id=user['id'], role_id=role_id,
                                 domain_id=domain_id, project_id=project_id)
             except exception.GroupNotFound:
-                LOG.debug(_('Group %s not found, no tokens to invalidate.'),
+                LOG.debug('Group %s not found, no tokens to invalidate.',
                           group_id)
 
         self.driver.delete_grant(role_id, user_id, group_id, domain_id,
@@ -561,8 +570,8 @@ class Manager(manager.Manager):
                         target = _('Domain (%s)') % assignment['domain_id']
                     else:
                         target = _('Unknown Target')
-                    msg = _('Group (%(group)s), referenced in assignment '
-                            'for %(target)s, not found - ignoring.')
+                    msg = ('Group (%(group)s), referenced in assignment '
+                           'for %(target)s, not found - ignoring.')
                     LOG.debug(msg, {'group': assignment['group_id'],
                                     'target': target})
                     continue
@@ -637,7 +646,7 @@ class Driver(object):
         :raises: keystone.exception.ProjectNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_user_ids_for_project(self, tenant_id):
@@ -647,7 +656,7 @@ class Driver(object):
         :raises: keystone.exception.ProjectNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
@@ -657,7 +666,7 @@ class Driver(object):
                  keystone.exception.ProjectNotFound,
                  keystone.exception.RoleNotFound
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
@@ -668,7 +677,7 @@ class Driver(object):
                  keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     # assignment/grant crud
 
@@ -687,7 +696,7 @@ class Driver(object):
                  keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_grants(self, user_id=None, group_id=None,
@@ -702,7 +711,7 @@ class Driver(object):
                  keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_grant(self, role_id, user_id=None, group_id=None,
@@ -717,7 +726,7 @@ class Driver(object):
                  keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_grant(self, role_id, user_id=None, group_id=None,
@@ -730,12 +739,12 @@ class Driver(object):
                  keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_role_assignments(self):
 
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     # domain crud
     @abc.abstractmethod
@@ -745,7 +754,7 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_domains(self, hints):
@@ -757,7 +766,7 @@ class Driver(object):
         :returns: a list of domain_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_domain(self, domain_id):
@@ -767,7 +776,7 @@ class Driver(object):
         :raises: keystone.exception.DomainNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_domain_by_name(self, domain_name):
@@ -777,7 +786,7 @@ class Driver(object):
         :raises: keystone.exception.DomainNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_domain(self, domain_id, domain):
@@ -787,7 +796,7 @@ class Driver(object):
                  keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_domain(self, domain_id):
@@ -796,7 +805,7 @@ class Driver(object):
         :raises: keystone.exception.DomainNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     # project crud
     @abc.abstractmethod
@@ -806,7 +815,7 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_projects(self, hints):
@@ -818,7 +827,7 @@ class Driver(object):
         :returns: a list of project_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_projects_in_domain(self, domain_id):
@@ -830,7 +839,7 @@ class Driver(object):
         :returns: a list of project_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_projects_for_user(self, user_id, group_ids, hints):
@@ -846,7 +855,7 @@ class Driver(object):
         :returns: a list of project_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_roles_for_groups(self, group_ids, project_id=None, domain_id=None):
@@ -867,7 +876,7 @@ class Driver(object):
                   project_id or domain_id
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_projects_for_groups(self, group_ids):
@@ -877,7 +886,7 @@ class Driver(object):
         :returns: List of projects accessible to specified groups.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_domains_for_groups(self, group_ids):
@@ -887,7 +896,7 @@ class Driver(object):
         :returns: List of domains accessible to specified groups.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_project(self, project_id):
@@ -897,7 +906,7 @@ class Driver(object):
         :raises: keystone.exception.ProjectNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_project(self, project_id, project):
@@ -907,7 +916,7 @@ class Driver(object):
                  keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_project(self, project_id):
@@ -916,7 +925,7 @@ class Driver(object):
         :raises: keystone.exception.ProjectNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     # role crud
 
@@ -927,7 +936,7 @@ class Driver(object):
         :raises: keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def list_roles(self, hints):
@@ -939,6 +948,24 @@ class Driver(object):
         :returns: a list of role_refs or an empty list.
 
         """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def get_group_project_roles(self, groups, project_id, project_domain_id):
+        """Get group roles for a specific project.
+
+        Supports the ``OS-INHERIT`` role inheritance from the project's domain
+        if supported by the assignment driver.
+
+        :param groups: list of group ids
+        :type groups: list
+        :param project_id: project identifier
+        :type project_id: str
+        :param project_domain_id: project's domain identifier
+        :type project_domain_id: str
+        :returns: list of role_refs for the project
+        :rtype: list
+        """
         raise exception.NotImplemented()
 
     @abc.abstractmethod
@@ -949,7 +976,7 @@ class Driver(object):
         :raises: keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def update_role(self, role_id, role):
@@ -959,7 +986,7 @@ class Driver(object):
                  keystone.exception.Conflict
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_role(self, role_id):
@@ -968,9 +995,9 @@ class Driver(object):
         :raises: keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
-#TODO(ayoung): determine what else these two functions raise
+# TODO(ayoung): determine what else these two functions raise
     @abc.abstractmethod
     def delete_user(self, user_id):
         """Deletes all assignments for a user.
@@ -978,7 +1005,7 @@ class Driver(object):
         :raises: keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_group(self, group_id):
@@ -987,11 +1014,11 @@ class Driver(object):
         :raises: keystone.exception.RoleNotFound
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
 
-    #domain management functions for backends that only allow a single domain.
-    #currently, this is only LDAP, but might be used by PAM or other backends
-    #as well.  This is used by both identity and assignment drivers.
+    # domain management functions for backends that only allow a single
+    # domain.  currently, this is only LDAP, but might be used by PAM or other
+    # backends as well.  This is used by both identity and assignment drivers.
     def _set_default_domain(self, ref):
         """If the domain ID has not been set, set it to the default."""
         if isinstance(ref, dict):

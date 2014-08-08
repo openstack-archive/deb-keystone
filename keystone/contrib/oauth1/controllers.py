@@ -21,7 +21,7 @@ from keystone import config
 from keystone.contrib.oauth1 import core as oauth1
 from keystone.contrib.oauth1 import validator
 from keystone import exception
-from keystone.openstack.common.gettextutils import _
+from keystone.i18n import _
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import timeutils
 
@@ -85,6 +85,15 @@ class AccessTokenCrudV3(controller.V3Controller):
     collection_name = 'access_tokens'
     member_name = 'access_token'
 
+    @classmethod
+    def _add_self_referential_link(cls, context, ref):
+        # NOTE(lwolf): overriding method to add proper path to self link
+        ref.setdefault('links', {})
+        path = '/users/%(user_id)s/OS-OAUTH1/access_tokens' % {
+            'user_id': cls._get_user_id(ref)
+        }
+        ref['links']['self'] = cls.base_url(context, path) + '/' + ref['id']
+
     @controller.protected()
     def get_access_token(self, context, user_id, access_token_id):
         access_token = self.oauth_api.get_access_token(access_token_id)
@@ -95,6 +104,12 @@ class AccessTokenCrudV3(controller.V3Controller):
 
     @controller.protected()
     def list_access_tokens(self, context, user_id):
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+        if auth_context.get('is_delegated_auth'):
+            raise exception.Forbidden(
+                _('Cannot list request tokens'
+                  ' with a token issued via delegation.'))
         refs = self.oauth_api.list_access_tokens(user_id)
         formatted_refs = ([self._format_token_entity(context, x)
                            for x in refs])
@@ -108,17 +123,19 @@ class AccessTokenCrudV3(controller.V3Controller):
         return self.oauth_api.delete_access_token(
             user_id, access_token_id)
 
+    @staticmethod
+    def _get_user_id(entity):
+        return entity.get('authorizing_user_id', '')
+
     def _format_token_entity(self, context, entity):
 
         formatted_entity = entity.copy()
         access_token_id = formatted_entity['id']
-        user_id = ""
+        user_id = self._get_user_id(formatted_entity)
         if 'role_ids' in entity:
             formatted_entity.pop('role_ids')
         if 'access_secret' in entity:
             formatted_entity.pop('access_secret')
-        if 'authorizing_user_id' in entity:
-            user_id = formatted_entity['authorizing_user_id']
 
         url = ('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(access_token_id)s'
                '/roles' % {'user_id': user_id,
@@ -310,6 +327,12 @@ class OAuthControllerV3(controller.V3Controller):
         there is not another easy way to make sure the user knows which roles
         are being requested before authorizing.
         """
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+        if auth_context.get('is_delegated_auth'):
+            raise exception.Forbidden(
+                _('Cannot authorize a request token'
+                  ' with a token issued via delegation.'))
 
         req_token = self.oauth_api.get_request_token(request_token_id)
 
@@ -344,12 +367,10 @@ class OAuthControllerV3(controller.V3Controller):
         # verify the user has the project too
         req_project_id = req_token['requested_project_id']
         user_projects = self.assignment_api.list_projects_for_user(user_id)
-        found = False
         for user_project in user_projects:
             if user_project['id'] == req_project_id:
-                found = True
                 break
-        if not found:
+        else:
             msg = _("User is not a member of the requested project")
             raise exception.Unauthorized(message=msg)
 
