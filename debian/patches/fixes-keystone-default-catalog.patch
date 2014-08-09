@@ -3,7 +3,7 @@ Description: Fix default keystone catalog
  default by debconf in all of the Openstack Debian packages.
 Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
-Last-Update: 2013-02-03
+Last-Update: 2014-08-09
 
 Index: keystone/etc/default_catalog.templates
 ===================================================================

@@ -5,8 +5,8 @@ Last-Update: 2014-01-29
 
 Index: keystone/keystone/common/utils.py
 ===================================================================
---- keystone.orig/keystone/common/utils.py	2014-03-28 14:35:45.000000000 +0800
-+++ keystone/keystone/common/utils.py	2014-03-28 14:41:11.000000000 +0800
+--- keystone.orig/keystone/common/utils.py	2014-08-09 09:47:34.000000000 +0800
++++ keystone/keystone/common/utils.py	2014-08-09 09:50:05.000000000 +0800
 @@ -34,6 +34,7 @@
  from keystone.openstack.common import strutils
  from six import moves

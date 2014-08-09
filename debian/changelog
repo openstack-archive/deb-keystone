@@ -1,3 +1,21 @@
+keystone (2014.1.2.1-1) unstable; urgency=medium
+
+  * Corrected new upstream point release (was wrong tag).
+
+ -- Thomas Goirand <zigo@debian.org>  Sat, 09 Aug 2014 09:50:26 +0800
+
+keystone (2014.1.2-1) unstable; urgency=medium
+
+  * New upstream point release.
+  * Removes patches applied upstream:
+    - cve-2014-3476-Block-delegation-escalation-of-privilege.patch
+    - cve-2014-3520-Ensure_that_in_v2_auth_tenant_id_matches_trust.patch
+  * Refresh patches.
+  * Reviewed (build-)depends for this release.
+  * Added PYTHONPATH=. when building doc with sphinx.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 08 Aug 2014 17:44:10 +0800
+
 keystone (2014.1.1-3) unstable; urgency=high
 
   * CVE-2014-3520: Keystone V2 trusts privilege escalation through user

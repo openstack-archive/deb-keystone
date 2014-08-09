@@ -4,8 +4,10 @@ Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
 Last-Update: 2014-03-28
 
---- keystone-2014.1~rc1.orig/etc/keystone.conf.sample
-+++ keystone-2014.1~rc1/etc/keystone.conf.sample
+Index: keystone/etc/keystone.conf.sample
+===================================================================
+--- keystone.orig/etc/keystone.conf.sample	2014-08-09 09:47:34.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2014-08-09 09:50:09.000000000 +0800
 @@ -622,7 +622,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
