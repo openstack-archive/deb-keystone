@@ -19,41 +19,53 @@ import abc
 
 import six
 
+from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.i18n import _LE
+from keystone import notifications
 from keystone.openstack.common import log
 
 
 CONF = config.CONF
 LOG = log.getLogger(__name__)
+SHOULD_CACHE = cache.should_cache_fn('catalog')
+
+EXPIRATION_TIME = lambda: CONF.catalog.cache_time
 
 
-def format_url(url, data):
-    """Safely string formats a user-defined URL with the given data."""
+def format_url(url, substitutions):
+    """Formats a user-defined URL with the given substitutions.
+
+    :param string url: the URL to be formatted
+    :param dict substitutions: the dictionary used for substitution
+    :returns: a formatted URL
+
+    """
     try:
-        result = url.replace('$(', '%(') % data
+        result = url.replace('$(', '%(') % substitutions
     except AttributeError:
         LOG.error(_('Malformed endpoint - %(url)r is not a string'),
                   {"url": url})
         raise exception.MalformedEndpoint(endpoint=url)
     except KeyError as e:
-        LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
+        LOG.error(_LE("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
                   {"url": url,
                    "keyerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except TypeError as e:
-        LOG.error(_("Malformed endpoint '%(url)s'. The following type error "
-                    "occurred during string substitution: %(typeerror)s"),
+        LOG.error(_LE("Malformed endpoint '%(url)s'. The following type error "
+                      "occurred during string substitution: %(typeerror)s"),
                   {"url": url,
                    "typeerror": e})
         raise exception.MalformedEndpoint(endpoint=url)
     except ValueError as e:
-        LOG.error(_("Malformed endpoint %s - incomplete format "
-                    "(are you missing a type notifier ?)"), url)
+        LOG.error(_LE("Malformed endpoint %s - incomplete format "
+                      "(are you missing a type notifier ?)"), url)
         raise exception.MalformedEndpoint(endpoint=url)
     return result
 
@@ -66,10 +78,14 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+    _ENDPOINT = 'endpoint'
+    _SERVICE = 'service'
+    _REGION = 'region'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.catalog.driver)
 
+    @notifications.created(_REGION, public=False, result_id_arg_attr='id')
     def create_region(self, region_ref):
         # Check duplicate ID
         try:
@@ -90,31 +106,58 @@ class Manager(manager.Manager):
             parent_region_id = region_ref.get('parent_region_id')
             raise exception.RegionNotFound(region_id=parent_region_id)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_region(self, region_id):
         try:
             return self.driver.get_region(region_id)
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
 
+    @notifications.updated(_REGION, public=False)
+    def update_region(self, region_id, region_ref):
+        return self.driver.update_region(region_id, region_ref)
+
+    @notifications.deleted(_REGION, public=False)
     def delete_region(self, region_id):
         try:
-            return self.driver.delete_region(region_id)
+            ret = self.driver.delete_region(region_id)
+            self.get_region.invalidate(self, region_id)
+            return ret
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
 
+    @manager.response_truncated
+    def list_regions(self, hints=None):
+        return self.driver.list_regions(hints or driver_hints.Hints())
+
+    @notifications.created(_SERVICE, public=False)
     def create_service(self, service_id, service_ref):
         service_ref.setdefault('enabled', True)
         return self.driver.create_service(service_id, service_ref)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_service(self, service_id):
         try:
             return self.driver.get_service(service_id)
         except exception.NotFound:
             raise exception.ServiceNotFound(service_id=service_id)
 
+    @notifications.updated(_SERVICE, public=False)
+    def update_service(self, service_id, service_ref):
+        return self.driver.update_service(service_id, service_ref)
+
+    @notifications.deleted(_SERVICE, public=False)
     def delete_service(self, service_id):
         try:
-            return self.driver.delete_service(service_id)
+            endpoints = self.list_endpoints()
+            ret = self.driver.delete_service(service_id)
+            self.get_service.invalidate(self, service_id)
+            for endpoint in endpoints:
+                if endpoint['service_id'] == service_id:
+                    self.get_endpoint.invalidate(self, endpoint['id'])
+            return ret
         except exception.NotFound:
             raise exception.ServiceNotFound(service_id=service_id)
 
@@ -122,19 +165,32 @@ class Manager(manager.Manager):
     def list_services(self, hints=None):
         return self.driver.list_services(hints or driver_hints.Hints())
 
+    @notifications.created(_ENDPOINT, public=False)
     def create_endpoint(self, endpoint_id, endpoint_ref):
         try:
             return self.driver.create_endpoint(endpoint_id, endpoint_ref)
+        except exception.RegionNotFound:
+            raise exception.ValidationError(attribute='endpoint region_id',
+                                            target='region table')
         except exception.NotFound:
             service_id = endpoint_ref.get('service_id')
             raise exception.ServiceNotFound(service_id=service_id)
 
+    @notifications.updated(_ENDPOINT, public=False)
+    def update_endpoint(self, endpoint_id, endpoint_ref):
+        return self.driver.update_endpoint(endpoint_id, endpoint_ref)
+
+    @notifications.deleted(_ENDPOINT, public=False)
     def delete_endpoint(self, endpoint_id):
         try:
-            return self.driver.delete_endpoint(endpoint_id)
+            ret = self.driver.delete_endpoint(endpoint_id)
+            self.get_endpoint.invalidate(self, endpoint_id)
+            return ret
         except exception.NotFound:
             raise exception.EndpointNotFound(endpoint_id=endpoint_id)
 
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=EXPIRATION_TIME)
     def get_endpoint(self, endpoint_id):
         try:
             return self.driver.get_endpoint(endpoint_id)
@@ -170,8 +226,12 @@ class Driver(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def list_regions(self):
+    def list_regions(self, hints):
         """List all regions.
+
+        :param hints: contains the list of filters yet to be satisfied.
+                      Any filters satisfied here will be removed so that
+                      the caller will know if any filters remain.
 
         :returns: list of region_refs or an empty list.
 
@@ -189,7 +249,7 @@ class Driver(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def update_region(self, region_id):
+    def update_region(self, region_id, region_ref):
         """Update region by id.
 
         :returns: region_ref dict
@@ -240,7 +300,7 @@ class Driver(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def update_service(self, service_id):
+    def update_service(self, service_id, service_ref):
         """Update service by id.
 
         :returns: service_ref dict

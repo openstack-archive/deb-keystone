@@ -37,7 +37,7 @@ from migrate.versioning import api as versioning_api
 from oslo.db import exception as db_exception
 from oslo.db.sqlalchemy import migration
 from oslo.db.sqlalchemy import session as db_session
-import sqlalchemy
+import six
 import sqlalchemy.exc
 
 from keystone.assignment.backends import sql as assignment_sql
@@ -46,6 +46,7 @@ from keystone.common.sql import migrate_repo
 from keystone.common.sql import migration_helpers
 from keystone import config
 from keystone.contrib import federation
+from keystone.contrib import revoke
 from keystone import exception
 from keystone import tests
 from keystone.tests import default_fixtures
@@ -120,9 +121,13 @@ INITIAL_EXTENSION_TABLE_STRUCTURE = {
     'revocation_event': [
         'id', 'domain_id', 'project_id', 'user_id', 'role_id',
         'trust_id', 'consumer_id', 'access_token_id',
-        'issued_before', 'expires_at', 'revoked_at',
+        'issued_before', 'expires_at', 'revoked_at', 'audit_id',
+        'audit_chain_id',
     ],
 }
+
+EXTENSIONS = {'federation': federation,
+              'revoke': revoke}
 
 
 class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
@@ -1195,9 +1200,18 @@ class SqlUpgradeTests(SqlMigrateBase):
         add_region(region_unique_table)
         self.assertEqual(1, session.query(region_unique_table).count())
         # verify the unique constraint is enforced
-        self.assertRaises(sqlalchemy.exc.IntegrityError,
-                          add_region,
-                          table=region_unique_table)
+        self.assertRaises(
+            # FIXME (I159): Since oslo.db wraps all the database exceptions
+            # into more specific exception objects, we should catch both of
+            # sqlalchemy and oslo.db exceptions. If an old oslo.db version
+            # is installed, IntegrityError is raised. If >=0.4.0 version of
+            # oslo.db is installed, DBDuplicateEntry is raised.
+            # When the global requirements is updated with
+            # the version fixes exceptions wrapping, IntegrityError must be
+            # removed from the tuple.
+            (sqlalchemy.exc.IntegrityError, db_exception.DBDuplicateEntry),
+            add_region,
+            table=region_unique_table)
 
         # migrate to 43, unique constraint should be dropped
         self.upgrade(43)
@@ -1219,6 +1233,172 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableExists('id_mapping')
         self.downgrade(50)
         self.assertTableDoesNotExist('id_mapping')
+
+    def test_region_url_upgrade(self):
+        self.upgrade(52)
+        self.assertTableColumns('region',
+                                ['id', 'description', 'parent_region_id',
+                                 'extra', 'url'])
+
+    def test_region_url_downgrade(self):
+        self.upgrade(52)
+        self.downgrade(51)
+        self.assertTableColumns('region',
+                                ['id', 'description', 'parent_region_id',
+                                 'extra'])
+
+    def test_region_url_cleanup(self):
+        # make sure that the url field is dropped in the downgrade
+        self.upgrade(52)
+        session = self.Session()
+        beta = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'parent_region_id': uuid.uuid4().hex,
+            'url': uuid.uuid4().hex
+        }
+        acme = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'parent_region_id': uuid.uuid4().hex,
+            'url': None
+        }
+        self.insert_dict(session, 'region', beta)
+        self.insert_dict(session, 'region', acme)
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(2, session.query(region_table).count())
+        self.downgrade(51)
+        self.metadata.clear()
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(2, session.query(region_table).count())
+        region = session.query(region_table)[0]
+        self.assertRaises(AttributeError, getattr, region, 'url')
+
+    def test_endpoint_region_upgrade_columns(self):
+        self.upgrade(53)
+        self.assertTableColumns('endpoint',
+                                ['id', 'legacy_endpoint_id', 'interface',
+                                 'service_id', 'url', 'extra', 'enabled',
+                                 'region_id'])
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(region_table.c.id.type.length, 255)
+        self.assertEqual(region_table.c.parent_region_id.type.length, 255)
+        endpoint_table = sqlalchemy.Table('endpoint',
+                                          self.metadata,
+                                          autoload=True)
+        self.assertEqual(endpoint_table.c.region_id.type.length, 255)
+
+    def test_endpoint_region_downgrade_columns(self):
+        self.upgrade(53)
+        self.downgrade(52)
+        self.assertTableColumns('endpoint',
+                                ['id', 'legacy_endpoint_id', 'interface',
+                                 'service_id', 'url', 'extra', 'enabled',
+                                 'region'])
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(region_table.c.id.type.length, 64)
+        self.assertEqual(region_table.c.parent_region_id.type.length, 64)
+        endpoint_table = sqlalchemy.Table('endpoint',
+                                          self.metadata,
+                                          autoload=True)
+        self.assertEqual(endpoint_table.c.region.type.length, 255)
+
+    def test_endpoint_region_migration(self):
+        self.upgrade(52)
+        session = self.Session()
+        _small_region_name = '0' * 30
+        _long_region_name = '0' * 255
+        _clashing_region_name = '0' * 70
+
+        def add_service():
+            service_id = uuid.uuid4().hex
+
+            service = {
+                'id': service_id,
+                'type': uuid.uuid4().hex
+            }
+
+            self.insert_dict(session, 'service', service)
+
+            return service_id
+
+        def add_endpoint(service_id, region):
+            endpoint_id = uuid.uuid4().hex
+
+            endpoint = {
+                'id': endpoint_id,
+                'interface': uuid.uuid4().hex[:8],
+                'service_id': service_id,
+                'url': uuid.uuid4().hex,
+                'region': region
+            }
+            self.insert_dict(session, 'endpoint', endpoint)
+
+            return endpoint_id
+
+        _service_id_ = add_service()
+        add_endpoint(_service_id_, region=_long_region_name)
+        add_endpoint(_service_id_, region=_long_region_name)
+        add_endpoint(_service_id_, region=_clashing_region_name)
+        add_endpoint(_service_id_, region=_small_region_name)
+        add_endpoint(_service_id_, region=None)
+
+        # upgrade to 53
+        self.upgrade(53)
+        self.metadata.clear()
+
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(1, session.query(region_table).
+                         filter_by(id=_long_region_name).count())
+        self.assertEqual(1, session.query(region_table).
+                         filter_by(id=_clashing_region_name).count())
+        self.assertEqual(1, session.query(region_table).
+                         filter_by(id=_small_region_name).count())
+
+        endpoint_table = sqlalchemy.Table('endpoint',
+                                          self.metadata,
+                                          autoload=True)
+        self.assertEqual(5, session.query(endpoint_table).count())
+        self.assertEqual(2, session.query(endpoint_table).
+                         filter_by(region_id=_long_region_name).count())
+        self.assertEqual(1, session.query(endpoint_table).
+                         filter_by(region_id=_clashing_region_name).count())
+        self.assertEqual(1, session.query(endpoint_table).
+                         filter_by(region_id=_small_region_name).count())
+
+        # downgrade to 52
+        self.downgrade(52)
+        self.metadata.clear()
+
+        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(1, session.query(region_table).count())
+        self.assertEqual(1, session.query(region_table).
+                         filter_by(id=_small_region_name).count())
+
+        endpoint_table = sqlalchemy.Table('endpoint',
+                                          self.metadata,
+                                          autoload=True)
+        self.assertEqual(5, session.query(endpoint_table).count())
+        self.assertEqual(2, session.query(endpoint_table).
+                         filter_by(region=_long_region_name).count())
+        self.assertEqual(1, session.query(endpoint_table).
+                         filter_by(region=_clashing_region_name).count())
+        self.assertEqual(1, session.query(endpoint_table).
+                         filter_by(region=_small_region_name).count())
+
+    def test_add_actor_id_index(self):
+        self.upgrade(53)
+        self.upgrade(54)
+        table = sqlalchemy.Table('assignment', self.metadata, autoload=True)
+        index_data = [(idx.name, idx.columns.keys()) for idx in table.indexes]
+        self.assertIn(('ix_actor_id', ['actor_id']), index_data)
+
+    def test_remove_actor_id_index(self):
+        self.upgrade(54)
+        self.downgrade(53)
+        table = sqlalchemy.Table('assignment', self.metadata, autoload=True)
+        index_data = [(idx.name, idx.columns.keys()) for idx in table.indexes]
+        self.assertNotIn(('ix_actor_id', ['actor_id']), index_data)
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):
@@ -1365,18 +1545,38 @@ class VersionTests(SqlMigrateBase):
 
     def test_extension_initial(self):
         """When get the initial version of an extension, it's 0."""
-        abs_path = migration_helpers.find_migrate_repo(federation)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        version = migration_helpers.get_db_version(extension='federation')
-        self.assertEqual(0, version)
+        for name, extension in six.iteritems(EXTENSIONS):
+            abs_path = migration_helpers.find_migrate_repo(extension)
+            migration.db_version_control(sql.get_engine(), abs_path)
+            version = migration_helpers.get_db_version(extension=name)
+            self.assertEqual(0, version,
+                             'Migrate version for %s is not 0' % name)
 
     def test_extension_migrated(self):
         """When get the version after migrating an extension, it's not 0."""
-        abs_path = migration_helpers.find_migrate_repo(federation)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        migration.db_sync(sql.get_engine(), abs_path)
-        version = migration_helpers.get_db_version(extension='federation')
-        self.assertTrue(version > 0, "Version didn't change after migrated?")
+        for name, extension in six.iteritems(EXTENSIONS):
+            abs_path = migration_helpers.find_migrate_repo(extension)
+            migration.db_version_control(sql.get_engine(), abs_path)
+            migration.db_sync(sql.get_engine(), abs_path)
+            version = migration_helpers.get_db_version(extension=name)
+            self.assertTrue(
+                version > 0,
+                "Version for %s didn't change after migrated?" % name)
+
+    def test_extension_downgraded(self):
+        """When get the version after downgrading an extension, it is 0."""
+        for name, extension in six.iteritems(EXTENSIONS):
+            abs_path = migration_helpers.find_migrate_repo(extension)
+            migration.db_version_control(sql.get_engine(), abs_path)
+            migration.db_sync(sql.get_engine(), abs_path)
+            version = migration_helpers.get_db_version(extension=name)
+            self.assertTrue(
+                version > 0,
+                "Version for %s didn't change after migrated?" % name)
+            migration.db_sync(sql.get_engine(), abs_path, version=0)
+            version = migration_helpers.get_db_version(extension=name)
+            self.assertEqual(0, version,
+                             'Migrate version for %s is not 0' % name)
 
     def test_unexpected_extension(self):
         """The version for an extension that doesn't exist raises ImportError.

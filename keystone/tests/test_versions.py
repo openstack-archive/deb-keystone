@@ -13,10 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import random
 
 import mock
+from testtools import matchers as tt_matchers
 
+from keystone.common import json_home
 from keystone import config
 from keystone import controllers
 from keystone.openstack.common import jsonutils
@@ -100,6 +103,253 @@ VERSIONS_RESPONSE = {
         ]
     }
 }
+
+_build_ec2tokens_relation = functools.partial(
+    json_home.build_v3_extension_resource_relation, extension_name='OS-EC2',
+    extension_version='1.0')
+
+REVOCATIONS_RELATION = json_home.build_v3_extension_resource_relation(
+    'OS-PKI', '1.0', 'revocations')
+
+_build_simple_cert_relation = functools.partial(
+    json_home.build_v3_extension_resource_relation,
+    extension_name='OS-SIMPLE-CERT', extension_version='1.0')
+
+_build_trust_relation = functools.partial(
+    json_home.build_v3_extension_resource_relation, extension_name='OS-TRUST',
+    extension_version='1.0')
+
+TRUST_ID_PARAMETER_RELATION = json_home.build_v3_extension_parameter_relation(
+    'OS-TRUST', '1.0', 'trust_id')
+
+V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
+    json_home.build_v3_resource_relation('auth_tokens'): {
+        'href': '/auth/tokens'},
+    json_home.build_v3_resource_relation('auth_catalog'): {
+        'href': '/auth/catalog'},
+    json_home.build_v3_resource_relation('auth_projects'): {
+        'href': '/auth/projects'},
+    json_home.build_v3_resource_relation('auth_domains'): {
+        'href': '/auth/domains'},
+    json_home.build_v3_resource_relation('credential'): {
+        'href-template': '/credentials/{credential_id}',
+        'href-vars': {
+            'credential_id':
+            json_home.build_v3_parameter_relation('credential_id')}},
+    json_home.build_v3_resource_relation('credentials'): {
+        'href': '/credentials'},
+    json_home.build_v3_resource_relation('domain'): {
+        'href-template': '/domains/{domain_id}',
+        'href-vars': {'domain_id': json_home.Parameters.DOMAIN_ID, }},
+    json_home.build_v3_resource_relation('domain_group_role'): {
+        'href-template':
+        '/domains/{domain_id}/groups/{group_id}/roles/{role_id}',
+        'href-vars': {
+            'domain_id': json_home.Parameters.DOMAIN_ID,
+            'group_id': json_home.Parameters.GROUP_ID,
+            'role_id': json_home.Parameters.ROLE_ID, }},
+    json_home.build_v3_resource_relation('domain_group_roles'): {
+        'href-template': '/domains/{domain_id}/groups/{group_id}/roles',
+        'href-vars': {
+            'domain_id': json_home.Parameters.DOMAIN_ID,
+            'group_id': json_home.Parameters.GROUP_ID}},
+    json_home.build_v3_resource_relation('domain_user_role'): {
+        'href-template':
+        '/domains/{domain_id}/users/{user_id}/roles/{role_id}',
+        'href-vars': {
+            'domain_id': json_home.Parameters.DOMAIN_ID,
+            'role_id': json_home.Parameters.ROLE_ID,
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('domain_user_roles'): {
+        'href-template': '/domains/{domain_id}/users/{user_id}/roles',
+        'href-vars': {
+            'domain_id': json_home.Parameters.DOMAIN_ID,
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('domains'): {'href': '/domains'},
+    json_home.build_v3_resource_relation('endpoint'): {
+        'href-template': '/endpoints/{endpoint_id}',
+        'href-vars': {
+            'endpoint_id':
+            json_home.build_v3_parameter_relation('endpoint_id'), }},
+    json_home.build_v3_resource_relation('endpoints'): {
+        'href': '/endpoints'},
+    _build_ec2tokens_relation(resource_name='ec2tokens'): {
+        'href': '/ec2tokens'},
+    _build_ec2tokens_relation(resource_name='user_credential'): {
+        'href-template': '/users/{user_id}/credentials/OS-EC2/{credential_id}',
+        'href-vars': {
+            'credential_id': json_home.build_v3_extension_parameter_relation(
+                'OS-EC2', '1.0', 'credential_id'),
+            'user_id': json_home.Parameters.USER_ID, }},
+    _build_ec2tokens_relation(resource_name='user_credentials'): {
+        'href-template': '/users/{user_id}/credentials/OS-EC2',
+        'href-vars': {
+            'user_id': json_home.Parameters.USER_ID, }},
+    REVOCATIONS_RELATION: {
+        'href': '/auth/tokens/OS-PKI/revoked'},
+    'http://docs.openstack.org/api/openstack-identity/3/ext/OS-REVOKE/1.0/rel/'
+    'events': {
+        'href': '/OS-REVOKE/events'},
+    _build_simple_cert_relation(resource_name='ca_certificate'): {
+        'href': '/OS-SIMPLE-CERT/ca'},
+    _build_simple_cert_relation(resource_name='certificates'): {
+        'href': '/OS-SIMPLE-CERT/certificates'},
+    _build_trust_relation(resource_name='trust'):
+    {
+        'href-template': '/OS-TRUST/trusts/{trust_id}',
+        'href-vars': {'trust_id': TRUST_ID_PARAMETER_RELATION, }},
+    _build_trust_relation(resource_name='trust_role'): {
+        'href-template': '/OS-TRUST/trusts/{trust_id}/roles/{role_id}',
+        'href-vars': {
+            'role_id': json_home.Parameters.ROLE_ID,
+            'trust_id': TRUST_ID_PARAMETER_RELATION, }},
+    _build_trust_relation(resource_name='trust_roles'): {
+        'href-template': '/OS-TRUST/trusts/{trust_id}/roles',
+        'href-vars': {'trust_id': TRUST_ID_PARAMETER_RELATION, }},
+    _build_trust_relation(resource_name='trusts'): {
+        'href': '/OS-TRUST/trusts'},
+    'http://docs.openstack.org/api/openstack-identity/3/ext/s3tokens/1.0/rel/'
+    's3tokens': {
+        'href': '/s3tokens'},
+    json_home.build_v3_resource_relation('group'): {
+        'href-template': '/groups/{group_id}',
+        'href-vars': {
+            'group_id': json_home.Parameters.GROUP_ID, }},
+    json_home.build_v3_resource_relation('group_user'): {
+        'href-template': '/groups/{group_id}/users/{user_id}',
+        'href-vars': {
+            'group_id': json_home.Parameters.GROUP_ID,
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('group_users'): {
+        'href-template': '/groups/{group_id}/users',
+        'href-vars': {'group_id': json_home.Parameters.GROUP_ID, }},
+    json_home.build_v3_resource_relation('groups'): {'href': '/groups'},
+    json_home.build_v3_resource_relation('policies'): {
+        'href': '/policies'},
+    json_home.build_v3_resource_relation('policy'): {
+        'href-template': '/policies/{policy_id}',
+        'href-vars': {
+            'policy_id':
+            json_home.build_v3_parameter_relation('policy_id'), }},
+    json_home.build_v3_resource_relation('project'): {
+        'href-template': '/projects/{project_id}',
+        'href-vars': {
+            'project_id': json_home.Parameters.PROJECT_ID, }},
+    json_home.build_v3_resource_relation('project_group_role'): {
+        'href-template':
+        '/projects/{project_id}/groups/{group_id}/roles/{role_id}',
+        'href-vars': {
+            'group_id': json_home.Parameters.GROUP_ID,
+            'project_id': json_home.Parameters.PROJECT_ID,
+            'role_id': json_home.Parameters.ROLE_ID, }},
+    json_home.build_v3_resource_relation('project_group_roles'): {
+        'href-template': '/projects/{project_id}/groups/{group_id}/roles',
+        'href-vars': {
+            'group_id': json_home.Parameters.GROUP_ID,
+            'project_id': json_home.Parameters.PROJECT_ID, }},
+    json_home.build_v3_resource_relation('project_user_role'): {
+        'href-template':
+        '/projects/{project_id}/users/{user_id}/roles/{role_id}',
+        'href-vars': {
+            'project_id': json_home.Parameters.PROJECT_ID,
+            'role_id': json_home.Parameters.ROLE_ID,
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('project_user_roles'): {
+        'href-template': '/projects/{project_id}/users/{user_id}/roles',
+        'href-vars': {
+            'project_id': json_home.Parameters.PROJECT_ID,
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('projects'): {
+        'href': '/projects'},
+    json_home.build_v3_resource_relation('region'): {
+        'href-template': '/regions/{region_id}',
+        'href-vars': {
+            'region_id':
+            json_home.build_v3_parameter_relation('region_id'), }},
+    json_home.build_v3_resource_relation('regions'): {'href': '/regions'},
+    json_home.build_v3_resource_relation('role'): {
+        'href-template': '/roles/{role_id}',
+        'href-vars': {
+            'role_id': json_home.Parameters.ROLE_ID, }},
+    json_home.build_v3_resource_relation('role_assignments'): {
+        'href': '/role_assignments'},
+    json_home.build_v3_resource_relation('roles'): {'href': '/roles'},
+    json_home.build_v3_resource_relation('service'): {
+        'href-template': '/services/{service_id}',
+        'href-vars': {
+            'service_id':
+            json_home.build_v3_parameter_relation('service_id')}},
+    json_home.build_v3_resource_relation('services'): {
+        'href': '/services'},
+    json_home.build_v3_resource_relation('user'): {
+        'href-template': '/users/{user_id}',
+        'href-vars': {
+            'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('user_change_password'): {
+        'href-template': '/users/{user_id}/password',
+        'href-vars': {'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('user_groups'): {
+        'href-template': '/users/{user_id}/groups',
+        'href-vars': {'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('user_projects'): {
+        'href-template': '/users/{user_id}/projects',
+        'href-vars': {'user_id': json_home.Parameters.USER_ID, }},
+    json_home.build_v3_resource_relation('users'): {'href': '/users'},
+}
+
+
+# with os-inherit enabled, there's some more resources.
+
+build_os_inherit_relation = functools.partial(
+    json_home.build_v3_extension_resource_relation,
+    extension_name='OS-INHERIT', extension_version='1.0')
+
+V3_JSON_HOME_RESOURCES_INHERIT_ENABLED = dict(
+    V3_JSON_HOME_RESOURCES_INHERIT_DISABLED)
+V3_JSON_HOME_RESOURCES_INHERIT_ENABLED.update((
+    (build_os_inherit_relation(
+        resource_name='domain_user_role_inherited_to_projects'),
+     {
+         'href-template': '/OS-INHERIT/domains/{domain_id}/users/'
+         '{user_id}/roles/{role_id}/inherited_to_projects',
+         'href-vars': {
+             'domain_id': json_home.Parameters.DOMAIN_ID,
+             'role_id': json_home.Parameters.ROLE_ID,
+             'user_id': json_home.Parameters.USER_ID,
+         },
+    }),
+    (build_os_inherit_relation(
+        resource_name='domain_group_role_inherited_to_projects'),
+     {
+         'href-template': '/OS-INHERIT/domains/{domain_id}/groups/'
+         '{group_id}/roles/{role_id}/inherited_to_projects',
+         'href-vars': {
+             'domain_id': json_home.Parameters.DOMAIN_ID,
+             'group_id': json_home.Parameters.GROUP_ID,
+             'role_id': json_home.Parameters.ROLE_ID,
+         },
+    }),
+    (build_os_inherit_relation(
+        resource_name='domain_user_roles_inherited_to_projects'),
+     {
+         'href-template': '/OS-INHERIT/domains/{domain_id}/users/'
+         '{user_id}/roles/inherited_to_projects',
+         'href-vars': {
+             'domain_id': json_home.Parameters.DOMAIN_ID,
+             'user_id': json_home.Parameters.USER_ID,
+         },
+    }),
+    (build_os_inherit_relation(
+        resource_name='domain_group_roles_inherited_to_projects'),
+     {
+         'href-template': '/OS-INHERIT/domains/{domain_id}/groups/'
+         '{group_id}/roles/inherited_to_projects',
+         'href-vars': {
+             'domain_id': json_home.Parameters.DOMAIN_ID,
+             'group_id': json_home.Parameters.GROUP_ID,
+         },
+    }),
+))
 
 
 class VersionTestCase(tests.TestCase):
@@ -295,6 +545,101 @@ class VersionTestCase(tests.TestCase):
         self.assertEqual(resp.status_int, 300)
         data = jsonutils.loads(resp.body)
         self.assertEqual(data, v2_only_response)
+
+    def test_json_home_v3(self):
+        # If the request is /v3 and the Accept header is application/json-home
+        # then the server responds with a JSON Home document.
+
+        client = self.client(self.public_app)
+        resp = client.get('/v3', headers={'Accept': 'application/json-home'})
+
+        self.assertThat(resp.status, tt_matchers.Equals('200 OK'))
+        self.assertThat(resp.headers['Content-Type'],
+                        tt_matchers.Equals('application/json-home'))
+
+        exp_json_home_data = {
+            'resources': V3_JSON_HOME_RESOURCES_INHERIT_DISABLED}
+
+        self.assertThat(jsonutils.loads(resp.body),
+                        tt_matchers.Equals(exp_json_home_data))
+
+    def test_accept_type_handling(self):
+        # Accept headers with multiple types and qvalues are handled.
+
+        def make_request(accept_types=None):
+            client = self.client(self.public_app)
+            headers = None
+            if accept_types:
+                headers = {'Accept': accept_types}
+            resp = client.get('/v3', headers=headers)
+            self.assertThat(resp.status, tt_matchers.Equals('200 OK'))
+            return resp.headers['Content-Type']
+
+        JSON = controllers.MimeTypes.JSON
+        JSON_HOME = controllers.MimeTypes.JSON_HOME
+
+        JSON_MATCHER = tt_matchers.Equals(JSON)
+        JSON_HOME_MATCHER = tt_matchers.Equals(JSON_HOME)
+
+        # Default is JSON.
+        self.assertThat(make_request(), JSON_MATCHER)
+
+        # Can request JSON and get JSON.
+        self.assertThat(make_request(JSON), JSON_MATCHER)
+
+        # Can request JSONHome and get JSONHome.
+        self.assertThat(make_request(JSON_HOME), JSON_HOME_MATCHER)
+
+        # If request JSON, JSON Home get JSON.
+        accept_types = '%s, %s' % (JSON, JSON_HOME)
+        self.assertThat(make_request(accept_types), JSON_MATCHER)
+
+        # If request JSON Home, JSON get JSON.
+        accept_types = '%s, %s' % (JSON_HOME, JSON)
+        self.assertThat(make_request(accept_types), JSON_MATCHER)
+
+        # If request JSON Home, JSON;q=0.5 get JSON Home.
+        accept_types = '%s, %s;q=0.5' % (JSON_HOME, JSON)
+        self.assertThat(make_request(accept_types), JSON_HOME_MATCHER)
+
+        # If request some unknown mime-type, get JSON.
+        self.assertThat(make_request(self.getUniqueString()), JSON_MATCHER)
+
+
+class VersionInheritEnabledTestCase(tests.TestCase):
+    def setUp(self):
+        super(VersionInheritEnabledTestCase, self).setUp()
+        self.load_backends()
+        self.public_app = self.loadapp('keystone', 'main')
+        self.admin_app = self.loadapp('keystone', 'admin')
+
+        self.config_fixture.config(
+            public_endpoint='http://localhost:%(public_port)d',
+            admin_endpoint='http://localhost:%(admin_port)d')
+
+    def config_overrides(self):
+        super(VersionInheritEnabledTestCase, self).config_overrides()
+        port = random.randint(10000, 30000)
+        self.config_fixture.config(public_port=port, admin_port=port)
+
+        self.config_fixture.config(group='os_inherit', enabled=True)
+
+    def test_json_home_v3(self):
+        # If the request is /v3 and the Accept header is application/json-home
+        # then the server responds with a JSON Home document.
+
+        client = self.client(self.public_app)
+        resp = client.get('/v3/', headers={'Accept': 'application/json-home'})
+
+        self.assertThat(resp.status, tt_matchers.Equals('200 OK'))
+        self.assertThat(resp.headers['Content-Type'],
+                        tt_matchers.Equals('application/json-home'))
+
+        exp_json_home_data = {
+            'resources': V3_JSON_HOME_RESOURCES_INHERIT_ENABLED}
+
+        self.assertThat(jsonutils.loads(resp.body),
+                        tt_matchers.Equals(exp_json_home_data))
 
 
 class XmlVersionTestCase(tests.TestCase):

@@ -16,6 +16,7 @@ import datetime
 import sys
 
 from keystoneclient.common import cms
+from oslo.utils import timeutils
 import six
 
 from keystone.common import controller
@@ -24,9 +25,9 @@ from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.models import token_model
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
 from keystone.token import provider
 
 
@@ -40,7 +41,7 @@ class ExternalAuthNotApplicable(Exception):
 
 
 @dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'token_api', 'token_provider_api', 'trust_api')
+                     'token_provider_api', 'trust_api')
 class Auth(controller.V2Controller):
 
     @controller.v2_deprecated
@@ -98,7 +99,7 @@ class Auth(controller.V2Controller):
                 auth_info = self._authenticate_local(
                     context, auth)
 
-        user_ref, tenant_ref, metadata_ref, expiry, bind = auth_info
+        user_ref, tenant_ref, metadata_ref, expiry, bind, audit_id = auth_info
         # Validate that the auth info is valid and nothing is disabled
         try:
             self.identity_api.assert_user_enabled(
@@ -122,7 +123,8 @@ class Auth(controller.V2Controller):
         auth_token_data = self._get_auth_token_data(user_ref,
                                                     tenant_ref,
                                                     metadata_ref,
-                                                    expiry)
+                                                    expiry,
+                                                    audit_id)
 
         if tenant_ref:
             catalog_ref = self.catalog_api.get_catalog(
@@ -141,6 +143,12 @@ class Auth(controller.V2Controller):
 
         (token_id, token_data) = self.token_provider_api.issue_v2_token(
             auth_token_data, roles_ref=roles_ref, catalog_ref=catalog_ref)
+
+        # NOTE(wanghong): We consume a trust use only when we are using trusts
+        # and have successfully issued a token.
+        if CONF.trust.enabled and 'trust_id' in auth:
+            self.trust_api.consume_use(auth['trust_id'])
+
         return token_data
 
     def _authenticate_token(self, context, auth):
@@ -162,20 +170,19 @@ class Auth(controller.V2Controller):
                                                 size=CONF.max_token_size)
 
         try:
-            old_token_ref = self.token_api.get_token(old_token)
+            token_model_ref = token_model.KeystoneToken(
+                token_id=old_token,
+                token_data=self.token_provider_api.validate_token(old_token))
         except exception.NotFound as e:
             raise exception.Unauthorized(e)
 
-        wsgi.validate_token_bind(context, old_token_ref)
+        wsgi.validate_token_bind(context, token_model_ref)
 
         # A trust token cannot be used to get another token
-        if 'trust' in old_token_ref:
-            raise exception.Forbidden()
-        if 'trust_id' in old_token_ref['metadata']:
+        if token_model_ref.trust_scoped:
             raise exception.Forbidden()
 
-        user_ref = old_token_ref['user']
-        user_id = user_ref['id']
+        user_id = token_model_ref.user_id
         tenant_id = self._get_project_id_from_auth(auth)
 
         if not CONF.trust.enabled and 'trust_id' in auth:
@@ -202,7 +209,6 @@ class Auth(controller.V2Controller):
                 trust_ref['trustee_user_id'])
             if not trustee_user_ref['enabled']:
                 raise exception.Forbidden()()
-            self.trust_api.consume_use(auth['trust_id'])
 
             if trust_ref['impersonation'] is True:
                 current_user_ref = trustor_user_ref
@@ -216,7 +222,7 @@ class Auth(controller.V2Controller):
         tenant_ref, metadata_ref['roles'] = self._get_project_roles_and_ref(
             user_id, tenant_id)
 
-        expiry = old_token_ref['expires']
+        expiry = token_model_ref.expires
         if CONF.trust.enabled and 'trust_id' in auth:
             trust_id = auth['trust_id']
             trust_roles = []
@@ -235,9 +241,11 @@ class Auth(controller.V2Controller):
             metadata_ref['trustee_user_id'] = trust_ref['trustee_user_id']
             metadata_ref['trust_id'] = trust_id
 
-        bind = old_token_ref.get('bind')
+        bind = token_model_ref.bind
+        audit_id = token_model_ref.audit_chain_id
 
-        return (current_user_ref, tenant_ref, metadata_ref, expiry, bind)
+        return (current_user_ref, tenant_ref, metadata_ref, expiry, bind,
+                audit_id)
 
     def _authenticate_local(self, context, auth):
         """Try to authenticate against the identity backend.
@@ -295,14 +303,17 @@ class Auth(controller.V2Controller):
             user_id, tenant_id)
 
         expiry = provider.default_expire_time()
-        return (user_ref, tenant_ref, metadata_ref, expiry, None)
+        bind = None
+        audit_id = None
+        return (user_ref, tenant_ref, metadata_ref, expiry, bind, audit_id)
 
     def _authenticate_external(self, context, auth):
         """Try to authenticate an external user via REMOTE_USER variable.
 
         Returns auth_token_data, (user_ref, tenant_ref, metadata_ref)
         """
-        if 'REMOTE_USER' not in context.get('environment', {}):
+        environment = context.get('environment', {})
+        if not environment.get('REMOTE_USER'):
             raise ExternalAuthNotApplicable()
 
         # NOTE(jamielennox): xml and json differ and get confused about what
@@ -310,7 +321,7 @@ class Auth(controller.V2Controller):
         if not auth:
             auth = {}
 
-        username = context['environment']['REMOTE_USER']
+        username = environment['REMOTE_USER']
         try:
             user_ref = self.identity_api.get_user_by_name(
                 username, CONF.identity.default_domain_id)
@@ -326,17 +337,18 @@ class Auth(controller.V2Controller):
         expiry = provider.default_expire_time()
         bind = None
         if ('kerberos' in CONF.token.bind and
-                context['environment'].
-                get('AUTH_TYPE', '').lower() == 'negotiate'):
+                environment.get('AUTH_TYPE', '').lower() == 'negotiate'):
             bind = {'kerberos': username}
+        audit_id = None
 
-        return (user_ref, tenant_ref, metadata_ref, expiry, bind)
+        return (user_ref, tenant_ref, metadata_ref, expiry, bind, audit_id)
 
-    def _get_auth_token_data(self, user, tenant, metadata, expiry):
+    def _get_auth_token_data(self, user, tenant, metadata, expiry, audit_id):
         return dict(user=user,
                     tenant=tenant,
                     metadata=metadata,
-                    expires=expiry)
+                    expires=expiry,
+                    parent_audit_id=audit_id)
 
     def _get_project_id_from_auth(self, auth):
         """Extract tenant information from auth dict.
@@ -389,15 +401,17 @@ class Auth(controller.V2Controller):
         Optionally, limited to a token owned by a specific tenant.
 
         """
-        data = self.token_api.get_token(token_id)
+        token_ref = token_model.KeystoneToken(
+            token_id=token_id,
+            token_data=self.token_provider_api.validate_token(token_id))
         if belongs_to:
-            if data.get('tenant') is None:
+            if not token_ref.project_scoped:
                 raise exception.Unauthorized(
                     _('Token does not belong to specified tenant.'))
-            if data['tenant'].get('id') != belongs_to:
+            if token_ref.project_id != belongs_to:
                 raise exception.Unauthorized(
                     _('Token does not belong to specified tenant.'))
-        return data
+        return token_ref
 
     @controller.v2_deprecated
     @controller.protected()
@@ -442,7 +456,7 @@ class Auth(controller.V2Controller):
     def revocation_list(self, context, auth=None):
         if not CONF.token.revoke_by_id:
             raise exception.Gone()
-        tokens = self.token_api.list_revoked_tokens()
+        tokens = self.token_provider_api.list_revoked_tokens()
 
         for t in tokens:
             expires = t['expires']
@@ -464,11 +478,11 @@ class Auth(controller.V2Controller):
         token_ref = self._get_token_ref(token_id)
 
         catalog_ref = None
-        if token_ref.get('tenant'):
+        if token_ref.project_id:
             catalog_ref = self.catalog_api.get_catalog(
-                token_ref['user']['id'],
-                token_ref['tenant']['id'],
-                token_ref['metadata'])
+                token_ref.user_id,
+                token_ref.project_id,
+                token_ref.metadata)
 
         return Auth.format_endpoint_list(catalog_ref)
 

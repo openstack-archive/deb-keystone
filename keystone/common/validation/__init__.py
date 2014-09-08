@@ -36,3 +36,27 @@ def validated(request_body_schema, resource_to_validate):
             return func(*args, **kwargs)
         return wrapper
     return add_validator
+
+
+def nullable(property_schema):
+    """Clone a property schema into one that is nullable.
+
+    :param dict property_schema: schema to clone into a nullable schema
+    :returns: a new dict schema
+    """
+    # TODO(dstanek): deal with the case where type is already a list; we don't
+    #                do that yet so I'm not wasting time on it
+    new_schema = property_schema.copy()
+    new_schema['type'] = [property_schema['type'], 'null']
+    return new_schema
+
+
+def add_array_type(property_schema):
+    """Convert the parameter schema to be of type list.
+
+    :param dict property_schema: schema to add array type to
+    :returns: a new dict schema
+    """
+    new_schema = property_schema.copy()
+    new_schema['type'] = [property_schema['type'], 'array']
+    return new_schema

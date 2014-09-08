@@ -206,8 +206,7 @@ def exception_translated(exception_type):
 
 @dependency.provider('identity_api')
 @dependency.optional('revoke_api')
-@dependency.requires('assignment_api', 'credential_api', 'id_mapping_api',
-                     'token_api')
+@dependency.requires('assignment_api', 'credential_api', 'id_mapping_api')
 class Manager(manager.Manager):
     """Default pivot point for the Identity backend.
 
@@ -247,6 +246,8 @@ class Manager(manager.Manager):
 
     """
     _USER = 'user'
+    _USER_PASSWORD = 'user_password'
+    _USER_REMOVED_FROM_GROUP = 'user_removed_from_group'
     _GROUP = 'group'
 
     def __init__(self):
@@ -284,9 +285,9 @@ class Manager(manager.Manager):
 
         """
         conf = CONF.identity
-        if (driver is self.driver and driver.generates_uuids() and
-                driver.is_domain_aware()):
-            # The default driver that needs no help, e.g. SQL
+
+        if not self._needs_post_processing(driver):
+            # a classic case would be when running with a single SQL driver
             return ref
 
         LOG.debug('ID Mapping - Domain ID: %(domain)s, '
@@ -300,50 +301,73 @@ class Manager(manager.Manager):
                    'compat': CONF.identity_mapping.backward_compatible_ids})
 
         if isinstance(ref, dict):
-            LOG.debug('Local ID: %s', ref['id'])
-            ref = ref.copy()
-            # If the driver can't handle domains, then we need to insert the
-            # domain_id into the entity being returned.  If the domain_id is
-            # None that means we are running in a single backend mode, so to
-            # remain backwardly compatible, we put in the default domain ID.
-            if not driver.is_domain_aware():
-                if domain_id is None:
-                    domain_id = conf.default_domain_id
-                ref['domain_id'] = domain_id
-
-            # There are two situations where we must now use the mapping:
-            # - this isn't the default driver (i.e. multiple backends), or
-            # - we have a single backend that doesn't use UUIDs
-            # The exception to the above is that we must honor backward
-            # compatibility if this is the default driver (e.g. to support
-            # current LDAP)
-            if (driver is not self.driver or
-                (not driver.generates_uuids() and
-                    not CONF.identity_mapping.backward_compatible_ids)):
-
-                local_entity = {'domain_id': ref['domain_id'],
-                                'local_id': ref['id'],
-                                'entity_type': entity_type}
-                public_id = self.id_mapping_api.get_public_id(local_entity)
-                if public_id:
-                    ref['id'] = public_id
-                    LOG.debug('Found existing mapping to public ID: %s',
-                              ref['id'])
-                else:
-                    # Need to create a mapping. If the driver generates UUIDs
-                    # then pass the local UUID in as the public ID to use.
-                    if driver.generates_uuids():
-                        public_id = ref['id']
-                    ref['id'] = self.id_mapping_api.create_id_mapping(
-                        local_entity, public_id)
-                    LOG.debug('Created new mapping to public ID: %s',
-                              ref['id'])
-            return ref
+            return self._set_domain_id_and_mapping_for_single_ref(
+                ref, domain_id, driver, entity_type, conf)
         elif isinstance(ref, list):
             return [self._set_domain_id_and_mapping(
                     x, domain_id, driver, entity_type) for x in ref]
         else:
             raise ValueError(_('Expected dict or list: %s') % type(ref))
+
+    def _needs_post_processing(self, driver):
+        """Returns whether entity from driver needs domain added or mapping."""
+        return (driver is not self.driver or not driver.generates_uuids() or
+                not driver.is_domain_aware())
+
+    def _set_domain_id_and_mapping_for_single_ref(self, ref, domain_id,
+                                                  driver, entity_type, conf):
+        LOG.debug('Local ID: %s', ref['id'])
+        ref = ref.copy()
+
+        self._insert_domain_id_if_needed(ref, driver, domain_id, conf)
+
+        if self._is_mapping_needed(driver):
+            local_entity = {'domain_id': ref['domain_id'],
+                            'local_id': ref['id'],
+                            'entity_type': entity_type}
+            public_id = self.id_mapping_api.get_public_id(local_entity)
+            if public_id:
+                ref['id'] = public_id
+                LOG.debug('Found existing mapping to public ID: %s',
+                          ref['id'])
+            else:
+                # Need to create a mapping. If the driver generates UUIDs
+                # then pass the local UUID in as the public ID to use.
+                if driver.generates_uuids():
+                    public_id = ref['id']
+                ref['id'] = self.id_mapping_api.create_id_mapping(
+                    local_entity, public_id)
+                LOG.debug('Created new mapping to public ID: %s',
+                          ref['id'])
+        return ref
+
+    def _insert_domain_id_if_needed(self, ref, driver, domain_id, conf):
+        """Inserts the domain ID into the ref, if required.
+
+        If the driver can't handle domains, then we need to insert the
+        domain_id into the entity being returned.  If the domain_id is
+        None that means we are running in a single backend mode, so to
+        remain backwardly compatible, we put in the default domain ID.
+        """
+        if not driver.is_domain_aware():
+            if domain_id is None:
+                domain_id = conf.default_domain_id
+            ref['domain_id'] = domain_id
+
+    def _is_mapping_needed(self, driver):
+        """Returns whether mapping is needed.
+
+        There are two situations where we must use the mapping:
+        - this isn't the default driver (i.e. multiple backends), or
+        - we have a single backend that doesn't use UUIDs
+        The exception to the above is that we must honor backward
+        compatibility if this is the default driver (e.g. to support
+        current LDAP)
+        """
+        is_not_default_driver = driver is not self.driver
+        return (is_not_default_driver or (
+            not driver.generates_uuids() and
+            not CONF.identity_mapping.backward_compatible_ids))
 
     def _clear_domain_id_if_domain_unaware(self, driver, ref):
         """Clear domain_id details if driver is not domain aware."""
@@ -579,6 +603,7 @@ class Manager(manager.Manager):
     @domains_configured
     @exception_translated('user')
     def update_user(self, user_id, user_ref):
+        old_user_ref = self.get_user(user_id)
         user = user_ref.copy()
         if 'name' in user:
             user['name'] = clean.user_name(user['name'])
@@ -598,10 +623,12 @@ class Manager(manager.Manager):
             self._get_domain_driver_and_entity_id(user_id))
         user = self._clear_domain_id_if_domain_unaware(driver, user)
         ref = driver.update_user(entity_id, user)
-        if user.get('enabled') is False or user.get('password') is not None:
-            if self.revoke_api:
-                self.revoke_api.revoke_by_user(user_id)
-            self.token_api.delete_tokens_for_user(user_id)
+
+        enabled_change = ((user.get('enabled') is False) and
+                          user['enabled'] != old_user_ref.get('enabled'))
+        if enabled_change or user.get('password') is not None:
+            self.emit_invalidate_user_token_persistence(user_id)
+
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
 
@@ -613,7 +640,6 @@ class Manager(manager.Manager):
             self._get_domain_driver_and_entity_id(user_id))
         driver.delete_user(entity_id)
         self.credential_api.delete_credentials_for_user(user_id)
-        self.token_api.delete_tokens_for_user(user_id)
         self.id_mapping_api.delete_id_mapping(user_id)
 
     @notifications.created(_GROUP, result_id_arg_attr='id')
@@ -659,30 +685,17 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.GROUP)
 
-    def revoke_tokens_for_group(self, group_id):
-        # We get the list of users before we attempt the group
-        # deletion, so that we can remove these tokens after we know
-        # the group deletion succeeded.
-
-        # TODO(ayoung): revoke based on group and roleids instead
-        user_ids = []
-        for u in self.list_users_in_group(group_id):
-            user_ids.append(u['id'])
-            if self.revoke_api:
-                self.revoke_api.revoke_by_user(u['id'])
-        self.token_api.delete_tokens_for_users(user_ids)
-
     @notifications.deleted(_GROUP)
     @domains_configured
     @exception_translated('group')
     def delete_group(self, group_id):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
-        # As well as deleting the group, we need to invalidate
-        # any tokens for the users who are members of the group.
-        self.revoke_tokens_for_group(group_id)
+        user_ids = (u['id'] for u in self.list_users_in_group(group_id))
         driver.delete_group(entity_id)
         self.id_mapping_api.delete_id_mapping(group_id)
+        for uid in user_ids:
+            self.emit_invalidate_user_token_persistence(uid)
 
     @domains_configured
     @exception_translated('group')
@@ -702,7 +715,6 @@ class Manager(manager.Manager):
             user_entity_id, user_driver, group_entity_id, group_driver)
 
         group_driver.add_user_to_group(user_entity_id, group_entity_id)
-        self.token_api.delete_tokens_for_user(user_id)
 
     @domains_configured
     @exception_translated('group')
@@ -722,13 +734,19 @@ class Manager(manager.Manager):
             user_entity_id, user_driver, group_entity_id, group_driver)
 
         group_driver.remove_user_from_group(user_entity_id, group_entity_id)
-        # TODO(ayoung) revoking all tokens for a user based on group
-        # membership is overkill, as we only would need to revoke tokens
-        # that had role assignments via the group.  Calculating those
-        # assignments would have to be done by the assignment backend.
-        if self.revoke_api:
-            self.revoke_api.revoke_by_user(user_id)
-        self.token_api.delete_tokens_for_user(user_id)
+        self.emit_invalidate_user_token_persistence(user_id)
+
+    @notifications.internal(notifications.INVALIDATE_USER_TOKEN_PERSISTENCE)
+    def emit_invalidate_user_token_persistence(self, user_id):
+        """Emit a notification to the callback system to revoke user tokens.
+
+        This method and associated callback listener removes the need for
+        making a direct call to another manager to delete and revoke tokens.
+
+        :param user_id: user identifier
+        :type user_id: string
+        """
+        pass
 
     @manager.response_truncated
     @domains_configured

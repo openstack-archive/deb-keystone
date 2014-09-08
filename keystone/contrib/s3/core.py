@@ -26,13 +26,11 @@ import hashlib
 import hmac
 
 from keystone.common import extension
+from keystone.common import json_home
 from keystone.common import utils
 from keystone.common import wsgi
-from keystone import config
 from keystone.contrib.ec2 import controllers
 from keystone import exception
-
-CONF = config.CONF
 
 EXTENSION_DATA = {
     'name': 'OpenStack S3 API',
@@ -52,14 +50,16 @@ EXTENSION_DATA = {
 extension.register_admin_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)
 
 
-class S3Extension(wsgi.ExtensionRouter):
+class S3Extension(wsgi.V3ExtensionRouter):
     def add_routes(self, mapper):
         controller = S3Controller()
         # validation
-        mapper.connect('/s3tokens',
-                       controller=controller,
-                       action='authenticate',
-                       conditions=dict(method=['POST']))
+        self._add_resource(
+            mapper, controller,
+            path='/s3tokens',
+            post_action='authenticate',
+            rel=json_home.build_v3_extension_resource_relation(
+                's3tokens', '1.0', 's3tokens'))
 
 
 class S3Controller(controllers.Ec2Controller):

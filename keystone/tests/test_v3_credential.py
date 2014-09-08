@@ -90,6 +90,18 @@ class CredentialTestCase(CredentialBaseTestCase):
         r = self.get('/credentials', content_type='xml')
         self.assertValidCredentialListResponse(r, ref=self.credential)
 
+    def test_list_credentials_filtered_by_user_id(self):
+        """Call ``GET  /credentials?user_id={user_id}``."""
+        credential = self.new_credential_ref(
+            user_id=uuid.uuid4().hex)
+        self.credential_api.create_credential(
+            credential['id'], credential)
+
+        r = self.get('/credentials?user_id=%s' % self.user['id'])
+        self.assertValidCredentialListResponse(r, ref=self.credential)
+        for cred in r.result['credentials']:
+            self.assertEqual(self.user['id'], cred['user_id'])
+
     def test_create_credential(self):
         """Call ``POST /credentials``."""
         ref = self.new_credential_ref(user_id=self.user['id'])
@@ -238,7 +250,7 @@ class TestCredentialTrustScoped(test_v3.RestfulTestCase):
             user_id=self.trustee_user['id'],
             password=self.trustee_user['password'],
             trust_id=trust['id'])
-        r = self.post('/auth/tokens', body=auth_data)
+        r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectTrustScopedTokenResponse(r, self.user)
         trust_id = r.result['token']['OS-TRUST:trust']['id']
         token_id = r.headers.get('X-Subject-Token')
@@ -372,8 +384,9 @@ class TestCredentialEc2(CredentialBaseTestCase):
         """Test ec2 credential deletion."""
         ec2_cred = self._get_ec2_cred()
         uri = '/'.join([self._get_ec2_cred_uri(), ec2_cred['access']])
-        cred_from_credential_api = self.credential_api.list_credentials(
-            user_id=self.user_id)
+        cred_from_credential_api = (
+            self.credential_api
+            .list_credentials_for_user(self.user_id))
         self.assertEqual(1, len(cred_from_credential_api))
         self.delete(uri)
         self.assertRaises(exception.CredentialNotFound,

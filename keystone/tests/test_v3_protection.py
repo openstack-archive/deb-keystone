@@ -13,7 +13,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import tempfile
 import uuid
 
 from keystone import config
@@ -21,6 +20,7 @@ from keystone import exception
 from keystone.openstack.common import jsonutils
 from keystone.policy.backends import rules
 from keystone import tests
+from keystone.tests.ksfixtures import temporaryfile
 from keystone.tests import test_v3
 
 
@@ -56,7 +56,8 @@ class IdentityTestProtectedCase(test_v3.RestfulTestCase):
         # file in each test to create the policies
         self.addCleanup(rules.reset)
         rules.reset()
-        _unused, self.tmpfilename = tempfile.mkstemp()
+        self.tempfile = self.useFixture(temporaryfile.SecureTempFile())
+        self.tmpfilename = self.tempfile.file_name
         self.config_fixture.config(policy_file=self.tmpfilename)
 
         # A default auth request we can use - un-scoped user token
@@ -661,3 +662,24 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
             domain_id=self.admin_domain['id'])
 
         self._test_domain_management()
+
+    def test_list_user_credentials(self):
+        self.credential_user = self.new_credential_ref(self.just_a_user['id'])
+        self.credential_api.create_credential(self.credential_user['id'],
+                                              self.credential_user)
+        self.credential_admin = self.new_credential_ref(
+            self.cloud_admin_user['id'])
+        self.credential_api.create_credential(self.credential_admin['id'],
+                                              self.credential_admin)
+
+        self.auth = self.build_authentication_request(
+            user_id=self.just_a_user['id'],
+            password=self.just_a_user['password'])
+        url = '/credentials?user_id=%s' % self.just_a_user['id']
+        self.get(url, auth=self.auth)
+        url = '/credentials?user_id=%s' % self.cloud_admin_user['id']
+        self.get(url, auth=self.auth,
+                 expected_status=exception.ForbiddenAction.code)
+        url = '/credentials'
+        self.get(url, auth=self.auth,
+                 expected_status=exception.ForbiddenAction.code)

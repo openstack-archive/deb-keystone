@@ -36,9 +36,8 @@ import abc
 import sys
 import uuid
 
-import six
-
 from keystoneclient.contrib.ec2 import utils as ec2_utils
+import six
 
 from keystone.common import controller
 from keystone.common import dependency
@@ -46,11 +45,12 @@ from keystone.common import utils
 from keystone.common import wsgi
 from keystone import exception
 from keystone.i18n import _
+from keystone.models import token_model
 from keystone.openstack.common import jsonutils
 
 
 @dependency.requires('assignment_api', 'catalog_api', 'credential_api',
-                     'identity_api', 'token_api')
+                     'identity_api', 'token_provider_api')
 @six.add_metaclass(abc.ABCMeta)
 class Ec2ControllerCommon(object):
     def check_signature(self, creds_ref, credentials):
@@ -182,8 +182,8 @@ class Ec2ControllerCommon(object):
         """
 
         self.identity_api.get_user(user_id)
-        credential_refs = self.credential_api.list_credentials(
-            user_id=user_id)
+        credential_refs = self.credential_api.list_credentials_for_user(
+            user_id)
         return {'credentials':
                 [self._convert_v3_to_ec2_credential(credential)
                     for credential in credential_refs]}
@@ -306,11 +306,15 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
 
         """
         try:
-            token_ref = self.token_api.get_token(context['token_id'])
+            token_data = self.token_provider_api.validate_token(
+                context['token_id'])
         except exception.TokenNotFound as e:
             raise exception.Unauthorized(e)
 
-        if token_ref['user'].get('id') != user_id:
+        token_ref = token_model.KeystoneToken(token_id=context['token_id'],
+                                              token_data=token_data)
+
+        if token_ref.user_id != user_id:
             raise exception.Forbidden(_('Token belongs to another user'))
 
     def _is_admin(self, context):

@@ -20,7 +20,7 @@ from keystone.catalog.backends import kvs
 from keystone.catalog import core
 from keystone import config
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _LC
 from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
 
@@ -103,27 +103,26 @@ class Catalog(kvs.Catalog):
         try:
             self.templates = parse_templates(open(template_file))
         except IOError:
-            LOG.critical(_('Unable to open template file %s'), template_file)
+            LOG.critical(_LC('Unable to open template file %s'), template_file)
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        d = dict(six.iteritems(CONF))
-        d.update({'tenant_id': tenant_id,
-                  'user_id': user_id})
+        substitutions = dict(six.iteritems(CONF))
+        substitutions.update({'tenant_id': tenant_id, 'user_id': user_id})
 
-        o = {}
+        catalog = {}
         for region, region_ref in six.iteritems(self.templates):
-            o[region] = {}
+            catalog[region] = {}
             for service, service_ref in six.iteritems(region_ref):
                 service_data = {}
                 try:
                     for k, v in six.iteritems(service_ref):
-                        service_data[k] = core.format_url(v, d)
+                        service_data[k] = core.format_url(v, substitutions)
                 except exception.MalformedEndpoint:
                     continue  # this failure is already logged in format_url()
-                o[region][service] = service_data
+                catalog[region][service] = service_data
 
-        return o
+        return catalog
 
 
 @versionutils.deprecated(

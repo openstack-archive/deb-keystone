@@ -12,8 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import sys
-
+from oslo.utils import timeutils
 import six
 from six.moves.urllib import parse
 
@@ -23,12 +22,9 @@ from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _
 from keystone.openstack.common import jsonutils
+from keystone.openstack.common import log
 from keystone import token
 from keystone.token import provider
-
-
-from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
 
 
 LOG = log.getLogger(__name__)
@@ -39,6 +35,7 @@ class V2TokenDataHelper(object):
     """Creates V2 token data."""
     @classmethod
     def format_token(cls, token_ref, roles_ref=None, catalog_ref=None):
+        audit_info = None
         user_ref = token_ref['user']
         metadata_ref = token_ref['metadata']
         if roles_ref is None:
@@ -47,9 +44,20 @@ class V2TokenDataHelper(object):
         if expires is not None:
             if not isinstance(expires, six.text_type):
                 expires = timeutils.isotime(expires)
+
+        token_data = token_ref.get('token_data')
+        if token_data:
+            token_audit = token_data.get(
+                'access', token_data).get('token', {}).get('audit_ids')
+            audit_info = token_audit
+
+        if audit_info is None:
+            audit_info = provider.audit_info(token_ref.get('parent_audit_id'))
+
         o = {'access': {'token': {'id': token_ref['id'],
                                   'expires': expires,
-                                  'issued_at': timeutils.strtime()
+                                  'issued_at': timeutils.strtime(),
+                                  'audit_ids': audit_info
                                   },
                         'user': {'id': user_ref['id'],
                                  'name': user_ref['name'],
@@ -310,18 +318,32 @@ class V3TokenDataHelper(object):
             # TODO(ayoung): Enforce Endpoints for trust
             token_data['catalog'] = service_catalog
 
-    def _populate_token_dates(self, token_data, expires=None, trust=None):
+    def _populate_token_dates(self, token_data, expires=None, trust=None,
+                              issued_at=None):
         if not expires:
             expires = provider.default_expire_time()
         if not isinstance(expires, six.string_types):
             expires = timeutils.isotime(expires, subsecond=True)
         token_data['expires_at'] = expires
-        token_data['issued_at'] = timeutils.isotime(subsecond=True)
+        token_data['issued_at'] = (issued_at or
+                                   timeutils.isotime(subsecond=True))
+
+    def _populate_audit_info(self, token_data, audit_info=None):
+        if audit_info is None or isinstance(audit_info, six.string_types):
+            token_data['audit_ids'] = provider.audit_info(audit_info)
+        elif isinstance(audit_info, list):
+            token_data['audit_ids'] = audit_info
+        else:
+            msg = _('Invalid audit info data type: %(data)s (%(type)s)')
+            msg_subst = {'data': audit_info, 'type': type(audit_info)}
+            LOG.error(msg, msg_subst)
+            raise exception.UnexpectedError(msg % msg_subst)
 
     def get_token_data(self, user_id, method_names, extras,
                        domain_id=None, project_id=None, expires=None,
                        trust=None, token=None, include_catalog=True,
-                       bind=None, access_token=None):
+                       bind=None, access_token=None, issued_at=None,
+                       audit_info=None):
         token_data = {'methods': method_names,
                       'extras': extras}
 
@@ -342,37 +364,25 @@ class V3TokenDataHelper(object):
         self._populate_user(token_data, user_id, trust)
         self._populate_roles(token_data, user_id, domain_id, project_id, trust,
                              access_token)
+        self._populate_audit_info(token_data, audit_info)
+
         if include_catalog:
             self._populate_service_catalog(token_data, user_id, domain_id,
                                            project_id, trust)
-        self._populate_token_dates(token_data, expires=expires, trust=trust)
+        self._populate_token_dates(token_data, expires=expires, trust=trust,
+                                   issued_at=issued_at)
         self._populate_oauth_section(token_data, access_token)
         return {'token': token_data}
 
 
-@dependency.optional('oauth_api', 'revoke_api')
+@dependency.optional('oauth_api')
 @dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'token_api', 'trust_api')
+                     'trust_api')
 class BaseProvider(provider.Provider):
     def __init__(self, *args, **kwargs):
         super(BaseProvider, self).__init__(*args, **kwargs)
         self.v3_token_data_helper = V3TokenDataHelper()
         self.v2_token_data_helper = V2TokenDataHelper()
-
-    def _create_token(self, token_id, token_data):
-        try:
-            if isinstance(token_data['expires'], six.string_types):
-                token_data['expires'] = timeutils.normalize_time(
-                    timeutils.parse_isotime(token_data['expires']))
-            self.token_api.create_token(token_id, token_data)
-        except Exception:
-            exc_info = sys.exc_info()
-            # an identical token may have been created already.
-            # if so, return the token_data as it is also identical
-            try:
-                self.token_api.get_token(token_id)
-            except exception.TokenNotFound:
-                six.reraise(*exc_info)
 
     def get_token_version(self, token_data):
         if token_data and isinstance(token_data, dict):
@@ -387,7 +397,7 @@ class BaseProvider(provider.Provider):
                 return token.provider.V2
             if 'token' in token_data and 'methods' in token_data['token']:
                 return token.provider.V3
-        raise token.provider.UnsupportedTokenVersionException()
+        raise exception.UnsupportedTokenVersionException()
 
     def issue_v2_token(self, token_ref, roles_ref=None,
                        catalog_ref=None):
@@ -395,24 +405,12 @@ class BaseProvider(provider.Provider):
             token_ref, roles_ref, catalog_ref)
         token_id = self._get_token_id(token_data)
         token_data['access']['token']['id'] = token_id
-        expiry = token_data['access']['token']['expires']
-        data = dict(key=token_id,
-                    id=token_id,
-                    expires=expiry,
-                    user=token_ref['user'],
-                    tenant=token_ref['tenant'],
-                    metadata=token_ref['metadata'],
-                    token_data=token_data,
-                    bind=token_ref.get('bind'),
-                    trust_id=token_ref['metadata'].get('trust_id'),
-                    token_version=token.provider.V2)
-        self._create_token(token_id, data)
-
-        return (token_id, token_data)
+        return token_id, token_data
 
     def issue_v3_token(self, user_id, method_names, expires_at=None,
                        project_id=None, domain_id=None, auth_context=None,
-                       trust=None, metadata_ref=None, include_catalog=True):
+                       trust=None, metadata_ref=None, include_catalog=True,
+                       parent_audit_id=None):
         # for V2, trust is stashed in metadata_ref
         if (CONF.trust.enabled and not trust and metadata_ref and
                 'trust_id' in metadata_ref):
@@ -442,44 +440,25 @@ class BaseProvider(provider.Provider):
             bind=auth_context.get('bind') if auth_context else None,
             token=token_ref,
             include_catalog=include_catalog,
-            access_token=access_token)
+            access_token=access_token,
+            audit_info=parent_audit_id)
 
         token_id = self._get_token_id(token_data)
-
-        expiry = token_data['token']['expires_at']
-        # FIXME(gyee): is there really a need to store roles in metadata?
-        role_ids = []
-        if metadata_ref is None:
-            metadata_ref = {}
-        if 'project' in token_data['token']:
-            # project-scoped token, fill in the v2 token data
-            # all we care are the role IDs
-            role_ids = [r['id'] for r in token_data['token']['roles']]
-            metadata_ref = {'roles': role_ids}
-        if trust:
-            metadata_ref.setdefault('trust_id', trust['id'])
-            metadata_ref.setdefault('trustee_user_id',
-                                    trust['trustee_user_id'])
-        data = dict(key=token_id,
-                    id=token_id,
-                    expires=expiry,
-                    user=token_data['token']['user'],
-                    tenant=token_data['token'].get('project'),
-                    metadata=metadata_ref,
-                    token_data=token_data,
-                    trust_id=trust['id'] if trust else None,
-                    token_version=token.provider.V3)
-        self._create_token(token_id, data)
-
-        return (token_id, token_data)
+        return token_id, token_data
 
     def _handle_saml2_tokens(self, auth_context, project_id, domain_id):
         user_id = auth_context['user_id']
         group_ids = auth_context['group_ids']
+        idp = auth_context[federation.IDENTITY_PROVIDER]
+        protocol = auth_context[federation.PROTOCOL]
         token_data = {
             'user': {
                 'id': user_id,
-                'name': parse.unquote(user_id)
+                'name': parse.unquote(user_id),
+                federation.FEDERATION: {
+                    'identity_provider': {'id': idp},
+                    'protocol': {'id': protocol}
+                }
             }
         }
 
@@ -488,42 +467,16 @@ class BaseProvider(provider.Provider):
                 group_ids, project_id, domain_id, user_id)
             token_data.update({'roles': roles})
         else:
-            idp = auth_context[federation.IDENTITY_PROVIDER]
-            protocol = auth_context[federation.PROTOCOL]
-            token_data['user'].update({
-                federation.FEDERATION: {
-                    'identity_provider': {'id': idp},
-                    'protocol': {'id': protocol},
-                    'groups': [{'id': x} for x in group_ids]
-                },
+            token_data['user'][federation.FEDERATION].update({
+                'groups': [{'id': x} for x in group_ids]
             })
         return token_data
-
-    def _verify_token(self, token_id):
-        """Verify the given token and return the token_ref."""
-        token_ref = self.token_api.get_token(token_id)
-        return self._verify_token_ref(token_ref)
 
     def _verify_token_ref(self, token_ref):
         """Verify and return the given token_ref."""
         if not token_ref:
             raise exception.Unauthorized()
         return token_ref
-
-    def revoke_token(self, token_id):
-        token = self.token_api.get_token(token_id)
-        if self.revoke_api:
-            version = self.get_token_version(token)
-            if version == provider.V3:
-                user_id = token['user']['id']
-                expires_at = token['expires']
-            elif version == provider.V2:
-                user_id = token['user_id']
-                expires_at = token['expires']
-            self.revoke_api.revoke_by_expiration(user_id, expires_at)
-
-        if CONF.token.revoke_by_id:
-            self.token_api.delete_token(token_id=token_id)
 
     def _assert_default_domain(self, token_ref):
         """Make sure we are operating on default domain only."""
@@ -569,11 +522,7 @@ class BaseProvider(provider.Provider):
                         CONF.identity.default_domain_id):
                     raise exception.Unauthorized(msg)
 
-    def validate_v2_token(self, token_id):
-        token_ref = self._verify_token(token_id)
-        return self._validate_v2_token_ref(token_ref)
-
-    def _validate_v2_token_ref(self, token_ref):
+    def validate_v2_token(self, token_ref):
         try:
             self._assert_default_domain(token_ref)
             # FIXME(gyee): performance or correctness? Should we return the
@@ -609,15 +558,7 @@ class BaseProvider(provider.Provider):
             LOG.exception(_('Failed to validate token'))
             raise exception.TokenNotFound(e)
 
-    def validate_v3_token(self, token_id):
-        try:
-            token_ref = self._verify_token(token_id)
-            token_data = self._validate_v3_token_ref(token_ref)
-            return token_data
-        except (exception.ValidationError, exception.UserNotFound):
-            raise exception.TokenNotFound(token_id)
-
-    def _validate_v3_token_ref(self, token_ref):
+    def validate_v3_token(self, token_ref):
         # FIXME(gyee): performance or correctness? Should we return the
         # cached token or reconstruct it? Obviously if we are going with
         # the cached token, any role, project, or domain name changes
@@ -633,20 +574,17 @@ class BaseProvider(provider.Provider):
             project_ref = token_ref.get('tenant')
             if project_ref:
                 project_id = project_ref['id']
+
+            issued_at = token_ref['token_data']['access']['token']['issued_at']
+            audit = token_ref['token_data']['access']['token'].get('audit_ids')
+
             token_data = self.v3_token_data_helper.get_token_data(
                 token_ref['user']['id'],
                 ['password', 'token'],
                 {},
                 project_id=project_id,
                 bind=token_ref.get('bind'),
-                expires=token_ref['expires'])
+                expires=token_ref['expires'],
+                issued_at=issued_at,
+                audit_info=audit)
         return token_data
-
-    def validate_token(self, token_id):
-        token_ref = self._verify_token(token_id)
-        version = self.get_token_version(token_ref)
-        if version == token.provider.V3:
-            return self._validate_v3_token_ref(token_ref)
-        elif version == token.provider.V2:
-            return self._validate_v2_token_ref(token_ref)
-        raise token.provider.UnsupportedTokenVersionException()

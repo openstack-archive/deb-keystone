@@ -10,13 +10,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from keystone.openstack.common import timeutils
+from oslo.utils import timeutils
+
 
 # The set of attributes common between the RevokeEvent
 # and the dictionaries created from the token Data.
 _NAMES = ['trust_id',
           'consumer_id',
           'access_token_id',
+          'audit_id',
+          'audit_chain_id',
           'expires_at',
           'domain_id',
           'project_id',
@@ -26,6 +29,10 @@ _NAMES = ['trust_id',
 
 # Additional arguments for creating a RevokeEvent
 _EVENT_ARGS = ['issued_before', 'revoked_at']
+
+# Names of attributes in the RevocationEvent, including "virtual" attributes.
+# Virtual attributes are those added based on other values.
+_EVENT_NAMES = _NAMES + ['domain_scope_id']
 
 # Values that will be in the token data but not in the event.
 # These will compared with event values that have different names.
@@ -56,6 +63,20 @@ class RevokeEvent(object):
         for k in REVOKE_KEYS:
             v = kwargs.get(k, None)
             setattr(self, k, v)
+
+        if self.domain_id and self.expires_at:
+            # This is revoking a domain-scoped token.
+            self.domain_scope_id = self.domain_id
+            self.domain_id = None
+        else:
+            # This is revoking all tokens for a domain.
+            self.domain_scope_id = None
+
+        if self.expires_at is not None:
+            # Trim off the expiration time because MySQL timestamps are only
+            # accurate to the second.
+            self.expires_at = self.expires_at.replace(microsecond=0)
+
         if self.revoked_at is None:
             self.revoked_at = timeutils.utcnow()
         if self.issued_before is None:
@@ -65,7 +86,11 @@ class RevokeEvent(object):
         keys = ['user_id',
                 'role_id',
                 'domain_id',
-                'project_id']
+                'domain_scope_id',
+                'project_id',
+                'audit_id',
+                'audit_chain_id',
+                ]
         event = dict((key, self.__dict__[key]) for key in keys
                      if self.__dict__[key] is not None)
         if self.trust_id is not None:
@@ -75,8 +100,7 @@ class RevokeEvent(object):
         if self.consumer_id is not None:
             event['OS-OAUTH1:access_token_id'] = self.access_token_id
         if self.expires_at is not None:
-            event['expires_at'] = timeutils.isotime(self.expires_at,
-                                                    subsecond=True)
+            event['expires_at'] = timeutils.isotime(self.expires_at)
         if self.issued_before is not None:
             event['issued_before'] = timeutils.isotime(self.issued_before,
                                                        subsecond=True)
@@ -87,7 +111,7 @@ class RevokeEvent(object):
 
 
 def attr_keys(event):
-    return map(event.key_for_name, _NAMES)
+    return map(event.key_for_name, _EVENT_NAMES)
 
 
 class RevokeTree(object):
@@ -137,7 +161,7 @@ class RevokeTree(object):
         """
         stack = []
         revoke_map = self.revoke_map
-        for name in _NAMES:
+        for name in _EVENT_NAMES:
             key = event.key_for_name(name)
             nxt = revoke_map.get(key)
             if nxt is None:
@@ -176,11 +200,13 @@ class RevokeTree(object):
         alternatives = {
             'user_id': ['user_id', 'trustor_id', 'trustee_id'],
             'domain_id': ['identity_domain_id', 'assignment_domain_id'],
+            # For a domain-scoped token, the domain is in assignment_domain_id.
+            'domain_scope_id': ['assignment_domain_id', ],
         }
         # Contains current forest (collection of trees) to be checked.
         partial_matches = [self.revoke_map]
         # We iterate over every layer of our revoke tree (except the last one).
-        for name in _NAMES:
+        for name in _EVENT_NAMES:
             # bundle is the set of partial matches for the next level down
             # the tree
             bundle = []
@@ -225,11 +251,20 @@ class RevokeTree(object):
 
 def build_token_values_v2(access, default_domain_id):
     token_data = access['token']
+
+    token_expires_at = timeutils.parse_isotime(token_data['expires'])
+
+    # Trim off the microseconds because the revocation event only has
+    # expirations accurate to the second.
+    token_expires_at = token_expires_at.replace(microsecond=0)
+
     token_values = {
-        'expires_at': timeutils.normalize_time(
-            timeutils.parse_isotime(token_data['expires'])),
+        'expires_at': timeutils.normalize_time(token_expires_at),
         'issued_at': timeutils.normalize_time(
-            timeutils.parse_isotime(token_data['issued_at']))}
+            timeutils.parse_isotime(token_data['issued_at'])),
+        'audit_id': token_data.get('audit_ids', [None])[0],
+        'audit_chain_id': token_data.get('audit_ids', [None])[-1],
+    }
 
     token_values['user_id'] = access.get('user', {}).get('id')
 
@@ -265,16 +300,27 @@ def build_token_values_v2(access, default_domain_id):
 
 
 def build_token_values(token_data):
+
+    token_expires_at = timeutils.parse_isotime(token_data['expires_at'])
+
+    # Trim off the microseconds because the revocation event only has
+    # expirations accurate to the second.
+    token_expires_at = token_expires_at.replace(microsecond=0)
+
     token_values = {
-        'expires_at': timeutils.normalize_time(
-            timeutils.parse_isotime(token_data['expires_at'])),
+        'expires_at': timeutils.normalize_time(token_expires_at),
         'issued_at': timeutils.normalize_time(
-            timeutils.parse_isotime(token_data['issued_at']))}
+            timeutils.parse_isotime(token_data['issued_at'])),
+        'audit_id': token_data.get('audit_ids', [None])[0],
+        'audit_chain_id': token_data.get('audit_ids', [None])[-1],
+    }
 
     user = token_data.get('user')
     if user is not None:
         token_values['user_id'] = user['id']
-        token_values['identity_domain_id'] = user['domain']['id']
+        # Federated users do not have a domain, be defensive and get the user
+        # domain set to None in the federated user case.
+        token_values['identity_domain_id'] = user.get('domain', {}).get('id')
     else:
         token_values['user_id'] = None
         token_values['identity_domain_id'] = None
@@ -285,7 +331,12 @@ def build_token_values(token_data):
         token_values['assignment_domain_id'] = project['domain']['id']
     else:
         token_values['project_id'] = None
-        token_values['assignment_domain_id'] = None
+
+        domain = token_data.get('domain')
+        if domain is not None:
+            token_values['assignment_domain_id'] = domain['id']
+        else:
+            token_values['assignment_domain_id'] = None
 
     role_list = []
     roles = token_data.get('roles')

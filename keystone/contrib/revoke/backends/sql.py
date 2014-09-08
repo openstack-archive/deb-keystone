@@ -12,13 +12,9 @@
 
 import uuid
 
-from keystone.common import config
 from keystone.common import sql
 from keystone.contrib import revoke
 from keystone.contrib.revoke import model
-
-
-CONF = config.CONF
 
 
 class RevocationEvent(sql.ModelBase, sql.ModelDictMixin):
@@ -38,6 +34,8 @@ class RevocationEvent(sql.ModelBase, sql.ModelDictMixin):
     issued_before = sql.Column(sql.DateTime(), nullable=False)
     expires_at = sql.Column(sql.DateTime())
     revoked_at = sql.Column(sql.DateTime(), nullable=False)
+    audit_id = sql.Column(sql.String(32))
+    audit_chain_id = sql.Column(sql.String(32))
 
 
 class Revoke(revoke.Driver):

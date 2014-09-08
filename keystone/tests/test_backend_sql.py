@@ -13,6 +13,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import functools
 import uuid
 
 import mock
@@ -20,7 +21,9 @@ from oslo.db import exception as db_exception
 from oslo.db import options
 import sqlalchemy
 from sqlalchemy import exc
+from testtools import matchers
 
+from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import config
 from keystone import exception
@@ -29,7 +32,7 @@ from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import database
 from keystone.tests import test_backend
-from keystone.token.backends import sql as token_sql
+from keystone.token.persistence.backends import sql as token_sql
 
 
 CONF = config.CONF
@@ -308,6 +311,66 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertNotIn('default_project_id', user_ref)
         session.close()
 
+    def test_list_domains_for_user(self):
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain['id'], domain)
+        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
+                'domain_id': domain['id'], 'enabled': True}
+
+        test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(test_domain1['id'], test_domain1)
+        test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(test_domain2['id'], test_domain2)
+
+        user = self.identity_api.create_user(user)
+        user_domains = self.assignment_api.list_domains_for_user(user['id'])
+        self.assertEqual(0, len(user_domains))
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         domain_id=test_domain1['id'],
+                                         role_id=self.role_member['id'])
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         domain_id=test_domain2['id'],
+                                         role_id=self.role_member['id'])
+        user_domains = self.assignment_api.list_domains_for_user(user['id'])
+        self.assertThat(user_domains, matchers.HasLength(2))
+
+    def test_list_domains_for_user_with_grants(self):
+        # Create two groups each with a role on a different domain, and
+        # make user1 a member of both groups.  Both these new domains
+        # should now be included, along with any direct user grants.
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain['id'], domain)
+        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
+                'domain_id': domain['id'], 'enabled': True}
+        user = self.identity_api.create_user(user)
+        group1 = {'name': uuid.uuid4().hex, 'domain_id': domain['id']}
+        group1 = self.identity_api.create_group(group1)
+        group2 = {'name': uuid.uuid4().hex, 'domain_id': domain['id']}
+        group2 = self.identity_api.create_group(group2)
+
+        test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(test_domain1['id'], test_domain1)
+        test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(test_domain2['id'], test_domain2)
+        test_domain3 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(test_domain3['id'], test_domain3)
+
+        self.identity_api.add_user_to_group(user['id'], group1['id'])
+        self.identity_api.add_user_to_group(user['id'], group2['id'])
+
+        # Create 3 grants, one user grant, the other two as group grants
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         domain_id=test_domain1['id'],
+                                         role_id=self.role_member['id'])
+        self.assignment_api.create_grant(group_id=group1['id'],
+                                         domain_id=test_domain2['id'],
+                                         role_id=self.role_admin['id'])
+        self.assignment_api.create_grant(group_id=group2['id'],
+                                         domain_id=test_domain3['id'],
+                                         role_id=self.role_admin['id'])
+        user_domains = self.assignment_api.list_domains_for_user(user['id'])
+        self.assertThat(user_domains, matchers.HasLength(3))
+
 
 class SqlTrust(SqlTests, test_backend.TrustTests):
     pass
@@ -342,37 +405,69 @@ class SqlToken(SqlTests, test_backend.TokenTests):
             tok = token_sql.Token()
             tok.flush_expired_tokens()
 
-        self.assertFalse(mock_sql.get_session().query().filter().limit.called)
+        filter_mock = mock_sql.get_session().query().filter()
+        self.assertFalse(filter_mock.limit.called)
+        self.assertTrue(filter_mock.delete.called_once)
 
-    def test_flush_expired_tokens_batch_ibm_db_sa(self):
-        # TODO(dstanek): This test should be rewritten to be less
-        # brittle. The code will likely need to be changed first. I
-        # just copied the spirit of the existing test when I rewrote
-        # mox -> mock. These tests are brittle because they have the
-        # call structure for SQLAlchemy encoded in them.
-
-        # test ibm_db_sa
+    def test_flush_expired_tokens_batch_mysql(self):
+        # test mysql dialect, we don't need to test IBM DB SA separately, since
+        # other tests below test the differences between how they use the batch
+        # strategy
         with mock.patch.object(token_sql, 'sql') as mock_sql:
-            # NOTE(dstanek): this will allow us to break out of the
-            # 'while True' loop
             mock_sql.get_session().query().filter().delete.return_value = 0
-
-            mock_sql.get_session().bind.dialect.name = 'ibm_db_sa'
+            mock_sql.get_session().bind.dialect.name = 'mysql'
             tok = token_sql.Token()
+            expiry_mock = mock.Mock()
+            ITERS = [1, 2, 3]
+            expiry_mock.return_value = iter(ITERS)
+            token_sql._expiry_range_batched = expiry_mock
             tok.flush_expired_tokens()
 
-        mock_limit = mock_sql.get_session().query().filter().limit
-        mock_limit.assert_called_with(100)
+            # The expiry strategy is only invoked once, the other calls are via
+            # the yield return.
+            expiry_mock.assert_called_once()
+            mock_delete = mock_sql.get_session().query().filter().delete
+            self.assertThat(mock_delete.call_args_list,
+                            matchers.HasLength(len(ITERS)))
 
-    def test_token_flush_batch_size_default(self):
-        tok = token_sql.Token()
-        sqlite_batch = tok.token_flush_batch_size('sqlite')
-        self.assertEqual(0, sqlite_batch)
+    def test_expiry_range_batched(self):
+        upper_bound_mock = mock.Mock(side_effect=[1, "final value"])
+        sess_mock = mock.Mock()
+        query_mock = sess_mock.query().filter().order_by().offset().limit()
+        query_mock.one.side_effect = [['test'], sql.NotFound()]
+        for i, x in enumerate(token_sql._expiry_range_batched(sess_mock,
+                                                              upper_bound_mock,
+                                                              batch_size=50)):
+            if i == 0:
+                # The first time the batch iterator returns, it should return
+                # the first result that comes back from the database.
+                self.assertEqual(x, 'test')
+            elif i == 1:
+                # The second time, the database range function should return
+                # nothing, so the batch iterator returns the result of the
+                # upper_bound function
+                self.assertEqual(x, "final value")
+            else:
+                self.fail("range batch function returned more than twice")
 
-    def test_token_flush_batch_size_db2(self):
+    def test_expiry_range_strategy_sqlite(self):
         tok = token_sql.Token()
-        db2_batch = tok.token_flush_batch_size('ibm_db_sa')
-        self.assertEqual(100, db2_batch)
+        sqlite_strategy = tok._expiry_range_strategy('sqlite')
+        self.assertEqual(token_sql._expiry_range_all, sqlite_strategy)
+
+    def test_expiry_range_strategy_ibm_db_sa(self):
+        tok = token_sql.Token()
+        db2_strategy = tok._expiry_range_strategy('ibm_db_sa')
+        self.assertIsInstance(db2_strategy, functools.partial)
+        self.assertEqual(db2_strategy.func, token_sql._expiry_range_batched)
+        self.assertEqual(db2_strategy.keywords, {'batch_size': 100})
+
+    def test_expiry_range_strategy_mysql(self):
+        tok = token_sql.Token()
+        mysql_strategy = tok._expiry_range_strategy('mysql')
+        self.assertIsInstance(mysql_strategy, functools.partial)
+        self.assertEqual(mysql_strategy.func, token_sql._expiry_range_batched)
+        self.assertEqual(mysql_strategy.keywords, {'batch_size': 1000})
 
 
 class SqlCatalog(SqlTests, test_backend.CatalogTests):
@@ -388,7 +483,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         malformed_url = "http://192.168.1.104:8774/v2/$(tenant)s"
         endpoint = {
             'id': uuid.uuid4().hex,
-            'region': uuid.uuid4().hex,
+            'region_id': None,
             'service_id': service['id'],
             'interface': 'public',
             'url': malformed_url,
@@ -410,7 +505,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
         endpoint = {
             'id': uuid.uuid4().hex,
-            'region': uuid.uuid4().hex,
+            'region_id': None,
             'interface': 'public',
             'url': '',
             'service_id': service['id'],
@@ -418,14 +513,14 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
 
         catalog = self.catalog_api.get_catalog('user', 'tenant')
-        catalog_endpoint = catalog[endpoint['region']][service['type']]
+        catalog_endpoint = catalog[endpoint['region_id']][service['type']]
         self.assertEqual(service['name'], catalog_endpoint['name'])
         self.assertEqual(endpoint['id'], catalog_endpoint['id'])
         self.assertEqual('', catalog_endpoint['publicURL'])
         self.assertIsNone(catalog_endpoint.get('adminURL'))
         self.assertIsNone(catalog_endpoint.get('internalURL'))
 
-    def test_create_endpoint_400(self):
+    def test_create_endpoint_region_404(self):
         service = {
             'id': uuid.uuid4().hex,
             'type': uuid.uuid4().hex,
@@ -436,16 +531,87 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
         endpoint = {
             'id': uuid.uuid4().hex,
-            'region': "0" * 256,
+            'region_id': uuid.uuid4().hex,
             'service_id': service['id'],
             'interface': 'public',
             'url': uuid.uuid4().hex,
         }
 
-        self.assertRaises(exception.StringLengthExceeded,
+        self.assertRaises(exception.ValidationError,
                           self.catalog_api.create_endpoint,
                           endpoint['id'],
                           endpoint.copy())
+
+    def test_create_region_invalid_id(self):
+        region = {
+            'id': '0' * 256,
+            'description': '',
+            'extra': {},
+        }
+
+        self.assertRaises(exception.StringLengthExceeded,
+                          self.catalog_api.create_region,
+                          region.copy())
+
+    def test_create_region_invalid_parent_id(self):
+        region = {
+            'id': uuid.uuid4().hex,
+            'parent_region_id': '0' * 256,
+        }
+
+        self.assertRaises(exception.RegionNotFound,
+                          self.catalog_api.create_region,
+                          region)
+
+    def test_delete_region_with_endpoint(self):
+        # create a region
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_region(region)
+
+        # create a child region
+        child_region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'parent_id': region['id']
+        }
+        self.catalog_api.create_region(child_region)
+        # create a service
+        service = {
+            'id': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_service(service['id'], service)
+
+        # create an endpoint attached to the service and child region
+        child_endpoint = {
+            'id': uuid.uuid4().hex,
+            'region_id': child_region['id'],
+            'interface': uuid.uuid4().hex[:8],
+            'url': uuid.uuid4().hex,
+            'service_id': service['id'],
+        }
+        self.catalog_api.create_endpoint(child_endpoint['id'], child_endpoint)
+        self.assertRaises(exception.RegionDeletionError,
+                          self.catalog_api.delete_region,
+                          child_region['id'])
+
+        # create an endpoint attached to the service and parent region
+        endpoint = {
+            'id': uuid.uuid4().hex,
+            'region_id': region['id'],
+            'interface': uuid.uuid4().hex[:8],
+            'url': uuid.uuid4().hex,
+            'service_id': service['id'],
+        }
+        self.catalog_api.create_endpoint(endpoint['id'], endpoint)
+        self.assertRaises(exception.RegionDeletionError,
+                          self.catalog_api.delete_region,
+                          region['id'])
 
 
 class SqlPolicy(SqlTests, test_backend.PolicyTests):
@@ -521,3 +687,52 @@ class SqlModuleInitialization(tests.TestCase):
         sql.initialize()
         set_defaults.assert_called_with(CONF,
                                         connection='sqlite:///keystone.db')
+
+
+class SqlCredential(SqlTests):
+
+    def _create_credential_with_user_id(self, user_id=uuid.uuid4().hex):
+        credential_id = uuid.uuid4().hex
+        new_credential = {
+            'id': credential_id,
+            'user_id': user_id,
+            'project_id': uuid.uuid4().hex,
+            'blob': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+            'extra': uuid.uuid4().hex
+        }
+        self.credential_api.create_credential(credential_id, new_credential)
+        return new_credential
+
+    def _validateCredentialList(self, retrieved_credentials,
+                                expected_credentials):
+        self.assertEqual(len(retrieved_credentials), len(expected_credentials))
+        retrived_ids = [c['id'] for c in retrieved_credentials]
+        for cred in expected_credentials:
+            self.assertIn(cred['id'], retrived_ids)
+
+    def setUp(self):
+        super(SqlCredential, self).setUp()
+        self.credentials = []
+        for _ in range(3):
+            self.credentials.append(
+                self._create_credential_with_user_id())
+        self.user_credentials = []
+        for _ in range(3):
+            cred = self._create_credential_with_user_id(self.user_foo['id'])
+            self.user_credentials.append(cred)
+            self.credentials.append(cred)
+
+    def test_list_credentials(self):
+        credentials = self.credential_api.list_credentials()
+        self._validateCredentialList(credentials, self.credentials)
+        # test filtering using hints
+        hints = driver_hints.Hints()
+        hints.add_filter('user_id', self.user_foo['id'])
+        credentials = self.credential_api.list_credentials(hints)
+        self._validateCredentialList(credentials, self.user_credentials)
+
+    def test_list_credentials_for_user(self):
+        credentials = self.credential_api.list_credentials_for_user(
+            self.user_foo['id'])
+        self._validateCredentialList(credentials, self.user_credentials)

@@ -12,12 +12,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo.utils import encodeutils
 import six
 
 from keystone.common import config
 from keystone.i18n import _
 from keystone.openstack.common import log
-from keystone.openstack.common import strutils
 
 
 CONF = config.CONF
@@ -62,7 +62,7 @@ class Error(Exception):
                 message = self.message_format % kwargs
             except UnicodeDecodeError:
                 try:
-                    kwargs = dict([(k, strutils.safe_decode(v)) for k, v in
+                    kwargs = dict([(k, encodeutils.safe_decode(v)) for k, v in
                                    six.iteritems(kwargs)])
                 except UnicodeDecodeError:
                     # NOTE(jamielennox): This is the complete failure case
@@ -119,6 +119,13 @@ class PasswordVerificationError(Error):
     message_format = _("The password length must be less than or equal "
                        "to %(size)i. The server could not comply with the "
                        "request because the password is invalid.")
+    code = 403
+    title = 'Forbidden'
+
+
+class RegionDeletionError(Error):
+    message_format = _("Unable to delete region %(region_id)s because it or "
+                       "its child regions have associated endpoints.")
     code = 403
     title = 'Forbidden'
 
@@ -203,6 +210,13 @@ class CrossBackendNotAllowed(Forbidden):
                        "user is %(user_id)s")
 
 
+class InvalidPolicyAssociation(Forbidden):
+    message_format = _("Invalid mix of entities for policy association - "
+                       "only Endpoint, Service or Region+Service allowed. "
+                       "Request was - Endpoint: %(endpoint_id)s, "
+                       "Service: %(service_id)s, Region: %(region_id)s")
+
+
 class NotFound(Error):
     message_format = _("Could not find: %(target)s")
     code = 404
@@ -223,6 +237,10 @@ class MetadataNotFound(NotFound):
 
 class PolicyNotFound(NotFound):
     message_format = _("Could not find policy: %(policy_id)s")
+
+
+class PolicyAssociationNotFound(NotFound):
+    message_format = _("Could not find policy association")
 
 
 class RoleNotFound(NotFound):
@@ -275,6 +293,10 @@ class CredentialNotFound(NotFound):
 
 class VersionNotFound(NotFound):
     message_format = _("Could not find version: %(version)s")
+
+
+class EndpointGroupNotFound(NotFound):
+    message_format = _("Could not find Endpoint Group: %(endpoint_group_id)s")
 
 
 class IdentityProviderNotFound(NotFound):
@@ -332,6 +354,11 @@ class UnexpectedError(SecurityError):
     title = 'Internal Server Error'
 
 
+class TrustConsumeMaximumAttempt(UnexpectedError):
+    debug_message_format = _("Unable to consume trust %(trust_id)s, unable to "
+                             "acquire lock.")
+
+
 class CertificateFilesUnavailable(UnexpectedError):
     debug_message_format = _("Expected signing certificates are not available "
                              "on the server. Please check Keystone "
@@ -373,3 +400,16 @@ class MigrationNotProvided(Exception):
             "%(mod_name)s doesn't provide database migrations. The migration"
             " repository path at %(path)s doesn't exist or isn't a directory."
         ) % {'mod_name': mod_name, 'path': path})
+
+
+class UnsupportedTokenVersionException(Exception):
+    """Token version is unrecognizable or unsupported."""
+    pass
+
+
+class SAMLSigningError(UnexpectedError):
+    debug_message_format = _('Unable to sign SAML assertion. It is likely '
+                             'that this server does not have xmlsec1 '
+                             'installed, or this is the result of '
+                             'misconfiguration. Reason %(reason)s')
+    title = 'Error signing SAML assertion'

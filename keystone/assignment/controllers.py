@@ -21,11 +21,14 @@ import uuid
 import six
 from six.moves import urllib
 
+from keystone.assignment import schema
 from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import validation
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.models import token_model
 from keystone.openstack.common import log
 
 
@@ -33,7 +36,7 @@ CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 
-@dependency.requires('assignment_api', 'identity_api', 'token_api')
+@dependency.requires('assignment_api', 'identity_api', 'token_provider_api')
 class Tenant(controller.V2Controller):
 
     @controller.v2_deprecated
@@ -65,14 +68,16 @@ class Tenant(controller.V2Controller):
 
         """
         try:
-            token_ref = self.token_api.get_token(context['token_id'])
+            token_data = self.token_provider_api.validate_token(
+                context['token_id'])
+            token_ref = token_model.KeystoneToken(token_id=context['token_id'],
+                                                  token_data=token_data)
         except exception.NotFound as e:
             LOG.warning(_('Authentication failed: %s'), e)
             raise exception.Unauthorized(e)
 
-        user_ref = token_ref['user']
         tenant_refs = (
-            self.assignment_api.list_projects_for_user(user_ref['id']))
+            self.assignment_api.list_projects_for_user(token_ref.user_id))
         tenant_refs = [self.filter_domain_id(ref) for ref in tenant_refs
                        if ref['domain_id'] == CONF.identity.default_domain_id]
         params = {
@@ -350,9 +355,8 @@ class DomainV3(controller.V3Controller):
         self.get_member_from_driver = self.assignment_api.get_domain
 
     @controller.protected()
+    @validation.validated(schema.domain_create, 'domain')
     def create_domain(self, context, domain):
-        self._require_attribute(domain, 'name')
-
         ref = self._assign_unique_id(self._normalize_dict(domain))
         ref = self.assignment_api.create_domain(ref['id'], ref)
         return DomainV3.wrap_member(context, ref)
@@ -369,6 +373,7 @@ class DomainV3(controller.V3Controller):
         return DomainV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.domain_update, 'domain')
     def update_domain(self, context, domain_id, domain):
         self._require_matching_id(domain_id, domain)
         ref = self.assignment_api.update_domain(domain_id, domain)
@@ -389,9 +394,8 @@ class ProjectV3(controller.V3Controller):
         self.get_member_from_driver = self.assignment_api.get_project
 
     @controller.protected()
+    @validation.validated(schema.project_create, 'project')
     def create_project(self, context, project):
-        self._require_attribute(project, 'name')
-
         ref = self._assign_unique_id(self._normalize_dict(project))
         ref = self._normalize_domain_id(context, ref)
         ref = self.assignment_api.create_project(ref['id'], ref)
@@ -416,6 +420,7 @@ class ProjectV3(controller.V3Controller):
         return ProjectV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.project_update, 'project')
     def update_project(self, context, project_id, project):
         self._require_matching_id(project_id, project)
         self._require_matching_domain_id(
@@ -438,9 +443,8 @@ class RoleV3(controller.V3Controller):
         self.get_member_from_driver = self.assignment_api.get_role
 
     @controller.protected()
+    @validation.validated(schema.role_create, 'role')
     def create_role(self, context, role):
-        self._require_attribute(role, 'name')
-
         ref = self._assign_unique_id(self._normalize_dict(role))
         ref = self.assignment_api.create_role(ref['id'], ref)
         return RoleV3.wrap_member(context, ref)
@@ -458,6 +462,7 @@ class RoleV3(controller.V3Controller):
         return RoleV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.role_update, 'role')
     def update_role(self, context, role_id, role):
         self._require_matching_id(role_id, role)
 
@@ -517,7 +522,7 @@ class RoleV3(controller.V3Controller):
 
         self.assignment_api.create_grant(
             role_id, user_id, group_id, domain_id, project_id,
-            self._check_if_inherited(context))
+            self._check_if_inherited(context), context)
 
     @controller.protected(callback=_check_grant_protection)
     def list_grants(self, context, user_id=None,
@@ -551,7 +556,7 @@ class RoleV3(controller.V3Controller):
 
         self.assignment_api.delete_grant(
             role_id, user_id, group_id, domain_id, project_id,
-            self._check_if_inherited(context))
+            self._check_if_inherited(context), context)
 
 
 @dependency.requires('assignment_api', 'identity_api')
@@ -680,19 +685,24 @@ class RoleAssignmentV3(controller.V3Controller):
                 # The group is missing, which should not happen since
                 # group deletion should remove any related assignments, so
                 # log a warning
-                if 'domain' in ref:
-                    target = 'Domain: %s' % ref['domain'].get('domain_id')
-                elif 'project' in ref:
-                    target = 'Project: %s' % ref['project'].get('project_id')
-                else:
-                    # Should always be a domain or project, but since to get
-                    # here things have gone astray, let's be cautious.
-                    target = 'Unknown'
+                target = 'Unknown'
+                # Should always be a domain or project, but since to get
+                # here things have gone astray, let's be cautious.
+                if 'scope' in ref:
+                    if 'domain' in ref['scope']:
+                        dom_id = ref['scope']['domain'].get('id', 'Unknown')
+                        target = 'Domain: %s' % dom_id
+                    elif 'project' in ref['scope']:
+                        proj_id = ref['scope']['project'].get('id', 'Unknown')
+                        target = 'Project: %s' % proj_id
+                role_id = 'Unknown'
+                if 'role' in ref and 'id' in ref['role']:
+                    role_id = ref['role']['id']
                 LOG.warning(
                     _('Group %(group)s not found for role-assignment - '
                       '%(target)s with Role: %(role)s'), {
-                          'group': ref['group_id'], 'target': target,
-                          'role': ref.get('role_id')})
+                          'group': ref['group']['id'], 'target': target,
+                          'role': role_id})
             return members
 
         def _build_user_assignment_equivalent_of_group(

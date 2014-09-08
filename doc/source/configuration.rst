@@ -159,6 +159,8 @@ continue to carry stale identity mappings in its table.  While benign, keystone
 provides an ability for operators to purge the mapping table of such stale
 entries using the keystone-manage command, for example:
 
+.. code-block:: bash
+
     $ keystone-manage mapping_purge --domain-name DOMAINA --local-id abc@de.com
 
 A typical usage would be for an operator to obtain a list of those entries
@@ -172,10 +174,14 @@ implementation**, then, if the details of those entries that have
 been deleted are not available, then it is safe to simply bulk purge
 identity mappings periodically, for example:
 
+.. code-block:: bash
+
     $ keystone-manage mapping_purge --domain-name DOMAINA
 
 will purge all the mappings for DOMAINA. The entire mapping table can be
 purged with the following command:
+
+.. code-block:: bash
 
     $ keystone-manage mapping_purge --all
 
@@ -408,7 +414,7 @@ For more information about the different backends (and configuration options):
     * `dogpile.cache.backends.memcached`_
     * `dogpile.cache.backends.redis`_
     * `dogpile.cache.backends.file`_
-    * :mod:`keystone.common.cache.backends.mongo`
+    * :py:mod:`keystone.common.cache.backends.mongo`
 
 .. _`dogpile.cache`: http://dogpilecache.readthedocs.org/en/latest/
 .. _`python-memcached`: http://www.tummy.com/software/python-memcached/
@@ -1089,28 +1095,30 @@ Example usage
 ``keystone`` is set up to expect commands in the general form of
 ``keystone`` ``command`` ``argument``, followed by flag-like keyword arguments to
 provide additional (often optional) information. For example, the command
-``user-list`` and ``tenant-create`` can be invoked as follows::
+``user-list`` and ``tenant-create`` can be invoked as follows:
+
+.. code-block:: bash
 
     # Using token auth env variables
-    export OS_SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
-    export OS_SERVICE_TOKEN=secrete_token
-    keystone user-list
-    keystone tenant-create --name=demo
+    $ export OS_SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
+    $ export OS_SERVICE_TOKEN=secrete_token
+    $ keystone user-list
+    $ keystone tenant-create --name=demo
 
     # Using token auth flags
-    keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ user-list
-    keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ tenant-create --name=demo
+    $ keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ user-list
+    $ keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ tenant-create --name=demo
 
     # Using user + password + tenant_name env variables
-    export OS_USERNAME=admin
-    export OS_PASSWORD=secrete
-    export OS_TENANT_NAME=admin
-    keystone user-list
-    keystone tenant-create --name=demo
+    $ export OS_USERNAME=admin
+    $ export OS_PASSWORD=secrete
+    $ export OS_TENANT_NAME=admin
+    $ keystone user-list
+    $ keystone tenant-create --name=demo
 
     # Using user + password + tenant_name flags
-    keystone --os_username=admin --os_password=secrete --os_tenant_name=admin user-list
-    keystone --os_username=admin --os_password=secrete --os_tenant_name=admin tenant-create --name=demo
+    $ keystone --os_username=admin --os_password=secrete --os_tenant_name=admin user-list
+    $ keystone --os_username=admin --os_password=secrete --os_tenant_name=admin tenant-create --name=demo
 
 Tenants
 -------
@@ -1603,3 +1611,67 @@ section::
   user_allow_create = False
   user_allow_update = False
   user_allow_delete = False
+
+Connection Pooling
+------------------
+
+Various LDAP backends in keystone use a common LDAP module to interact with
+LDAP data. By default, a new connection is established for LDAP operations.
+This can become highly expensive when TLS support is enabled which is a likely
+configuraton in enterprise setup. Re-using of connectors from a connection
+pool drastically reduces overhead of initiating a new connection for every
+LDAP operation.
+
+Keystone now provides connection pool support via configuration. This change
+will keep LDAP connectors alive and re-use for subsequent LDAP operations. A
+connection lifespan is going to be configurable with other pooling specific
+attributes. The change is made in LDAP handler layer logic which is primarily
+responsible for LDAP connection and shared common operations.
+
+In LDAP identity driver, Keystone authenticates end user by LDAP bind with user
+DN and provided password. These kind of auth binds can fill up the pool pretty
+quickly so a separate pool is provided for those end user auth bind calls.
+If a deployment does not want to use pool for those binds, then it can disable
+pooling selectively by ``use_auth_pool`` as false. If a deployment wants to
+use pool for those auth binds, then ``use_auth_pool`` needs to be true. For
+auth pool, a different pool size (``auth_pool_size``) and connection lifetime
+(``auth_pool_connection_lifetime``) can be specified. With enabled auth pool,
+its connection lifetime should be kept short so that pool frequently re-binds
+the connection with provided creds and works reliably in end user password
+change case. When ``use_pool`` is false (disabled), then auth pool
+configuration is also not used.
+
+Connection pool configuration is added in ``[ldap]`` configuration section::
+
+  [ldap]
+  # Enable LDAP connection pooling. (boolean value)
+  use_pool=false
+
+  # Connection pool size. (integer value)
+  pool_size=10
+
+  # Maximum count of reconnect trials. (integer value)
+  pool_retry_max=3
+
+  # Time span in seconds to wait between two reconnect trials.
+  # (floating point value)
+  pool_retry_delay=0.1
+
+  # Connector timeout in seconds. Value -1 indicates indefinite wait for
+  # response. (integer value)
+  pool_connection_timeout=-1
+
+  # Connection lifetime in seconds.  (integer value)
+  pool_connection_lifetime=600
+
+  # Enable LDAP connection pooling for end user authentication. If use_pool
+  # is disabled, then this setting is meaningless and is not used at all.
+  # (boolean value)
+  use_auth_pool=false
+
+  # End user auth connection pool size. (integer value)
+  auth_pool_size=100
+
+  # End user auth connection lifetime in seconds. (integer value)
+  auth_pool_connection_lifetime=60
+

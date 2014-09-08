@@ -143,10 +143,6 @@
 # Size of RPC connection pool. (integer value)
 #rpc_conn_pool_size=30
 
-# Modules of exceptions that are permitted to be recreated
-# upon receiving exception data from an rpc call. (list value)
-#allowed_rpc_exception_modules=oslo.messaging.exceptions,nova.exception,cinder.exception,exceptions
-
 # Qpid broker hostname. (string value)
 #qpid_hostname=localhost
 
@@ -285,15 +281,6 @@
 # Heartbeat time-to-live. (integer value)
 #matchmaker_heartbeat_ttl=600
 
-# Host to locate redis. (string value)
-#host=127.0.0.1
-
-# Use this port to connect to redis host. (integer value)
-#port=6379
-
-# Password for Redis server (optional). (string value)
-#password=<None>
-
 # Size of RPC greenthread pool. (integer value)
 #rpc_thread_pool_size=64
 
@@ -320,7 +307,7 @@
 # The default exchange under which topics are scoped. May be
 # overridden by an exchange name specified in the
 # transport_url option. (string value)
-#control_exchange=openstack
+#control_exchange=keystone
 
 
 #
@@ -330,30 +317,6 @@
 # Default publisher_id for outgoing notifications (string
 # value)
 #default_publisher_id=<None>
-
-
-#
-# Options defined in keystone.middleware.ec2_token
-#
-
-# URL to get token from ec2 request. (string value)
-#keystone_ec2_url=http://localhost:5000/v2.0/ec2tokens
-
-# Required if EC2 server requires client certificate. (string
-# value)
-#keystone_ec2_keyfile=<None>
-
-# Client certificate key filename. Required if EC2 server
-# requires client certificate. (string value)
-#keystone_ec2_certfile=<None>
-
-# A PEM encoded certificate authority to use when verifying
-# HTTPS connections. Defaults to the system CAs. (string
-# value)
-#keystone_ec2_cafile=<None>
-
-# Disable SSL certificate verification. (boolean value)
-#keystone_ec2_insecure=false
 
 
 #
@@ -369,17 +332,6 @@
 # of port numbers.  The chosen port is displayed in the
 # service's log file. (string value)
 #backdoor_port=<None>
-
-
-#
-# Options defined in keystone.openstack.common.lockutils
-#
-
-# Enables or disables inter-process locks. (boolean value)
-#disable_process_locking=false
-
-# Directory to use for lock files. (string value)
-#lock_path=<None>
 
 
 #
@@ -414,7 +366,7 @@
 #logging_exception_prefix=%(asctime)s.%(msecs)03d %(process)d TRACE %(name)s %(instance)s
 
 # List of logger=LEVEL pairs. (list value)
-#default_log_levels=amqp=WARN,amqplib=WARN,boto=WARN,qpid=WARN,sqlalchemy=WARN,suds=INFO,oslo.messaging=INFO,iso8601=WARN,requests.packages.urllib3.connectionpool=WARN,urllib3.connectionpool=WARN
+#default_log_levels=amqp=WARN,amqplib=WARN,boto=WARN,qpid=WARN,sqlalchemy=WARN,suds=INFO,oslo.messaging=INFO,iso8601=WARN,requests.packages.urllib3.connectionpool=WARN,urllib3.connectionpool=WARN,websocket=WARN,keystonemiddleware=WARN,routes.middleware=WARN,stevedore=WARN
 
 # Enables or disables publication of error events. (boolean
 # value)
@@ -590,6 +542,15 @@
 # Catalog backend driver. (string value)
 #driver=keystone.catalog.backends.sql.Catalog
 
+# Toggle for catalog caching. This has no effect unless global
+# caching is enabled. (boolean value)
+#caching=true
+
+# Time to cache catalog data (in seconds). This has no effect
+# unless global and catalog caching are enabled. (integer
+# value)
+#cache_time=<None>
+
 # Maximum number of entities that will be returned in a
 # catalog collection. (integer value)
 #list_limit=<None>
@@ -734,6 +695,16 @@
 # Toggle to return all active endpoints if no filter exists.
 # (boolean value)
 #return_all_endpoints_if_no_filter=true
+
+
+[endpoint_policy]
+
+#
+# Options defined in keystone
+#
+
+# Endpoint policy backend driver (string value)
+#driver=keystone.contrib.endpoint_policy.backends.sql.EndpointPolicy
 
 
 [federation]
@@ -925,13 +896,22 @@
 #user_name_attribute=sn
 
 # LDAP attribute mapped to user email. (string value)
-#user_mail_attribute=email
+#user_mail_attribute=mail
 
 # LDAP attribute mapped to password. (string value)
 #user_pass_attribute=userPassword
 
 # LDAP attribute mapped to user enabled flag. (string value)
 #user_enabled_attribute=enabled
+
+# Invert the meaning of the boolean enabled values. Some LDAP
+# servers use a boolean lock attribute where "true" means an
+# account is disabled. Setting "user_enabled_invert = true"
+# will allow these lock attributes to be used. This setting
+# will have no effect if "user_enabled_mask" or
+# "user_enabled_emulation" settings are in use. (boolean
+# value)
+#user_enabled_invert=false
 
 # Bitmask integer to indicate the bit that the enabled value
 # is stored in if the LDAP server represents "enabled" as a
@@ -1149,6 +1129,54 @@
 # (string value)
 #tls_req_cert=demand
 
+# Enable LDAP connection pooling. (boolean value)
+#use_pool=false
+
+# Connection pool size. (integer value)
+#pool_size=10
+
+# Maximum count of reconnect trials. (integer value)
+#pool_retry_max=3
+
+# Time span in seconds to wait between two reconnect trials.
+# (floating point value)
+#pool_retry_delay=0.1
+
+# Connector timeout in seconds. Value -1 indicates indefinite
+# wait for response. (integer value)
+#pool_connection_timeout=-1
+
+# Connection lifetime in seconds. (integer value)
+#pool_connection_lifetime=600
+
+# Enable LDAP connection pooling for end user authentication.
+# If use_pool is disabled, then this setting is meaningless
+# and is not used at all. (boolean value)
+#use_auth_pool=false
+
+# End user auth connection pool size. (integer value)
+#auth_pool_size=100
+
+# End user auth connection lifetime in seconds. (integer
+# value)
+#auth_pool_connection_lifetime=60
+
+
+[matchmaker_redis]
+
+#
+# Options defined in oslo.messaging
+#
+
+# Host to locate redis. (string value)
+#host=127.0.0.1
+
+# Use this port to connect to redis host. (integer value)
+#port=6379
+
+# Password for Redis server (optional). (string value)
+#password=<None>
+
 
 [matchmaker_ring]
 
@@ -1248,6 +1276,33 @@
 # Toggle for revocation event cacheing. This has no effect
 # unless global caching is enabled. (boolean value)
 #caching=true
+
+
+[saml]
+
+#
+# Options defined in keystone
+#
+
+# Default TTL, in seconds, for any generated SAML assertion
+# created by Keystone. (integer value)
+#assertion_expiration_time=3600
+
+# Binary to be called for XML signing. Install the appropriate
+# package, specify absolute path or adjust your PATH
+# environment variable if the binary cannot be found. (string
+# value)
+#xmlsec1_binary=xmlsec1
+
+# Path of the certfile for SAML signing. For non-production
+# environments, you may be interested in using `keystone-
+# manage pki_setup` to generate self-signed certificates.
+# Note, the path cannot contain a comma. (string value)
+#certfile=/etc/keystone/ssl/certs/signing_cert.pem
+
+# Path of the keyfile for SAML signing. Note, the path cannot
+# contain a comma. (string value)
+#keyfile=/etc/keystone/ssl/private/signing_key.pem
 
 
 [signing]
@@ -1366,7 +1421,7 @@
 #provider=<None>
 
 # Token persistence backend driver. (string value)
-#driver=keystone.token.backends.sql.Token
+#driver=keystone.token.persistence.backends.sql.Token
 
 # Toggle for token system cacheing. This has no effect unless
 # global caching is enabled. (boolean value)

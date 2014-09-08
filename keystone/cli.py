@@ -172,7 +172,7 @@ class TokenFlush(BaseApp):
 
     @classmethod
     def main(cls):
-        token_manager = token.Manager()
+        token_manager = token.persistence.PersistenceManager()
         token_manager.driver.flush_expired_tokens()
 
 
@@ -219,9 +219,9 @@ class MappingPurge(BaseApp):
 
             if (CONF.command.all is True and
                 (CONF.command.domain_name is not None or
-                CONF.command.public_id is not None or
-                CONF.command.local_id is not None or
-                    CONF.command.type is not None)):
+                 CONF.command.public_id is not None or
+                 CONF.command.local_id is not None or
+                 CONF.command.type is not None)):
                 raise ValueError(_('--all option cannot be mixed with '
                                    'other options'))
 

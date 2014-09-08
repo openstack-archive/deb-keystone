@@ -28,8 +28,6 @@
     "identity:update_endpoint": "rule:cloud_admin",
     "identity:delete_endpoint": "rule:cloud_admin",
 
-    "identity:get_catalog": "",
-
     "identity:get_domain": "rule:cloud_admin",
     "identity:list_domains": "rule:cloud_admin",
     "identity:create_domain": "rule:cloud_admin",
@@ -67,7 +65,7 @@
     "identity:add_user_to_group": "rule:cloud_admin or rule:admin_and_matching_target_group_domain_id",
 
     "identity:get_credential": "rule:admin_required",
-    "identity:list_credentials": "rule:admin_required",
+    "identity:list_credentials": "rule:admin_required or user_id:%(user_id)s",
     "identity:create_credential": "rule:admin_required",
     "identity:update_credential": "rule:admin_required",
     "identity:delete_credential": "rule:admin_required",
@@ -134,6 +132,17 @@
     "identity:list_endpoints_for_project": "rule:admin_required",
     "identity:remove_endpoint_from_project": "rule:admin_required",
 
+    "identity:create_endpoint_group": "rule:admin_required",
+    "identity:list_endpoint_groups": "rule:admin_required",
+    "identity:get_endpoint_group": "rule:admin_required",
+    "identity:update_endpoint_group": "rule:admin_required",
+    "identity:delete_endpoint_group": "rule:admin_required",
+    "identity:list_projects_associated_with_endpoint_group": "rule:admin_required",
+    "identity:list_endpoints_associated_with_endpoint_group": "rule:admin_required",
+    "identity:list_endpoint_groups_for_project": "rule:admin_required",
+    "identity:add_endpoint_group_to_project": "rule:admin_required",
+    "identity:remove_endpoint_group_from_project": "rule:admin_required",
+
     "identity:create_identity_provider": "rule:admin_required",
     "identity:list_identity_providers": "rule:admin_required",
     "identity:get_identity_providers": "rule:admin_required",
@@ -152,8 +161,24 @@
     "identity:delete_mapping": "rule:admin_required",
     "identity:update_mapping": "rule:admin_required",
 
+    "identity:get_auth_catalog": "",
+    "identity:get_auth_projects": "",
+    "identity:get_auth_domains": "",
+
     "identity:list_projects_for_groups": "",
     "identity:list_domains_for_groups": "",
 
-    "identity:list_revoke_events": ""
+    "identity:list_revoke_events": "",
+
+    "identity:create_policy_association_for_endpoint": "rule:cloud_admin",
+    "identity:check_policy_association_for_endpoint": "rule:cloud_admin",
+    "identity:delete_policy_association_for_endpoint": "rule:cloud_admin",
+    "identity:create_policy_association_for_service": "rule:cloud_admin",
+    "identity:check_policy_association_for_service": "rule:cloud_admin",
+    "identity:delete_policy_association_for_service": "rule:cloud_admin",
+    "identity:create_policy_association_for_region_and_service": "rule:cloud_admin",
+    "identity:check_policy_association_for_region_and_service": "rule:cloud_admin",
+    "identity:delete_policy_association_for_region_and_service": "rule:cloud_admin",
+    "identity:get_policy_for_endpoint": "rule:cloud_admin",
+    "identity:list_endpoints_for_policy": "rule:cloud_admin"
 }

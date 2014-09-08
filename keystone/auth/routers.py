@@ -13,32 +13,49 @@
 # under the License.
 
 from keystone.auth import controllers
+from keystone.common import json_home
+from keystone.common import wsgi
 
 
-def append_v3_routers(mapper, routers):
-    auth_controller = controllers.Auth()
+class Routers(wsgi.RoutersBase):
 
-    mapper.connect('/auth/tokens',
-                   controller=auth_controller,
-                   action='authenticate_for_token',
-                   conditions=dict(method=['POST']))
-    # NOTE(morganfainberg): For policy enforcement reasons, the
-    # ``validate_token_head`` method is still used for HEAD requests.
-    # The controller method makes the same call as the validate_token
-    # call and lets wsgi.render_response remove the body data.
-    mapper.connect('/auth/tokens',
-                   controller=auth_controller,
-                   action='check_token',
-                   conditions=dict(method=['HEAD']))
-    mapper.connect('/auth/tokens',
-                   controller=auth_controller,
-                   action='revoke_token',
-                   conditions=dict(method=['DELETE']))
-    mapper.connect('/auth/tokens',
-                   controller=auth_controller,
-                   action='validate_token',
-                   conditions=dict(method=['GET']))
-    mapper.connect('/auth/tokens/OS-PKI/revoked',
-                   controller=auth_controller,
-                   action='revocation_list',
-                   conditions=dict(method=['GET']))
+    def append_v3_routers(self, mapper, routers):
+        auth_controller = controllers.Auth()
+
+        # NOTE(morganfainberg): For policy enforcement reasons, the
+        # ``validate_token_head`` method is still used for HEAD requests.
+        # The controller method makes the same call as the validate_token
+        # call and lets wsgi.render_response remove the body data.
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth/tokens',
+            get_action='validate_token',
+            head_action='check_token',
+            post_action='authenticate_for_token',
+            delete_action='revoke_token',
+            rel=json_home.build_v3_resource_relation('auth_tokens'))
+
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth/tokens/OS-PKI/revoked',
+            get_action='revocation_list',
+            rel=json_home.build_v3_extension_resource_relation(
+                'OS-PKI', '1.0', 'revocations'))
+
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth/catalog',
+            get_action='get_auth_catalog',
+            rel=json_home.build_v3_resource_relation('auth_catalog'))
+
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth/projects',
+            get_action='get_auth_projects',
+            rel=json_home.build_v3_resource_relation('auth_projects'))
+
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth/domains',
+            get_action='get_auth_domains',
+            rel=json_home.build_v3_resource_relation('auth_domains'))

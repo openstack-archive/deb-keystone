@@ -17,6 +17,7 @@ import uuid
 
 from keystone import tests
 from keystone.tests import default_fixtures
+from keystone.tests.ksfixtures import database
 from keystone.tests import test_backend
 
 
@@ -48,6 +49,7 @@ class TestTemplatedCatalog(tests.TestCase, test_backend.CatalogTests):
 
     def setUp(self):
         super(TestTemplatedCatalog, self).setUp()
+        self.useFixture(database.Database())
         self.load_backends()
         self.load_fixtures(default_fixtures)
 
@@ -111,3 +113,6 @@ class TestTemplatedCatalog(tests.TestCase, test_backend.CatalogTests):
              'name': "'Identity Service'",
              'id': '1'}]
         self.assertEqual(exp_catalog, catalog_ref)
+
+    def test_list_regions_filtered_by_parent_region_id(self):
+        self.skipTest('Templated backend does not support hints')

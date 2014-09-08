@@ -24,43 +24,6 @@ from keystone.tests import test_v3
 class CatalogTestCase(test_v3.RestfulTestCase):
     """Test service & endpoint CRUD."""
 
-    def test_get_catalog_project_scoped_token(self):
-        """Call ``GET /catalog`` with a project-scoped token."""
-        r = self.get(
-            '/catalog',
-            expected_status=200)
-        self.assertValidCatalogResponse(r)
-
-    def test_get_catalog_domain_scoped_token(self):
-        """Call ``GET /catalog`` with a domain-scoped token."""
-        # grant a domain role to a user
-        self.put(path='/domains/%s/users/%s/roles/%s' % (
-            self.domain['id'], self.user['id'], self.role['id']))
-
-        self.get(
-            '/catalog',
-            auth=self.build_authentication_request(
-                user_id=self.user['id'],
-                password=self.user['password'],
-                domain_id=self.domain['id']),
-            expected_status=403)
-
-    def test_get_catalog_unscoped_token(self):
-        """Call ``GET /catalog`` with an unscoped token."""
-        self.get(
-            '/catalog',
-            auth=self.build_authentication_request(
-                user_id=self.default_domain_user['id'],
-                password=self.default_domain_user['password']),
-            expected_status=403)
-
-    def test_get_catalog_no_token(self):
-        """Call ``GET /catalog`` without a token."""
-        self.get(
-            '/catalog',
-            noauth=True,
-            expected_status=401)
-
     # region crud tests
 
     def test_create_region_with_id(self):
@@ -114,6 +77,17 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             '/regions/%(region_id)s' % {
                 'region_id': ref['id']})
         self.assertValidRegionResponse(r, ref)
+
+    def test_create_region_with_empty_id(self):
+        """Call ``POST /regions`` with an empty ID in the request body."""
+        ref = self.new_region_ref()
+        ref['id'] = ''
+
+        r = self.post(
+            '/regions',
+            body={'region': ref}, expected_status=201)
+        self.assertValidRegionResponse(r, ref)
+        self.assertNotEmpty(r.result['region'].get('id'))
 
     def test_create_region_without_id(self):
         """Call ``POST /regions`` without an ID in the request body."""
@@ -215,6 +189,26 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         r = self.get('/regions')
         self.assertValidRegionListResponse(r, ref=self.region)
 
+    def _create_region_with_parent_id(self, parent_id=None):
+        ref = self.new_region_ref()
+        ref['parent_region_id'] = parent_id
+        return self.post(
+            '/regions',
+            body={'region': ref})
+
+    def test_list_regions_filtered_by_parent_region_id(self):
+        """Call ``GET /regions?parent_region_id={parent_region_id}``."""
+        new_region = self._create_region_with_parent_id()
+        parent_id = new_region.result['region']['id']
+
+        new_region = self._create_region_with_parent_id(parent_id)
+        new_region = self._create_region_with_parent_id(parent_id)
+
+        r = self.get('/regions?parent_region_id=%s' % parent_id)
+
+        for region in r.result['regions']:
+            self.assertEqual(parent_id, region['parent_region_id'])
+
     def test_list_regions_xml(self):
         """Call ``GET /regions (xml data)``."""
         r = self.get('/regions', content_type='xml')
@@ -237,8 +231,57 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
     def test_delete_region(self):
         """Call ``DELETE /regions/{region_id}``."""
+
+        ref = self.new_region_ref()
+        r = self.post(
+            '/regions',
+            body={'region': ref})
+        self.assertValidRegionResponse(r, ref)
+
         self.delete('/regions/%(region_id)s' % {
-            'region_id': self.region_id})
+            'region_id': ref['id']})
+
+    def test_create_region_with_url(self):
+        """Call ``POST /regions`` with a custom url field."""
+        ref = self.new_region_ref()
+        ref['url'] = 'http://beta.com:5000/v3'
+
+        r = self.post(
+            '/regions',
+            body={'region': ref},
+            expected_status=201)
+
+        self.assertEqual(ref['url'], r.json['region']['url'])
+        self.assertValidRegionResponse(r, ref)
+
+        r = self.get(
+            '/regions/%(region_id)s' % {
+                'region_id': ref['id']})
+        self.assertEqual(ref['url'], r.json['region']['url'])
+        self.assertValidRegionResponse(r, ref)
+
+    def test_update_region_with_url(self):
+        """Call ``PUT /regions`` with a custom url field."""
+        ref = self.new_region_ref()
+
+        r = self.post(
+            '/regions',
+            body={'region': ref},
+            expected_status=201)
+
+        self.assertIsNone(r.json['region']['url'])
+        self.assertValidRegionResponse(r, ref)
+
+        region_id = r.json['region']['id']
+        ref = self.new_region_ref()
+        del ref['id']
+        ref['url'] = 'http://beta.com:5000/v3'
+
+        r = self.patch('/regions/%(region_id)s' % {
+            'region_id': region_id},
+            body={'region': ref})
+        self.assertEqual(ref['url'], r.json['region']['url'])
+        self.assertValidRegionResponse(r, ref)
 
     # service crud tests
 
@@ -395,16 +438,34 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             body={'endpoint': ref},
             expected_status=400)
 
-    def test_create_endpoint_400(self):
+    def test_create_endpoint_with_invalid_region_id(self):
         """Call ``POST /endpoints``."""
         ref = self.new_endpoint_ref(service_id=self.service_id)
-        ref["region"] = "0" * 256
+        ref["region_id"] = uuid.uuid4().hex
         self.post('/endpoints', body={'endpoint': ref}, expected_status=400)
+
+    def test_create_endpoint_with_region(self):
+        """EndpointV3 creates the region before creating the endpoint, if
+        endpoint is provided with 'region' and no 'region_id'
+        """
+        ref = self.new_endpoint_ref(service_id=self.service_id)
+        ref["region"] = uuid.uuid4().hex
+        ref.pop('region_id')
+        self.post('/endpoints', body={'endpoint': ref}, expected_status=201)
+        # Make sure the region is created
+        self.get('/regions/%(region_id)s' % {
+            'region_id': ref["region"]})
+
+    def test_create_endpoint_with_no_region(self):
+        """EndpointV3 allows to creates the endpoint without region."""
+        ref = self.new_endpoint_ref(service_id=self.service_id)
+        ref.pop('region_id')
+        self.post('/endpoints', body={'endpoint': ref}, expected_status=201)
 
     def test_create_endpoint_with_empty_url(self):
         """Call ``POST /endpoints``."""
         ref = self.new_endpoint_ref(service_id=self.service_id)
-        del ref["url"]
+        ref["url"] = ''
         self.post('/endpoints', body={'endpoint': ref}, expected_status=400)
 
     def test_get_endpoint(self):
@@ -485,6 +546,8 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         del ref['interface']
         ref['publicurl'] = ref.pop('url')
         ref['internalurl'] = None
+        ref['region'] = ref['region_id']
+        del ref['region_id']
         # don't set adminurl to ensure it's absence is handled like internalurl
 
         # create the endpoint on v2 (using a v3 token)
@@ -502,7 +565,7 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         endpoint_v3 = endpoints.pop()
 
         # these attributes are identical between both APIs
-        self.assertEqual(ref['region'], endpoint_v3['region'])
+        self.assertEqual(ref['region'], endpoint_v3['region_id'])
         self.assertEqual(ref['service_id'], endpoint_v3['service_id'])
         self.assertEqual(ref['description'], endpoint_v3['description'])
 
@@ -521,6 +584,8 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
         # test for bug 1152635 -- this attribute was being returned by v3
         self.assertNotIn('legacy_endpoint_id', endpoint_v3)
+
+        self.assertEqual(endpoint_v2['region'], endpoint_v3['region_id'])
 
 
 class TestCatalogAPISQL(tests.TestCase):
@@ -582,3 +647,72 @@ class TestCatalogAPISQL(tests.TestCase):
         self.assertEqual(1, len(catalog[0]['endpoints']))
         # all three appear in the backend
         self.assertEqual(3, len(self.catalog_api.list_endpoints()))
+
+
+# TODO(dstanek): this needs refactoring with the test above, but we are in a
+# crunch so that will happen in a future patch.
+class TestCatalogAPISQLRegions(tests.TestCase):
+    """Tests for the catalog Manager against the SQL backend.
+
+    """
+
+    def setUp(self):
+        super(TestCatalogAPISQLRegions, self).setUp()
+        self.useFixture(database.Database())
+        self.catalog_api = catalog.Manager()
+
+    def config_overrides(self):
+        super(TestCatalogAPISQLRegions, self).config_overrides()
+        self.config_fixture.config(
+            group='catalog',
+            driver='keystone.catalog.backends.sql.Catalog')
+
+    def new_endpoint_ref(self, service_id):
+        return {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'interface': uuid.uuid4().hex[:8],
+            'service_id': service_id,
+            'url': uuid.uuid4().hex,
+            'region_id': uuid.uuid4().hex,
+        }
+
+    def test_get_catalog_returns_proper_endpoints_with_no_region(self):
+        service_id = uuid.uuid4().hex
+        service = {'id': service_id, 'name': uuid.uuid4().hex}
+        self.catalog_api.create_service(service_id, service)
+
+        endpoint = self.new_endpoint_ref(service_id=service_id)
+        del endpoint['region_id']
+        self.catalog_api.create_endpoint(endpoint['id'], endpoint)
+
+        user_id = uuid.uuid4().hex
+        tenant_id = uuid.uuid4().hex
+
+        catalog = self.catalog_api.get_v3_catalog(user_id, tenant_id)
+        self.assertValidCatalogEndpoint(
+            catalog[0]['endpoints'][0], ref=endpoint)
+
+    def test_get_catalog_returns_proper_endpoints_with_region(self):
+        service_id = uuid.uuid4().hex
+        service = {'id': service_id, 'name': uuid.uuid4().hex}
+        self.catalog_api.create_service(service_id, service)
+
+        endpoint = self.new_endpoint_ref(service_id=service_id)
+        self.catalog_api.create_region({'id': endpoint['region_id']})
+        self.catalog_api.create_endpoint(endpoint['id'], endpoint)
+
+        endpoint = self.catalog_api.get_endpoint(endpoint['id'])
+        user_id = uuid.uuid4().hex
+        tenant_id = uuid.uuid4().hex
+
+        catalog = self.catalog_api.get_v3_catalog(user_id, tenant_id)
+        self.assertValidCatalogEndpoint(
+            catalog[0]['endpoints'][0], ref=endpoint)
+
+    def assertValidCatalogEndpoint(self, entity, ref=None):
+        keys = ['description', 'id', 'interface', 'name', 'region_id', 'url']
+        for k in keys:
+            self.assertEqual(ref.get(k), entity[k], k)
+        self.assertEqual(entity['region_id'], entity['region'])

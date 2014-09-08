@@ -14,20 +14,21 @@
 
 import uuid
 
+from oslo.utils import timeutils
 import six
 
 from keystone import assignment
 from keystone.common import controller
 from keystone.common import dependency
-from keystone import config
+from keystone.common import validation
 from keystone import exception
 from keystone.i18n import _
+from keystone.models import token_model
 from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
+from keystone.trust import schema
 
 
 LOG = log.getLogger(__name__)
-CONF = config.CONF
 
 
 def _trustor_trustee_only(trust, user_id):
@@ -41,8 +42,8 @@ def _admin_trustor_only(context, trust, user_id):
         raise exception.Forbidden()
 
 
-@dependency.requires('assignment_api', 'identity_api', 'trust_api',
-                     'token_api')
+@dependency.requires('assignment_api', 'identity_api', 'token_provider_api',
+                     'trust_api')
 class TrustV3(controller.V3Controller):
     collection_name = "trusts"
     member_name = "trust"
@@ -59,9 +60,10 @@ class TrustV3(controller.V3Controller):
     def _get_user_id(self, context):
         if 'token_id' in context:
             token_id = context['token_id']
-            token = self.token_api.get_token(token_id)
-            user_id = token['user']['id']
-            return user_id
+            token_data = self.token_provider_api.validate_token(token_id)
+            token_ref = token_model.KeystoneToken(token_id=token_id,
+                                                  token_data=token_data)
+            return token_ref.user_id
         return None
 
     def get_trust(self, context, trust_id):
@@ -118,6 +120,7 @@ class TrustV3(controller.V3Controller):
         return trust_roles
 
     @controller.protected()
+    @validation.validated(schema.trust_create, 'trust')
     def create_trust(self, context, trust=None):
         """Create a new trust.
 
@@ -135,8 +138,6 @@ class TrustV3(controller.V3Controller):
         if not trust:
             raise exception.ValidationError(attribute='trust',
                                             target='request')
-        self._require_attributes(trust, ['impersonation', 'trustee_user_id',
-                                         'trustor_user_id'])
         if trust.get('project_id'):
             self._require_role(trust)
         self._require_user_is_trustor(context, trust)
@@ -231,8 +232,6 @@ class TrustV3(controller.V3Controller):
         user_id = self._get_user_id(context)
         _admin_trustor_only(context, trust, user_id)
         self.trust_api.delete_trust(trust_id)
-        userid = trust['trustor_user_id']
-        self.token_api.delete_tokens(userid, trust_id=trust_id)
 
     @controller.protected()
     def list_roles_for_trust(self, context, trust_id):

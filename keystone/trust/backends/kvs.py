@@ -17,20 +17,23 @@ only to be used for testing purposes
 """
 import copy
 
+from oslo.utils import timeutils
+
 from keystone.common import kvs
 from keystone import exception
-from keystone.openstack.common import timeutils
+from keystone.openstack.common import versionutils
 from keystone import trust as keystone_trust
 
 
-def _filter_trust(ref):
-    if ref['deleted']:
+def _filter_trust(ref, deleted=False):
+    if ref['deleted_at'] and not deleted:
         return None
-    if ref.get('expires_at') and timeutils.utcnow() > ref['expires_at']:
+    if (ref.get('expires_at') and timeutils.utcnow() > ref['expires_at'] and
+            not deleted):
         return None
     remaining_uses = ref.get('remaining_uses')
     # Do not return trusts that can't be used anymore
-    if remaining_uses is not None:
+    if remaining_uses is not None and not deleted:
         if remaining_uses <= 0:
             return None
     ref = copy.deepcopy(ref)
@@ -38,10 +41,18 @@ def _filter_trust(ref):
 
 
 class Trust(kvs.Base, keystone_trust.Driver):
+
+    @versionutils.deprecated(versionutils.deprecated.JUNO,
+                             in_favor_of='keystone.trust.backends.sql',
+                             remove_in=+1,
+                             what='keystone.trust.backends.kvs')
+    def __init__(self):
+        super(Trust, self).__init__()
+
     def create_trust(self, trust_id, trust, roles):
         trust_ref = copy.deepcopy(trust)
         trust_ref['id'] = trust_id
-        trust_ref['deleted'] = False
+        trust_ref['deleted_at'] = None
         trust_ref['roles'] = roles
         if (trust_ref.get('expires_at') and
                 trust_ref['expires_at'].tzinfo is not None):
@@ -75,10 +86,10 @@ class Trust(kvs.Base, keystone_trust.Driver):
         else:
             raise exception.TrustUseLimitReached(trust_id=trust_id)
 
-    def get_trust(self, trust_id):
+    def get_trust(self, trust_id, deleted=False):
         try:
             ref = self.db.get('trust-%s' % trust_id)
-            return _filter_trust(ref)
+            return _filter_trust(ref, deleted=deleted)
         except exception.NotFound:
             return None
 
@@ -87,13 +98,13 @@ class Trust(kvs.Base, keystone_trust.Driver):
             ref = self.db.get('trust-%s' % trust_id)
         except exception.NotFound:
             raise exception.TrustNotFound(trust_id=trust_id)
-        ref['deleted'] = True
+        ref['deleted_at'] = timeutils.utcnow()
         self.db.set('trust-%s' % trust_id, ref)
 
     def list_trusts(self):
         trusts = []
         for key, value in self.db.items():
-            if key.startswith("trust-") and not value['deleted']:
+            if key.startswith("trust-") and not value['deleted_at']:
                 trusts.append(value)
         return trusts
 

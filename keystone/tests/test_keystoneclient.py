@@ -15,13 +15,13 @@
 import datetime
 import os
 import uuid
-import webob
 
 import mock
+from oslo.utils import timeutils
+import webob
 
 from keystone import config
 from keystone.openstack.common import jsonutils
-from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import appserver
@@ -30,7 +30,8 @@ from keystone.tests.ksfixtures import database
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
-OPENSTACK_REPO = 'https://review.openstack.org/p/openstack'
+OPENSTACK_REPO = os.environ.get('OPENSTACK_REPO',
+                                'https://git.openstack.org/openstack')
 KEYSTONECLIENT_REPO = '%s/python-keystoneclient.git' % OPENSTACK_REPO
 
 

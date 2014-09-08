@@ -14,8 +14,9 @@
 
 import uuid
 
+import mock
+
 from keystone import auth
-from keystone.common import config
 from keystone import exception
 from keystone import tests
 
@@ -67,13 +68,17 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
 
     def config_overrides(self):
         super(TestAuthPlugin, self).config_overrides()
-        self.config_fixture.config(
-            group='auth',
-            methods=[
-                'keystone.auth.plugins.external.DefaultDomain',
-                'keystone.auth.plugins.password.Password',
-                'keystone.auth.plugins.token.Token',
-                'keystone.tests.test_auth_plugin.SimpleChallengeResponse'])
+        method_opts = dict(
+            [
+                ('external', 'keystone.auth.plugins.external.DefaultDomain'),
+                ('password', 'keystone.auth.plugins.password.Password'),
+                ('token', 'keystone.auth.plugins.token.Token'),
+                (METHOD_NAME,
+                 'keystone.tests.test_auth_plugin.SimpleChallengeResponse'),
+            ])
+        self.auth_plugin_config_override(
+            methods=['external', 'password', 'token', METHOD_NAME],
+            **method_opts)
 
     def test_unsupported_auth_method(self):
         method_name = uuid.uuid4().hex
@@ -154,24 +159,66 @@ class TestInvalidAuthMethodRegistration(tests.TestCase):
         self.clear_auth_plugin_registry()
         self.assertRaises(ValueError, auth.controllers.load_auth_methods)
 
-    def test_mismatched_auth_method_and_plugin_attribute(self):
-        test_opt = config.cfg.StrOpt('test')
 
-        def clear_and_unregister_opt():
-            # NOTE(morganfainberg): Reset is required before unregistering
-            # arguments or ArgsAlreadyParsedError is raised.
-            config.CONF.reset()
-            config.CONF.unregister_opt(test_opt, 'auth')
+class TestMapped(tests.TestCase):
+    def setUp(self):
+        super(TestMapped, self).setUp()
+        self.load_backends()
 
-        self.addCleanup(clear_and_unregister_opt)
+        self.api = auth.controllers.Auth()
 
-        # Guarantee we register the option we expect to unregister in cleanup
-        config.CONF.register_opt(test_opt, 'auth')
+    def config_files(self):
+        config_files = super(TestMapped, self).config_files()
+        config_files.append(tests.dirs.tests_conf('test_auth_plugin.conf'))
+        return config_files
 
-        self.config_fixture.config(group='auth', methods=['test'])
-        self.config_fixture.config(
-            group='auth',
-            test='keystone.tests.test_auth_plugin.MismatchedAuthPlugin')
+    def config_overrides(self):
+        # don't override configs so we can use test_auth_plugin.conf only
+        pass
 
-        self.clear_auth_plugin_registry()
-        self.assertRaises(ValueError, auth.controllers.load_auth_methods)
+    def _test_mapped_invocation_with_method_name(self, method_name):
+        with mock.patch.object(auth.plugins.mapped.Mapped,
+                               'authenticate',
+                               return_value=None) as authenticate:
+            context = {'environment': {}}
+            auth_data = {
+                'identity': {
+                    'methods': [method_name],
+                    method_name: {'protocol': method_name},
+                }
+            }
+            auth_info = auth.controllers.AuthInfo.create(context, auth_data)
+            auth_context = {'extras': {},
+                            'method_names': [],
+                            'user_id': uuid.uuid4().hex}
+            self.api.authenticate(context, auth_info, auth_context)
+            # make sure Mapped plugin got invoked with the correct payload
+            ((context, auth_payload, auth_context),
+             kwargs) = authenticate.call_args
+            self.assertEqual(method_name, auth_payload['protocol'])
+
+    def test_mapped_with_remote_user(self):
+        with mock.patch.object(auth.plugins.mapped.Mapped,
+                               'authenticate',
+                               return_value=None) as authenticate:
+            # external plugin should fail and pass to mapped plugin
+            method_name = 'saml2'
+            auth_data = {'methods': [method_name]}
+            # put the method name in the payload so its easier to correlate
+            # method name with payload
+            auth_data[method_name] = {'protocol': method_name}
+            auth_data = {'identity': auth_data}
+            auth_info = auth.controllers.AuthInfo.create(None, auth_data)
+            auth_context = {'extras': {},
+                            'method_names': [],
+                            'user_id': uuid.uuid4().hex}
+            environment = {'environment': {'REMOTE_USER': 'foo@idp.com'}}
+            self.api.authenticate(environment, auth_info, auth_context)
+            # make sure Mapped plugin got invoked with the correct payload
+            ((context, auth_payload, auth_context),
+             kwargs) = authenticate.call_args
+            self.assertEqual(auth_payload['protocol'], method_name)
+
+    def test_supporting_multiple_methods(self):
+        for method_name in ['saml2', 'openid', 'x509']:
+            self._test_mapped_invocation_with_method_name(method_name)

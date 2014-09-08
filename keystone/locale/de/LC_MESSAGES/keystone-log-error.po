@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Keystone\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/keystone\n"
-"POT-Creation-Date: 2014-06-26 06:01+0000\n"
-"PO-Revision-Date: 2014-06-20 20:11+0000\n"
+"POT-Creation-Date: 2014-08-04 06:06+0000\n"
+"PO-Revision-Date: 2014-07-16 14:42+0000\n"
 "Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
 "Language-Team: German (http://www.transifex.com/projects/p/keystone/language/"
 "de/)\n"
@@ -29,37 +29,37 @@ msgstr "Ursprüngliche Ausnahme wird gelöscht: %s"
 msgid "Unexpected exception occurred %d time(s)... retrying."
 msgstr "Unerwartete Ausnahme %d mal(e) aufgetreten... Neuversuch."
 
-#: keystone/openstack/common/lockutils.py:120
+#: keystone/openstack/common/lockutils.py:119
 #, python-format
 msgid "Could not release the acquired lock `%s`"
 msgstr "Angeforderte Sperre `%s` konnte nicht freigegeben werden"
 
-#: keystone/openstack/common/loopingcall.py:89
+#: keystone/openstack/common/loopingcall.py:95
 msgid "in fixed duration looping call"
 msgstr "in Schleifenaufruf mit festgelegter Dauer"
 
-#: keystone/openstack/common/loopingcall.py:131
+#: keystone/openstack/common/loopingcall.py:138
 msgid "in dynamic looping call"
 msgstr "in dynamischen Schleifenaufruf"
 
-#: keystone/openstack/common/policy.py:511
+#: keystone/openstack/common/policy.py:507
 #, python-format
 msgid "Failed to understand rule %s"
 msgstr "Regel %s konnte nicht verstanden werden"
 
-#: keystone/openstack/common/policy.py:521
+#: keystone/openstack/common/policy.py:517
 #, python-format
 msgid "No handler for matches of kind %s"
 msgstr "Kein Handler für Übereinstimmungen des Typs %s"
 
-#: keystone/openstack/common/policy.py:791
+#: keystone/openstack/common/policy.py:787
 #, python-format
 msgid "Failed to understand rule %r"
 msgstr "Regel %r konnte nicht verstanden werden"
 
 #: keystone/openstack/common/service.py:188
 msgid "Exception during rpc cleanup."
-msgstr ""
+msgstr "Ausnahme bei RPC Cleanup."
 
 #: keystone/openstack/common/service.py:277
 msgid "Unhandled exception"

@@ -17,9 +17,10 @@ import uuid
 
 import six
 
-from keystone.common import authorization
+from keystone.catalog import schema
 from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import validation
 from keystone.common import wsgi
 from keystone import exception
 from keystone.i18n import _
@@ -78,6 +79,7 @@ class Endpoint(controller.V2Controller):
                 legacy_ep['id'] = legacy_ep.pop('legacy_endpoint_id')
                 legacy_ep.pop('interface')
                 legacy_ep.pop('url')
+                legacy_ep['region'] = legacy_ep.pop('region_id')
 
                 legacy_endpoints[endpoint['legacy_endpoint_id']] = legacy_ep
             else:
@@ -96,6 +98,13 @@ class Endpoint(controller.V2Controller):
         self._require_attribute(endpoint, 'publicurl')
         # service_id is necessary
         self._require_attribute(endpoint, 'service_id')
+
+        if endpoint.get('region') is not None:
+            try:
+                self.catalog_api.get_region(endpoint['region'])
+            except exception.RegionNotFound:
+                region = dict(id=endpoint['region'])
+                self.catalog_api.create_region(region)
 
         legacy_endpoint_ref = endpoint.copy()
 
@@ -118,6 +127,7 @@ class Endpoint(controller.V2Controller):
             endpoint_ref['legacy_endpoint_id'] = legacy_endpoint_id
             endpoint_ref['interface'] = interface
             endpoint_ref['url'] = url
+            endpoint_ref['region_id'] = endpoint_ref.pop('region')
 
             self.catalog_api.create_endpoint(endpoint_ref['id'], endpoint_ref)
 
@@ -137,36 +147,6 @@ class Endpoint(controller.V2Controller):
 
         if not deleted_at_least_one:
             raise exception.EndpointNotFound(endpoint_id=endpoint_id)
-
-
-@dependency.requires('catalog_api')
-class CatalogV3(controller.V3Controller):
-    collection_name = 'catalog'
-
-    @controller.protected()
-    def get_catalog(self, context):
-        # TODO(dolphm): this method of accessing the auth context is terrible,
-        # but context needs to be refactored to always have reasonable values.
-        env_context = context.get('environment', {})
-        auth_context = env_context.get(authorization.AUTH_CONTEXT_ENV, {})
-        user_id = auth_context.get('user_id')
-        project_id = auth_context.get('project_id')
-
-        if not user_id or not project_id:
-            raise exception.Forbidden(
-                _('A project-scoped token is required to produce a service '
-                  'catalog.'))
-
-        # The V3Controller base methods mostly assume that you're returning
-        # either a collection or a single element from a collection, neither of
-        # which apply to the catalog. Because this is a special case, this
-        # re-implements a tiny bit of work done by the base controller (such as
-        # self-referential link building) to avoid overriding or refactoring
-        # several private methods.
-        return {
-            'catalog': self.catalog_api.get_v3_catalog(user_id, project_id),
-            'links': {
-                'self': CatalogV3.base_url(context)}}
 
 
 @dependency.requires('catalog_api')
@@ -190,10 +170,11 @@ class RegionV3(controller.V3Controller):
         return self.create_region(context, region)
 
     @controller.protected()
+    @validation.validated(schema.region_create, 'region')
     def create_region(self, context, region):
         ref = self._normalize_dict(region)
 
-        if 'id' not in ref:
+        if not ref.get('id'):
             ref = self._assign_unique_id(ref)
 
         ref = self.catalog_api.create_region(ref)
@@ -201,10 +182,11 @@ class RegionV3(controller.V3Controller):
             RegionV3.wrap_member(context, ref),
             status=(201, 'Created'))
 
-    @controller.protected()
-    def list_regions(self, context):
-        refs = self.catalog_api.list_regions()
-        return RegionV3.wrap_collection(context, refs)
+    @controller.filterprotected('parent_region_id')
+    def list_regions(self, context, filters):
+        hints = RegionV3.build_driver_hints(context, filters)
+        refs = self.catalog_api.list_regions(hints)
+        return RegionV3.wrap_collection(context, refs, hints=hints)
 
     @controller.protected()
     def get_region(self, context, region_id):
@@ -212,6 +194,7 @@ class RegionV3(controller.V3Controller):
         return RegionV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.region_update, 'region')
     def update_region(self, context, region_id, region):
         self._require_matching_id(region_id, region)
 
@@ -232,17 +215,10 @@ class ServiceV3(controller.V3Controller):
         super(ServiceV3, self).__init__()
         self.get_member_from_driver = self.catalog_api.get_service
 
-    def _validate_service(self, service):
-        if 'enabled' in service and not isinstance(service['enabled'], bool):
-            msg = _('Enabled field must be a boolean')
-            raise exception.ValidationError(message=msg)
-
     @controller.protected()
+    @validation.validated(schema.service_create, 'service')
     def create_service(self, context, service):
-        self._validate_service(service)
-
         ref = self._assign_unique_id(self._normalize_dict(service))
-        self._require_attribute(ref, 'type')
 
         ref = self.catalog_api.create_service(ref['id'], ref)
         return ServiceV3.wrap_member(context, ref)
@@ -259,9 +235,9 @@ class ServiceV3(controller.V3Controller):
         return ServiceV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.service_update, 'service')
     def update_service(self, context, service_id, service):
         self._require_matching_id(service_id, service)
-        self._validate_service(service)
 
         ref = self.catalog_api.update_service(service_id, service)
         return ServiceV3.wrap_member(context, ref)
@@ -284,6 +260,7 @@ class EndpointV3(controller.V3Controller):
     def filter_endpoint(cls, ref):
         if 'legacy_endpoint_id' in ref:
             ref.pop('legacy_endpoint_id')
+        ref['region'] = ref['region_id']
         return ref
 
     @classmethod
@@ -291,20 +268,35 @@ class EndpointV3(controller.V3Controller):
         ref = cls.filter_endpoint(ref)
         return super(EndpointV3, cls).wrap_member(context, ref)
 
-    def _validate_endpoint(self, endpoint):
-        if 'enabled' in endpoint and not isinstance(endpoint['enabled'], bool):
-            msg = _('Enabled field must be a boolean')
-            raise exception.ValidationError(message=msg)
+    def _validate_endpoint_region(self, endpoint):
+        """Ensure the region for the endpoint exists.
+
+        If 'region_id' is used to specify the region, then we will let the
+        manager/driver take care of this.  If, however, 'region' is used,
+        then for backward compatibility, we will auto-create the region.
+
+        """
+        if (endpoint.get('region_id') is None and
+                endpoint.get('region') is not None):
+            # To maintain backward compatibility with clients that are
+            # using the v3 API in the same way as they used the v2 API,
+            # create the endpoint region, if that region does not exist
+            # in keystone.
+            endpoint['region_id'] = endpoint.pop('region')
+            try:
+                self.catalog_api.get_region(endpoint['region_id'])
+            except exception.RegionNotFound:
+                region = dict(id=endpoint['region_id'])
+                self.catalog_api.create_region(region)
+
+        return endpoint
 
     @controller.protected()
+    @validation.validated(schema.endpoint_create, 'endpoint')
     def create_endpoint(self, context, endpoint):
-        self._validate_endpoint(endpoint)
-
         ref = self._assign_unique_id(self._normalize_dict(endpoint))
-        self._require_attribute(ref, 'service_id')
-        self._require_attribute(ref, 'interface')
-        self._require_attribute(ref, 'url')
         self.catalog_api.get_service(ref['service_id'])
+        ref = self._validate_endpoint_region(ref)
 
         ref = self.catalog_api.create_endpoint(ref['id'], ref)
         return EndpointV3.wrap_member(context, ref)
@@ -321,12 +313,13 @@ class EndpointV3(controller.V3Controller):
         return EndpointV3.wrap_member(context, ref)
 
     @controller.protected()
+    @validation.validated(schema.endpoint_update, 'endpoint')
     def update_endpoint(self, context, endpoint_id, endpoint):
         self._require_matching_id(endpoint_id, endpoint)
-        self._validate_endpoint(endpoint)
 
         if 'service_id' in endpoint:
             self.catalog_api.get_service(endpoint['service_id'])
+        endpoint = self._validate_endpoint_region(endpoint.copy())
 
         ref = self.catalog_api.update_endpoint(endpoint_id, endpoint)
         return EndpointV3.wrap_member(context, ref)

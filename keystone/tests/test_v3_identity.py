@@ -132,13 +132,17 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
     def test_list_domains(self):
         """Call ``GET /domains``."""
-        r = self.get('/domains')
-        self.assertValidDomainListResponse(r, ref=self.domain)
+        resource_url = '/domains'
+        r = self.get(resource_url)
+        self.assertValidDomainListResponse(r, ref=self.domain,
+                                           resource_url=resource_url)
 
     def test_list_domains_xml(self):
         """Call ``GET /domains (xml data)``."""
-        r = self.get('/domains', content_type='xml')
-        self.assertValidDomainListResponse(r, ref=self.domain)
+        resource_url = '/domains'
+        r = self.get(resource_url, content_type='xml')
+        self.assertValidDomainListResponse(r, ref=self.domain,
+                                           resource_url=resource_url)
 
     def test_get_domain(self):
         """Call ``GET /domains/{domain_id}``."""
@@ -192,7 +196,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             user_id=self.user2['id'],
             password=self.user2['password'],
             project_id=self.project2['id'])
-        self.post('/auth/tokens', body=auth_data)
+        self.v3_authenticate_token(auth_data)
 
         # Now disable the domain
         self.domain2['enabled'] = False
@@ -220,14 +224,14 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             user_id=self.user2['id'],
             password=self.user2['password'],
             project_id=self.project2['id'])
-        self.post('/auth/tokens', body=auth_data, expected_status=401)
+        self.v3_authenticate_token(auth_data, expected_status=401)
 
         auth_data = self.build_authentication_request(
             username=self.user2['name'],
             user_domain_id=self.domain2['id'],
             password=self.user2['password'],
             project_id=self.project2['id'])
-        self.post('/auth/tokens', body=auth_data, expected_status=401)
+        self.v3_authenticate_token(auth_data, expected_status=401)
 
     def test_delete_enabled_domain_fails(self):
         """Call ``DELETE /domains/{domain_id}`` (when domain enabled)."""
@@ -381,17 +385,65 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.delete(
             '/domains/%(domain_id)s' % {'domain_id': old_default_domain_id})
 
+    def test_token_revoked_once_domain_disabled(self):
+        """Test token from a disabled domain has been invalidated.
+
+        Test that a token that was valid for an enabled domain
+        becomes invalid once that domain is disabled.
+
+        """
+
+        self.domain = self.new_domain_ref()
+        self.assignment_api.create_domain(self.domain['id'], self.domain)
+
+        self.user2 = self.new_user_ref(domain_id=self.domain['id'])
+        password = self.user2['password']
+        self.user2 = self.identity_api.create_user(self.user2)
+        self.user2['password'] = password
+
+        # build a request body
+        auth_body = self.build_authentication_request(
+            user_id=self.user2['id'],
+            password=self.user2['password'])
+
+        # sends a request for the user's token
+        token_resp = self.post('/auth/tokens', body=auth_body)
+
+        subject_token = token_resp.headers.get('x-subject-token')
+
+        # validates the returned token and it should be valid.
+        self.head('/auth/tokens',
+                  headers={'x-subject-token': subject_token},
+                  expected_status=200)
+
+        # now disable the domain
+        self.domain['enabled'] = False
+        url = "/domains/%(domain_id)s" % {'domain_id': self.domain['id']}
+        self.patch(url,
+                   body={'domain': {'enabled': False}},
+                   expected_status=200)
+
+        # validates the same token again and it should be 'not found'
+        # as the domain has already been disabled.
+        self.head('/auth/tokens',
+                  headers={'x-subject-token': subject_token},
+                  expected_status=404)
+
     # project crud tests
 
     def test_list_projects(self):
         """Call ``GET /projects``."""
-        r = self.get('/projects')
-        self.assertValidProjectListResponse(r, ref=self.project)
+        resource_url = '/projects'
+        r = self.get(resource_url)
+        self.assertValidProjectListResponse(r, ref=self.project,
+                                            resource_url=resource_url)
 
     def test_list_projects_xml(self):
         """Call ``GET /projects`` (xml data)."""
-        r = self.get('/projects', content_type='xml')
-        self.assertValidProjectListResponse(r, ref=self.project)
+        resource_url = '/projects'
+        r = self.get(resource_url, content_type='xml')
+        self.assertValidProjectListResponse(r, ref=self.project,
+                                            resource_url=resource_url)
 
     def test_create_project(self):
         """Call ``POST /projects``."""
@@ -536,8 +588,10 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
     def test_list_users(self):
         """Call ``GET /users``."""
-        r = self.get('/users')
-        self.assertValidUserListResponse(r, ref=self.user)
+        resource_url = '/users'
+        r = self.get(resource_url)
+        self.assertValidUserListResponse(r, ref=self.user,
+                                         resource_url=resource_url)
 
     def test_list_users_with_multiple_backends(self):
         """Call ``GET /users`` when multiple backends is enabled.
@@ -570,29 +624,45 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             domain_id=domain['id'])
 
         # First try using a domain scoped token
-        r = self.get('/users', auth=auth)
-        self.assertValidUserListResponse(r, ref=user)
+        resource_url = '/users'
+        r = self.get(resource_url, auth=auth)
+        self.assertValidUserListResponse(r, ref=user,
+                                         resource_url=resource_url)
 
         # Now try with an explicit filter
-        r = self.get('/users?domain_id=%(domain_id)s' %
-                     {'domain_id': domain['id']})
-        self.assertValidUserListResponse(r, ref=user)
+        resource_url = ('/users?domain_id=%(domain_id)s' %
+                        {'domain_id': domain['id']})
+        r = self.get(resource_url)
+        self.assertValidUserListResponse(r, ref=user,
+                                         resource_url=resource_url)
 
         # Now try the same thing without a domain token or filter,
         # which should fail
         r = self.get('/users', expected_status=exception.Unauthorized.code)
 
+    def test_list_users_with_static_admin_token_and_multiple_backends(self):
+        # domain-specific operations with the bootstrap ADMIN token is
+        # disallowed when domain-specific drivers are enabled
+        self.config_fixture.config(group='identity',
+                                   domain_specific_drivers_enabled=True)
+        self.get('/users', token=CONF.admin_token,
+                 expected_status=exception.Unauthorized.code)
+
     def test_list_users_no_default_project(self):
         """Call ``GET /users`` making sure no default_project_id."""
         user = self.new_user_ref(self.domain_id)
         user = self.identity_api.create_user(user)
-        r = self.get('/users')
-        self.assertValidUserListResponse(r, ref=user)
+        resource_url = '/users'
+        r = self.get(resource_url)
+        self.assertValidUserListResponse(r, ref=user,
+                                         resource_url=resource_url)
 
     def test_list_users_xml(self):
         """Call ``GET /users`` (xml data)."""
-        r = self.get('/users', content_type='xml')
-        self.assertValidUserListResponse(r, ref=self.user)
+        resource_url = '/users'
+        r = self.get(resource_url, content_type='xml')
+        self.assertValidUserListResponse(r, ref=self.user,
+                                         resource_url=resource_url)
 
     def test_get_user(self):
         """Call ``GET /users/{user_id}``."""
@@ -635,14 +705,18 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         auth = self.build_authentication_request(
             user_id=self.user1['id'],
             password=self.user1['password'])
-        r = self.get('/users/%(user_id)s/groups' % {
-            'user_id': self.user1['id']}, auth=auth)
-        self.assertValidGroupListResponse(r, ref=self.group)
+        resource_url = ('/users/%(user_id)s/groups' %
+                        {'user_id': self.user1['id']})
+        r = self.get(resource_url, auth=auth)
+        self.assertValidGroupListResponse(r, ref=self.group,
+                                          resource_url=resource_url)
 
         # Administrator is allowed to list others' groups
-        r = self.get('/users/%(user_id)s/groups' % {
-            'user_id': self.user1['id']})
-        self.assertValidGroupListResponse(r, ref=self.group)
+        resource_url = ('/users/%(user_id)s/groups' %
+                        {'user_id': self.user1['id']})
+        r = self.get(resource_url)
+        self.assertValidGroupListResponse(r, ref=self.group,
+                                          resource_url=resource_url)
 
         # Ordinary users should not be allowed to list other's groups
         auth = self.build_authentication_request(
@@ -663,9 +737,11 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         """Call ``GET /groups/{group_id}/users``."""
         self.put('/groups/%(group_id)s/users/%(user_id)s' % {
             'group_id': self.group_id, 'user_id': self.user['id']})
-        r = self.get('/groups/%(group_id)s/users' % {
-            'group_id': self.group_id})
-        self.assertValidUserListResponse(r, ref=self.user)
+        resource_url = ('/groups/%(group_id)s/users' %
+                        {'group_id': self.group_id})
+        r = self.get(resource_url)
+        self.assertValidUserListResponse(r, ref=self.user,
+                                         resource_url=resource_url)
         self.assertIn('/groups/%(group_id)s/users' % {
             'group_id': self.group_id}, r.result['links']['self'])
 
@@ -730,8 +806,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             user_id=self.user['id'],
             password=self.user['password'],
             project_id=self.project['id'])
-        resp = self.post('/auth/tokens', body=auth_data)
-        token = resp.headers.get('X-Subject-Token')
+        token = self.get_requested_token(auth_data)
         # Confirm token is valid for now
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token},
@@ -747,7 +822,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                           self.credential_api.get_credential,
                           self.credential['id'])
         # And the no tokens we remain valid
-        tokens = self.token_api._list_tokens(self.user['id'])
+        tokens = self.token_provider_api._persistence._list_tokens(
+            self.user['id'])
         self.assertEqual(0, len(tokens))
         # But the credential for user2 is unaffected
         r = self.credential_api.get_credential(self.credential2['id'])
@@ -769,13 +845,17 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
     def test_list_groups(self):
         """Call ``GET /groups``."""
-        r = self.get('/groups')
-        self.assertValidGroupListResponse(r, ref=self.group)
+        resource_url = '/groups'
+        r = self.get(resource_url)
+        self.assertValidGroupListResponse(r, ref=self.group,
+                                          resource_url=resource_url)
 
     def test_list_groups_xml(self):
         """Call ``GET /groups`` (xml data)."""
-        r = self.get('/groups', content_type='xml')
-        self.assertValidGroupListResponse(r, ref=self.group)
+        resource_url = '/groups'
+        r = self.get(resource_url, content_type='xml')
+        self.assertValidGroupListResponse(r, ref=self.group,
+                                          resource_url=resource_url)
 
     def test_get_group(self):
         """Call ``GET /groups/{group_id}``."""
@@ -829,13 +909,17 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
     def test_list_roles(self):
         """Call ``GET /roles``."""
-        r = self.get('/roles')
-        self.assertValidRoleListResponse(r, ref=self.role)
+        resource_url = '/roles'
+        r = self.get(resource_url)
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=resource_url)
 
     def test_list_roles_xml(self):
         """Call ``GET /roles`` (xml data)."""
-        r = self.get('/roles', content_type='xml')
-        self.assertValidRoleListResponse(r, ref=self.role)
+        resource_url = '/roles'
+        r = self.get(resource_url, content_type='xml')
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=resource_url)
 
     def test_get_role(self):
         """Call ``GET /roles/{role_id}``."""
@@ -869,8 +953,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=self.role)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=collection_url)
 
         # FIXME(gyee): this test is no longer valid as user
         # have no role in the project. Can't get a scoped token
@@ -910,13 +994,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=self.role)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=collection_url)
 
         self.delete(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, expected_length=0)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, expected_length=0,
+                                         resource_url=collection_url)
 
     def test_crud_user_domain_role_grants_no_user(self):
         """Grant role on a domain to a user that doesn't exist, 404 result.
@@ -949,13 +1033,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=self.role)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=collection_url)
 
         self.delete(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, expected_length=0)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, expected_length=0,
+                                         resource_url=collection_url)
 
     def test_crud_group_project_role_grants_no_group(self):
         """Grant role on a project to a group that doesn't exist, 404 result.
@@ -989,13 +1073,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=self.role)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         resource_url=collection_url)
 
         self.delete(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, expected_length=0)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, expected_length=0,
+                                         resource_url=collection_url)
 
     def test_crud_group_domain_role_grants_no_group(self):
         """Grant role on a domain to a group that doesn't exist, 404 result.
@@ -1053,8 +1137,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         existing_assignments = len(r.result.get('role_assignments'))
 
         # Now add one of each of the four types of assignment, making sure
@@ -1064,7 +1148,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(gd_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 1,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
@@ -1074,7 +1159,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(ud_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 2,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, ud_entity, link_url=ud_url)
@@ -1084,7 +1170,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(gp_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 3,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gp_entity, link_url=gp_url)
@@ -1094,7 +1181,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(up_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 4,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
@@ -1107,7 +1195,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.delete(gp_url)
         self.delete(up_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentNotInListResponse(r, gd_entity)
@@ -1144,8 +1233,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         existing_assignments = len(r.result.get('role_assignments'))
 
         gd_url, gd_entity = _build_role_assignment_url_and_entity(
@@ -1153,7 +1242,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(gd_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 1,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
@@ -1163,7 +1253,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # member user assignments
         collection_url = '/role_assignments?effective'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 2,
                          len(r.result.get('role_assignments')))
         unused, ud_entity = _build_role_assignment_url_and_entity(
@@ -1219,7 +1310,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         existing_assignments = len(r.result.get('role_assignments'))
 
         gd_url, gd_entity = _build_role_assignment_url_and_entity(
@@ -1227,7 +1319,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             role_id=self.role_id)
         self.put(gd_url)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 1,
                          len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
@@ -1238,14 +1331,16 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # member user assignments
         collection_url = '/role_assignments?effective'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 2,
                          len(r.result.get('role_assignments')))
         # Now set 'effective' to false explicitly - should get
         # back the regular roles
         collection_url = '/role_assignments?effective=0'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 1,
                          len(r.result.get('role_assignments')))
         # Now try setting  'effective' to 'False' explicitly- this is
@@ -1254,13 +1349,15 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # effective roles.
         collection_url = '/role_assignments?effective=False'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 2,
                          len(r.result.get('role_assignments')))
         # Now set 'effective' to True explicitly
         collection_url = '/role_assignments?effective=True'
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(existing_assignments + 2,
                          len(r.result.get('role_assignments')))
 
@@ -1338,7 +1435,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         collection_url = ('/role_assignments?scope.project.id=%s' %
                           self.project1['id'])
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
         self.assertRoleAssignmentInListResponse(r, gp_entity, link_url=gp_url)
@@ -1346,28 +1444,32 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         collection_url = ('/role_assignments?scope.domain.id=%s' %
                           self.domain['id'])
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, ud_entity, link_url=ud_url)
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
 
         collection_url = '/role_assignments?user.id=%s' % self.user1['id']
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
         self.assertRoleAssignmentInListResponse(r, ud_entity, link_url=ud_url)
 
         collection_url = '/role_assignments?group.id=%s' % self.group1['id']
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
         self.assertRoleAssignmentInListResponse(r, gp_entity, link_url=gp_url)
 
         collection_url = '/role_assignments?role.id=%s' % self.role1['id']
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, gd_entity, link_url=gd_url)
         self.assertRoleAssignmentInListResponse(r, gp_entity, link_url=gp_url)
@@ -1380,7 +1482,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                 'user_id': self.user1['id'],
                 'project_id': self.project1['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(1, len(r.result.get('role_assignments')))
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
 
@@ -1391,7 +1494,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         collection_url = ('/role_assignments?effective&user.id=%s' %
                           self.user1['id'])
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(4, len(r.result.get('role_assignments')))
         # Should have the two direct roles...
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
@@ -1424,7 +1528,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                 'user_id': self.user1['id'],
                 'project_id': self.project1['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         # Should have one direct role and one from group membership...
         self.assertRoleAssignmentInListResponse(r, up_entity, link_url=up_url)
@@ -1465,14 +1570,14 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         # Check we can read it back
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[0])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[0],
+                                         resource_url=collection_url)
 
         # Now delete and check its gone
         self.delete(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, expected_length=0)
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, expected_length=0,
+                                         resource_url=collection_url)
 
     def test_list_role_assignments_for_inherited_domain_grants(self):
         """Call ``GET /role_assignments with inherited domain grants``.
@@ -1530,8 +1635,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[3])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[3],
+                                         resource_url=collection_url)
 
         # Now use the list domain role assignments api to check if this
         # is included
@@ -1541,7 +1646,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
                 'user_id': user1['id'],
                 'domain_id': domain['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(1, len(r.result.get('role_assignments')))
         ud_url, ud_entity = _build_role_assignment_url_and_entity(
             domain_id=domain['id'], user_id=user1['id'],
@@ -1557,7 +1663,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
                 'user_id': user1['id'],
                 'project_id': project1['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(3, len(r.result.get('role_assignments')))
         # An effective role for an inherited role will be a project
         # entity, with a domain link to the inherited assignment
@@ -1624,8 +1731,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[3])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[3],
+                                         resource_url=collection_url)
 
         # Get effective list role assignments - the role should
         # turn into a project role, along with the two direct roles that are
@@ -1636,7 +1743,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
                 'user_id': user1['id'],
                 'project_id': project1['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(3, len(r.result.get('role_assignments')))
 
         unused, up_entity = _build_role_assignment_url_and_entity(
@@ -1651,7 +1759,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         # from the project should no longer show up
         self.config_fixture.config(group='os_inherit', enabled=False)
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
 
         unused, up_entity = _build_role_assignment_url_and_entity(
@@ -1731,8 +1840,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[3])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[3],
+                                         resource_url=collection_url)
 
         # Now use the list domain role assignments api to check if this
         # is included
@@ -1742,7 +1851,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
                 'group_id': group1['id'],
                 'domain_id': domain['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(1, len(r.result.get('role_assignments')))
         gd_url, gd_entity = _build_role_assignment_url_and_entity(
             domain_id=domain['id'], group_id=group1['id'],
@@ -1758,7 +1868,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
                 'user_id': user1['id'],
                 'project_id': project1['id']})
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(3, len(r.result.get('role_assignments')))
         # An effective role for an inherited role will be a project
         # entity, with a domain link to the inherited assignment
@@ -1829,8 +1940,8 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[3])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[3],
+                                         resource_url=collection_url)
 
         base_collection_url = (
             '/OS-INHERIT/domains/%(domain_id)s/groups/%(group_id)s/roles' % {
@@ -1844,15 +1955,16 @@ class IdentityInheritanceTestCase(test_v3.RestfulTestCase):
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=role_list[4])
-        self.assertIn(collection_url, r.result['links']['self'])
+        self.assertValidRoleListResponse(r, ref=role_list[4],
+                                         resource_url=collection_url)
 
         # Now use the list role assignments api to get a list of inherited
         # roles on the domain - should get back the two roles
         collection_url = (
             '/role_assignments?scope.OS-INHERIT:inherited_to=projects')
         r = self.get(collection_url)
-        self.assertValidRoleAssignmentListResponse(r)
+        self.assertValidRoleAssignmentListResponse(r,
+                                                   resource_url=collection_url)
         self.assertEqual(2, len(r.result.get('role_assignments')))
         ud_url, ud_entity = _build_role_assignment_url_and_entity(
             domain_id=domain['id'], user_id=user1['id'],
@@ -2007,9 +2119,8 @@ class UserSelfServiceChangingPasswordsTestCase(test_v3.RestfulTestCase):
         auth_data = self.build_authentication_request(
             user_id=self.user_ref['id'],
             password=password)
-        r = self.post('/auth/tokens',
-                      body=auth_data,
-                      expected_status=expected_status)
+        r = self.v3_authenticate_token(auth_data,
+                                       expected_status=expected_status)
         return r.headers.get('X-Subject-Token')
 
     def change_password(self, expected_status, **kwargs):

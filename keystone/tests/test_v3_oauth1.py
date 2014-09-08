@@ -13,8 +13,6 @@
 # under the License.
 
 import copy
-import os
-import tempfile
 import uuid
 
 from six.moves import urllib
@@ -25,6 +23,7 @@ from keystone.contrib.oauth1 import controllers
 from keystone.contrib.oauth1 import core
 from keystone import exception
 from keystone.openstack.common import jsonutils
+from keystone.tests.ksfixtures import temporaryfile
 from keystone.tests import test_v3
 
 
@@ -301,12 +300,15 @@ class AccessTokenCRUDTests(OAuthFlowTests):
 
     def test_get_single_access_token(self):
         self.test_oauth_flow()
-        resp = self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
-                        % {'user_id': self.user_id,
-                           'key': self.access_token.key})
+        url = '/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s' % {
+              'user_id': self.user_id,
+              'key': self.access_token.key
+        }
+        resp = self.get(url)
         entity = resp.result['access_token']
         self.assertEqual(entity['id'], self.access_token.key)
         self.assertEqual(entity['consumer_id'], self.consumer['key'])
+        self.assertEqual('http://localhost/v3' + url, entity['links']['self'])
 
     def test_get_access_token_dne(self):
         self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens/%(key)s'
@@ -477,10 +479,12 @@ class AuthTokenTests(OAuthFlowTests):
 
     def test_delete_keystone_tokens_by_consumer_id(self):
         self.test_oauth_flow()
-        self.token_api.get_token(self.keystone_token_id)
-        self.token_api.delete_tokens(self.user_id,
-                                     consumer_id=self.consumer['key'])
-        self.assertRaises(exception.TokenNotFound, self.token_api.get_token,
+        self.token_provider_api._persistence.get_token(self.keystone_token_id)
+        self.token_provider_api._persistence.delete_tokens(
+            self.user_id,
+            consumer_id=self.consumer['key'])
+        self.assertRaises(exception.TokenNotFound,
+                          self.token_provider_api._persistence.get_token,
                           self.keystone_token_id)
 
     def _create_trust_get_token(self):
@@ -500,10 +504,8 @@ class AuthTokenTests(OAuthFlowTests):
             user_id=self.user['id'],
             password=self.user['password'],
             trust_id=trust['id'])
-        r = self.post('/auth/tokens', body=auth_data)
 
-        trust_token = r.headers['X-Subject-Token']
-        return trust_token
+        return self.get_requested_token(auth_data)
 
     def _approve_request_token_url(self):
         consumer = self._create_single_consumer()
@@ -560,11 +562,11 @@ class AuthTokenTests(OAuthFlowTests):
                  expected_status=403)
 
     def _set_policy(self, new_policy):
-        _unused, self.tmpfilename = tempfile.mkstemp()
+        self.tempfile = self.useFixture(temporaryfile.SecureTempFile())
+        self.tmpfilename = self.tempfile.file_name
         self.config_fixture.config(policy_file=self.tmpfilename)
         with open(self.tmpfilename, "w") as policyfile:
             policyfile.write(jsonutils.dumps(new_policy))
-        self.addCleanup(os.remove, self.tmpfilename)
 
     def test_trust_token_cannot_authorize_request_token(self):
         trust_token = self._create_trust_get_token()
@@ -710,3 +712,12 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         url, headers, body = self._get_oauth_token(self.consumer,
                                                    self.access_token)
         self.post(url, headers=headers, body=body, expected_status=401)
+
+
+class JsonHomeTests(OAuth1Tests, test_v3.JsonHomeTestMixin):
+    JSON_HOME_DATA = {
+        'http://docs.openstack.org/api/openstack-identity/3/ext/OS-OAUTH1/1.0/'
+        'rel/consumers': {
+            'href': '/OS-OAUTH1/consumers',
+        },
+    }

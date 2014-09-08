@@ -16,6 +16,7 @@ import datetime
 import uuid
 
 from lxml import etree
+from oslo.utils import timeutils
 import six
 from testtools import matchers
 
@@ -26,7 +27,7 @@ from keystone.common import serializer
 from keystone import config
 from keystone import exception
 from keystone import middleware
-from keystone.openstack.common import timeutils
+from keystone.openstack.common import jsonutils
 from keystone.policy.backends import rules
 from keystone import tests
 from keystone.tests.ksfixtures import database
@@ -254,6 +255,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.endpoint_id = uuid.uuid4().hex
         self.endpoint = self.new_endpoint_ref(service_id=self.service_id)
         self.endpoint['id'] = self.endpoint_id
+        self.endpoint['region_id'] = self.region['id']
         self.catalog_api.create_endpoint(
             self.endpoint_id,
             self.endpoint.copy())
@@ -281,13 +283,13 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         ref['type'] = uuid.uuid4().hex
         return ref
 
-    def new_endpoint_ref(self, service_id, **kwargs):
+    def new_endpoint_ref(self, service_id, interface='public', **kwargs):
         ref = self.new_ref()
         del ref['enabled']  # enabled is optional
-        ref['interface'] = uuid.uuid4().hex[:8]
+        ref['interface'] = interface
         ref['service_id'] = service_id
-        ref['url'] = uuid.uuid4().hex
-        ref['region'] = uuid.uuid4().hex
+        ref['url'] = 'https://' + uuid.uuid4().hex + '.com'
+        ref['region_id'] = self.region_id
         ref.update(kwargs)
         return ref
 
@@ -314,17 +316,25 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         ref['domain_id'] = domain_id
         return ref
 
-    def new_credential_ref(self, user_id, project_id=None):
-        ref = self.new_ref()
+    def new_credential_ref(self, user_id, project_id=None, cred_type=None):
+        ref = dict()
+        ref['id'] = uuid.uuid4().hex
         ref['user_id'] = user_id
-        ref['blob'] = uuid.uuid4().hex
-        ref['type'] = uuid.uuid4().hex
+        if cred_type == 'ec2':
+            ref['type'] = 'ec2'
+            ref['blob'] = {'blah': 'test'}
+        else:
+            ref['type'] = 'cert'
+            ref['blob'] = uuid.uuid4().hex
         if project_id:
             ref['project_id'] = project_id
         return ref
 
     def new_role_ref(self):
         ref = self.new_ref()
+        # Roles don't have a description or the enabled flag
+        del ref['description']
+        del ref['enabled']
         return ref
 
     def new_policy_ref(self):
@@ -336,8 +346,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
     def new_trust_ref(self, trustor_user_id, trustee_user_id, project_id=None,
                       impersonation=None, expires=None, role_ids=None,
                       role_names=None, remaining_uses=None):
-        ref = self.new_ref()
-
+        ref = dict()
+        ref['id'] = uuid.uuid4().hex
         ref['trustor_user_id'] = trustor_user_id
         ref['trustee_user_id'] = trustee_user_id
         ref['impersonation'] = impersonation or False
@@ -423,11 +433,14 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
     def get_requested_token(self, auth):
         """Request the specific token we want."""
 
-        r = self.admin_request(
-            method='POST',
-            path='/v3/auth/tokens',
-            body=auth)
+        r = self.v3_authenticate_token(auth)
         return r.headers.get('X-Subject-Token')
+
+    def v3_authenticate_token(self, auth, expected_status=201):
+        return self.admin_request(method='POST',
+                                  path='/v3/auth/tokens',
+                                  body=auth,
+                                  expected_status=expected_status)
 
     def v3_noauth_request(self, path, **kwargs):
         # request does not require auth token header
@@ -435,9 +448,6 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         return self.admin_request(path=path, **kwargs)
 
     def v3_request(self, path, **kwargs):
-        # TODO(gyee): need to fix all the v3 auth tests. They should not
-        # require the token header.
-
         # check to see if caller requires token for the API call.
         if kwargs.pop('noauth', None):
             return self.v3_noauth_request(path, **kwargs)
@@ -503,10 +513,13 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.assertIsNotNone(resp['error'].get('message'))
         self.assertEqual(int(resp['error']['code']), r.status_code)
 
-    def assertValidListLinks(self, links):
+    def assertValidListLinks(self, links, resource_url=None):
         self.assertIsNotNone(links)
         self.assertIsNotNone(links.get('self'))
         self.assertThat(links['self'], matchers.StartsWith('http://localhost'))
+
+        if resource_url:
+            self.assertThat(links['self'], matchers.EndsWith(resource_url))
 
         self.assertIn('next', links)
         if links['next'] is not None:
@@ -519,7 +532,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
                             matchers.StartsWith('http://localhost'))
 
     def assertValidListResponse(self, resp, key, entity_validator, ref=None,
-                                expected_length=None, keys_to_check=None):
+                                expected_length=None, keys_to_check=None,
+                                resource_url=None):
         """Make assertions common to all API list responses.
 
         If a reference is provided, it's ID will be searched for in the
@@ -536,7 +550,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             self.assertNotEmpty(entities)
 
         # collections should have relational links
-        self.assertValidListLinks(resp.result.get('links'))
+        self.assertValidListLinks(resp.result.get('links'),
+                                  resource_url=resource_url)
 
         for entity in entities:
             self.assertIsNotNone(entity)
@@ -734,7 +749,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.assertIsInstance(resp.json['links'], dict)
         self.assertEqual(['self'], resp.json['links'].keys())
         self.assertEqual(
-            'http://localhost/v3/catalog',
+            'http://localhost/v3/auth/catalog',
             resp.json['links']['self'])
 
     def assertValidCatalog(self, entity):
@@ -842,6 +857,9 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         if ref:
             self.assertEqual(ref['interface'], entity['interface'])
             self.assertEqual(ref['service_id'], entity['service_id'])
+            if ref.get('region') is not None:
+                self.assertEqual(ref['region_id'], entity.get('region_id'))
+
         return entity
 
     # domain validation
@@ -954,6 +972,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'credentials',
             self.assertValidCredential,
+            keys_to_check=['blob', 'user_id', 'type'],
             *args,
             **kwargs)
 
@@ -962,6 +981,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'credential',
             self.assertValidCredential,
+            keys_to_check=['blob', 'user_id', 'type'],
             *args,
             **kwargs)
 
@@ -1003,7 +1023,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         return entity
 
     def assertValidRoleAssignmentListResponse(self, resp, ref=None,
-                                              expected_length=None):
+                                              expected_length=None,
+                                              resource_url=None):
 
         entities = resp.result.get('role_assignments')
 
@@ -1014,7 +1035,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             self.assertNotEmpty(entities)
 
         # collections should have relational links
-        self.assertValidListLinks(resp.result.get('links'))
+        self.assertValidListLinks(resp.result.get('links'),
+                                  resource_url=resource_url)
 
         for entity in entities:
             self.assertIsNotNone(entity)
@@ -1116,6 +1138,9 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'trusts',
             self.assertValidTrustSummary,
+            keys_to_check=['trustor_user_id',
+                           'trustee_user_id',
+                           'impersonation'],
             *args,
             **kwargs)
 
@@ -1124,6 +1149,9 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'trust',
             self.assertValidTrust,
+            keys_to_check=['trustor_user_id',
+                           'trustee_user_id',
+                           'impersonation'],
             *args,
             **kwargs)
 
@@ -1147,7 +1175,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         else:
             for role in entity['roles']:
                 self.assertIsNotNone(role)
-                self.assertValidEntity(role)
+                self.assertValidEntity(role, keys_to_check=['name'])
                 self.assertValidRole(role)
 
             self.assertValidListLinks(entity.get('roles_links'))
@@ -1236,3 +1264,27 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         middleware.AuthContextMiddleware(application).process_request(req)
         self.assertDictEqual(req.environ.get(authorization.AUTH_CONTEXT_ENV),
                              {})
+
+
+class JsonHomeTestMixin(object):
+    """JSON Home test
+
+    Mixin this class to provide a test for the JSON-Home response for an
+    extension.
+
+    The base class must set JSON_HOME_DATA to a dict of relationship URLs
+    (rels) to the JSON-Home data for the relationship. The rels and associated
+    data must be in the response.
+
+    """
+    def test_get_json_home(self):
+        resp = self.get('/', convert=False,
+                        headers={'Accept': 'application/json-home'})
+        self.assertThat(resp.headers['Content-Type'],
+                        matchers.Equals('application/json-home'))
+        resp_data = jsonutils.loads(resp.body)
+
+        # Check that the example relationships are present.
+        for rel in self.JSON_HOME_DATA:
+            self.assertThat(resp_data['resources'][rel],
+                            matchers.Equals(self.JSON_HOME_DATA[rel]))

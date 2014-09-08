@@ -15,8 +15,11 @@
 import sys
 
 from keystoneclient.common import cms
+from oslo.utils import timeutils
 import six
 
+from keystone.assignment import controllers as assignment_controllers
+from keystone.common import authorization
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
@@ -27,7 +30,6 @@ from keystone.i18n import _, _LI
 from keystone.openstack.common import importutils
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
 
 
 LOG = log.getLogger(__name__)
@@ -58,24 +60,18 @@ def load_auth_methods():
                 raise ValueError(_('Cannot load an auth-plugin by class-name '
                                    'without a "method" attribute defined: %s'),
                                  plugin_class)
+
+            LOG.info(_LI('Loading auth-plugins by class-name is deprecated.'))
+            plugin_name = driver.method
         else:
+            plugin_name = plugin
             plugin_class = CONF.auth.get(plugin)
             driver = importutils.import_object(plugin_class)
-            if hasattr(driver, 'method'):
-                if driver.method != plugin:
-                    raise ValueError(_('Driver requested method %(req)s does '
-                                       'not match plugin name %(plugin)s.') %
-                                     {'req': driver.method,
-                                      'plugin': plugin})
-            else:
-                LOG.warning(_('Auth Plugin %s does not have a "method" '
-                              'attribute.'), plugin)
-                setattr(driver, 'method', plugin)
-        if driver.method in AUTH_METHODS:
+        if plugin_name in AUTH_METHODS:
             raise ValueError(_('Auth plugin %(plugin)s is requesting '
                                'previously registered method %(method)s') %
                              {'plugin': plugin_class, 'method': driver.method})
-        AUTH_METHODS[driver.method] = driver
+        AUTH_METHODS[plugin_name] = driver
     AUTH_PLUGINS_LOADED = True
 
 
@@ -344,7 +340,7 @@ class AuthInfo(object):
         self._scope_data = (domain_id, project_id, trust)
 
 
-@dependency.requires('assignment_api', 'identity_api', 'token_api',
+@dependency.requires('assignment_api', 'catalog_api', 'identity_api',
                      'token_provider_api', 'trust_api')
 class Auth(controller.V3Controller):
 
@@ -380,9 +376,6 @@ class Auth(controller.V3Controller):
             self._check_and_set_default_scoping(auth_info, auth_context)
             (domain_id, project_id, trust) = auth_info.get_scope()
 
-            if trust:
-                self.trust_api.consume_use(trust['id'])
-
             method_names = auth_info.get_method_names()
             method_names += auth_context.get('method_names', [])
             # make sure the list is unique
@@ -392,9 +385,17 @@ class Auth(controller.V3Controller):
             # argument is during the issue_v3_token provider call.
             metadata_ref = None
 
+            token_audit_id = auth_context.get('audit_id')
+
             (token_id, token_data) = self.token_provider_api.issue_v3_token(
                 auth_context['user_id'], method_names, expires_at, project_id,
-                domain_id, auth_context, trust, metadata_ref, include_catalog)
+                domain_id, auth_context, trust, metadata_ref, include_catalog,
+                parent_audit_id=token_audit_id)
+
+            # NOTE(wanghong): We consume a trust use only when we are using
+            # trusts and have successfully issued a token.
+            if trust:
+                self.trust_api.consume_use(trust['id'])
 
             return render_token_data_response(token_id, token_data,
                                               created=True)
@@ -463,7 +464,9 @@ class Auth(controller.V3Controller):
         """Authenticate user."""
 
         # The 'external' method allows any 'REMOTE_USER' based authentication
-        if 'REMOTE_USER' in context['environment']:
+        # In some cases the server can set REMOTE_USER as '' instead of
+        # dropping it, so this must be filtered out
+        if context['environment'].get('REMOTE_USER'):
             try:
                 external = get_auth_method('external')
                 external.authenticate(context, auth_info, auth_context)
@@ -474,6 +477,10 @@ class Auth(controller.V3Controller):
                 # In those cases, it is correct to not register an
                 # 'external' plugin;  if there is both an 'external' and a
                 # 'kerberos' plugin, it would run the check on identity twice.
+                pass
+            except exception.Unauthorized:
+                # If external fails then continue and attempt to determine
+                # user identity using remaining auth methods
                 pass
 
         # need to aggregate the results in case two or more methods
@@ -525,7 +532,7 @@ class Auth(controller.V3Controller):
     def revocation_list(self, context, auth=None):
         if not CONF.token.revoke_by_id:
             raise exception.Gone()
-        tokens = self.token_api.list_revoked_tokens()
+        tokens = self.token_provider_api.list_revoked_tokens()
 
         for t in tokens:
             expires = t['expires']
@@ -538,6 +545,84 @@ class Auth(controller.V3Controller):
                                         CONF.signing.keyfile)
 
         return {'signed': signed_text}
+
+    def get_auth_context(self, context):
+        # TODO(dolphm): this method of accessing the auth context is terrible,
+        # but context needs to be refactored to always have reasonable values.
+        env_context = context.get('environment', {})
+        return env_context.get(authorization.AUTH_CONTEXT_ENV, {})
+
+    def _combine_lists_uniquely(self, a, b):
+        # it's most likely that only one of these will be filled so avoid
+        # the combination if possible.
+        if a and b:
+            return dict((x['id'], x) for x in a + b).values()
+        else:
+            return a or b
+
+    @controller.protected()
+    def get_auth_projects(self, context):
+        auth_context = self.get_auth_context(context)
+
+        user_id = auth_context.get('user_id')
+        user_refs = []
+        if user_id:
+            try:
+                user_refs = self.assignment_api.list_projects_for_user(user_id)
+            except exception.UserNotFound:
+                # federated users have an id but they don't link to anything
+                pass
+
+        group_ids = auth_context.get('group_ids')
+        grp_refs = []
+        if group_ids:
+            grp_refs = self.assignment_api.list_projects_for_groups(group_ids)
+
+        refs = self._combine_lists_uniquely(user_refs, grp_refs)
+        return assignment_controllers.ProjectV3.wrap_collection(context, refs)
+
+    @controller.protected()
+    def get_auth_domains(self, context):
+        auth_context = self.get_auth_context(context)
+
+        user_id = auth_context.get('user_id')
+        user_refs = []
+        if user_id:
+            try:
+                user_refs = self.assignment_api.list_domains_for_user(user_id)
+            except exception.UserNotFound:
+                # federated users have an id but they don't link to anything
+                pass
+
+        group_ids = auth_context.get('group_ids')
+        grp_refs = []
+        if group_ids:
+            grp_refs = self.assignment_api.list_domains_for_groups(group_ids)
+
+        refs = self._combine_lists_uniquely(user_refs, grp_refs)
+        return assignment_controllers.DomainV3.wrap_collection(context, refs)
+
+    @controller.protected()
+    def get_auth_catalog(self, context):
+        auth_context = self.get_auth_context(context)
+        user_id = auth_context.get('user_id')
+        project_id = auth_context.get('project_id')
+
+        if not project_id:
+            raise exception.Forbidden(
+                _('A project-scoped token is required to produce a service '
+                  'catalog.'))
+
+        # The V3Controller base methods mostly assume that you're returning
+        # either a collection or a single element from a collection, neither of
+        # which apply to the catalog. Because this is a special case, this
+        # re-implements a tiny bit of work done by the base controller (such as
+        # self-referential link building) to avoid overriding or refactoring
+        # several private methods.
+        return {
+            'catalog': self.catalog_api.get_v3_catalog(user_id, project_id),
+            'links': {'self': self.base_url(context, path='auth/catalog')}
+        }
 
 
 # FIXME(gyee): not sure if it belongs here or keystone.common. Park it here

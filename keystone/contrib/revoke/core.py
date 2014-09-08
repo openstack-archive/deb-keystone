@@ -13,6 +13,7 @@
 import abc
 import datetime
 
+from oslo.utils import timeutils
 import six
 
 from keystone.common import cache
@@ -25,7 +26,7 @@ from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
 from keystone.openstack.common import log
-from keystone.openstack.common import timeutils
+from keystone.openstack.common import versionutils
 
 
 CONF = config.CONF
@@ -110,28 +111,75 @@ class Manager(manager.Manager):
         self.revoke(
             model.RevokeEvent(access_token_id=payload['resource_info']))
 
+    def _group_callback(self, service, resource_type, operation, payload):
+        user_ids = (u['id'] for u in self.identity_api.list_users_in_group(
+            payload['resource_info']))
+        for uid in user_ids:
+            self.revoke(model.RevokeEvent(user_id=uid))
+
     def _register_listeners(self):
-        callbacks = [
-            ['deleted', 'OS-TRUST:trust', self._trust_callback],
-            ['deleted', 'OS-OAUTH1:consumer', self._consumer_callback],
-            ['deleted', 'OS-OAUTH1:access_token',
-             self._access_token_callback],
-            ['deleted', 'role', self._role_callback],
-            ['deleted', 'user', self._user_callback],
-            ['disabled', 'user', self._user_callback],
-            ['deleted', 'project', self._project_callback],
-            ['disabled', 'project', self._project_callback],
-            ['disabled', 'domain', self._domain_callback]]
-        for cb in callbacks:
-            notifications.register_event_callback(*cb)
+        callbacks = {
+            notifications.ACTIONS.deleted: [
+                ['OS-TRUST:trust', self._trust_callback],
+                ['OS-OAUTH1:consumer', self._consumer_callback],
+                ['OS-OAUTH1:access_token', self._access_token_callback],
+                ['role', self._role_callback],
+                ['user', self._user_callback],
+                ['project', self._project_callback],
+            ],
+            notifications.ACTIONS.disabled: [
+                ['user', self._user_callback],
+                ['project', self._project_callback],
+                ['domain', self._domain_callback],
+            ],
+            notifications.ACTIONS.internal: [
+                [notifications.INVALIDATE_USER_TOKEN_PERSISTENCE,
+                 self._user_callback],
+            ]
+        }
+
+        for event, cb_info in six.iteritems(callbacks):
+            for resource_type, callback_fns in cb_info:
+                notifications.register_event_callback(event, resource_type,
+                                                      callback_fns)
 
     def revoke_by_user(self, user_id):
         return self.revoke(model.RevokeEvent(user_id=user_id))
 
-    def revoke_by_expiration(self, user_id, expires_at):
+    def _assert_not_domain_and_project_scoped(self, domain_id=None,
+                                              project_id=None):
+        if domain_id is not None and project_id is not None:
+            msg = _('The revoke call must not have both domain_id and '
+                    'project_id. This is a bug in the Keystone server. The '
+                    'current request is aborted.')
+            raise exception.UnexpectedError(exception=msg)
+
+    @versionutils.deprecated(as_of=versionutils.deprecated.JUNO,
+                             remove_in=0)
+    def revoke_by_expiration(self, user_id, expires_at,
+                             domain_id=None, project_id=None):
+
+        self._assert_not_domain_and_project_scoped(domain_id=domain_id,
+                                                   project_id=project_id)
+
         self.revoke(
             model.RevokeEvent(user_id=user_id,
-                              expires_at=expires_at))
+                              expires_at=expires_at,
+                              domain_id=domain_id,
+                              project_id=project_id))
+
+    def revoke_by_audit_id(self, audit_id):
+        self.revoke(model.RevokeEvent(audit_id=audit_id))
+
+    def revoke_by_audit_chain_id(self, audit_chain_id, project_id=None,
+                                 domain_id=None):
+
+        self._assert_not_domain_and_project_scoped(domain_id=domain_id,
+                                                   project_id=project_id)
+
+        self.revoke(model.RevokeEvent(audit_chain_id=audit_chain_id,
+                                      domain_id=domain_id,
+                                      project_id=project_id))
 
     def revoke_by_grant(self, role_id, user_id=None,
                         domain_id=None, project_id=None):

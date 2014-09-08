@@ -10,23 +10,28 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import functools
+
+from keystone.common import json_home
 from keystone.common import wsgi
 from keystone.contrib import federation
 from keystone.contrib.federation import controllers
 
 
-class _BaseFederationExtension(wsgi.ExtensionRouter):
-    """Base class for Federation Extension classes.
+build_resource_relation = functools.partial(
+    json_home.build_v3_extension_resource_relation,
+    extension_name='OS-FEDERATION', extension_version='1.0')
 
-    All generic methods should be stored here so
-    inheriting classes don't need to reimplement them.
+build_parameter_relation = functools.partial(
+    json_home.build_v3_extension_parameter_relation,
+    extension_name='OS-FEDERATION', extension_version='1.0')
 
-    """
-    def _construct_url(self, suffix):
-        return "/OS-FEDERATION/%s" % suffix
+IDP_ID_PARAMETER_RELATION = build_parameter_relation(parameter_name='idp_id')
+PROTOCOL_ID_PARAMETER_RELATION = build_parameter_relation(
+    parameter_name='protocol_id')
 
 
-class FederationExtension(_BaseFederationExtension):
+class FederationExtension(wsgi.V3ExtensionRouter):
     """API Endpoints for the Federation extension.
 
     The API looks like::
@@ -63,6 +68,9 @@ class FederationExtension(_BaseFederationExtension):
             protocols/$protocol/auth
 
     """
+    def _construct_url(self, suffix):
+        return "/OS-FEDERATION/%s" % suffix
+
     def add_routes(self, mapper):
         # This is needed for dependency injection
         # it loads the Federation driver which registers it as a dependency.
@@ -76,121 +84,86 @@ class FederationExtension(_BaseFederationExtension):
 
         # Identity Provider CRUD operations
 
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}'),
-            controller=idp_controller,
-            action='create_identity_provider',
-            conditions=dict(method=['PUT']))
-
-        mapper.connect(
-            self._construct_url('identity_providers'),
-            controller=idp_controller,
-            action='list_identity_providers',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}'),
-            controller=idp_controller,
-            action='get_identity_provider',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}'),
-            controller=idp_controller,
-            action='delete_identity_provider',
-            conditions=dict(method=['DELETE']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}'),
-            controller=idp_controller,
-            action='update_identity_provider',
-            conditions=dict(method=['PATCH']))
+        self._add_resource(
+            mapper, idp_controller,
+            path=self._construct_url('identity_providers/{idp_id}'),
+            get_action='get_identity_provider',
+            put_action='create_identity_provider',
+            patch_action='update_identity_provider',
+            delete_action='delete_identity_provider',
+            rel=build_resource_relation(resource_name='identity_provider'),
+            path_vars={
+                'idp_id': IDP_ID_PARAMETER_RELATION,
+            })
+        self._add_resource(
+            mapper, idp_controller,
+            path=self._construct_url('identity_providers'),
+            get_action='list_identity_providers',
+            rel=build_resource_relation(resource_name='identity_providers'))
 
         # Protocol CRUD operations
 
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}/'
-                                'protocols/{protocol_id}'),
-            controller=protocol_controller,
-            action='create_protocol',
-            conditions=dict(method=['PUT']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}/'
-                                'protocols/{protocol_id}'),
-            controller=protocol_controller,
-            action='update_protocol',
-            conditions=dict(method=['PATCH']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}/'
-                                'protocols/{protocol_id}'),
-            controller=protocol_controller,
-            action='get_protocol',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}/'
-                                'protocols'),
-            controller=protocol_controller,
-            action='list_protocols',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/{idp_id}/'
-                                'protocols/{protocol_id}'),
-            controller=protocol_controller,
-            action='delete_protocol',
-            conditions=dict(method=['DELETE']))
+        self._add_resource(
+            mapper, protocol_controller,
+            path=self._construct_url('identity_providers/{idp_id}/protocols/'
+                                     '{protocol_id}'),
+            get_action='get_protocol',
+            put_action='create_protocol',
+            patch_action='update_protocol',
+            delete_action='delete_protocol',
+            rel=build_resource_relation(
+                resource_name='identity_provider_protocol'),
+            path_vars={
+                'idp_id': IDP_ID_PARAMETER_RELATION,
+                'protocol_id': PROTOCOL_ID_PARAMETER_RELATION,
+            })
+        self._add_resource(
+            mapper, protocol_controller,
+            path=self._construct_url('identity_providers/{idp_id}/protocols'),
+            get_action='list_protocols',
+            rel=build_resource_relation(
+                resource_name='identity_provider_protocols'),
+            path_vars={
+                'idp_id': IDP_ID_PARAMETER_RELATION,
+            })
 
         # Mapping CRUD operations
 
-        mapper.connect(
-            self._construct_url('mappings/{mapping_id}'),
-            controller=mapping_controller,
-            action='create_mapping',
-            conditions=dict(method=['PUT']))
-
-        mapper.connect(
-            self._construct_url('mappings'),
-            controller=mapping_controller,
-            action='list_mappings',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('mappings/{mapping_id}'),
-            controller=mapping_controller,
-            action='get_mapping',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('mappings/{mapping_id}'),
-            controller=mapping_controller,
-            action='delete_mapping',
-            conditions=dict(method=['DELETE']))
-
-        mapper.connect(
-            self._construct_url('mappings/{mapping_id}'),
-            controller=mapping_controller,
-            action='update_mapping',
-            conditions=dict(method=['PATCH']))
-
-        mapper.connect(
-            self._construct_url('domains'),
-            controller=domain_controller,
-            action='list_domains_for_groups',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('projects'),
-            controller=project_controller,
-            action='list_projects_for_groups',
-            conditions=dict(method=['GET']))
-
-        mapper.connect(
-            self._construct_url('identity_providers/'
-                                '{identity_provider}/protocols/'
-                                '{protocol}/auth'),
-            controller=auth_controller,
-            action='federated_authentication',
-            conditions=dict(method=['GET', 'POST']))
+        self._add_resource(
+            mapper, mapping_controller,
+            path=self._construct_url('mappings/{mapping_id}'),
+            get_action='get_mapping',
+            put_action='create_mapping',
+            patch_action='update_mapping',
+            delete_action='delete_mapping',
+            rel=build_resource_relation(resource_name='mapping'),
+            path_vars={
+                'mapping_id': build_parameter_relation(
+                    parameter_name='mapping_id'),
+            })
+        self._add_resource(
+            mapper, mapping_controller,
+            path=self._construct_url('mappings'),
+            get_action='list_mappings',
+            rel=build_resource_relation(resource_name='mappings'))
+        self._add_resource(
+            mapper, domain_controller,
+            path=self._construct_url('domains'),
+            get_action='list_domains_for_groups',
+            rel=build_resource_relation(resource_name='domains'))
+        self._add_resource(
+            mapper, project_controller,
+            path=self._construct_url('projects'),
+            get_action='list_projects_for_groups',
+            rel=build_resource_relation(resource_name='projects'))
+        self._add_resource(
+            mapper, auth_controller,
+            path=self._construct_url('identity_providers/{identity_provider}/'
+                                     'protocols/{protocol}/auth'),
+            get_post_action='federated_authentication',
+            rel=build_resource_relation(
+                resource_name='identity_provider_protocol_auth'),
+            path_vars={
+                'identity_provider': IDP_ID_PARAMETER_RELATION,
+                'protocol': PROTOCOL_ID_PARAMETER_RELATION,
+            })

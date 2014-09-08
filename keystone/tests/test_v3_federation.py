@@ -10,16 +10,28 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os
 import random
+import subprocess
 import uuid
+
+from lxml import etree
+import mock
+from oslotest import mockpatch
+import saml2
+from saml2 import saml
+from saml2 import sigver
+import xmldsig
 
 from keystone.auth import controllers as auth_controllers
 from keystone.common import dependency
 from keystone.common import serializer
 from keystone import config
 from keystone.contrib.federation import controllers as federation_controllers
+from keystone.contrib.federation import idp as keystone_idp
 from keystone.contrib.federation import utils as mapping_utils
 from keystone import exception
+from keystone import notifications
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.tests import mapping_fixtures
@@ -28,6 +40,8 @@ from keystone.tests import test_v3
 
 CONF = config.CONF
 LOG = log.getLogger(__name__)
+ROOTDIR = os.path.dirname(os.path.abspath(__file__))
+XMLDIR = os.path.join(ROOTDIR, 'saml2/')
 
 
 def dummy_validator(*args, **kwargs):
@@ -754,6 +768,26 @@ class MappingRuleEngineTests(FederationTests):
 
 class FederatedTokenTests(FederationTests):
 
+    def setUp(self):
+        super(FederatedTokenTests, self).setUp()
+        self._notifications = []
+
+        def fake_saml_notify(action, context, user_id, group_ids,
+                             identity_provider, protocol, token_id, outcome):
+            note = {
+                'action': action,
+                'user_id': user_id,
+                'identity_provider': identity_provider,
+                'protocol': protocol,
+                'send_notification_called': True}
+            self._notifications.append(note)
+
+        self.useFixture(mockpatch.PatchObject(
+            notifications,
+            'send_saml_audit_notification',
+            fake_saml_notify))
+
+    ACTION = 'authenticate'
     IDP = 'ORG_IDP'
     PROTOCOL = 'saml2'
     AUTH_METHOD = 'saml2'
@@ -770,7 +804,16 @@ class FederatedTokenTests(FederationTests):
         }
     }
 
-    AUTH_URL = '/auth/tokens'
+    def _assert_last_notify(self, action, identity_provider, protocol,
+                            user_id=None):
+        self.assertTrue(self._notifications)
+        note = self._notifications[-1]
+        if user_id:
+            self.assertEqual(note['user_id'], user_id)
+        self.assertEqual(note['action'], action)
+        self.assertEqual(note['identity_provider'], identity_provider)
+        self.assertEqual(note['protocol'], protocol)
+        self.assertTrue(note['send_notification_called'])
 
     def load_fixtures(self, fixtures):
         super(FederationTests, self).load_fixtures(fixtures)
@@ -861,15 +904,31 @@ class FederatedTokenTests(FederationTests):
             raise AssertionError("You must specify either"
                                  "project or domain.")
 
-    def _issue_unscoped_token(self, assertion='EMPLOYEE_ASSERTION'):
+        self.assertIn('OS-FEDERATION', token['user'])
+        os_federation = token['user']['OS-FEDERATION']
+        self.assertEqual(self.IDP, os_federation['identity_provider']['id'])
+        self.assertEqual(self.PROTOCOL, os_federation['protocol']['id'])
+
+    def _issue_unscoped_token(self,
+                              assertion='EMPLOYEE_ASSERTION',
+                              environment=None):
         api = federation_controllers.Auth()
-        context = {'environment': {}}
+        context = {'environment': environment or {}}
         self._inject_assertion(context, assertion)
         r = api.federated_authentication(context, self.IDP, self.PROTOCOL)
         return r
 
+    def test_issue_unscoped_token_notify(self):
+        self._issue_unscoped_token()
+        self._assert_last_notify(self.ACTION, self.IDP, self.PROTOCOL)
+
     def test_issue_unscoped_token(self):
         r = self._issue_unscoped_token()
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_issue_unscoped_token_with_remote_user_as_empty_string(self):
+        # make sure that REMOTE_USER set as the empty string won't interfere
+        r = self._issue_unscoped_token(environment={'REMOTE_USER': ''})
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_issue_unscoped_token_serialize_to_xml(self):
@@ -916,9 +975,15 @@ class FederatedTokenTests(FederationTests):
         r = api.authenticate_for_token(context, self.UNSCOPED_V3_SAML2_REQ)
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
+    def test_scope_to_project_once_notify(self):
+        r = self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
+        user_id = r.json['token']['user']['id']
+        self._assert_last_notify(self.ACTION, self.IDP, self.PROTOCOL, user_id)
+
     def test_scope_to_project_once(self):
-        r = self.post(self.AUTH_URL,
-                      body=self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
+        r = self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
         token_resp = r.result['token']
         project_id = token_resp['project']['id']
         self.assertEqual(project_id, self.proj_employees['id'])
@@ -930,9 +995,9 @@ class FederatedTokenTests(FederationTests):
     def test_scope_to_bad_project(self):
         """Scope unscoped token with a project we don't have access to."""
 
-        self.post(self.AUTH_URL,
-                  body=self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_CUSTOMER,
-                  expected_status=401)
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_CUSTOMER,
+            expected_status=401)
 
     def test_scope_to_project_multiple_times(self):
         """Try to scope the unscoped token multiple times.
@@ -949,7 +1014,7 @@ class FederatedTokenTests(FederationTests):
         project_ids = (self.proj_employees['id'],
                        self.proj_customers['id'])
         for body, project_id_ref in zip(bodies, project_ids):
-            r = self.post(self.AUTH_URL, body=body)
+            r = self.v3_authenticate_token(body)
             token_resp = r.result['token']
             project_id = token_resp['project']['id']
             self.assertEqual(project_id, project_id_ref)
@@ -957,9 +1022,9 @@ class FederatedTokenTests(FederationTests):
 
     def test_scope_token_from_nonexistent_unscoped_token(self):
         """Try to scope token from non-existent unscoped token."""
-        self.post(self.AUTH_URL,
-                  body=self.TOKEN_SCOPE_PROJECT_FROM_NONEXISTENT_TOKEN,
-                  expected_status=404)
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_FROM_NONEXISTENT_TOKEN,
+            expected_status=404)
 
     def test_issue_token_from_rules_without_user(self):
         api = auth_controllers.Auth()
@@ -981,8 +1046,7 @@ class FederatedTokenTests(FederationTests):
                           assertion='CONTRACTOR_ASSERTION')
 
     def test_scope_to_domain_once(self):
-        r = self.post(self.AUTH_URL,
-                      body=self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER)
+        r = self.v3_authenticate_token(self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER)
         token_resp = r.result['token']
         domain_id = token_resp['domain']['id']
         self.assertEqual(domain_id, self.domainA['id'])
@@ -1006,14 +1070,14 @@ class FederatedTokenTests(FederationTests):
                       self.domainC['id'])
 
         for body, domain_id_ref in zip(bodies, domain_ids):
-            r = self.post(self.AUTH_URL, body=body)
+            r = self.v3_authenticate_token(body)
             token_resp = r.result['token']
             domain_id = token_resp['domain']['id']
             self.assertEqual(domain_id, domain_id_ref)
             self._check_scoped_token_attributes(token_resp)
 
     def test_list_projects(self):
-        url = '/OS-FEDERATION/projects'
+        urls = ('/OS-FEDERATION/projects', '/auth/projects')
 
         token = (self.tokens['CUSTOMER_ASSERTION'],
                  self.tokens['EMPLOYEE_ASSERTION'],
@@ -1027,13 +1091,15 @@ class FederatedTokenTests(FederationTests):
                               self.proj_customers['id']]))
 
         for token, projects_ref in zip(token, projects_refs):
-            r = self.get(url, token=token)
-            projects_resp = r.result['projects']
-            projects = set(p['id'] for p in projects_resp)
-            self.assertEqual(projects, projects_ref)
+            for url in urls:
+                r = self.get(url, token=token)
+                projects_resp = r.result['projects']
+                projects = set(p['id'] for p in projects_resp)
+                self.assertEqual(projects, projects_ref,
+                                 'match failed for url %s' % url)
 
     def test_list_domains(self):
-        url = '/OS-FEDERATION/domains'
+        urls = ('/OS-FEDERATION/domains', '/auth/domains')
 
         tokens = (self.tokens['CUSTOMER_ASSERTION'],
                   self.tokens['EMPLOYEE_ASSERTION'],
@@ -1047,10 +1113,12 @@ class FederatedTokenTests(FederationTests):
                             self.domainC['id']]))
 
         for token, domains_ref in zip(tokens, domain_refs):
-            r = self.get(url, token=token)
-            domains_resp = r.result['domains']
-            domains = set(p['id'] for p in domains_resp)
-            self.assertEqual(domains, domains_ref)
+            for url in urls:
+                r = self.get(url, token=token)
+                domains_resp = r.result['domains']
+                domains = set(p['id'] for p in domains_resp)
+                self.assertEqual(domains, domains_ref,
+                                 'match failed for url %s' % url)
 
     def test_full_workflow(self):
         """Test 'standard' workflow for granting access tokens.
@@ -1072,7 +1140,7 @@ class FederatedTokenTests(FederationTests):
         v3_scope_request = self._scope_request(employee_unscoped_token_id,
                                                'project', project['id'])
 
-        r = self.post(self.AUTH_URL, body=v3_scope_request)
+        r = self.v3_authenticate_token(v3_scope_request)
         token_resp = r.result['token']
         project_id = token_resp['project']['id']
         self.assertEqual(project_id, project['id'])
@@ -1147,9 +1215,7 @@ class FederatedTokenTests(FederationTests):
             token_id, 'project',
             self.project_all['id'])
 
-        self.post(self.AUTH_URL,
-                  body=scoped_token,
-                  expected_status=500)
+        self.v3_authenticate_token(scoped_token, expected_status=500)
 
     def test_assertion_prefix_parameter(self):
         """Test parameters filtering based on the prefix.
@@ -1560,3 +1626,138 @@ class FederatedTokenTests(FederationTests):
         assertion = getattr(mapping_fixtures, variant)
         context['environment'].update(assertion)
         context['query_string'] = []
+
+
+class JsonHomeTests(FederationTests, test_v3.JsonHomeTestMixin):
+    JSON_HOME_DATA = {
+        'http://docs.openstack.org/api/openstack-identity/3/ext/OS-FEDERATION/'
+        '1.0/rel/identity_provider': {
+            'href-template': '/OS-FEDERATION/identity_providers/{idp_id}',
+            'href-vars': {
+                'idp_id': 'http://docs.openstack.org/api/openstack-identity/3/'
+                'ext/OS-FEDERATION/1.0/param/idp_id'
+            },
+        },
+    }
+
+
+def _is_xmlsec1_installed():
+    p = subprocess.Popen(
+        ['which', 'xmlsec1'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    # invert the return code
+    return not bool(p.wait())
+
+
+class SAMLGenerationTests(FederationTests):
+
+    ISSUER = 'https://acme.com/FIM/sps/openstack/saml20'
+    RECIPIENT = 'http://beta.com/Shibboleth.sso/SAML2/POST'
+    SUBJECT = 'test_user'
+    ROLES = ['admin', 'member']
+    PROJECT = 'development'
+
+    def setUp(self):
+        super(SAMLGenerationTests, self).setUp()
+        self.signed_assertion = saml2.create_class_from_xml_string(
+            saml.Assertion, self._load_xml('signed_saml2_assertion.xml'))
+
+    def _load_xml(self, filename):
+        with open(os.path.join(XMLDIR, filename), 'r') as xml:
+            return xml.read()
+
+    def test_samlize_token_values(self):
+        """Test the SAML generator produces a SAML object.
+
+        Test the SAML generator directly by passing known arguments, the result
+        should be a SAML object that consistently includes attributes based on
+        the known arguments that were passed in.
+
+        """
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               return_value=self.signed_assertion):
+            generator = keystone_idp.SAMLGenerator()
+            response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                               self.SUBJECT, self.ROLES,
+                                               self.PROJECT)
+
+        assertion = response.assertion
+        self.assertIsNotNone(assertion)
+        self.assertIsInstance(assertion, saml.Assertion)
+        issuer = response.issuer
+        self.assertEqual(self.RECIPIENT, response.destination)
+        self.assertEqual(self.ISSUER, issuer.text)
+
+        user_attribute = assertion.attribute_statement[0].attribute[0]
+        self.assertEqual(self.SUBJECT, user_attribute.attribute_value[0].text)
+
+        role_attribute = assertion.attribute_statement[0].attribute[1]
+        for attribute_value in role_attribute.attribute_value:
+            self.assertIn(attribute_value.text, self.ROLES)
+
+        project_attribute = assertion.attribute_statement[0].attribute[2]
+        self.assertEqual(self.PROJECT,
+                         project_attribute.attribute_value[0].text)
+
+    def test_valid_saml_xml(self):
+        """Test the generated SAML object can become valid XML.
+
+        Test the  generator directly by passing known arguments, the result
+        should be a SAML object that consistently includes attributes based on
+        the known arguments that were passed in.
+
+        """
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               return_value=self.signed_assertion):
+            generator = keystone_idp.SAMLGenerator()
+            response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                               self.SUBJECT, self.ROLES,
+                                               self.PROJECT)
+
+        saml_str = response.to_string()
+        response = etree.fromstring(saml_str)
+        issuer = response[0]
+        assertion = response[2]
+
+        self.assertEqual(self.RECIPIENT, response.get('Destination'))
+        self.assertEqual(self.ISSUER, issuer.text)
+
+        user_attribute = assertion[4][0]
+        self.assertEqual(self.SUBJECT, user_attribute[0].text)
+
+        role_attribute = assertion[4][1]
+        for attribute_value in role_attribute:
+            self.assertIn(attribute_value.text, self.ROLES)
+
+        project_attribute = assertion[4][2]
+        self.assertEqual(self.PROJECT, project_attribute[0].text)
+
+    def test_saml_signing(self):
+        """Test that the SAML generator produces a SAML object.
+
+        Test the SAML generator directly by passing known arguments, the result
+        should be a SAML object that consistently includes attributes based on
+        the known arguments that were passed in.
+
+        """
+        if not _is_xmlsec1_installed():
+            self.skip('xmlsec1 is not installed')
+
+        generator = keystone_idp.SAMLGenerator()
+        response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                           self.SUBJECT, self.ROLES,
+                                           self.PROJECT)
+
+        signature = response.assertion.signature
+        self.assertIsNotNone(signature)
+        self.assertIsInstance(signature, xmldsig.Signature)
+
+        idp_public_key = sigver.read_cert_from_file(CONF.saml.certfile, 'pem')
+        cert_text = signature.key_info.x509_data[0].x509_certificate.text
+        # NOTE(stevemar): Rather than one line of text, the certificate is
+        # printed with newlines for readability, we remove these so we can
+        # match it with the key that we used.
+        cert_text = cert_text.replace(os.linesep, '')
+        self.assertEqual(idp_public_key, cert_text)

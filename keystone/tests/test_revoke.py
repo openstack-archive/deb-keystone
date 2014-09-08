@@ -15,17 +15,15 @@ import datetime
 import uuid
 
 import mock
+from oslo.utils import timeutils
+from testtools import matchers
 
 from keystone.common import dependency
-from keystone import config
 from keystone.contrib.revoke import model
 from keystone import exception
-from keystone.openstack.common import timeutils
 from keystone import tests
 from keystone.tests import test_backend_sql
-
-
-CONF = config.CONF
+from keystone.token import provider
 
 
 def _new_id():
@@ -79,10 +77,14 @@ def _matches(event, token_values):
 
     # The token has two attributes that can match the domain_id
     if event.domain_id is not None:
-        for attribute_name in ['user_domain_id', 'project_domain_id']:
+        for attribute_name in ['identity_domain_id', 'assignment_domain_id']:
             if event.domain_id == token_values[attribute_name]:
                 break
         else:
+            return False
+
+    if event.domain_scope_id is not None:
+        if event.domain_scope_id != token_values['assignment_domain_id']:
             return False
 
     # If any one check does not match, the while token does
@@ -91,7 +93,7 @@ def _matches(event, token_values):
     # rest of the logic.
     attribute_names = ['project_id',
                        'expires_at', 'trust_id', 'consumer_id',
-                       'access_token_id']
+                       'access_token_id', 'audit_id', 'audit_chain_id']
     for attribute_name in attribute_names:
         if getattr(event, attribute_name) is not None:
             if (getattr(event, attribute_name) !=
@@ -165,6 +167,17 @@ class RevokeTests(object):
         self.revoke_api.revoke_by_expiration(_new_id(), now_plus_2h)
         # should no longer throw an exception
         self.revoke_api.check_token(token_values)
+
+    def test_revoke_by_expiration_project_and_domain_fails(self):
+        user_id = _new_id()
+        expires_at = timeutils.isotime(_future_time(), subsecond=True)
+        domain_id = _new_id()
+        project_id = _new_id()
+        self.assertThat(
+            lambda: self.revoke_api.revoke_by_expiration(
+                user_id, expires_at, domain_id=domain_id,
+                project_id=project_id),
+            matchers.raises(exception.UnexpectedError))
 
 
 class SqlRevokeTests(test_backend_sql.SqlTests, RevokeTests):
@@ -255,10 +268,29 @@ class RevokeTreeTests(tests.TestCase):
         return self.tree.add_event(
             model.RevokeEvent(user_id=user_id))
 
-    def _revoke_by_expiration(self, user_id, expires_at):
+    def _revoke_by_audit_id(self, audit_id):
+        event = self.tree.add_event(
+            model.RevokeEvent(audit_id=audit_id))
+        self.events.append(event)
+        return event
+
+    def _revoke_by_audit_chain_id(self, audit_chain_id, project_id=None,
+                                  domain_id=None):
+        event = self.tree.add_event(
+            model.RevokeEvent(audit_chain_id=audit_chain_id,
+                              project_id=project_id,
+                              domain_id=domain_id)
+        )
+        self.events.append(event)
+        return event
+
+    def _revoke_by_expiration(self, user_id, expires_at, project_id=None,
+                              domain_id=None):
         event = self.tree.add_event(
             model.RevokeEvent(user_id=user_id,
-                              expires_at=expires_at))
+                              expires_at=expires_at,
+                              project_id=project_id,
+                              domain_id=domain_id))
         self.events.append(event)
         return event
 
@@ -293,6 +325,10 @@ class RevokeTreeTests(tests.TestCase):
         self.events.append(event)
         return event
 
+    def _revoke_by_domain(self, domain_id):
+        event = self.tree.add_event(model.RevokeEvent(domain_id=domain_id))
+        self.events.append(event)
+
     def _user_field_test(self, field_name):
         user_id = _new_id()
         event = self._revoke_by_user(user_id)
@@ -323,7 +359,7 @@ class RevokeTreeTests(tests.TestCase):
         event = self._revoke_by_expiration(user_id, future_time)
         token_data_1 = _sample_blank_token()
         token_data_1['user_id'] = user_id
-        token_data_1['expires_at'] = future_time
+        token_data_1['expires_at'] = future_time.replace(microsecond=0)
         self._assertTokenRevoked(token_data_1)
 
         token_data_2 = _sample_blank_token()
@@ -335,6 +371,79 @@ class RevokeTreeTests(tests.TestCase):
 
         self.removeEvent(event)
         self._assertTokenNotRevoked(token_data_1)
+
+    def test_revoke_by_audit_id(self):
+        audit_id = provider.audit_info(parent_audit_id=None)[0]
+        token_data_1 = _sample_blank_token()
+        # Audit ID and Audit Chain ID are populated with the same value
+        # if the token is an original token
+        token_data_1['audit_id'] = audit_id
+        token_data_1['audit_chain_id'] = audit_id
+        event = self._revoke_by_audit_id(audit_id)
+        self._assertTokenRevoked(token_data_1)
+
+        audit_id_2 = provider.audit_info(parent_audit_id=audit_id)[0]
+        token_data_2 = _sample_blank_token()
+        token_data_2['audit_id'] = audit_id_2
+        token_data_2['audit_chain_id'] = audit_id
+        self._assertTokenNotRevoked(token_data_2)
+
+        self.removeEvent(event)
+        self._assertTokenNotRevoked(token_data_1)
+
+    def test_revoke_by_audit_chain_id(self):
+        audit_id = provider.audit_info(parent_audit_id=None)[0]
+        token_data_1 = _sample_blank_token()
+        # Audit ID and Audit Chain ID are populated with the same value
+        # if the token is an original token
+        token_data_1['audit_id'] = audit_id
+        token_data_1['audit_chain_id'] = audit_id
+        event = self._revoke_by_audit_chain_id(audit_id)
+        self._assertTokenRevoked(token_data_1)
+
+        audit_id_2 = provider.audit_info(parent_audit_id=audit_id)[0]
+        token_data_2 = _sample_blank_token()
+        token_data_2['audit_id'] = audit_id_2
+        token_data_2['audit_chain_id'] = audit_id
+        self._assertTokenRevoked(token_data_2)
+
+        self.removeEvent(event)
+        self._assertTokenNotRevoked(token_data_1)
+        self._assertTokenNotRevoked(token_data_2)
+
+    def test_by_user_project(self):
+        # When a user has a project-scoped token and the project-scoped token
+        # is revoked then the token is revoked.
+
+        user_id = _new_id()
+        project_id = _new_id()
+
+        future_time = _future_time()
+
+        token_data = _sample_blank_token()
+        token_data['user_id'] = user_id
+        token_data['project_id'] = project_id
+        token_data['expires_at'] = future_time.replace(microsecond=0)
+
+        self._revoke_by_expiration(user_id, future_time, project_id=project_id)
+        self._assertTokenRevoked(token_data)
+
+    def test_by_user_domain(self):
+        # When a user has a domain-scoped token and the domain-scoped token
+        # is revoked then the token is revoked.
+
+        user_id = _new_id()
+        domain_id = _new_id()
+
+        future_time = _future_time()
+
+        token_data = _sample_blank_token()
+        token_data['user_id'] = user_id
+        token_data['assignment_domain_id'] = domain_id
+        token_data['expires_at'] = future_time.replace(microsecond=0)
+
+        self._revoke_by_expiration(user_id, future_time, domain_id=domain_id)
+        self._assertTokenRevoked(token_data)
 
     def removeEvent(self, event):
         self.events.remove(event)
@@ -403,6 +512,57 @@ class RevokeTreeTests(tests.TestCase):
         token_data['project_id'] = project_id
         self._assertTokenRevoked(token_data)
 
+    def test_by_domain_user(self):
+        # If revoke a domain, then a token for a user in the domain is revoked
+
+        user_id = _new_id()
+        domain_id = _new_id()
+
+        token_data = _sample_blank_token()
+        token_data['user_id'] = user_id
+        token_data['identity_domain_id'] = domain_id
+
+        self._revoke_by_domain(domain_id)
+
+        self._assertTokenRevoked(token_data)
+
+    def test_by_domain_project(self):
+        # If revoke a domain, then a token scoped to a project in the domain
+        # is revoked.
+
+        user_id = _new_id()
+        user_domain_id = _new_id()
+
+        project_id = _new_id()
+        project_domain_id = _new_id()
+
+        token_data = _sample_blank_token()
+        token_data['user_id'] = user_id
+        token_data['identity_domain_id'] = user_domain_id
+        token_data['project_id'] = project_id
+        token_data['assignment_domain_id'] = project_domain_id
+
+        self._revoke_by_domain(project_domain_id)
+
+        self._assertTokenRevoked(token_data)
+
+    def test_by_domain_domain(self):
+        # If revoke a domain, then a token scoped to the domain is revoked.
+
+        user_id = _new_id()
+        user_domain_id = _new_id()
+
+        domain_id = _new_id()
+
+        token_data = _sample_blank_token()
+        token_data['user_id'] = user_id
+        token_data['identity_domain_id'] = user_domain_id
+        token_data['assignment_domain_id'] = domain_id
+
+        self._revoke_by_domain(domain_id)
+
+        self._assertTokenRevoked(token_data)
+
     def _assertEmpty(self, collection):
         return self.assertEqual(0, len(collection), "collection not empty")
 
@@ -411,18 +571,24 @@ class RevokeTreeTests(tests.TestCase):
         self.assertEqual(turn + 1, len(self.tree.revoke_map
                                        ['trust_id=*']
                                        ['consumer_id=*']
-                                       ['access_token_id=*']))
+                                       ['access_token_id=*']
+                                       ['audit_id=*']
+                                       ['audit_chain_id=*']))
         # two different functions add  domain_ids, +1 for None
         self.assertEqual(2 * turn + 1, len(self.tree.revoke_map
                                            ['trust_id=*']
                                            ['consumer_id=*']
                                            ['access_token_id=*']
+                                           ['audit_id=*']
+                                           ['audit_chain_id=*']
                                            ['expires_at=*']))
         # two different functions add  project_ids, +1 for None
         self.assertEqual(2 * turn + 1, len(self.tree.revoke_map
                                            ['trust_id=*']
                                            ['consumer_id=*']
                                            ['access_token_id=*']
+                                           ['audit_id=*']
+                                           ['audit_chain_id=*']
                                            ['expires_at=*']
                                            ['domain_id=*']))
         # 10 users added
@@ -430,6 +596,8 @@ class RevokeTreeTests(tests.TestCase):
                                    ['trust_id=*']
                                    ['consumer_id=*']
                                    ['access_token_id=*']
+                                   ['audit_id=*']
+                                   ['audit_chain_id=*']
                                    ['expires_at=*']
                                    ['domain_id=*']
                                    ['project_id=*']))
@@ -450,7 +618,9 @@ class RevokeTreeTests(tests.TestCase):
             self.assertEqual(i + 2, len(self.tree.revoke_map
                                         ['trust_id=*']
                                         ['consumer_id=*']
-                                        ['access_token_id=*']),
+                                        ['access_token_id=*']
+                                        ['audit_id=*']
+                                        ['audit_chain_id=*']),
                              'adding %s to %s' % (args,
                                                   self.tree.revoke_map))
 

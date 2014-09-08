@@ -14,13 +14,11 @@
 
 from keystone.common import extension
 from keystone.common import wsgi
-from keystone import config
 from keystone import exception
 from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
-CONF = config.CONF
 
 MEDIA_TYPE_JSON = 'application/vnd.openstack.identity-%s+json'
 MEDIA_TYPE_XML = 'application/vnd.openstack.identity-%s+xml'
@@ -62,10 +60,28 @@ def register_version(version):
     _VERSIONS.append(version)
 
 
+class MimeTypes:
+    JSON = 'application/json'
+    JSON_HOME = 'application/json-home'
+
+
+def v3_mime_type_best_match(context):
+
+    # accept_header is a WebOb MIMEAccept object so supports best_match.
+    accept_header = context['accept_header']
+
+    if not accept_header:
+        return MimeTypes.JSON
+
+    SUPPORTED_TYPES = [MimeTypes.JSON, MimeTypes.JSON_HOME]
+    return accept_header.best_match(SUPPORTED_TYPES)
+
+
 class Version(wsgi.Application):
 
-    def __init__(self, version_type):
+    def __init__(self, version_type, routers=None):
         self.endpoint_url_type = version_type
+        self._routers = routers
 
         super(Version, self).__init__()
 
@@ -144,9 +160,27 @@ class Version(wsgi.Application):
         else:
             raise exception.VersionNotFound(version='v2.0')
 
+    def _get_json_home_v3(self):
+
+        def all_resources():
+            for router in self._routers:
+                for resource in router.v3_resources:
+                    yield resource
+
+        return {
+            'resources': dict(all_resources())
+        }
+
     def get_version_v3(self, context):
         versions = self._get_versions_list(context)
         if 'v3' in _VERSIONS:
+            req_mime_type = v3_mime_type_best_match(context)
+
+            if req_mime_type == MimeTypes.JSON_HOME:
+                return wsgi.render_response(
+                    body=self._get_json_home_v3(),
+                    headers=(('Content-Type', MimeTypes.JSON_HOME),))
+
             return wsgi.render_response(body={
                 'version': versions['v3']
             })

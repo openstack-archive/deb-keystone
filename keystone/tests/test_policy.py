@@ -14,21 +14,17 @@
 #    under the License.
 
 import json
-import tempfile
 
 import mock
 import six
 from six.moves.urllib import request as urlrequest
 from testtools import matchers
 
-from keystone import config
 from keystone import exception
 from keystone.openstack.common import policy as common_policy
 from keystone.policy.backends import rules
 from keystone import tests
-
-
-CONF = config.CONF
+from keystone.tests.ksfixtures import temporaryfile
 
 
 class PolicyFileTestCase(tests.TestCase):
@@ -36,7 +32,8 @@ class PolicyFileTestCase(tests.TestCase):
         # self.tmpfilename should exist before setUp super is called
         # this is to ensure it is available for the config_fixture in
         # the config_overrides call.
-        _unused, self.tmpfilename = tempfile.mkstemp()
+        self.tempfile = self.useFixture(temporaryfile.SecureTempFile())
+        self.tmpfilename = self.tempfile.file_name
         super(PolicyFileTestCase, self).setUp()
 
         rules.reset()

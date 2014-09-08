@@ -17,6 +17,8 @@ import datetime
 import uuid
 
 import mock
+from oslo.utils import timeutils
+from testtools import matchers
 
 from keystone import assignment
 from keystone import auth
@@ -24,11 +26,12 @@ from keystone.common import authorization
 from keystone.common import environment
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import timeutils
+from keystone.models import token_model
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import database
 from keystone import token
+from keystone.token import provider
 from keystone import trust
 
 
@@ -87,7 +90,7 @@ class AuthTest(tests.TestCase):
         # tests in this file are run alone, API calls return unauthorized.
         environment.use_eventlet(monkeypatch_thread=False)
 
-    def assertEqualTokens(self, a, b):
+    def assertEqualTokens(self, a, b, enforce_audit_ids=True):
         """Assert that two tokens are equal.
 
         Compare two tokens except for their ids. This also truncates
@@ -97,6 +100,7 @@ class AuthTest(tests.TestCase):
             token['access']['token']['id'] = 'dummy'
             del token['access']['token']['expires']
             del token['access']['token']['issued_at']
+            del token['access']['token']['audit_ids']
             return token
 
         self.assertCloseEnoughForGovernmentWork(
@@ -105,6 +109,14 @@ class AuthTest(tests.TestCase):
         self.assertCloseEnoughForGovernmentWork(
             timeutils.parse_isotime(a['access']['token']['issued_at']),
             timeutils.parse_isotime(b['access']['token']['issued_at']))
+        if enforce_audit_ids:
+            self.assertIn(a['access']['token']['audit_ids'][0],
+                          b['access']['token']['audit_ids'])
+            self.assertThat(len(a['access']['token']['audit_ids']),
+                            matchers.LessThan(3))
+            self.assertThat(len(b['access']['token']['audit_ids']),
+                            matchers.LessThan(3))
+
         return self.assertDictEqual(normalize(a), normalize(b))
 
 
@@ -114,7 +126,17 @@ class AuthBadRequests(AuthTest):
         self.assertRaises(
             token.controllers.ExternalAuthNotApplicable,
             self.controller._authenticate_external,
-            {}, {})
+            context={}, auth={})
+
+    def test_empty_remote_user(self):
+        """Verify that _authenticate_external() raises exception if
+        REMOTE_USER is set as the empty string.
+        """
+        context = {'environment': {'REMOTE_USER': ''}}
+        self.assertRaises(
+            token.controllers.ExternalAuthNotApplicable,
+            self.controller._authenticate_external,
+            context=context, auth={})
 
     def test_no_token_in_auth(self):
         """Verify that _authenticate_token() raises exception if no token."""
@@ -289,60 +311,6 @@ class AuthWithToken(AuthTest):
         self.assertIn(self.role_member['id'], roles)
         self.assertIn(self.role_admin['id'], roles)
 
-    def test_auth_token_cross_domain_group_and_project(self):
-        """Verify getting a token in cross domain group/project roles."""
-        # create domain, project and group and grant roles to user
-        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(domain1['id'], domain1)
-        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain1['id']}
-        self.assignment_api.create_project(project1['id'], project1)
-        role_foo_domain1 = {'id': uuid.uuid4().hex,
-                            'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_foo_domain1['id'],
-                                        role_foo_domain1)
-        role_group_domain1 = {'id': uuid.uuid4().hex,
-                              'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_group_domain1['id'],
-                                        role_group_domain1)
-        self.assignment_api.add_user_to_project(project1['id'],
-                                                self.user_foo['id'])
-        new_group = {'domain_id': domain1['id'], 'name': uuid.uuid4().hex}
-        new_group = self.identity_api.create_group(new_group)
-        self.identity_api.add_user_to_group(self.user_foo['id'],
-                                            new_group['id'])
-        self.assignment_api.create_grant(
-            user_id=self.user_foo['id'],
-            project_id=project1['id'],
-            role_id=self.role_member['id'])
-        self.assignment_api.create_grant(
-            group_id=new_group['id'],
-            project_id=project1['id'],
-            role_id=self.role_admin['id'])
-        self.assignment_api.create_grant(
-            user_id=self.user_foo['id'],
-            domain_id=domain1['id'],
-            role_id=role_foo_domain1['id'])
-        self.assignment_api.create_grant(
-            group_id=new_group['id'],
-            domain_id=domain1['id'],
-            role_id=role_group_domain1['id'])
-
-        # Get a scoped token for the tenant
-        body_dict = _build_user_auth(
-            username=self.user_foo['name'],
-            password=self.user_foo['password'],
-            tenant_name=project1['name'])
-
-        scoped_token = self.controller.authenticate({}, body_dict)
-        tenant = scoped_token["access"]["token"]["tenant"]
-        roles = scoped_token["access"]["metadata"]["roles"]
-        self.assertEqual(project1['id'], tenant["id"])
-        self.assertIn(self.role_member['id'], roles)
-        self.assertIn(self.role_admin['id'], roles)
-        self.assertNotIn(role_foo_domain1['id'], roles)
-        self.assertNotIn(role_group_domain1['id'], roles)
-
     def test_belongs_to_no_tenant(self):
         r = self.controller.authenticate(
             {},
@@ -441,6 +409,143 @@ class AuthWithToken(AuthTest):
             self.controller.validate_token,
             dict(is_admin=True, query_string={}),
             token_id=token_id)
+
+    def test_only_original_audit_id_is_kept(self):
+        context = {}
+
+        def get_audit_ids(token):
+            return token['access']['token']['audit_ids']
+
+        # get a token
+        body_dict = _build_user_auth(username='FOO', password='foo2')
+        unscoped_token = self.controller.authenticate(context, body_dict)
+        starting_audit_id = get_audit_ids(unscoped_token)[0]
+        self.assertIsNotNone(starting_audit_id)
+
+        # get another token to ensure the correct parent audit_id is set
+        body_dict = _build_user_auth(token=unscoped_token["access"]["token"])
+        unscoped_token_2 = self.controller.authenticate(context, body_dict)
+        audit_ids = get_audit_ids(unscoped_token_2)
+        self.assertThat(audit_ids, matchers.HasLength(2))
+        self.assertThat(audit_ids[-1], matchers.Equals(starting_audit_id))
+
+        # get another token from token 2 and ensure the correct parent
+        # audit_id is set
+        body_dict = _build_user_auth(token=unscoped_token_2["access"]["token"])
+        unscoped_token_3 = self.controller.authenticate(context, body_dict)
+        audit_ids = get_audit_ids(unscoped_token_3)
+        self.assertThat(audit_ids, matchers.HasLength(2))
+        self.assertThat(audit_ids[-1], matchers.Equals(starting_audit_id))
+
+    def test_revoke_by_audit_chain_id_original_token(self):
+        self.config_fixture.config(group='token', revoke_by_id=False)
+        context = {}
+
+        # get a token
+        body_dict = _build_user_auth(username='FOO', password='foo2')
+        unscoped_token = self.controller.authenticate(context, body_dict)
+        token_id = unscoped_token['access']['token']['id']
+        # get a second token
+        body_dict = _build_user_auth(token=unscoped_token["access"]["token"])
+        unscoped_token_2 = self.controller.authenticate(context, body_dict)
+        token_2_id = unscoped_token_2['access']['token']['id']
+
+        self.token_provider_api.revoke_token(token_id, revoke_chain=True)
+
+        self.assertRaises(exception.TokenNotFound,
+                          self.token_provider_api.validate_v2_token,
+                          token_id=token_id)
+        self.assertRaises(exception.TokenNotFound,
+                          self.token_provider_api.validate_v2_token,
+                          token_id=token_2_id)
+
+    def test_revoke_by_audit_chain_id_chained_token(self):
+        self.config_fixture.config(group='token', revoke_by_id=False)
+        context = {}
+
+        # get a token
+        body_dict = _build_user_auth(username='FOO', password='foo2')
+        unscoped_token = self.controller.authenticate(context, body_dict)
+        token_id = unscoped_token['access']['token']['id']
+        # get a second token
+        body_dict = _build_user_auth(token=unscoped_token["access"]["token"])
+        unscoped_token_2 = self.controller.authenticate(context, body_dict)
+        token_2_id = unscoped_token_2['access']['token']['id']
+
+        self.token_provider_api.revoke_token(token_2_id, revoke_chain=True)
+
+        self.assertRaises(exception.TokenNotFound,
+                          self.token_provider_api.validate_v2_token,
+                          token_id=token_id)
+        self.assertRaises(exception.TokenNotFound,
+                          self.token_provider_api.validate_v2_token,
+                          token_id=token_2_id)
+
+    def _mock_audit_info(self, parent_audit_id):
+        # NOTE(morgainfainberg): The token model and other cases that are
+        # extracting the audit id expect 'None' if the audit id doesn't
+        # exist. This ensures that the audit_id is None and the
+        # audit_chain_id will also return None.
+        return [None, None]
+
+    def test_revoke_with_no_audit_info(self):
+        self.config_fixture.config(group='token', revoke_by_id=False)
+        context = {}
+
+        with mock.patch.object(provider, 'audit_info', self._mock_audit_info):
+            # get a token
+            body_dict = _build_user_auth(username='FOO', password='foo2')
+            unscoped_token = self.controller.authenticate(context, body_dict)
+            token_id = unscoped_token['access']['token']['id']
+            # get a second token
+            body_dict = _build_user_auth(
+                token=unscoped_token['access']['token'])
+            unscoped_token_2 = self.controller.authenticate(context, body_dict)
+            token_2_id = unscoped_token_2['access']['token']['id']
+
+            self.token_provider_api.revoke_token(token_id, revoke_chain=True)
+
+            revoke_events = self.revoke_api.get_events()
+            self.assertThat(revoke_events, matchers.HasLength(1))
+            revoke_event = revoke_events[0].to_dict()
+            self.assertIn('expires_at', revoke_event)
+            self.assertEqual(unscoped_token_2['access']['token']['expires'],
+                             revoke_event['expires_at'])
+
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_provider_api.validate_v2_token,
+                              token_id=token_id)
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_provider_api.validate_v2_token,
+                              token_id=token_2_id)
+
+            # get a new token, with no audit info
+            body_dict = _build_user_auth(username='FOO', password='foo2')
+            unscoped_token = self.controller.authenticate(context, body_dict)
+            token_id = unscoped_token['access']['token']['id']
+            # get a second token
+            body_dict = _build_user_auth(
+                token=unscoped_token['access']['token'])
+            unscoped_token_2 = self.controller.authenticate(context, body_dict)
+            token_2_id = unscoped_token_2['access']['token']['id']
+
+            # Revoke by audit_id, no audit_info means both parent and child
+            # token are revoked.
+            self.token_provider_api.revoke_token(token_id)
+
+            revoke_events = self.revoke_api.get_events()
+            self.assertThat(revoke_events, matchers.HasLength(2))
+            revoke_event = revoke_events[1].to_dict()
+            self.assertIn('expires_at', revoke_event)
+            self.assertEqual(unscoped_token_2['access']['token']['expires'],
+                             revoke_event['expires_at'])
+
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_provider_api.validate_v2_token,
+                              token_id=token_id)
+            self.assertRaises(exception.TokenNotFound,
+                              self.token_provider_api.validate_v2_token,
+                              token_id=token_2_id)
 
 
 class AuthWithPasswordCredentials(AuthTest):
@@ -559,7 +664,8 @@ class AuthWithRemoteUser(AuthTest):
         remote_token = self.controller.authenticate(
             self.context_with_remote_user, body_dict)
 
-        self.assertEqualTokens(local_token, remote_token)
+        self.assertEqualTokens(local_token, remote_token,
+                               enforce_audit_ids=False)
 
     def test_unscoped_remote_authn_jsonless(self):
         """Verify that external auth with invalid request fails."""
@@ -583,7 +689,8 @@ class AuthWithRemoteUser(AuthTest):
         remote_token = self.controller.authenticate(
             self.context_with_remote_user, body_dict)
 
-        self.assertEqualTokens(local_token, remote_token)
+        self.assertEqualTokens(local_token, remote_token,
+                               enforce_audit_ids=False)
 
     def test_scoped_nometa_remote_authn(self):
         """Verify getting a token with external authn and no metadata."""
@@ -598,7 +705,8 @@ class AuthWithRemoteUser(AuthTest):
         remote_token = self.controller.authenticate(
             {'environment': {'REMOTE_USER': 'TWO'}}, body_dict)
 
-        self.assertEqualTokens(local_token, remote_token)
+        self.assertEqualTokens(local_token, remote_token,
+                               enforce_audit_ids=False)
 
     def test_scoped_remote_authn_invalid_user(self):
         """Verify that external auth with invalid user fails."""
@@ -650,9 +758,10 @@ class AuthWithTrust(AuthTest):
         self.config_fixture.config(group='trust', enabled=True)
 
     def _create_auth_context(self, token_id):
-        token_ref = self.token_api.get_token(token_id)
-        auth_context = authorization.token_to_auth_context(
-            token_ref['token_data'])
+        token_ref = token_model.KeystoneToken(
+            token_id=token_id,
+            token_data=self.token_provider_api.validate_token(token_id))
+        auth_context = authorization.token_to_auth_context(token_ref)
         return {'environment': {authorization.AUTH_CONTEXT_ENV: auth_context},
                 'token_id': token_id,
                 'host_url': HOST_URL}
@@ -887,7 +996,7 @@ class AuthWithTrust(AuthTest):
                          " only get the two roles specified in the trust.")
 
     def assert_token_count_for_trust(self, trust, expected_value):
-        tokens = self.trust_controller.token_api._list_tokens(
+        tokens = self.token_provider_api._persistence._list_tokens(
             self.trustee['id'], trust_id=trust['id'])
         token_count = len(tokens)
         self.assertEqual(expected_value, token_count)
@@ -897,7 +1006,8 @@ class AuthWithTrust(AuthTest):
         self.assert_token_count_for_trust(new_trust, 0)
         self.fetch_v2_token_from_trust(new_trust)
         self.assert_token_count_for_trust(new_trust, 1)
-        self.token_api.delete_tokens_for_user(self.trustee['id'])
+        self.token_provider_api._persistence.delete_tokens_for_user(
+            self.trustee['id'])
         self.assert_token_count_for_trust(new_trust, 0)
 
     def test_token_from_trust_cant_get_another_token(self):
@@ -917,12 +1027,14 @@ class AuthWithTrust(AuthTest):
             unscoped_token['access']['token']['id'])
         self.fetch_v2_token_from_trust(new_trust)
         trust_id = new_trust['id']
-        tokens = self.token_api._list_tokens(self.trustor['id'],
-                                             trust_id=trust_id)
+        tokens = self.token_provider_api._persistence._list_tokens(
+            self.trustor['id'],
+            trust_id=trust_id)
         self.assertEqual(1, len(tokens))
         self.trust_controller.delete_trust(context, trust_id=trust_id)
-        tokens = self.token_api._list_tokens(self.trustor['id'],
-                                             trust_id=trust_id)
+        tokens = self.token_provider_api._persistence._list_tokens(
+            self.trustor['id'],
+            trust_id=trust_id)
         self.assertEqual(0, len(tokens))
 
     def test_token_from_trust_with_no_role_fails(self):
@@ -959,6 +1071,26 @@ class AuthWithTrust(AuthTest):
         self.assertRaises(
             exception.Forbidden,
             self.controller.authenticate, {}, request_body)
+
+    def test_do_not_consume_remaining_uses_when_get_token_fails(self):
+        trust_data = copy.deepcopy(self.sample_data)
+        trust_data['remaining_uses'] = 3
+        new_trust = self.create_trust(trust_data, self.trustor['name'])
+
+        for assigned_role in self.assigned_roles:
+            self.assignment_api.remove_role_from_user_and_project(
+                self.trustor['id'], self.tenant_bar['id'], assigned_role)
+
+        request_body = self.build_v2_token_request('TWO', 'two2', new_trust)
+        self.assertRaises(exception.Forbidden,
+                          self.controller.authenticate, {}, request_body)
+
+        unscoped_token = self.get_unscoped_token(self.trustor['name'])
+        context = self._create_auth_context(
+            unscoped_token['access']['token']['id'])
+        trust = self.trust_controller.get_trust(context,
+                                                new_trust['id'])['trust']
+        self.assertEqual(3, trust['remaining_uses'])
 
 
 class TokenExpirationTest(AuthTest):
@@ -1023,12 +1155,18 @@ class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
         return config_files
 
     def _create_endpoints(self):
+        def create_region(**kwargs):
+            ref = {'id': uuid.uuid4().hex}
+            ref.update(kwargs)
+            self.catalog_api.create_region(ref)
+            return ref
+
         def create_endpoint(service_id, region, **kwargs):
             id_ = uuid.uuid4().hex
             ref = {
                 'id': id_,
                 'interface': 'public',
-                'region': region,
+                'region_id': region,
                 'service_id': service_id,
                 'url': 'http://localhost/%s' % uuid.uuid4().hex,
             }
@@ -1051,16 +1189,16 @@ class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
         enabled_service_ref = create_service(enabled=True)
         disabled_service_ref = create_service(enabled=False)
 
-        region = uuid.uuid4().hex
+        region = create_region()
 
         # Create endpoints
         enabled_endpoint_ref = create_endpoint(
-            enabled_service_ref['id'], region)
+            enabled_service_ref['id'], region['id'])
         create_endpoint(
-            enabled_service_ref['id'], region, enabled=False,
+            enabled_service_ref['id'], region['id'], enabled=False,
             interface='internal')
         create_endpoint(
-            disabled_service_ref['id'], region)
+            disabled_service_ref['id'], region['id'])
 
         return enabled_endpoint_ref
 
@@ -1085,7 +1223,7 @@ class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
         exp_endpoint = {
             'id': endpoint_ref['id'],
             'publicURL': endpoint_ref['url'],
-            'region': endpoint_ref['region'],
+            'region': endpoint_ref['region_id'],
         }
 
         self.assertEqual(exp_endpoint, endpoint)
@@ -1117,7 +1255,7 @@ class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
         exp_endpoint = {
             'id': endpoint_ref['id'],
             'publicURL': endpoint_ref['url'],
-            'region': endpoint_ref['region'],
+            'region': endpoint_ref['region_id'],
         }
 
         self.assertEqual(exp_endpoint, endpoint)

@@ -13,11 +13,11 @@
 import datetime
 import uuid
 
+from oslo.utils import timeutils
 import six
 
 from keystone.common import dependency
 from keystone.contrib.revoke import model
-from keystone.openstack.common import timeutils
 from keystone.tests import test_v3
 from keystone.token import provider
 
@@ -29,9 +29,16 @@ def _future_time_string():
 
 
 @dependency.requires('revoke_api')
-class OSRevokeTests(test_v3.RestfulTestCase):
+class OSRevokeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
+
+    JSON_HOME_DATA = {
+        'http://docs.openstack.org/api/openstack-identity/3/ext/OS-REVOKE/1.0/'
+        'rel/events': {
+            'href': '/OS-REVOKE/events',
+        },
+    }
 
     def test_get_empty_list(self):
         resp = self.get('/OS-REVOKE/events')
@@ -64,8 +71,7 @@ class OSRevokeTests(test_v3.RestfulTestCase):
         expires_at = provider.default_expire_time()
         sample = self._blank_event()
         sample['user_id'] = six.text_type(user_id)
-        sample['expires_at'] = six.text_type(timeutils.isotime(expires_at,
-                                                               subsecond=True))
+        sample['expires_at'] = six.text_type(timeutils.isotime(expires_at))
         before_time = timeutils.utcnow()
         self.revoke_api.revoke_by_expiration(user_id, expires_at)
         resp = self.get('/OS-REVOKE/events')

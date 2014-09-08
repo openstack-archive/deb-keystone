@@ -26,6 +26,7 @@ from keystone.common import manager
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.i18n import _LI
 from keystone import notifications
 from keystone.openstack.common import log
 
@@ -49,7 +50,7 @@ def calc_default_domain():
 
 @dependency.provider('assignment_api')
 @dependency.optional('revoke_api')
-@dependency.requires('credential_api', 'identity_api', 'token_api')
+@dependency.requires('credential_api', 'identity_api')
 class Manager(manager.Manager):
     """Default pivot point for the Assignment backend.
 
@@ -60,6 +61,8 @@ class Manager(manager.Manager):
     api object by both managers.
     """
     _PROJECT = 'project'
+    _ROLE_REMOVED_FROM_USER = 'role_removed_from_user'
+    _INVALIDATION_USER_PROJECT_TOKENS = 'invalidate_user_project_tokens'
 
     def __init__(self):
         assignment_driver = CONF.assignment.driver
@@ -69,6 +72,12 @@ class Manager(manager.Manager):
             assignment_driver = identity_driver.default_assignment_driver()
 
         super(Manager, self).__init__(assignment_driver)
+
+    def _get_group_ids_for_user_id(self, user_id):
+        # TODO(morganfainberg): Implement a way to get only group_ids
+        # instead of the more expensive to_dict() call for each record.
+        return [x['id'] for
+                x in self.identity_api.list_groups_for_user(user_id)]
 
     @notifications.created(_PROJECT)
     def create_project(self, tenant_id, tenant):
@@ -105,10 +114,17 @@ class Manager(manager.Manager):
             raise AssertionError(_('Project is disabled: %s') % project_id)
 
     @notifications.disabled(_PROJECT, public=False)
-    def _disable_project(self, tenant_id):
-        return self.token_api.delete_tokens_for_users(
-            self.list_user_ids_for_project(tenant_id),
-            project_id=tenant_id)
+    def _disable_project(self, project_id):
+        """Emit a notification to the callback system project is been disabled.
+
+        This method, and associated callback listeners, removes the need for
+        making direct calls to other managers to take action (e.g. revoking
+        project scoped tokens) when a project is disabled.
+
+        :param project_id: project identifier
+        :type project_id: string
+        """
+        pass
 
     @notifications.updated(_PROJECT)
     def update_project(self, tenant_id, tenant):
@@ -128,8 +144,10 @@ class Manager(manager.Manager):
     @notifications.deleted(_PROJECT)
     def delete_project(self, tenant_id):
         project = self.driver.get_project(tenant_id)
-        user_ids = self.list_user_ids_for_project(tenant_id)
-        self.token_api.delete_tokens_for_users(user_ids, project_id=tenant_id)
+        project_user_ids = self.list_user_ids_for_project(tenant_id)
+        for user_id in project_user_ids:
+            payload = {'user_id': user_id, 'project_id': tenant_id}
+            self._emit_invalidate_user_project_tokens_notification(payload)
         ret = self.driver.delete_project(tenant_id)
         self.get_project.invalidate(self, tenant_id)
         self.get_project_by_name.invalidate(self, project['name'],
@@ -151,10 +169,7 @@ class Manager(manager.Manager):
 
         """
         def _get_group_project_roles(user_id, project_ref):
-            # TODO(morganfainberg): Implement a way to get only group_ids
-            # instead of the more expensive to_dict() call for each record.
-            group_ids = [group['id'] for group in
-                         self.identity_api.list_groups_for_user(user_id)]
+            group_ids = self._get_group_ids_for_user_id(user_id)
             return self.driver.get_group_project_roles(
                 group_ids,
                 project_ref['id'],
@@ -199,10 +214,10 @@ class Manager(manager.Manager):
 
         def _get_group_domain_roles(user_id, domain_id):
             role_list = []
-            group_refs = self.identity_api.list_groups_for_user(user_id)
-            for x in group_refs:
+            group_ids = self._get_group_ids_for_user_id(user_id)
+            for group_id in group_ids:
                 try:
-                    metadata_ref = self._get_metadata(group_id=x['id'],
+                    metadata_ref = self._get_metadata(group_id=group_id,
                                                       domain_id=domain_id)
                     role_list += self._roles_from_role_dicts(
                         metadata_ref.get('roles', {}), False)
@@ -245,8 +260,8 @@ class Manager(manager.Manager):
                 tenant_id,
                 config.CONF.member_role_id)
         except exception.RoleNotFound:
-            LOG.info(_("Creating the default role %s "
-                       "because it does not exist."),
+            LOG.info(_LI("Creating the default role %s "
+                         "because it does not exist."),
                      config.CONF.member_role_id)
             role = {'id': CONF.member_role_id,
                     'name': CONF.member_role_name}
@@ -289,9 +304,7 @@ class Manager(manager.Manager):
         # list here and pass it in. The rest of the detailed logic of listing
         # projects for a user is pushed down into the driver to enable
         # optimization with the various backend technologies (SQL, LDAP etc.).
-
-        group_ids = [x['id'] for
-                     x in self.identity_api.list_groups_for_user(user_id)]
+        group_ids = self._get_group_ids_for_user_id(user_id)
         return self.driver.list_projects_for_user(
             user_id, group_ids, hints or driver_hints.Hints())
 
@@ -319,9 +332,31 @@ class Manager(manager.Manager):
     def list_domains(self, hints=None):
         return self.driver.list_domains(hints or driver_hints.Hints())
 
+    # TODO(henry-nash): We might want to consider list limiting this at some
+    # point in the future.
+    def list_domains_for_user(self, user_id, hints=None):
+        # NOTE(henry-nash): In order to get a complete list of user domains,
+        # the driver will need to look at group assignments.  To avoid cross
+        # calling between the assignment and identity driver we get the group
+        # list here and pass it in. The rest of the detailed logic of listing
+        # projects for a user is pushed down into the driver to enable
+        # optimization with the various backend technologies (SQL, LDAP etc.).
+        group_ids = self._get_group_ids_for_user_id(user_id)
+        return self.driver.list_domains_for_user(
+            user_id, group_ids, hints or driver_hints.Hints())
+
     @notifications.disabled('domain', public=False)
     def _disable_domain(self, domain_id):
-        self.token_api.delete_tokens_for_domain(domain_id)
+        """Emit a notification to the callback system domain is been disabled.
+
+        This method, and associated callback listeners, removes the need for
+        making direct calls to other managers to take action (e.g. revoking
+        domain scoped tokens) when a domain is disabled.
+
+        :param domain_id: domain identifier
+        :type domain_id: string
+        """
+        pass
 
     @notifications.updated('domain')
     def update_domain(self, domain_id, domain):
@@ -498,16 +533,26 @@ class Manager(manager.Manager):
     def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
         self.driver.remove_role_from_user_and_project(user_id, tenant_id,
                                                       role_id)
-        if CONF.token.revoke_by_id:
-            self.token_api.delete_tokens_for_user(user_id)
+        self.identity_api.emit_invalidate_user_token_persistence(user_id)
         if self.revoke_api:
             self.revoke_api.revoke_by_grant(role_id, user_id=user_id,
                                             project_id=tenant_id)
 
+    @notifications.internal(notifications.INVALIDATE_USER_TOKEN_PERSISTENCE)
+    def _emit_invalidate_user_token_persistence(self, user_id):
+        self.identity_api.emit_invalidate_user_token_persistence(user_id)
+
+    @notifications.role_assignment('created')
+    def create_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False, context=None):
+        self.driver.create_grant(role_id, user_id, group_id, domain_id,
+                                 project_id, inherited_to_projects)
+
+    @notifications.role_assignment('deleted')
     def delete_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
-                     inherited_to_projects=False):
-        user_ids = []
+                     inherited_to_projects=False, context=None):
         if group_id is None:
             if self.revoke_api:
                 self.revoke_api.revoke_by_grant(user_id=user_id,
@@ -521,7 +566,9 @@ class Manager(manager.Manager):
                 for user in self.identity_api.list_users_in_group(group_id,
                                                                   domain_id):
                     if user['id'] != user_id:
-                        user_ids.append(user['id'])
+                        if user_id:
+                            self._emit_invalidate_user_token_persistence(
+                                user_id)
                         if self.revoke_api:
                             self.revoke_api.revoke_by_grant(
                                 user_id=user['id'], role_id=role_id,
@@ -533,8 +580,7 @@ class Manager(manager.Manager):
         self.driver.delete_grant(role_id, user_id, group_id, domain_id,
                                  project_id, inherited_to_projects)
         if user_id is not None:
-            user_ids.append(user_id)
-        self.token_api.delete_tokens_for_users(user_ids)
+            self._emit_invalidate_user_token_persistence(user_id)
 
     def _delete_tokens_for_role(self, role_id):
         assignments = self.list_role_assignments_for_role(role_id=role_id)
@@ -555,7 +601,8 @@ class Manager(manager.Manager):
                     user_and_project_ids.append(
                         (assignment['user_id'], assignment['project_id']))
                 elif 'domain_id' in assignment:
-                    user_ids.add(assignment['user_id'])
+                    self._emit_invalidate_user_token_persistence(
+                        assignment['user_id'])
             elif 'group_id' in assignment:
                 # Add in any users for this group, being tolerant of any
                 # cross-driver database integrity errors.
@@ -582,7 +629,8 @@ class Manager(manager.Manager):
                             (user['id'], assignment['project_id']))
                 elif 'domain_id' in assignment:
                     for user in users:
-                        user_ids.add(user['id'])
+                        self._emit_invalidate_user_token_persistence(
+                            user['id'])
 
         # Now process the built up lists.  Before issuing calls to delete any
         # tokens, let's try and minimize the number of calls by pruning out
@@ -593,9 +641,18 @@ class Manager(manager.Manager):
             if user_and_project_id[0] not in user_ids:
                 user_and_project_ids_to_action.append(user_and_project_id)
 
-        self.token_api.delete_tokens_for_users(user_ids)
         for user_id, project_id in user_and_project_ids_to_action:
-            self.token_api.delete_tokens_for_user(user_id, project_id)
+            self._emit_invalidate_user_project_tokens_notification(
+                {'user_id': user_id,
+                 'project_id': project_id})
+
+    @notifications.internal(
+        notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE)
+    def _emit_invalidate_user_project_tokens_notification(self, payload):
+        # This notification's payload is a dict of user_id and
+        # project_id so the token provider can invalidate the tokens
+        # from persistence if persistence is enabled.
+        pass
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -884,6 +941,22 @@ class Driver(object):
 
         :param group_ids: List of group ids.
         :returns: List of projects accessible to specified groups.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_domains_for_user(self, user_id, group_ids, hints):
+        """List all domains associated with a given user.
+
+        :param user_id: the user in question
+        :param group_ids: the groups this user is a member of.  This list is
+                          built in the Manager, so that the driver itself
+                          does not have to call across to identity.
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
+
+        :returns: a list of domain_refs or an empty list.
 
         """
         raise exception.NotImplemented()  # pragma: no cover

@@ -23,6 +23,7 @@ from keystone.common import wsgi
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.models import token_model
 from keystone.openstack.common import log
 
 
@@ -59,26 +60,24 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         LOG.debug('RBAC: using auth context from the request environment')
         return context['environment'].get(authorization.AUTH_CONTEXT_ENV)
 
-    # now build the auth context from the incoming auth token
+    # There is no current auth context, build it from the incoming token.
+    # TODO(morganfainberg): Collapse this logic with AuthContextMiddleware
+    # in sane manner as this just mirrors the logic in AuthContextMiddleware
     try:
         LOG.debug('RBAC: building auth context from the incoming auth token')
-        # TODO(ayoung): These two functions return the token in different
-        # formats.  However, the call
-        # to get_token hits the caching layer, and does not validate the
-        # token.  This should be reduced to one call
-        if not CONF.token.revoke_by_id:
-            self.token_api.token_provider_api.validate_token(
-                context['token_id'])
-        token_ref = self.token_api.get_token(context['token_id'])
+        token_ref = token_model.KeystoneToken(
+            token_id=context['token_id'],
+            token_data=self.token_provider_api.validate_token(
+                context['token_id']))
+        # NOTE(jamielennox): whilst this maybe shouldn't be within this
+        # function it would otherwise need to reload the token_ref from
+        # backing store.
+        wsgi.validate_token_bind(context, token_ref)
     except exception.TokenNotFound:
         LOG.warning(_('RBAC: Invalid token'))
         raise exception.Unauthorized()
 
-    # NOTE(jamielennox): whilst this maybe shouldn't be within this function
-    # it would otherwise need to reload the token_ref from backing store.
-    wsgi.validate_token_bind(context, token_ref)
-
-    auth_context = authorization.token_to_auth_context(token_ref['token_data'])
+    auth_context = authorization.token_to_auth_context(token_ref)
 
     return auth_context
 
@@ -93,7 +92,7 @@ def protected(callback=None):
     entities) should pass in a callback function, that will be subsequently
     called to check protection for these multiple entities. This callback
     function should gather the appropriate entities needed and then call
-    check_proetction() in the V3Controller class.
+    check_protection() in the V3Controller class.
 
     """
     def wrapper(f):
@@ -126,20 +125,26 @@ def protected(callback=None):
                 # TODO(henry-nash): Move this entire code to a member
                 # method inside v3 Auth
                 if context.get('subject_token_id') is not None:
-                    token_ref = self.token_api.get_token(
-                        context['subject_token_id'])
+                    token_ref = token_model.KeystoneToken(
+                        token_id=context['subject_token_id'],
+                        token_data=self.token_provider_api.validate_token(
+                            context['subject_token_id']))
                     policy_dict.setdefault('target', {})
                     policy_dict['target'].setdefault(self.member_name, {})
                     policy_dict['target'][self.member_name]['user_id'] = (
-                        token_ref['user_id'])
-                    if 'domain' in token_ref['user']:
+                        token_ref.user_id)
+                    try:
+                        user_domain_id = token_ref.user_domain_id
+                    except exception.UnexpectedError:
+                        user_domain_id = None
+                    if user_domain_id:
                         policy_dict['target'][self.member_name].setdefault(
                             'user', {})
                         policy_dict['target'][self.member_name][
                             'user'].setdefault('domain', {})
                         policy_dict['target'][self.member_name]['user'][
                             'domain']['id'] = (
-                                token_ref['user']['domain']['id'])
+                                user_domain_id)
 
                 # Add in the kwargs, which means that any entity provided as a
                 # parameter for calls like create and update will be included.
@@ -281,7 +286,7 @@ class V2Controller(wsgi.Application):
             raise ValueError(_('Expected dict or list: %s') % type(ref))
 
 
-@dependency.requires('policy_api', 'token_api')
+@dependency.requires('policy_api', 'token_provider_api')
 class V3Controller(wsgi.Application):
     """Base controller class for Identity API v3.
 
@@ -310,6 +315,14 @@ class V3Controller(wsgi.Application):
             path = cls.collection_name
 
         return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
+
+    @classmethod
+    def full_url(cls, context, path=None):
+        url = cls.base_url(context, path)
+        if context['environment'].get('QUERY_STRING'):
+            url = '%s?%s' % (url, context['environment']['QUERY_STRING'])
+
+        return url
 
     @classmethod
     def _add_self_referential_link(cls, context, ref):
@@ -354,7 +367,7 @@ class V3Controller(wsgi.Application):
         container = {cls.collection_name: refs}
         container['links'] = {
             'next': None,
-            'self': cls.base_url(context, path=context['path']),
+            'self': cls.full_url(context, path=context['path']),
             'previous': None}
 
         if list_limited:
@@ -563,18 +576,21 @@ class V3Controller(wsgi.Application):
             return context['query_string'].get('domain_id')
 
         try:
-            token_ref = self.token_api.get_token(context['token_id'])
-            token = token_ref['token_data']['token']
-        except exception.KeyError:
+            token_ref = token_model.KeystoneToken(
+                token_id=context['token_id'],
+                token_data=self.token_provider_api.validate_token(
+                    context['token_id']))
+        except KeyError:
             raise exception.ValidationError(
                 _('domain_id is required as part of entity'))
-        except exception.TokenNotFound:
+        except (exception.TokenNotFound,
+                exception.UnsupportedTokenVersionException):
             LOG.warning(_('Invalid token found while getting domain ID '
                           'for list request'))
             raise exception.Unauthorized()
 
-        if 'domain' in token:
-            return token['domain']['id']
+        if token_ref.domain_scoped:
+            return token_ref.domain_id
         else:
             LOG.warning(
                 _('No domain information specified as part of list request'))
@@ -594,18 +610,22 @@ class V3Controller(wsgi.Application):
         # a v3 protected call).  However, this optimization is probably not
         # worth the duplication of state
         try:
-            token_ref = self.token_api.get_token(context['token_id'])
-        except exception.KeyError:
+            token_ref = token_model.KeystoneToken(
+                token_id=context['token_id'],
+                token_data=self.token_provider_api.validate_token(
+                    context['token_id']))
+        except KeyError:
             # This might happen if we use the Admin token, for instance
             raise exception.ValidationError(
                 _('A domain-scoped token must be used'))
-        except exception.TokenNotFound:
+        except (exception.TokenNotFound,
+                exception.UnsupportedTokenVersionException):
             LOG.warning(_('Invalid token found while getting domain ID '
                           'for list request'))
             raise exception.Unauthorized()
 
-        if token_ref.get('token_data', {}).get('token', {}).get('domain', {}):
-            return token_ref['token_data']['token']['domain']['id']
+        if token_ref.domain_scoped:
+            return token_ref.domain_id
         else:
             # TODO(henry-nash): We should issue an exception here since if
             # a v3 call does not explicitly specify the domain_id in the

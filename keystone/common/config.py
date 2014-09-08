@@ -13,9 +13,12 @@
 # under the License.
 
 from oslo.config import cfg
+from oslo import messaging
 
 
 _DEFAULT_AUTH_METHODS = ['external', 'password', 'token']
+_CERTFILE = '/etc/keystone/ssl/certs/signing_cert.pem'
+_KEYFILE = '/etc/keystone/ssl/private/signing_key.pem'
 
 
 FILE_OPTIONS = {
@@ -238,7 +241,7 @@ FILE_OPTIONS = {
                         '"keystone.token.providers.[pkiz|pki|uuid].'
                         'Provider". The default provider is pkiz.'),
         cfg.StrOpt('driver',
-                   default='keystone.token.backends.sql.Token',
+                   default='keystone.token.persistence.backends.sql.Token',
                    help='Token persistence backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for token system cacheing. This has no '
@@ -365,13 +368,13 @@ FILE_OPTIONS = {
                    help='Deprecated in favor of provider in the '
                         '[token] section.'),
         cfg.StrOpt('certfile',
-                   default='/etc/keystone/ssl/certs/signing_cert.pem',
+                   default=_CERTFILE,
                    help='Path of the certfile for token signing. For '
                         'non-production environments, you may be interested '
                         'in using `keystone-manage pki_setup` to generate '
                         'self-signed certificates.'),
         cfg.StrOpt('keyfile',
-                   default='/etc/keystone/ssl/private/signing_key.pem',
+                   default=_KEYFILE,
                    help='Path of the keyfile for token signing.'),
         cfg.StrOpt('ca_certs',
                    default='/etc/keystone/ssl/certs/ca.pem',
@@ -453,6 +456,12 @@ FILE_OPTIONS = {
                     help='Toggle to return all active endpoints if no filter '
                          'exists.'),
     ],
+    'endpoint_policy': [
+        cfg.StrOpt('driver',
+                   default='keystone.contrib.endpoint_policy.backends'
+                           '.sql.EndpointPolicy',
+                   help='Endpoint policy backend driver'),
+    ],
     'stats': [
         cfg.StrOpt('driver',
                    default=('keystone.contrib.stats.backends'
@@ -510,12 +519,20 @@ FILE_OPTIONS = {
                    help='LDAP attribute mapped to user id.'),
         cfg.StrOpt('user_name_attribute', default='sn',
                    help='LDAP attribute mapped to user name.'),
-        cfg.StrOpt('user_mail_attribute', default='email',
+        cfg.StrOpt('user_mail_attribute', default='mail',
                    help='LDAP attribute mapped to user email.'),
         cfg.StrOpt('user_pass_attribute', default='userPassword',
                    help='LDAP attribute mapped to password.'),
         cfg.StrOpt('user_enabled_attribute', default='enabled',
                    help='LDAP attribute mapped to user enabled flag.'),
+        cfg.BoolOpt('user_enabled_invert', default=False,
+                    help='Invert the meaning of the boolean enabled values. '
+                         'Some LDAP servers use a boolean lock attribute '
+                         'where "true" means an account is disabled. Setting '
+                         '"user_enabled_invert = true" will allow these lock '
+                         'attributes to be used. This setting will have no '
+                         'effect if "user_enabled_mask" or '
+                         '"user_enabled_emulation" settings are in use.'),
         cfg.IntOpt('user_enabled_mask', default=0,
                    help='Bitmask integer to indicate the bit that the enabled '
                         'value is stored in if the LDAP server represents '
@@ -706,6 +723,28 @@ FILE_OPTIONS = {
         cfg.StrOpt('tls_req_cert', default='demand',
                    help='Valid options for tls_req_cert are demand, never, '
                         'and allow.'),
+        cfg.BoolOpt('use_pool', default=False,
+                    help='Enable LDAP connection pooling.'),
+        cfg.IntOpt('pool_size', default=10,
+                   help='Connection pool size.'),
+        cfg.IntOpt('pool_retry_max', default=3,
+                   help='Maximum count of reconnect trials.'),
+        cfg.FloatOpt('pool_retry_delay', default=0.1,
+                     help='Time span in seconds to wait between two '
+                          'reconnect trials.'),
+        cfg.IntOpt('pool_connection_timeout', default=-1,
+                   help='Connector timeout in seconds. Value -1 indicates '
+                        'indefinite wait for response.'),
+        cfg.IntOpt('pool_connection_lifetime', default=600,
+                   help='Connection lifetime in seconds.'),
+        cfg.BoolOpt('use_auth_pool', default=False,
+                    help='Enable LDAP connection pooling for end user '
+                         'authentication. If use_pool is disabled, then this '
+                         'setting is meaningless and is not used at all.'),
+        cfg.IntOpt('auth_pool_size', default=100,
+                   help='End user auth connection pool size.'),
+        cfg.IntOpt('auth_pool_connection_lifetime', default=60,
+                   help='End user auth connection lifetime in seconds.'),
     ],
     'auth': [
         cfg.ListOpt('methods', default=_DEFAULT_AUTH_METHODS,
@@ -742,6 +781,13 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='keystone.catalog.backends.sql.Catalog',
                    help='Catalog backend driver.'),
+        cfg.BoolOpt('caching', default=True,
+                    help='Toggle for catalog caching. This has no '
+                         'effect unless global caching is enabled.'),
+        cfg.IntOpt('cache_time',
+                   help='Time to cache catalog data (in seconds). This has no '
+                        'effect unless global and catalog caching are '
+                        'enabled.'),
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a catalog collection.'),
@@ -763,10 +809,37 @@ FILE_OPTIONS = {
         cfg.IntOpt('default_lock_timeout', default=5,
                    help='Default lock timeout for distributed locking.'),
     ],
+    'saml': [
+        cfg.IntOpt('assertion_expiration_time', default=3600,
+                   help='Default TTL, in seconds, for any generated SAML '
+                        'assertion created by Keystone.'),
+        cfg.StrOpt('xmlsec1_binary',
+                   default='xmlsec1',
+                   help='Binary to be called for XML signing. Install the '
+                        'appropriate package, specify absolute path or adjust '
+                        'your PATH environment variable if the binary cannot '
+                        'be found.'),
+        cfg.StrOpt('certfile',
+                   default=_CERTFILE,
+                   help='Path of the certfile for SAML signing. For '
+                        'non-production environments, you may be interested '
+                        'in using `keystone-manage pki_setup` to generate '
+                        'self-signed certificates. Note, the path cannot '
+                        'contain a comma.'),
+        cfg.StrOpt('keyfile',
+                   default=_KEYFILE,
+                   help='Path of the keyfile for SAML signing. Note, the path '
+                        'cannot contain a comma.'),
+    ],
 }
 
 
 CONF = cfg.CONF
+messaging.set_transport_defaults(control_exchange='keystone')
+
+
+def _register_auth_plugin_opt(conf, option):
+    conf.register_opt(option, group='auth')
 
 
 def setup_authentication(conf=None):
@@ -775,7 +848,8 @@ def setup_authentication(conf=None):
         conf = CONF
     for method_name in conf.auth.methods:
         if method_name not in _DEFAULT_AUTH_METHODS:
-            conf.register_opt(cfg.StrOpt(method_name), group='auth')
+            option = cfg.StrOpt(method_name)
+            _register_auth_plugin_opt(conf, option)
 
 
 def configure(conf=None):

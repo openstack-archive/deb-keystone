@@ -16,6 +16,7 @@ from __future__ import absolute_import
 import atexit
 import copy
 import functools
+import logging
 import os
 import re
 import shutil
@@ -25,7 +26,7 @@ import time
 import warnings
 
 import fixtures
-import logging
+from oslo.config import fixture as config_fixture
 import oslotest.base as oslotest
 from oslotest import mockpatch
 from paste import deploy
@@ -36,11 +37,12 @@ import webob
 # NOTE(ayoung)
 # environment.use_eventlet must run before any of the code that will
 # call the eventlet monkeypatching.
-from keystone.common import environment
+from keystone.common import environment  # noqa
 environment.use_eventlet()
 
 from keystone import auth
 from keystone import backends
+from keystone.common import config as common_cfg
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
@@ -49,7 +51,6 @@ from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common.fixture import config as config_fixture
 from keystone.openstack.common import log
 from keystone.tests import ksfixtures
 
@@ -60,7 +61,6 @@ from keystone.openstack.common import policy as common_policy  # noqa
 
 
 config.configure()
-
 
 LOG = log.getLogger(__name__)
 PID = six.text_type(os.getpid())
@@ -327,17 +327,12 @@ class TestCase(BaseTestCase):
         return copy.copy(self._config_file_list)
 
     def config_overrides(self):
+        certfile = 'examples/pki/certs/signing_cert.pem'
+        keyfile = 'examples/pki/private/signing_key.pem'
         # Exercise multiple worker process code paths
         self.config_fixture.config(public_workers=2)
         self.config_fixture.config(admin_workers=2)
         self.config_fixture.config(policy_file=dirs.etc('policy.json'))
-        self.config_fixture.config(
-            group='auth',
-            methods=['keystone.auth.plugins.external.DefaultDomain',
-                     'keystone.auth.plugins.password.Password',
-                     'keystone.auth.plugins.token.Token',
-                     'keystone.auth.plugins.oauth1.OAuth',
-                     'keystone.auth.plugins.saml2.Saml2'])
         self.config_fixture.config(
             # TODO(morganfainberg): Make Cache Testing a separate test case
             # in tempest, and move it out of the base unit tests.
@@ -351,7 +346,7 @@ class TestCase(BaseTestCase):
             template_file=dirs.tests('default_catalog.templates'))
         self.config_fixture.config(
             group='identity',
-            driver='keystone.identity.backends.kvs.Identity')
+            driver='keystone.identity.backends.sql.Identity')
         self.config_fixture.config(
             group='kvs',
             backends=[
@@ -361,16 +356,16 @@ class TestCase(BaseTestCase):
             group='revoke',
             driver='keystone.contrib.revoke.backends.kvs.Revoke')
         self.config_fixture.config(
-            group='signing',
-            certfile='examples/pki/certs/signing_cert.pem',
-            keyfile='examples/pki/private/signing_key.pem',
+            group='signing', certfile=certfile, keyfile=keyfile,
             ca_certs='examples/pki/certs/cacert.pem')
         self.config_fixture.config(
             group='token',
-            driver='keystone.token.backends.kvs.Token')
+            driver='keystone.token.persistence.backends.kvs.Token')
         self.config_fixture.config(
             group='trust',
             driver='keystone.trust.backends.kvs.Trust')
+        self.config_fixture.config(
+            group='saml', certfile=certfile, keyfile=keyfile)
         self.config_fixture.config(
             default_log_levels=[
                 'amqp=WARN',
@@ -385,6 +380,23 @@ class TestCase(BaseTestCase):
                 'routes.middleware=INFO',
                 'stevedore.extension=INFO',
             ])
+        self.auth_plugin_config_override()
+
+    def auth_plugin_config_override(self, methods=None, **method_classes):
+        if methods is None:
+            methods = ['external', 'password', 'token', 'oauth1', 'saml2']
+            if not method_classes:
+                method_classes = dict(
+                    external='keystone.auth.plugins.external.DefaultDomain',
+                    password='keystone.auth.plugins.password.Password',
+                    token='keystone.auth.plugins.token.Token',
+                    oauth1='keystone.auth.plugins.oauth1.OAuth',
+                    saml2='keystone.auth.plugins.saml2.Saml2',
+                )
+        self.config_fixture.config(group='auth', methods=methods)
+        common_cfg.setup_authentication()
+        if method_classes:
+            self.config_fixture.config(group='auth', **method_classes)
 
     def setUp(self):
         super(TestCase, self).setUp()
@@ -413,6 +425,15 @@ class TestCase(BaseTestCase):
         self.exit_patch.mock.side_effect = UnexpectedExit
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.config(self.config_files())
+
+        # NOTE(morganfainberg): mock the auth plugin setup to use the config
+        # fixture which automatically unregisters options when performing
+        # cleanup.
+        def mocked_register_auth_plugin_opt(conf, opt):
+            self.config_fixture.register_opt(opt, group='auth')
+        self.register_auth_plugin_opt_patch = self.useFixture(
+            mockpatch.PatchObject(common_cfg, '_register_auth_plugin_opt',
+                                  new=mocked_register_auth_plugin_opt))
 
         self.config_overrides()
 
@@ -759,7 +780,7 @@ class SQLDriverOverrides(object):
             driver='keystone.contrib.revoke.backends.sql.Revoke')
         self.config_fixture.config(
             group='token',
-            driver='keystone.token.backends.sql.Token')
+            driver='keystone.token.persistence.backends.sql.Token')
         self.config_fixture.config(
             group='trust',
             driver='keystone.trust.backends.sql.Trust')

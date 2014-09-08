@@ -27,6 +27,8 @@ import six
 from keystone.common import config
 from keystone import exception
 from keystone.i18n import _
+from keystone.i18n import _LI
+from keystone.i18n import _LW
 from keystone.openstack.common import importutils
 from keystone.openstack.common import log
 
@@ -96,7 +98,7 @@ class KeyValueStore(object):
                                    backend for configuration
         :return:
         """
-        if 'backend' in self._region.__dict__:
+        if self.is_configured:
             # NOTE(morganfainberg): It is a bad idea to reconfigure a backend,
             # there are a lot of pitfalls and potential memory leaks that could
             # occur.  By far the best approach is to re-create the KVS object
@@ -110,6 +112,10 @@ class KeyValueStore(object):
         self._configure_region(backing_store, **region_config_args)
         self._set_key_mangler(key_mangler)
         self._apply_region_proxy(proxy_list)
+
+    @property
+    def is_configured(self):
+        return 'backend' in self._region.__dict__
 
     def _apply_region_proxy(self, proxy_list):
         if isinstance(proxy_list, list):
@@ -125,11 +131,11 @@ class KeyValueStore(object):
                 if issubclass(pxy, proxy.ProxyBackend):
                     proxies.append(pxy)
                 else:
-                    LOG.warning(_('%s is not a dogpile.proxy.ProxyBackend'),
+                    LOG.warning(_LW('%s is not a dogpile.proxy.ProxyBackend'),
                                 pxy.__name__)
 
             for proxy_cls in reversed(proxies):
-                LOG.info(_('Adding proxy \'%(proxy)s\' to KVS %(name)s.'),
+                LOG.info(_LI('Adding proxy \'%(proxy)s\' to KVS %(name)s.'),
                          {'proxy': proxy_cls.__name__,
                           'name': self._region.name})
                 self._region.wrap(proxy_cls)
@@ -179,7 +185,7 @@ class KeyValueStore(object):
 
         if CONF.kvs.enable_key_mangler:
             if key_mangler is not None:
-                msg = _('Using %(func)s as KVS region %(name)s key_mangler')
+                msg = _LI('Using %(func)s as KVS region %(name)s key_mangler')
                 if callable(key_mangler):
                     self._region.key_mangler = key_mangler
                     LOG.info(msg, {'func': key_mangler.__name__,
@@ -191,8 +197,8 @@ class KeyValueStore(object):
                     raise exception.ValidationError(
                         _('`key_mangler` option must be a function reference'))
             else:
-                LOG.info(_('Using default dogpile sha1_mangle_key as KVS '
-                           'region %s key_mangler'), self._region.name)
+                LOG.info(_LI('Using default dogpile sha1_mangle_key as KVS '
+                             'region %s key_mangler'), self._region.name)
                 # NOTE(morganfainberg): Sane 'default' keymangler is the
                 # dogpile sha1_mangle_key function.  This ensures that unless
                 # explicitly changed, we mangle keys.  This helps to limit
@@ -201,7 +207,7 @@ class KeyValueStore(object):
                 self._region.key_mangler = dogpile_util.sha1_mangle_key
             self._set_keymangler_on_backend(self._region.key_mangler)
         else:
-            LOG.info(_('KVS region %s key_mangler disabled.'),
+            LOG.info(_LI('KVS region %s key_mangler disabled.'),
                      self._region.name)
             self._set_keymangler_on_backend(None)
 
@@ -392,7 +398,7 @@ class KeyValueStoreLock(object):
             if not self.expired:
                 LOG.debug('KVS lock released for: %s', self.key)
             else:
-                LOG.warning(_('KVS lock released (timeout reached) for: %s'),
+                LOG.warning(_LW('KVS lock released (timeout reached) for: %s'),
                             self.key)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
