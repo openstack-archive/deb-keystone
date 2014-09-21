@@ -1,0 +1,28 @@
+Description: Do not run git-cloned ksc master tests when local client specified
+ There is no reason to run both the KSC Master test and a locally specified
+ keystoneclient. If the local keystoneclient path is set only use the
+ KcOptTestCase not the KcMasterTestCase.
+Author: Morgan Fainberg <morgan.fainberg@gmail.com>
+Date: Fri, 19 Sep 2014 15:12:23 +0000 (-0700)
+X-Git-Url: https://review.openstack.org/gitweb?p=openstack%2Fkeystone.git;a=commitdiff_plain;h=bd3b5ce25f4da159de9ee591a4237865f407d7e8
+Origin: upstream, https://review.openstack.org/122768/
+Bug-Ubuntu: https://launchpad.net/bugs/1371428
+Change-Id: Ib9a1e06b2e760a97e3318263b85631c436e23141
+
+diff --git a/keystone/tests/test_keystoneclient.py b/keystone/tests/test_keystoneclient.py
+index 94e01e9..72991a1 100644
+--- a/keystone/tests/test_keystoneclient.py
++++ b/keystone/tests/test_keystoneclient.py
+@@ -1085,6 +1085,12 @@ class KeystoneClientTests(object):
+ class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
+     checkout_info = (KEYSTONECLIENT_REPO, 'master')
+ 
++    def setUp(self):
++        if os.environ.get('KSCTEST_PATH'):
++            self.skip('KSCTEST_PATH env set, running tests with local '
++                      'client instead.')
++        super(KcMasterTestCase, self).setUp()
++
+ 
+ class KcOptTestCase(KcMasterTestCase):
+     # Set KSCTEST_PATH to the keystoneclient directory, then run this test.

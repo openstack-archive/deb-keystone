@@ -1,3 +1,4 @@
 fixes-keystone-default-catalog.patch
 fix-missing-gettextutil.py-import.patch
 fixes-default-connection.patch
+Do_not_run_git-cloned_ksc_master_tests_when_local_client_specified.patch

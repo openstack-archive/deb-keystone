@@ -1,3 +1,11 @@
+keystone (2014.2~b3-2) experimental; urgency=medium
+
+  * Adds patch to avoid "git clone" when running the unit tests
+    keystone.tests.test_keystoneclient.KcMasterTestCase.*. See
+    https://review.openstack.org/122768/ for details.
+
+ -- Thomas Goirand <zigo@debian.org>  Fri, 19 Sep 2014 14:36:23 +0800
+
 keystone (2014.2~b3-1) experimental; urgency=medium
 
   * New upstream release.
