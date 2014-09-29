@@ -1,3 +1,9 @@
+keystone (2014.1.2.1-2) unstable; urgency=medium
+
+  * Updated pt_BR.po thanks to Adriano Rafael Gomes (Closes: #762471).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 29 Sep 2014 08:42:45 +0000
+
 keystone (2014.1.2.1-1) unstable; urgency=medium
 
   * Corrected new upstream point release (was wrong tag).
