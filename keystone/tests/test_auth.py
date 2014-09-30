@@ -152,6 +152,14 @@ class AuthBadRequests(AuthTest):
             self.controller._authenticate_local,
             None, {})
 
+    def test_empty_username_and_userid_in_auth(self):
+        """Verify that empty username and userID raises ValidationError."""
+        self.assertRaises(
+            exception.ValidationError,
+            self.controller._authenticate_local,
+            None, {'passwordCredentials': {'password': 'abc',
+                                           'userId': '', 'username': ''}})
+
     def test_authenticate_blank_request_body(self):
         """Verify sending empty json dict raises the right exception."""
         self.assertRaises(exception.ValidationError,
@@ -1091,6 +1099,59 @@ class AuthWithTrust(AuthTest):
         trust = self.trust_controller.get_trust(context,
                                                 new_trust['id'])['trust']
         self.assertEqual(3, trust['remaining_uses'])
+
+    def test_v2_trust_token_contains_trustor_user_id_and_impersonation(self):
+        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
+        auth_response = self.fetch_v2_token_from_trust(new_trust)
+
+        self.assertEqual(new_trust['trustee_user_id'],
+                         auth_response['access']['trust']['trustee_user_id'])
+        self.assertEqual(new_trust['trustor_user_id'],
+                         auth_response['access']['trust']['trustor_user_id'])
+        self.assertEqual(new_trust['impersonation'],
+                         auth_response['access']['trust']['impersonation'])
+        self.assertEqual(new_trust['id'],
+                         auth_response['access']['trust']['id'])
+
+        validate_response = self.controller.validate_token(
+            context=dict(is_admin=True, query_string={}),
+            token_id=auth_response['access']['token']['id'])
+        self.assertEqual(
+            new_trust['trustee_user_id'],
+            validate_response['access']['trust']['trustee_user_id'])
+        self.assertEqual(
+            new_trust['trustor_user_id'],
+            validate_response['access']['trust']['trustor_user_id'])
+        self.assertEqual(
+            new_trust['impersonation'],
+            validate_response['access']['trust']['impersonation'])
+        self.assertEqual(
+            new_trust['id'],
+            validate_response['access']['trust']['id'])
+
+    def disable_user(self, user):
+        user['enabled'] = False
+        self.identity_api.update_user(user['id'], user)
+
+    def test_trust_get_token_fails_if_trustor_disabled(self):
+        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
+        request_body = self.build_v2_token_request(self.trustee['name'],
+                                                   self.trustee['password'],
+                                                   new_trust)
+        self.disable_user(self.trustor)
+        self.assertRaises(
+            exception.Forbidden,
+            self.controller.authenticate, {}, request_body)
+
+    def test_trust_get_token_fails_if_trustee_disabled(self):
+        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
+        request_body = self.build_v2_token_request(self.trustee['name'],
+                                                   self.trustee['password'],
+                                                   new_trust)
+        self.disable_user(self.trustee)
+        self.assertRaises(
+            exception.Unauthorized,
+            self.controller.authenticate, {}, request_body)
 
 
 class TokenExpirationTest(AuthTest):

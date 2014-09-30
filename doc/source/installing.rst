@@ -38,21 +38,25 @@ It's expected that your system already has python_, pip_, and git_ available.
 .. _pip: http://www.pip-installer.org/en/latest/installing.html
 .. _git: http://git-scm.com/
 
-Clone the keystone repository::
+Clone the Keystone repository:
 
-    git clone http://github.com/openstack/keystone.git
-    cd keystone
+.. code-block:: bash
 
-Install the keystone web service::
+    $ git clone http://github.com/openstack/keystone.git
+    $ cd keystone
 
-    python setup.py install
+Install the Keystone web service:
 
-You should have all the pieces you need to run keystone installed on your
+.. code-block:: bash
+
+    $ python setup.py install
+
+You should have all the pieces you need to run Keystone installed on your
 system. The following commands should be available on the command-line path:
 
-* ``keystone`` the keystone client, used to interact with keystone
-* ``keystone-manage`` used to bootstrap keystone data
-* ``keystone-all`` used to run the keystone services
+* ``keystone`` the Keystone client, used to interact with Keystone
+* ``keystone-manage`` used to bootstrap Keystone data
+* ``keystone-all`` used to run the Keystone services
 
 You will find sample configuration files in ``etc/``:
 
@@ -63,16 +67,18 @@ You will find sample configuration files in ``etc/``:
 * ``default_catalog.templates``
 
 From here, refer to :doc:`configuration` to choose which backend drivers to
-enable and use. Once configured, you should be able to run keystone by issuing
-the command::
+enable and use. Once configured, you should be able to run Keystone by issuing
+the command:
 
-    keystone-all
+.. code-block:: bash
+
+    $ keystone-all
 
 By default, this will show logging on the console from which it was started.
-Once started, you can initialize data in keystone for use with the rest of
+Once started, you can initialize data in Keystone for use with the rest of
 OpenStack, as described in :doc:`configuringservices`.
 
-An excellent reference implementation of setting up keystone is DEVSTACK_,
+An excellent reference implementation of setting up Keystone is DEVSTACK_,
 most commonly used for development and testing setup of not only Keystone,
 but all of the core OpenStack projects.
 
@@ -87,9 +93,11 @@ Installing from packages: Ubuntu
 --------------------------------
 
 Ubuntu is providing packages for Keystone for Precise. To install keystone
-on Ubuntu::
+on Ubuntu:
 
-    sudo apt-get install keystone
+.. code-block:: bash
+
+    $ sudo apt-get install keystone
 
 In using Ubuntu's packages, the packages will set up a user account for
 the Keystone service (`keystone`), and place default configurations in
@@ -106,10 +114,12 @@ Installing from packages: Fedora
 Installing Keystone with Fedora 17 is documented at
 http://fedoraproject.org/wiki/Getting_started_with_OpenStack_on_Fedora_17.
 
-To install the packages::
+To install the packages:
 
-    sudo yum install --enablerepo=updates-testing openstack-keystone
+.. code-block:: bash
 
-Once installed, you can configure keystone based on the instructions at:
+    $ sudo yum install --enablerepo=updates-testing openstack-keystone
+
+Once installed, you can configure Keystone based on the instructions at:
 
 http://fedoraproject.org/wiki/Getting_started_with_OpenStack_on_Fedora_17#Configuring_Keystone_for_authentication

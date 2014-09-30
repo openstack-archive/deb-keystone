@@ -10,10 +10,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import ldap.dn
+import ldap
+import mock
+from testtools import matchers
+
+import os
+import shutil
+import tempfile
 
 from keystone.common import ldap as ks_ldap
+from keystone.common.ldap import core as common_ldap_core
+from keystone import config
 from keystone import tests
+from keystone.tests import default_fixtures
+from keystone.tests import fakeldap
+
+CONF = config.CONF
 
 
 class DnCompareTest(tests.BaseTestCase):
@@ -162,8 +174,166 @@ class DnCompareTest(tests.BaseTestCase):
         dn = 'ou=OpenStack,dc=example.com'
         self.assertTrue(ks_ldap.dn_startswith(descendant, dn))
 
+        descendant = 'uid=12345,ou=Users,dc=example,dc=com'
+        dn = 'ou=Users,dc=example,dc=com'
+        self.assertTrue(ks_ldap.dn_startswith(descendant, dn))
+
     def test_startswith_parsed_dns(self):
         # dn_startswith also accepts parsed DNs.
         descendant = ldap.dn.str2dn('cn=Babs Jansen,ou=OpenStack')
         dn = ldap.dn.str2dn('ou=OpenStack')
         self.assertTrue(ks_ldap.dn_startswith(descendant, dn))
+
+
+class LDAPDeleteTreeTest(tests.TestCase):
+
+    def setUp(self):
+        super(LDAPDeleteTreeTest, self).setUp()
+
+        ks_ldap.register_handler('fake://',
+                                 fakeldap.FakeLdapNoSubtreeDelete)
+        self.load_backends()
+        self.load_fixtures(default_fixtures)
+
+        self.addCleanup(self.clear_database)
+        self.addCleanup(common_ldap_core._HANDLERS.clear)
+
+    def clear_database(self):
+        for shelf in fakeldap.FakeShelves:
+            fakeldap.FakeShelves[shelf].clear()
+
+    def config_overrides(self):
+        super(LDAPDeleteTreeTest, self).config_overrides()
+        self.config_fixture.config(
+            group='identity',
+            driver='keystone.identity.backends.ldap.Identity')
+
+    def config_files(self):
+        config_files = super(LDAPDeleteTreeTest, self).config_files()
+        config_files.append(tests.dirs.tests_conf('backend_ldap.conf'))
+        return config_files
+
+    def test_deleteTree(self):
+        """Test manually deleting a tree.
+
+        Few LDAP servers support CONTROL_DELETETREE.  This test
+        exercises the alternate code paths in BaseLdap.deleteTree.
+
+        """
+        conn = self.identity_api.user.get_connection()
+        id_attr = self.identity_api.user.id_attr
+        objclass = self.identity_api.user.object_class.lower()
+        tree_dn = self.identity_api.user.tree_dn
+
+        def create_entry(name, parent_dn=None):
+            if not parent_dn:
+                parent_dn = tree_dn
+            dn = '%s=%s,%s' % (id_attr, name, parent_dn)
+            attrs = [('objectclass', [objclass, 'ldapsubentry']),
+                     (id_attr, [name])]
+            conn.add_s(dn, attrs)
+            return dn
+
+        # create 3 entries like this:
+        # cn=base
+        # cn=child,cn=base
+        # cn=grandchild,cn=child,cn=base
+        # then attempt to deleteTree(cn=base)
+        base_id = 'base'
+        base_dn = create_entry(base_id)
+        child_dn = create_entry('child', base_dn)
+        grandchild_dn = create_entry('grandchild', child_dn)
+
+        # verify that the three entries were created
+        scope = ldap.SCOPE_SUBTREE
+        filt = '(|(objectclass=*)(objectclass=ldapsubentry))'
+        entries = conn.search_s(base_dn, scope, filt,
+                                attrlist=common_ldap_core.DN_ONLY)
+        self.assertThat(entries, matchers.HasLength(3))
+        sort_ents = sorted([e[0] for e in entries], key=len, reverse=True)
+        self.assertEqual([grandchild_dn, child_dn, base_dn], sort_ents)
+
+        # verify that a non-leaf node can't be deleted directly by the
+        # LDAP server
+        self.assertRaises(ldap.NOT_ALLOWED_ON_NONLEAF,
+                          conn.delete_s, base_dn)
+        self.assertRaises(ldap.NOT_ALLOWED_ON_NONLEAF,
+                          conn.delete_s, child_dn)
+
+        # call our deleteTree implementation
+        self.identity_api.user.deleteTree(base_id)
+        self.assertRaises(ldap.NO_SUCH_OBJECT,
+                          conn.search_s, base_dn, ldap.SCOPE_BASE)
+        self.assertRaises(ldap.NO_SUCH_OBJECT,
+                          conn.search_s, child_dn, ldap.SCOPE_BASE)
+        self.assertRaises(ldap.NO_SUCH_OBJECT,
+                          conn.search_s, grandchild_dn, ldap.SCOPE_BASE)
+
+
+class SslTlsTest(tests.TestCase):
+    """Tests for the SSL/TLS functionality in keystone.common.ldap.core."""
+
+    @mock.patch.object(ks_ldap.core.KeystoneLDAPHandler, 'simple_bind_s')
+    @mock.patch.object(ldap.ldapobject.LDAPObject, 'start_tls_s')
+    def _init_ldap_connection(self, config, mock_ldap_one, mock_ldap_two):
+        # Attempt to connect to initialize python-ldap.
+        base_ldap = ks_ldap.BaseLdap(config)
+        base_ldap.get_connection()
+
+    def test_certfile_trust_tls(self):
+        # We need this to actually exist, so we create a tempfile.
+        (handle, certfile) = tempfile.mkstemp()
+        self.addCleanup(os.unlink, certfile)
+        self.addCleanup(os.close, handle)
+        self.config_fixture.config(group='ldap',
+                                   url='ldap://localhost',
+                                   use_tls=True,
+                                   tls_cacertfile=certfile)
+
+        self._init_ldap_connection(CONF)
+
+        # Ensure the cert trust option is set.
+        self.assertEqual(certfile, ldap.get_option(ldap.OPT_X_TLS_CACERTFILE))
+
+    def test_certdir_trust_tls(self):
+        # We need this to actually exist, so we create a tempdir.
+        certdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, certdir)
+        self.config_fixture.config(group='ldap',
+                                   url='ldap://localhost',
+                                   use_tls=True,
+                                   tls_cacertdir=certdir)
+
+        self._init_ldap_connection(CONF)
+
+        # Ensure the cert trust option is set.
+        self.assertEqual(certdir, ldap.get_option(ldap.OPT_X_TLS_CACERTDIR))
+
+    def test_certfile_trust_ldaps(self):
+        # We need this to actually exist, so we create a tempfile.
+        (handle, certfile) = tempfile.mkstemp()
+        self.addCleanup(os.unlink, certfile)
+        self.addCleanup(os.close, handle)
+        self.config_fixture.config(group='ldap',
+                                   url='ldaps://localhost',
+                                   use_tls=False,
+                                   tls_cacertfile=certfile)
+
+        self._init_ldap_connection(CONF)
+
+        # Ensure the cert trust option is set.
+        self.assertEqual(certfile, ldap.get_option(ldap.OPT_X_TLS_CACERTFILE))
+
+    def test_certdir_trust_ldaps(self):
+        # We need this to actually exist, so we create a tempdir.
+        certdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, certdir)
+        self.config_fixture.config(group='ldap',
+                                   url='ldaps://localhost',
+                                   use_tls=False,
+                                   tls_cacertdir=certdir)
+
+        self._init_ldap_connection(CONF)
+
+        # Ensure the cert trust option is set.
+        self.assertEqual(certdir, ldap.get_option(ldap.OPT_X_TLS_CACERTDIR))

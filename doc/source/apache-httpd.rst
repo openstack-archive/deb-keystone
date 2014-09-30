@@ -19,6 +19,13 @@
 Running Keystone in HTTPD
 =========================
 
+.. WARNING::
+
+    Running Keystone under HTTPD in the recommended (and tested) configuration does not support
+    the use of ``Transfer-Encoding: chunked``. This is due to a limitation with the WSGI spec
+    and the implementation used by ``mod_wsgi``. It is recommended that all clients assume Keystone
+    will not support ``Transfer-Encoding: chunked``.
+
 
 SSL
 ===
@@ -78,9 +85,13 @@ one of the default locations described in :doc:`configuration`.
 SELinux
 -------
 
-If you are running with SELinux enabled (and you should be) make sure that the file has the appropriate SELinux context to access the linked file.  If you have the file in /var/www/cgi-bin,  you can do this by running::
+If you are running with SELinux enabled (and you should be) make sure that the
+file has the appropriate SELinux context to access the linked file. If you
+have the file in /var/www/cgi-bin,  you can do this by running:
 
-    sudo restorecon /var/www/cgi-bin
+.. code-block:: bash
+
+    $ sudo restorecon /var/www/cgi-bin
 
 Putting it somewhere else requires you set up your SELinux policy accordingly.
 

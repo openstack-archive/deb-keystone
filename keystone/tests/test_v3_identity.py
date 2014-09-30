@@ -941,6 +941,45 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.delete('/roles/%(role_id)s' % {
             'role_id': self.role_id})
 
+    def _create_new_user_and_assign_role_on_project(self):
+        """Create a new user and assign user a role on a project."""
+        # Create a new user
+        new_user = self.new_user_ref(domain_id=self.domain_id)
+        user_ref = self.identity_api.create_user(new_user)
+        # Assign the user a role on the project
+        collection_url = (
+            '/projects/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': self.project_id,
+                'user_id': user_ref['id']})
+        member_url = ('%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id})
+        self.put(member_url, expected_status=204)
+        # Check the user has the role assigned
+        self.head(member_url, expected_status=204)
+        return member_url, user_ref
+
+    # TODO(lbragstad): Move this test to tests/test_v3_assignment.py
+    def test_delete_user_before_removing_role_assignment_succeeds(self):
+        """Call ``DELETE`` on the user before the role assignment."""
+        member_url, user = self._create_new_user_and_assign_role_on_project()
+        # Delete the user from identity backend
+        self.identity_api.driver.delete_user(user['id'])
+        # Clean up the role assignment
+        self.delete(member_url, expected_status=204)
+        # Make sure the role is gone
+        self.head(member_url, expected_status=404)
+
+    # TODO(lbragstad): Move this test to tests/test_v3_assignment.py
+    def test_delete_user_and_check_role_assignment_fails(self):
+        """Call ``DELETE`` on the user and check the role assignment."""
+        member_url, user = self._create_new_user_and_assign_role_on_project()
+        # Delete the user from identity backend
+        self.identity_api.driver.delete_user(user['id'])
+        # We should get a 404 when looking for the user in the identity
+        # backend because we're not performing a delete operation on the role.
+        self.head(member_url, expected_status=404)
+
     def test_crud_user_project_role_grants(self):
         collection_url = (
             '/projects/%(project_id)s/users/%(user_id)s/roles' % {
@@ -1100,6 +1139,53 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             'role_id': self.role_id}
 
         self.put(member_url, expected_status=404)
+
+    def test_token_revoked_once_group_role_grant_revoked(self):
+        """Test token is revoked when group role grant is revoked
+
+        When a role granted to a group is revoked for a given scope,
+        all tokens related to this scope and belonging to one of the members
+        of this group should be revoked.
+
+        The revocation should be independently to the presence
+        of the revoke API.
+        """
+
+        # If enabled, the revoke API will revoke tokens first.
+        # This ensures that tokens are revoked even without revoke API.
+        self.assignment_api.revoke_api = None
+
+        # creates grant from group on project.
+        self.assignment_api.create_grant(role_id=self.role['id'],
+                                         project_id=self.project['id'],
+                                         group_id=self.group['id'])
+
+        # adds user to the group.
+        self.identity_api.add_user_to_group(user_id=self.user['id'],
+                                            group_id=self.group['id'])
+
+        # creates a token for the user
+        auth_body = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        token_resp = self.post('/auth/tokens', body=auth_body)
+        token = token_resp.headers.get('x-subject-token')
+
+        # validates the returned token; it should be valid.
+        self.head('/auth/tokens',
+                  headers={'x-subject-token': token},
+                  expected_status=200)
+
+        # revokes the grant from group on project.
+        self.assignment_api.delete_grant(role_id=self.role['id'],
+                                         project_id=self.project['id'],
+                                         group_id=self.group['id'])
+
+        # validates the same token again; it should not longer be valid.
+        self.head('/auth/tokens',
+                  headers={'x-subject-token': token},
+                  expected_status=404)
 
     def test_get_role_assignments(self):
         """Call ``GET /role_assignments``.

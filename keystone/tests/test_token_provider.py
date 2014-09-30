@@ -34,7 +34,9 @@ SAMPLE_V2_TOKEN = {
     "access": {
         "trust": {
             "id": "abc123",
-            "trustee_user_id": "123456"
+            "trustee_user_id": "123456",
+            "trustor_user_id": "333333",
+            "impersonation": False
         },
         "serviceCatalog": [
             {
@@ -341,7 +343,9 @@ SAMPLE_V2_TOKEN_WITH_EMBEDED_VERSION = {
     "access": {
         "trust": {
             "id": "abc123",
-            "trustee_user_id": "123456"
+            "trustee_user_id": "123456",
+            "trustor_user_id": "333333",
+            "impersonation": False
         },
         "serviceCatalog": [
             {
@@ -730,7 +734,7 @@ class TestTokenProvider(tests.TestCase):
                           'bogus')
 
     def test_default_token_format(self):
-        self.assertEqual(token.provider.PKIZ_PROVIDER,
+        self.assertEqual(token.provider.UUID_PROVIDER,
                          token.provider.Manager.get_token_provider())
 
     def test_uuid_token_format_and_no_provider(self):

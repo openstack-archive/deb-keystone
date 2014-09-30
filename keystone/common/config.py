@@ -77,12 +77,14 @@ FILE_OPTIONS = {
                         'to set this value if the base URL contains a path '
                         '(e.g. /prefix/v2.0) or the endpoint should be found '
                         'on a different server.'),
-        cfg.IntOpt('public_workers', default=1,
+        cfg.IntOpt('public_workers',
                    help='The number of worker processes to serve the public '
-                        'WSGI application'),
-        cfg.IntOpt('admin_workers', default=1,
+                        'WSGI application. Defaults to number of CPUs '
+                        '(minimum of 2).'),
+        cfg.IntOpt('admin_workers',
                    help='The number of worker processes to serve the admin '
-                        'WSGI application'),
+                        'WSGI application. Defaults to number of CPUs '
+                        '(minimum of 2).'),
         # default max request size is 112k
         cfg.IntOpt('max_request_body_size', default=114688,
                    help='Enforced by optional sizelimit middleware '
@@ -239,12 +241,12 @@ FILE_OPTIONS = {
                    help='Controls the token construction, validation, and '
                         'revocation operations. Core providers are '
                         '"keystone.token.providers.[pkiz|pki|uuid].'
-                        'Provider". The default provider is pkiz.'),
+                        'Provider". The default provider is uuid.'),
         cfg.StrOpt('driver',
                    default='keystone.token.persistence.backends.sql.Token',
                    help='Token persistence backend driver.'),
         cfg.BoolOpt('caching', default=True,
-                    help='Toggle for token system cacheing. This has no '
+                    help='Toggle for token system caching. This has no '
                          'effect unless global caching is enabled.'),
         cfg.IntOpt('revocation_cache_time', default=3600,
                    help='Time to cache the revocation list and the revocation '
@@ -281,7 +283,7 @@ FILE_OPTIONS = {
                         'expiration before a revocation event may be removed '
                         'from the backend.'),
         cfg.BoolOpt('caching', default=True,
-                    help='Toggle for revocation event cacheing. This has no '
+                    help='Toggle for revocation event caching. This has no '
                          'effect unless global caching is enabled.'),
     ],
     'cache': [
@@ -305,7 +307,8 @@ FILE_OPTIONS = {
         # backend.
         cfg.StrOpt('backend', default='keystone.common.cache.noop',
                    help='Dogpile.cache backend module. It is recommended '
-                        'that Memcache (dogpile.cache.memcached) or Redis '
+                        'that Memcache with pooling '
+                        '(keystone.cache.memcache_pool) or Redis '
                         '(dogpile.cache.redis) be used in production '
                         'deployments.  Small workloads (single process) '
                         'like devstack can use the dogpile.cache.memory '
@@ -330,6 +333,34 @@ FILE_OPTIONS = {
                          'cache-backend get/set/delete calls with the '
                          'keys/values.  Typically this should be left set '
                          'to false.'),
+        cfg.ListOpt('memcache_servers', default=['localhost:11211'],
+                    help='Memcache servers in the format of "host:port".'
+                    ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
+                    ' backends only)'),
+        cfg.IntOpt('memcache_dead_retry',
+                   default=5 * 60,
+                   help='Number of seconds memcached server is considered dead'
+                   ' before it is tried again. (dogpile.cache.memcache and'
+                   ' keystone.cache.memcache_pool backends only)'),
+        cfg.IntOpt('memcache_socket_timeout',
+                   default=3,
+                   help='Timeout in seconds for every call to a server.'
+                   ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
+                   ' backends only)'),
+        cfg.IntOpt('memcache_pool_maxsize',
+                   default=10,
+                   help='Max total number of open connections to every'
+                   ' memcached server. (keystone.cache.memcache_pool backend'
+                   ' only)'),
+        cfg.IntOpt('memcache_pool_unused_timeout',
+                   default=60,
+                   help='Number of seconds a connection to memcached is held'
+                   ' unused in the pool before it is closed.'
+                   ' (keystone.cache.memcache_pool backend only)'),
+        cfg.IntOpt('memcache_pool_connection_get_timeout',
+                   default=10,
+                   help='Number of seconds that an operation will wait to get '
+                        'a memcache client connection.'),
     ],
     'ssl': [
         cfg.BoolOpt('enable', default=False,
@@ -516,7 +547,8 @@ FILE_OPTIONS = {
         cfg.StrOpt('user_objectclass', default='inetOrgPerson',
                    help='LDAP objectclass for users.'),
         cfg.StrOpt('user_id_attribute', default='cn',
-                   help='LDAP attribute mapped to user id.'),
+                   help='LDAP attribute mapped to user id. '
+                        'WARNING: must not be a multivalued attribute.'),
         cfg.StrOpt('user_name_attribute', default='sn',
                    help='LDAP attribute mapped to user name.'),
         cfg.StrOpt('user_mail_attribute', default='mail',
@@ -768,10 +800,35 @@ FILE_OPTIONS = {
     'memcache': [
         cfg.ListOpt('servers', default=['localhost:11211'],
                     help='Memcache servers in the format of "host:port".'),
-        cfg.IntOpt('max_compare_and_set_retry', default=16,
-                   help='Number of compare-and-set attempts to make when '
-                        'using compare-and-set in the token memcache back '
-                        'end.'),
+        cfg.IntOpt('dead_retry',
+                   default=5 * 60,
+                   help='Number of seconds memcached server is considered dead'
+                        ' before it is tried again. This is used by the key '
+                        'value store system (e.g. token '
+                        'pooled memcached persistence backend).'),
+        cfg.IntOpt('socket_timeout',
+                   default=3,
+                   help='Timeout in seconds for every call to a server. This '
+                        'is used by the key value store system (e.g. token '
+                        'pooled memcached persistence backend).'),
+        cfg.IntOpt('pool_maxsize',
+                   default=10,
+                   help='Max total number of open connections to every'
+                        ' memcached server. This is used by the key value '
+                        'store system (e.g. token pooled memcached '
+                        'persistence backend).'),
+        cfg.IntOpt('pool_unused_timeout',
+                   default=60,
+                   help='Number of seconds a connection to memcached is held'
+                        ' unused in the pool before it is closed. This is used'
+                        ' by the key value store system (e.g. token pooled '
+                        'memcached persistence backend).'),
+        cfg.IntOpt('pool_connection_get_timeout',
+                   default=10,
+                   help='Number of seconds that an operation will wait to get '
+                        'a memcache client connection. This is used by the '
+                        'key value store system (e.g. token pooled memcached '
+                        'persistence backend).'),
     ],
     'catalog': [
         cfg.StrOpt('template_file',
@@ -791,6 +848,17 @@ FILE_OPTIONS = {
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a catalog collection.'),
+        cfg.ListOpt('endpoint_substitution_whitelist',
+                    default=['tenant_id', 'user_id', 'public_bind_host',
+                             'admin_bind_host', 'compute_host', 'compute_port',
+                             'admin_port', 'public_port', 'public_endpoint',
+                             'admin_endpoint'],
+                    help='(Deprecated) List of possible substitutions for use '
+                         'in formatting endpoints. Use caution when modifying '
+                         'this list. It will give users with permission to '
+                         'create endpoints the ability to see those values '
+                         'in your configuration file. This option will be '
+                         'removed in Juno.'),
     ],
     'kvs': [
         cfg.ListOpt('backends', default=[],
@@ -830,6 +898,45 @@ FILE_OPTIONS = {
                    default=_KEYFILE,
                    help='Path of the keyfile for SAML signing. Note, the path '
                         'cannot contain a comma.'),
+        cfg.StrOpt('idp_entity_id',
+                   help='Entity ID value for unique Identity Provider '
+                        'identification. Usually FQDN is set with a suffix. '
+                        'A value is required to generate IDP Metadata. '
+                        'For example: https://keystone.example.com/v3/'
+                        'OS-FEDERATION/saml2/idp'),
+        cfg.StrOpt('idp_sso_endpoint',
+                   help='Identity Provider Single-Sign-On service value, '
+                        'required in the Identity Provider\'s metadata. '
+                        'A value is required to generate IDP Metadata. '
+                        'For example: https://keystone.example.com/v3/'
+                        'OS-FEDERATION/saml2/sso'),
+        cfg.StrOpt('idp_lang', default='en',
+                   help='Language used by the organization.'),
+        cfg.StrOpt('idp_organization_name',
+                   help='Organization name the installation belongs to.'),
+        cfg.StrOpt('idp_organization_display_name',
+                   help='Organization name to be displayed.'),
+        cfg.StrOpt('idp_organization_url',
+                   help='URL of the organization.'),
+        cfg.StrOpt('idp_contact_company',
+                   help='Company of contact person.'),
+        cfg.StrOpt('idp_contact_name',
+                   help='Given name of contact person'),
+        cfg.StrOpt('idp_contact_surname',
+                   help='Surname of contact person.'),
+        cfg.StrOpt('idp_contact_email',
+                   help='Email address of contact person.'),
+        cfg.StrOpt('idp_contact_telephone',
+                   help='Telephone number of contact person.'),
+        cfg.StrOpt('idp_contact_type', default='other',
+                   help='Contact type. Allowed values are: '
+                        'technical, support, administrative '
+                        'billing, and other'),
+        cfg.StrOpt('idp_metadata_path',
+                   default='/etc/keystone/saml2_idp_metadata.xml',
+                   help='Path to the Identity Provider Metadata file. '
+                        'This file should be generated with the '
+                        'keystone-manage saml_idp_metadata command.'),
     ],
 }
 

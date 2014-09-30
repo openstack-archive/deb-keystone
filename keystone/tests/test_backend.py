@@ -35,7 +35,6 @@ from keystone.token import provider
 
 CONF = config.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
-TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 NULL_OBJECT = object()
 
 
@@ -552,6 +551,46 @@ class IdentityTests(object):
             {'group_id': new_group['id'], 'project_id': new_project['id'],
              'role_id': 'admin'},
             assignment_list)
+
+    def test_list_group_role_assignment(self):
+        # When a group role assignment is created and the role assignments are
+        # listed then the group role assignment is included in the list.
+
+        MEMBER_ROLE_ID = 'member'
+
+        def get_member_assignments():
+            assignments = self.assignment_api.list_role_assignments()
+            return filter(lambda x: x['role_id'] == MEMBER_ROLE_ID,
+                          assignments)
+
+        orig_member_assignments = get_member_assignments()
+
+        # Create a group.
+        new_group = {
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'name': self.getUniqueString(prefix='tlgra')}
+        new_group = self.identity_api.create_group(new_group)
+
+        # Create a project.
+        new_project = {
+            'id': uuid.uuid4().hex,
+            'name': self.getUniqueString(prefix='tlgra'),
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.assignment_api.create_project(new_project['id'], new_project)
+
+        # Assign a role to the group.
+        self.assignment_api.create_grant(
+            group_id=new_group['id'], project_id=new_project['id'],
+            role_id=MEMBER_ROLE_ID)
+
+        # List role assignments
+        new_member_assignments = get_member_assignments()
+
+        expected_member_assignments = orig_member_assignments + [{
+            'group_id': new_group['id'], 'project_id': new_project['id'],
+            'role_id': MEMBER_ROLE_ID}]
+        self.assertThat(new_member_assignments,
+                        matchers.Equals(expected_member_assignments))
 
     def test_list_role_assignments_bad_role(self):
         assignment_list = self.assignment_api.list_role_assignments_for_role(
@@ -1975,6 +2014,7 @@ class IdentityTests(object):
         self.assertIn(self.tenant_mtu['id'], project_ids)
         self.assertIn(self.tenant_service['id'], project_ids)
 
+    @tests.skip_if_no_multiple_domains_support
     def test_list_projects_for_alternate_domain(self):
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.assignment_api.create_domain(domain1['id'], domain1)
@@ -2441,6 +2481,7 @@ class IdentityTests(object):
                           group1['id'],
                           group1)
 
+    @tests.skip_if_no_multiple_domains_support
     def test_project_crud(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2520,6 +2561,7 @@ class IdentityTests(object):
                           self.assignment_api.get_domain,
                           domain['id'])
 
+    @tests.skip_if_no_multiple_domains_support
     def test_create_domain_case_sensitivity(self):
         # create a ref with a lowercase name
         ref = {
@@ -2655,6 +2697,7 @@ class IdentityTests(object):
         self.assertEqual(3, len(user_projects))
 
     @tests.skip_if_cache_disabled('assignment')
+    @tests.skip_if_no_multiple_domains_support
     def test_domain_rename_invalidates_get_domain_by_name_cache(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2724,6 +2767,7 @@ class IdentityTests(object):
                           domain_id)
 
     @tests.skip_if_cache_disabled('assignment')
+    @tests.skip_if_no_multiple_domains_support
     def test_project_rename_invalidates_get_project_by_name_cache(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2743,6 +2787,7 @@ class IdentityTests(object):
                           domain['id'])
 
     @tests.skip_if_cache_disabled('assignment')
+    @tests.skip_if_no_multiple_domains_support
     def test_cache_layer_project_crud(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
@@ -2897,6 +2942,7 @@ class IdentityTests(object):
             group_id=uuid.uuid4().hex,
             project_id=self.tenant_bar['id'])
 
+    @tests.skip_if_no_multiple_domains_support
     def test_get_default_domain_by_name(self):
         domain_name = 'default'
 
@@ -2954,6 +3000,46 @@ class IdentityTests(object):
 
         user_ref = self.identity_api.get_user(user['id'])
         self.assertDictEqual(user_ref, updated_user_ref)
+
+    def test_delete_group_removes_role_assignments(self):
+        # When a group is deleted any role assignments for the group are
+        # removed.
+
+        MEMBER_ROLE_ID = 'member'
+
+        def get_member_assignments():
+            assignments = self.assignment_api.list_role_assignments()
+            return filter(lambda x: x['role_id'] == MEMBER_ROLE_ID,
+                          assignments)
+
+        orig_member_assignments = get_member_assignments()
+
+        # Create a group.
+        new_group = {
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'name': self.getUniqueString(prefix='tdgrra')}
+        new_group = self.identity_api.create_group(new_group)
+
+        # Create a project.
+        new_project = {
+            'id': uuid.uuid4().hex,
+            'name': self.getUniqueString(prefix='tdgrra'),
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.assignment_api.create_project(new_project['id'], new_project)
+
+        # Assign a role to the group.
+        self.assignment_api.create_grant(
+            group_id=new_group['id'], project_id=new_project['id'],
+            role_id=MEMBER_ROLE_ID)
+
+        # Delete the group.
+        self.identity_api.delete_group(new_group['id'])
+
+        # Check that the role assignment for the group is gone
+        member_assignments = get_member_assignments()
+
+        self.assertThat(member_assignments,
+                        matchers.Equals(orig_member_assignments))
 
 
 class TokenTests(object):
@@ -3759,6 +3845,50 @@ class CatalogTests(object):
         self.assertRaises(exception.ServiceNotFound,
                           self.catalog_api.get_service,
                           service_id)
+
+    def _create_random_service(self):
+        service_id = uuid.uuid4().hex
+        new_service = {
+            'id': service_id,
+            'type': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        return self.catalog_api.create_service(service_id, new_service.copy())
+
+    def test_service_filtering(self):
+        target_service = self._create_random_service()
+        unrelated_service1 = self._create_random_service()
+        unrelated_service2 = self._create_random_service()
+
+        # filter by type
+        hint_for_type = driver_hints.Hints()
+        hint_for_type.add_filter(name="type", value=target_service['type'])
+        services = self.catalog_api.list_services(hint_for_type)
+
+        self.assertEqual(1, len(services))
+        filtered_service = services[0]
+        self.assertEqual(target_service['type'], filtered_service['type'])
+        self.assertEqual(target_service['id'], filtered_service['id'])
+
+        # filter should have been removed, since it was already used by the
+        # backend
+        self.assertEqual(0, len(hint_for_type.filters))
+
+        # the backend shouldn't filter by name, since this is handled by the
+        # front end
+        hint_for_name = driver_hints.Hints()
+        hint_for_name.add_filter(name="name", value=target_service['name'])
+        services = self.catalog_api.list_services(hint_for_name)
+
+        self.assertEqual(3, len(services))
+
+        # filter should still be there, since it wasn't used by the backend
+        self.assertEqual(1, len(hint_for_name.filters))
+
+        self.catalog_api.delete_service(target_service['id'])
+        self.catalog_api.delete_service(unrelated_service1['id'])
+        self.catalog_api.delete_service(unrelated_service2['id'])
 
     @tests.skip_if_cache_disabled('catalog')
     def test_cache_layer_service_crud(self):

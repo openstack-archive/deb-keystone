@@ -375,6 +375,10 @@ class MappedGroupNotFound(UnexpectedError):
                              "%(mapping_id)s was not found in the backend.")
 
 
+class MetadataFileError(UnexpectedError):
+    message_format = _("Error while reading metadata file, %(reason)s")
+
+
 class NotImplemented(Error):
     message_format = _("The action you have requested has not"
                        " been implemented.")
@@ -392,6 +396,12 @@ class Gone(Error):
 class ConfigFileNotFound(UnexpectedError):
     debug_message_format = _("The Keystone configuration file %(config_file)s "
                              "could not be found.")
+
+
+class MultipleSQLDriversInConfig(UnexpectedError):
+    message_format = _('The Keystone domain configuration file '
+                       '%(config_file)s defines an additional SQL driver - '
+                       'only one is permitted.')
 
 
 class MigrationNotProvided(Exception):

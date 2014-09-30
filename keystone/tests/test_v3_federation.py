@@ -34,6 +34,7 @@ from keystone import exception
 from keystone import notifications
 from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
+from keystone.tests import federation_fixtures
 from keystone.tests import mapping_fixtures
 from keystone.tests import test_v3
 
@@ -1651,6 +1652,11 @@ def _is_xmlsec1_installed():
     return not bool(p.wait())
 
 
+def _load_xml(filename):
+    with open(os.path.join(XMLDIR, filename), 'r') as xml:
+        return xml.read()
+
+
 class SAMLGenerationTests(FederationTests):
 
     ISSUER = 'https://acme.com/FIM/sps/openstack/saml20'
@@ -1658,15 +1664,13 @@ class SAMLGenerationTests(FederationTests):
     SUBJECT = 'test_user'
     ROLES = ['admin', 'member']
     PROJECT = 'development'
+    SAML_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2'
+    ASSERTION_VERSION = "2.0"
 
     def setUp(self):
         super(SAMLGenerationTests, self).setUp()
         self.signed_assertion = saml2.create_class_from_xml_string(
-            saml.Assertion, self._load_xml('signed_saml2_assertion.xml'))
-
-    def _load_xml(self, filename):
-        with open(os.path.join(XMLDIR, filename), 'r') as xml:
-            return xml.read()
+            saml.Assertion, _load_xml('signed_saml2_assertion.xml'))
 
     def test_samlize_token_values(self):
         """Test the SAML generator produces a SAML object.
@@ -1700,6 +1704,22 @@ class SAMLGenerationTests(FederationTests):
         project_attribute = assertion.attribute_statement[0].attribute[2]
         self.assertEqual(self.PROJECT,
                          project_attribute.attribute_value[0].text)
+
+    def test_verify_assertion_object(self):
+        """Test if the Assertion object is build properly.
+
+        The Assertion doesn't need to be signed in this test, so
+        _sign_assertion method is patched and doesn't alter the assertion.
+
+        """
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               side_effect=lambda x: x):
+            generator = keystone_idp.SAMLGenerator()
+            response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                               self.SUBJECT, self.ROLES,
+                                               self.PROJECT)
+        assertion = response.assertion
+        self.assertEqual(self.ASSERTION_VERSION, assertion.version)
 
     def test_valid_saml_xml(self):
         """Test the generated SAML object can become valid XML.
@@ -1761,3 +1781,261 @@ class SAMLGenerationTests(FederationTests):
         # match it with the key that we used.
         cert_text = cert_text.replace(os.linesep, '')
         self.assertEqual(idp_public_key, cert_text)
+
+    def _create_generate_saml_request(self, token_id, region_id):
+        return {
+            "auth": {
+                "identity": {
+                    "methods": [
+                        "token"
+                    ],
+                    "token": {
+                        "id": token_id
+                    }
+                },
+                "scope": {
+                    "region": {
+                        "id": region_id
+                    }
+                }
+            }
+        }
+
+    def _create_region_with_url(self):
+        ref = self.new_region_ref()
+        ref['url'] = self.RECIPIENT
+        r = self.post('/regions', body={'region': ref})
+        return r.json['region']['id']
+
+    def _fetch_valid_token(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_id=self.project['id'])
+        resp = self.v3_authenticate_token(auth_data)
+        token_id = resp.headers.get('X-Subject-Token')
+        return token_id
+
+    def test_generate_saml_route(self):
+        """Test that the SAML generation endpoint produces XML.
+
+        The SAML endpoint /v3/auth/OS-FEDERATION/saml2 should take as input,
+        a scoped token ID, and a region ID.
+        The controller should fetch details about the user from the token,
+        and details about the service provider from the region.
+        This should be enough information to invoke the SAML generator and
+        provide a valid SAML (XML) document back.
+
+        """
+        CONF.saml.idp_entity_id = self.ISSUER
+        region_id = self._create_region_with_url()
+        token_id = self._fetch_valid_token()
+        body = self._create_generate_saml_request(token_id, region_id)
+
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               return_value=self.signed_assertion):
+            http_response = self.post(self.SAML_GENERATION_ROUTE, body=body,
+                                      response_content_type='text/xml',
+                                      expected_status=200)
+
+        response = etree.fromstring(http_response.result)
+        issuer = response[0]
+        assertion = response[2]
+
+        self.assertEqual(self.RECIPIENT, response.get('Destination'))
+        self.assertEqual(self.ISSUER, issuer.text)
+
+        # NOTE(stevemar): We should test this against expected values,
+        # but the self.xyz attribute names are uuids, and we mock out
+        # the result. Ideally we should update the mocked result with
+        # some known data, and create the roles/project/user before
+        # these tests run.
+        user_attribute = assertion[4][0]
+        self.assertIsInstance(user_attribute[0].text, str)
+
+        role_attribute = assertion[4][1]
+        self.assertIsInstance(role_attribute[0].text, str)
+
+        project_attribute = assertion[4][2]
+        self.assertIsInstance(project_attribute[0].text, str)
+
+    def test_invalid_scope_body(self):
+        """Test that missing the scope in request body raises an exception.
+
+        Raises exception.SchemaValidationError() - error code 400
+
+        """
+
+        region_id = uuid.uuid4().hex
+        token_id = uuid.uuid4().hex
+        body = self._create_generate_saml_request(token_id, region_id)
+        del body['auth']['scope']
+
+        self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=400)
+
+    def test_invalid_token_body(self):
+        """Test that missing the token in request body raises an exception.
+
+        Raises exception.SchemaValidationError() - error code 400
+
+        """
+
+        region_id = uuid.uuid4().hex
+        token_id = uuid.uuid4().hex
+        body = self._create_generate_saml_request(token_id, region_id)
+        del body['auth']['identity']['token']
+
+        self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=400)
+
+    def test_region_not_found(self):
+        """Test that an invalid region in the request body raises an exception.
+
+        Raises exception.RegionNotFound() - error code 404
+
+        """
+
+        region_id = uuid.uuid4().hex
+        token_id = self._fetch_valid_token()
+        body = self._create_generate_saml_request(token_id, region_id)
+        self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=404)
+
+    def test_token_not_found(self):
+        """Test that an invalid token in the request body raises an exception.
+
+        Raises exception.TokenNotFound() - error code 404
+
+        """
+
+        region_id = self._create_region_with_url()
+        token_id = uuid.uuid4().hex
+        body = self._create_generate_saml_request(token_id, region_id)
+        self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=404)
+
+
+class IdPMetadataGenerationTests(FederationTests):
+    """A class for testing Identity Provider Metadata generation."""
+
+    METADATA_URL = '/OS-FEDERATION/saml2/metadata'
+
+    def setUp(self):
+        super(IdPMetadataGenerationTests, self).setUp()
+        self.generator = keystone_idp.MetadataGenerator()
+
+    def config_overrides(self):
+        super(IdPMetadataGenerationTests, self).config_overrides()
+        self.config_fixture.config(
+            group='saml',
+            idp_entity_id=federation_fixtures.IDP_ENTITY_ID,
+            idp_sso_endpoint=federation_fixtures.IDP_SSO_ENDPOINT,
+            idp_organization_name=federation_fixtures.IDP_ORGANIZATION_NAME,
+            idp_organization_display_name=(
+                federation_fixtures.IDP_ORGANIZATION_DISPLAY_NAME),
+            idp_organization_url=federation_fixtures.IDP_ORGANIZATION_URL,
+            idp_contact_company=federation_fixtures.IDP_CONTACT_COMPANY,
+            idp_contact_name=federation_fixtures.IDP_CONTACT_GIVEN_NAME,
+            idp_contact_surname=federation_fixtures.IDP_CONTACT_SURNAME,
+            idp_contact_email=federation_fixtures.IDP_CONTACT_EMAIL,
+            idp_contact_telephone=(
+                federation_fixtures.IDP_CONTACT_TELEPHONE_NUMBER),
+            idp_contact_type=federation_fixtures.IDP_CONTACT_TYPE)
+
+    def test_check_entity_id(self):
+        metadata = self.generator.generate_metadata()
+        self.assertEqual(federation_fixtures.IDP_ENTITY_ID, metadata.entity_id)
+
+    def test_metadata_validity(self):
+        """Call md.EntityDescriptor method that does internal verification."""
+        self.generator.generate_metadata().verify()
+
+    def test_serialize_metadata_object(self):
+        """Check whether serialization doesn't raise any exceptions."""
+        self.generator.generate_metadata().to_string()
+        # TODO(marek-denis): Check values here
+
+    def test_check_idp_sso(self):
+        metadata = self.generator.generate_metadata()
+        idpsso_descriptor = metadata.idpsso_descriptor
+        self.assertIsNotNone(metadata.idpsso_descriptor)
+        self.assertEqual(federation_fixtures.IDP_SSO_ENDPOINT,
+                         idpsso_descriptor.single_sign_on_service.location)
+
+        self.assertIsNotNone(idpsso_descriptor.organization)
+        organization = idpsso_descriptor.organization
+        self.assertEqual(federation_fixtures.IDP_ORGANIZATION_DISPLAY_NAME,
+                         organization.organization_display_name.text)
+        self.assertEqual(federation_fixtures.IDP_ORGANIZATION_NAME,
+                         organization.organization_name.text)
+        self.assertEqual(federation_fixtures.IDP_ORGANIZATION_URL,
+                         organization.organization_url.text)
+
+        self.assertIsNotNone(idpsso_descriptor.contact_person)
+        contact_person = idpsso_descriptor.contact_person
+
+        self.assertEqual(federation_fixtures.IDP_CONTACT_GIVEN_NAME,
+                         contact_person.given_name.text)
+        self.assertEqual(federation_fixtures.IDP_CONTACT_SURNAME,
+                         contact_person.sur_name.text)
+        self.assertEqual(federation_fixtures.IDP_CONTACT_EMAIL,
+                         contact_person.email_address.text)
+        self.assertEqual(federation_fixtures.IDP_CONTACT_TELEPHONE_NUMBER,
+                         contact_person.telephone_number.text)
+        self.assertEqual(federation_fixtures.IDP_CONTACT_TYPE,
+                         contact_person.contact_type)
+
+    def test_metadata_no_organization(self):
+        self.config_fixture.config(
+            group='saml',
+            idp_organization_display_name=None,
+            idp_organization_url=None,
+            idp_organization_name=None)
+        metadata = self.generator.generate_metadata()
+        idpsso_descriptor = metadata.idpsso_descriptor
+        self.assertIsNotNone(metadata.idpsso_descriptor)
+        self.assertIsNone(idpsso_descriptor.organization)
+        self.assertIsNotNone(idpsso_descriptor.contact_person)
+
+    def test_metadata_no_contact_person(self):
+        self.config_fixture.config(
+            group='saml',
+            idp_contact_name=None,
+            idp_contact_surname=None,
+            idp_contact_email=None,
+            idp_contact_telephone=None)
+        metadata = self.generator.generate_metadata()
+        idpsso_descriptor = metadata.idpsso_descriptor
+        self.assertIsNotNone(metadata.idpsso_descriptor)
+        self.assertIsNotNone(idpsso_descriptor.organization)
+        self.assertEqual([], idpsso_descriptor.contact_person)
+
+    def test_metadata_invalid_contact_type(self):
+        self.config_fixture.config(
+            group='saml',
+            idp_contact_type="invalid")
+        self.assertRaises(exception.ValidationError,
+                          self.generator.generate_metadata)
+
+    def test_metadata_invalid_idp_sso_endpoint(self):
+        self.config_fixture.config(
+            group='saml',
+            idp_sso_endpoint=None)
+        self.assertRaises(exception.ValidationError,
+                          self.generator.generate_metadata)
+
+    def test_metadata_invalid_idp_entity_id(self):
+        self.config_fixture.config(
+            group='saml',
+            idp_entity_id=None)
+        self.assertRaises(exception.ValidationError,
+                          self.generator.generate_metadata)
+
+    def test_get_metadata_with_no_metadata_file_configured(self):
+        self.get(self.METADATA_URL, expected_status=500)
+
+    def test_get_metadata(self):
+        CONF.saml.idp_metadata_path = XMLDIR + '/idp_saml2_metadata.xml'
+        r = self.get(self.METADATA_URL, response_content_type='text/xml',
+                     expected_status=200)
+        self.assertEqual('text/xml', r.headers.get('Content-Type'))
+
+        reference_file = _load_xml('idp_saml2_metadata.xml')
+        self.assertEqual(reference_file, r.result)

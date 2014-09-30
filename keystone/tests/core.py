@@ -29,7 +29,6 @@ import fixtures
 from oslo.config import fixture as config_fixture
 import oslotest.base as oslotest
 from oslotest import mockpatch
-from paste import deploy
 import six
 from testtools import testcase
 import webob
@@ -48,10 +47,12 @@ from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
 from keystone.common import utils as common_utils
 from keystone import config
+from keystone import controllers
 from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
 from keystone.openstack.common import log
+from keystone import service
 from keystone.tests import ksfixtures
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
@@ -214,6 +215,19 @@ def skip_if_cache_disabled(*sections):
     return wrapper
 
 
+def skip_if_no_multiple_domains_support(f):
+    """This decorator is used to skip a test if an identity driver
+    does not support multiple domains.
+    """
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        test_obj = args[0]
+        if not test_obj.identity_api.multiple_domains_supported:
+                raise testcase.TestSkipped('No multiple domains support')
+        return f(*args, **kwargs)
+    return wrapper
+
+
 class UnexpectedExit(Exception):
     pass
 
@@ -327,8 +341,8 @@ class TestCase(BaseTestCase):
         return copy.copy(self._config_file_list)
 
     def config_overrides(self):
-        certfile = 'examples/pki/certs/signing_cert.pem'
-        keyfile = 'examples/pki/private/signing_key.pem'
+        signing_certfile = 'examples/pki/certs/signing_cert.pem'
+        signing_keyfile = 'examples/pki/private/signing_key.pem'
         # Exercise multiple worker process code paths
         self.config_fixture.config(public_workers=2)
         self.config_fixture.config(admin_workers=2)
@@ -356,7 +370,8 @@ class TestCase(BaseTestCase):
             group='revoke',
             driver='keystone.contrib.revoke.backends.kvs.Revoke')
         self.config_fixture.config(
-            group='signing', certfile=certfile, keyfile=keyfile,
+            group='signing', certfile=signing_certfile,
+            keyfile=signing_keyfile,
             ca_certs='examples/pki/certs/cacert.pem')
         self.config_fixture.config(
             group='token',
@@ -365,7 +380,7 @@ class TestCase(BaseTestCase):
             group='trust',
             driver='keystone.trust.backends.kvs.Trust')
         self.config_fixture.config(
-            group='saml', certfile=certfile, keyfile=keyfile)
+            group='saml', certfile=signing_certfile, keyfile=signing_keyfile)
         self.config_fixture.config(
             default_log_levels=[
                 'amqp=WARN',
@@ -379,6 +394,8 @@ class TestCase(BaseTestCase):
                 'requests.packages.urllib3.connectionpool=WARN',
                 'routes.middleware=INFO',
                 'stevedore.extension=INFO',
+                'keystone.notifications=INFO',
+                'keystone.common._memcache_pool=INFO',
             ])
         self.auth_plugin_config_override()
 
@@ -468,6 +485,8 @@ class TestCase(BaseTestCase):
 
         # Reset the auth-plugin registry
         self.addCleanup(self.clear_auth_plugin_registry)
+
+        self.addCleanup(setattr, controllers, '_VERSIONS', [])
 
     def config(self, config_files):
         CONF(args=[], project='keystone', default_config_files=config_files)
@@ -586,7 +605,7 @@ class TestCase(BaseTestCase):
         return config
 
     def loadapp(self, config, name='main'):
-        return deploy.loadapp(self._paste_config(config), name=name)
+        return service.loadapp(self._paste_config(config), name=name)
 
     def client(self, app, *args, **kw):
         return TestClient(app, *args, **kw)

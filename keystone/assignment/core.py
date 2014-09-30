@@ -320,6 +320,9 @@ class Manager(manager.Manager):
 
     @notifications.created('domain')
     def create_domain(self, domain_id, domain):
+        if (not self.identity_api.multiple_domains_supported and
+                domain_id != CONF.identity.default_domain_id):
+            raise exception.Forbidden(_('Multiple domains are not supported'))
         domain.setdefault('enabled', True)
         domain['enabled'] = clean.domain_enabled(domain['enabled'])
         ret = self.driver.create_domain(domain_id, domain)
@@ -563,12 +566,10 @@ class Manager(manager.Manager):
             try:
                 # NOTE(morganfainberg): The user ids are the important part
                 # for invalidating tokens below, so extract them here.
-                for user in self.identity_api.list_users_in_group(group_id,
-                                                                  domain_id):
+                for user in self.identity_api.list_users_in_group(group_id):
                     if user['id'] != user_id:
-                        if user_id:
-                            self._emit_invalidate_user_token_persistence(
-                                user_id)
+                        self._emit_invalidate_user_token_persistence(
+                            user['id'])
                         if self.revoke_api:
                             self.revoke_api.revoke_by_grant(
                                 user_id=user['id'], role_id=role_id,
@@ -1089,9 +1090,9 @@ class Driver(object):
         """
         raise exception.NotImplemented()  # pragma: no cover
 
-    # domain management functions for backends that only allow a single
-    # domain.  currently, this is only LDAP, but might be used by PAM or other
-    # backends as well.  This is used by both identity and assignment drivers.
+    # Domain management functions for backends that only allow a single
+    # domain.  Currently, this is only LDAP, but might be used by other
+    # backends in the future.
     def _set_default_domain(self, ref):
         """If the domain ID has not been set, set it to the default."""
         if isinstance(ref, dict):

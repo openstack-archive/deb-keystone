@@ -144,7 +144,7 @@ class Manager(manager.Manager):
             return mapped
 
         if CONF.token.provider is None:
-            return PKIZ_PROVIDER
+            return UUID_PROVIDER
         else:
             return CONF.token.provider
 
@@ -467,7 +467,7 @@ class Manager(manager.Manager):
                 revoke_by_expires = True
 
             if audit_chain_id is None and revoke_chain:
-                LOG.debug('Received token with no audit_chain_id.', token_id)
+                LOG.debug('Received token with no audit_chain_id.')
                 revoke_by_expires = True
 
             if revoke_by_expires:

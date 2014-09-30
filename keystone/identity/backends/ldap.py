@@ -18,7 +18,6 @@ import ldap
 import ldap.filter
 
 from keystone import clean
-from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import ldap as common_ldap
 from keystone.common import models
@@ -34,7 +33,6 @@ CONF = config.CONF
 LOG = log.getLogger(__name__)
 
 
-@dependency.requires('assignment_api')
 class Identity(identity.Driver):
     def __init__(self, conf=None):
         super(Identity, self).__init__()
@@ -114,7 +112,6 @@ class Identity(identity.Driver):
 
     def delete_user(self, user_id):
         self.user.check_allow_delete()
-        self.assignment_api.delete_user(user_id)
         user = self.user.get(user_id)
         user_dn = user['dn']
         groups = self.group.list_user_groups(user_dn)
@@ -265,6 +262,16 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
     def filter_attributes(self, user):
         return identity.filter_user(common_ldap.filter_entity(user))
 
+    def is_user(self, dn):
+        """Returns True if the entry is a user."""
+
+        # NOTE(blk-u): It's easy to check if the DN is under the User tree,
+        # but may not be accurate. A more accurate test would be to fetch the
+        # entry to see if it's got the user objectclass, but this could be
+        # really expensive considering how this is used.
+
+        return common_ldap.dn_startswith(dn, self.tree_dn)
+
 
 class GroupApi(common_ldap.BaseLdap):
     DEFAULT_OU = 'ou=UserGroups'
@@ -359,7 +366,7 @@ class GroupApi(common_ldap.BaseLdap):
 
         try:
             attrs = self._ldap_get_list(group_dn, ldap.SCOPE_BASE,
-                                        attrlist=(self.member_attribute,))
+                                        attrlist=[self.member_attribute])
         except ldap.NO_SUCH_OBJECT:
             raise self.NotFound(group_id=group_id)
 

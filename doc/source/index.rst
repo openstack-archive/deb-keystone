@@ -46,6 +46,7 @@ Getting Started
     configuration
     configure_federation
     configuringservices
+    enabling_extensions
     community
 
 Man Pages
@@ -67,6 +68,7 @@ Developers Documentation
    middlewarearchitecture
    http-api
    api_curl_examples
+   cli_examples
    apache-httpd
    external-auth
    event_notifications

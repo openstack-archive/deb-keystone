@@ -15,13 +15,17 @@
 Configuring Keystone for Federation
 ===================================
 
+-----------
 Definitions
 -----------
-
 * `Service Provider (SP)`: provides a service to an end-user.
 * `Identity Provider (IdP)`: service that stores information about users and
   groups.
 * `SAML assertion`: contains information about a user as provided by an IdP.
+
+-----------------------------------
+Keystone as a Service Provider (SP)
+-----------------------------------
 
 Prerequisites
 -------------
@@ -82,8 +86,13 @@ Make sure you add two *<Location>* directives to the *wsgi-keystone.conf*::
 .. NOTE::
     * ``saml2`` may be different in your deployment, but do not use a wildcard value.
       Otherwise *every* federated protocol will be handled by Shibboleth.
-    * The ``ShibRequireSession`` rule is invalid in Apache 2.4+ and should be dropped
-      in that specific setup.
+    * The ``ShibRequireSession`` and ``ShibRequireAll`` rules are invalid in
+      Apache 2.4+ and should be dropped in that specific setup.
+    * You are advised to carefully examine `Shibboleth Apache configuration
+      documentation
+      <https://wiki.shibboleth.net/confluence/display/SHIB2/NativeSPApacheConfig>`_
+
+
 
 Enable the Keystone virtual host, for example:
 
@@ -143,9 +152,9 @@ correspond to the Identity Provider's groups; additionally, these groups should
 be assigned roles on one or more projects or domains.
 
 You may be interested in more information on `group management
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3.md#create-group-post-groups>`_
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3.md#create-group-post-groups>`_
 and `role assignments
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3.md#grant-role-to-group-on-project-put-projectsproject_idgroupsgroup_idrolesrole_id>`_,
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3.md#grant-role-to-group-on-project-put-projectsproject_idgroupsgroup_idrolesrole_id>`_,
 both of which are exposed to the CLI via `python-openstackclient
 <https://pypi.python.org/pypi/python-openstackclient/>`_.
 
@@ -159,7 +168,7 @@ To utilize federation the following must be created in the Identity Service:
 * Protocol
 
 More information on ``OS-FEDERATION`` can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md>`__.
 
 ~~~~~~~~~~~~~~~~~
 Identity Provider
@@ -169,7 +178,7 @@ Create an Identity Provider object in Keystone, which represents the Identity
 Provider we will use to authenticate end users.
 
 More information on identity providers can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#register-an-identity-provider-put-os-federationidentity_providersidp_id>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#register-an-identity-provider-put-os-federationidentity_providersidp_id>`__.
 
 ~~~~~~~
 Mapping
@@ -183,7 +192,7 @@ An Identity Provider has exactly one mapping specified per protocol.
 Mapping objects can be used multiple times by different combinations of Identity Provider and Protocol.
 
 More information on mapping can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#create-a-mapping-put-os-federationmappingsmapping_id>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#create-a-mapping-put-os-federationmappingsmapping_id>`__.
 
 ~~~~~~~~
 Protocol
@@ -193,7 +202,7 @@ A protocol contains information that dictates which Mapping rules to use for an 
 request made by an IdP. An IdP may have multiple supported protocols.
 
 Add `Protocol object
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#add-a-supported-protocol-and-attribute-mapping-combination-to-an-identity-provider-put-os-federationidentity_providersidp_idprotocolsprotocol_id>`__ and specify the mapping id
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#add-a-supported-protocol-and-attribute-mapping-combination-to-an-identity-provider-put-os-federationidentity_providersidp_idprotocolsprotocol_id>`__ and specify the mapping id
 you want to use with the combination of the IdP and Protocol.
 
 Performing federated authentication
@@ -223,7 +232,7 @@ In the returned unscoped token, a list of Identity Service groups the user
 belongs to will be included.
 
 More information on getting an unscoped token can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#authenticating>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#authenticating>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -248,7 +257,7 @@ projects and domains that are accessible.
 * List domains a federated user can access: ``GET /OS-FEDERATION/domains``
 
 More information on listing resources can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#listing-projects-and-domains>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#listing-projects-and-domains>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -272,7 +281,7 @@ project or domain may be specified by either ``id`` or ``name``. An ``id`` is
 sufficient to uniquely identify a project or domain.
 
 More information on getting a scoped token can be found `here
-<https://github.com/openstack/identity-api/blob/master/openstack-identity-api/v3/src/markdown/identity-api-v3-os-federation-ext.md#request-a-scoped-os-federation-token-post-authtokens>`__.
+<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#request-a-scoped-os-federation-token-post-authtokens>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -281,3 +290,100 @@ Example cURL
 .. code-block:: bash
 
     $ curl -X POST -H "Content-Type: application/json" -d '{"auth":{"identity":{"methods":["saml2"],"saml2":{"id":"<unscoped_token_id>"}},"scope":{"project":{"domain": {"name": "Default"},"name":"service"}}}}' -D - http://localhost:5000/v3/auth/tokens
+
+--------------------------------------
+Keystone as an Identity Provider (IdP)
+--------------------------------------
+
+.. WARNING::
+
+    This feature is experimental and unsupported in Juno (with several known
+    issues that will not be fixed). Feedback welcome for Kilo!
+
+Configuration Options
+---------------------
+
+There are certain settings in ``keystone.conf`` that must be setup, prior to
+attempting to federate multiple Keystone deployments.
+
+Within ``keystone.conf``, assign values to the ``[saml]`` related fields, for
+example:
+
+.. code-block:: ini
+
+    [saml]
+    certfile=/etc/keystone/ssl/certs/ca.pem
+    keyfile=/etc/keystone/ssl/private/cakey.pem
+    idp_entity_id=https://keystone.example.com/v3/OS-FEDERATION/saml2/idp
+    idp_sso_endpoint=https://keystone.example.com/v3/OS-FEDERATION/saml2/sso
+    idp_metadata_path=/etc/keystone/saml2_idp_metadata.xml
+
+Though not necessary, the follow Organization configuration options should
+also be setup. It is recommended that these values be URL safe.
+
+.. code-block:: ini
+
+    idp_organization_name=example_company
+    idp_organization_display_name=Example Corp.
+    idp_organization_url=example.com
+
+As with the Organizaion options, the Contact options, are not necessary, but
+it's advisable to set these values too.
+
+.. code-block:: ini
+
+    idp_contact_company=example_company
+    idp_contact_name=John
+    idp_contact_surname=Smith
+    idp_contact_email=jsmith@example.com
+    idp_contact_telephone=555-55-5555
+    idp_contact_type=technical
+
+Generate Metadata
+-----------------
+
+In order to create a trust between the IdP and SP, metadata must be exchanged.
+To create metadata for your Keystone IdP, run the ``keystone-manage`` command
+and pipe the output to a file. For example:
+
+.. code-block:: bash
+
+    $ keystone-manage saml_idp_metadata > /etc/keystone/saml2_idp_metadata.xml
+
+.. NOTE::
+    The file location should match the value of the configuration option
+    ``idp_metadata_path`` that was assigned in the previous section.
+
+Create a region for the Service Provider (SP)
+---------------------------------------------
+
+Create a new region for the service provider, in this example, we are creating
+a new region with an ID of ``BETA``, and URL of
+``https://beta.com/Shibboleth.sso/SAML2/POST``. This URL will be used when
+creating a SAML assertion for ``BETA``, and signed by the current Keystone IdP.
+
+.. code-block:: bash
+
+    $ curl -s -X PUT \
+      -H "X-Auth-Token: $OS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"region": {"url": "http://beta.com/Shibboleth.sso/SAML2/POST"}}' \
+      http://localhost:5000/v3/regions/BETA | python -mjson.tool
+
+Testing it all out
+------------------
+
+Lastly, if a scoped token and a Service Provider region are presented to
+Keystone, the result will be a full SAML Assertion, signed by the IdP
+Keystone, specifically intended for the Service Provider Keystone.
+
+.. code-block:: bash
+
+    $ curl -s -X POST \
+      -H "Content-Type: application/json" \
+      -d '{"auth": {"scope": {"region": {"id": "BETA"}}, "identity": {"token": {"id": "d793d935b9c343f783955cf39ee7dc3c"}, "methods": ["token"]}}}' \
+      http://localhost:5000/v3/auth/OS-FEDERATION/saml2
+
+At this point the SAML Assertion can be sent to the Service Provider Keystone,
+and a valid OpenStack token, issued by a Service Provider Keystone, will be
+returned.
