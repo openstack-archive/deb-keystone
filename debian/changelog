@@ -1,3 +1,9 @@
+keystone (2014.2~rc1-2) experimental; urgency=medium
+
+  * Using templated init script from openstack-pkg-tools >= 13.
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 02 Oct 2014 17:32:31 +0000
+
 keystone (2014.2~rc1-1) experimental; urgency=medium
 
   * New upstream release.
