@@ -4,6 +4,7 @@ keystone (2014.2~rc2-1) experimental; urgency=medium
   * Mangling upstream rc and beta versions in watch file.
   * Updated nl.po thanks to Frans Spiesschaert (Closes: #764205).
   * Using templated init script from openstack-pkg-tools >= 13.
+  * Removed silly python-support build-depends.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 13 Oct 2014 00:47:25 +0800
 
