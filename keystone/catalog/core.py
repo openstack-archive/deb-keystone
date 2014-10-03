@@ -22,6 +22,7 @@ import six
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
+from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone.openstack.common.gettextutils import _
@@ -34,10 +35,15 @@ LOG = log.getLogger(__name__)
 
 def format_url(url, data):
     """Safely string formats a user-defined URL with the given data."""
+    data = utils.WhiteListedFormatter(
+        CONF.catalog.endpoint_substitution_whitelist,
+        data)
     try:
         result = url.replace('$(', '%(') % data
     except AttributeError:
-        return None
+        LOG.error(_('Malformed endpoint - %(url)r is not a string'),
+                  {"url": url})
+        raise exception.MalformedEndpoint(endpoint=url)
     except KeyError as e:
         LOG.error(_("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
                   {"url": url,
@@ -322,9 +328,10 @@ class Driver(object):
         """
         raise exception.NotImplemented()
 
-    @abc.abstractmethod
     def get_v3_catalog(self, user_id, tenant_id, metadata=None):
         """Retrieve and format the current V3 service catalog.
+
+        The default implementation builds the V3 catalog from the V2 catalog.
 
         Example::
 
@@ -351,4 +358,35 @@ class Driver(object):
         :raises: keystone.exception.NotFound
 
         """
-        raise exception.NotImplemented()
+        v2_catalog = self.get_catalog(user_id, tenant_id, metadata=metadata)
+        v3_catalog = []
+
+        for region_name, region in six.iteritems(v2_catalog):
+            for service_type, service in six.iteritems(region):
+                service_v3 = {
+                    'type': service_type,
+                    'endpoints': []
+                }
+
+                for attr, value in six.iteritems(service):
+                    # Attributes that end in URL are interfaces. In the V2
+                    # catalog, these are internalURL, publicURL, and adminURL.
+                    # For example, <region_name>.publicURL=<URL> in the V2
+                    # catalog becomes the V3 interface for the service:
+                    # { 'interface': 'public', 'url': '<URL>', 'region':
+                    #   'region: '<region_name>' }
+                    if attr.endswith('URL'):
+                        v3_interface = attr[:-len('URL')]
+                        service_v3['endpoints'].append({
+                            'interface': v3_interface,
+                            'region': region_name,
+                            'url': value,
+                        })
+                        continue
+
+                    # Other attributes are copied to the service.
+                    service_v3[attr] = value
+
+                v3_catalog.append(service_v3)
+
+        return v3_catalog

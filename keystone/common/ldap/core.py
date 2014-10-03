@@ -140,14 +140,19 @@ def convert_ldap_result(ldap_result):
     py_result = []
     at_least_one_referral = False
     for dn, attrs in ldap_result:
+        ldap_attrs = {}
         if dn is None:
             # this is a Referral object, rather than an Entry object
             at_least_one_referral = True
             continue
 
-        py_result.append((utf8_decode(dn),
-                          dict((kind, [ldap2py(x) for x in values])
-                               for kind, values in six.iteritems(attrs))))
+        for kind, values in six.iteritems(attrs):
+            try:
+                ldap_attrs[kind] = [ldap2py(x) for x in values]
+            except UnicodeDecodeError:
+                LOG.debug('Unable to decode value for attribute %s ', kind)
+
+        py_result.append((utf8_decode(dn), ldap_attrs))
     if at_least_one_referral:
         LOG.debug(_('Referrals were returned and ignored. Enable referral '
                     'chasing in keystone.conf via [ldap] chase_referrals'))
@@ -467,7 +472,8 @@ class BaseLdap(object):
                 {'id_attr': self.id_attr,
                  'id': ldap.filter.escape_filter_chars(
                      six.text_type(object_id)),
-                 'objclass': self.object_class})
+                 'objclass': self.object_class},
+                ['1.1'])
         finally:
             conn.unbind_s()
         if search_result:
@@ -493,7 +499,12 @@ class BaseLdap(object):
                 continue
 
             try:
-                v = lower_res[self.attribute_mapping.get(k, k).lower()]
+                map_attr = self.attribute_mapping.get(k, k)
+                if map_attr is None:
+                    # Ignore attributes that are mapped to None.
+                    continue
+
+                v = lower_res[map_attr.lower()]
             except KeyError:
                 pass
             else:
@@ -720,7 +731,8 @@ class LdapWrapper(object):
         if use_tls and using_ldaps:
             raise AssertionError(_('Invalid TLS / LDAPS combination'))
 
-        if use_tls:
+        # The certificate trust options apply for both LDAPS and TLS.
+        if use_tls or using_ldaps:
             if not ldap.TLS_AVAIL:
                 raise ValueError(_('Invalid LDAP TLS_AVAIL option: %s. TLS '
                                    'not available') % ldap.TLS_AVAIL)

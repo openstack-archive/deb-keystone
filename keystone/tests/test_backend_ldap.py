@@ -531,6 +531,26 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         # If this doesn't raise, then the test is successful.
         self.identity_api.create_user(u'fäké1', user)
 
+    def test_unignored_user_none_mapping(self):
+        # Ensure that an attribute that maps to None that is not explicitly
+        # ignored in configuration is implicitly ignored without triggering
+        # an error.
+        conf = self.get_config(CONF.identity.default_domain_id)
+        conf.ldap.user_attribute_ignore = ['enabled', 'email',
+                                           'tenants', 'tenantId']
+        self.reload_backends(CONF.identity.default_domain_id)
+
+        user = {'id': u'fäké1',
+                'name': u'fäké1',
+                'password': u'fäképass1',
+                'domain_id': CONF.identity.default_domain_id,
+                }
+
+        user_ref = self.identity_api.create_user(u'fäké1', user)
+
+        # If this doesn't raise, then the test is successful.
+        self.identity_api.get_user(user_ref['id'])
+
     def test_update_user_name(self):
         """A user's name cannot be changed through the LDAP driver."""
         self.assertRaises(exception.Conflict,
@@ -1078,6 +1098,21 @@ class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
                          user['name'])
         self.assertEqual(mock_ldap_get.return_value[1]['eMaIl'][0],
                          user['email'])
+
+    def test_binary_attribute_values(self):
+        result = [(
+            'cn=junk,dc=example,dc=com',
+            {
+                'cn': ['junk'],
+                'sn': [uuid.uuid4().hex],
+                'mail': [uuid.uuid4().hex],
+                'binary_attr': ['\x00\xFF\x00\xFF']
+            }
+        ), ]
+        py_result = common_ldap_core.convert_ldap_result(result)
+        # The attribute containing the binary value should
+        # not be present in the converted result.
+        self.assertNotIn('binary_attr', py_result[0][1])
 
     def test_parse_extra_attribute_mapping(self):
         option_list = ['description:name', 'gecos:password',

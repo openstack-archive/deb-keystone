@@ -261,6 +261,10 @@ class Catalog(catalog.Driver):
         for endpoint in endpoints:
             if not endpoint.service['enabled']:
                 continue
+            try:
+                url = core.format_url(endpoint['url'], d)
+            except exception.MalformedEndpoint:
+                continue  # this failure is already logged in format_url()
 
             region = endpoint['region']
             service_type = endpoint.service['type']
@@ -271,7 +275,6 @@ class Catalog(catalog.Driver):
             }
             catalog.setdefault(region, {})
             catalog[region].setdefault(service_type, default_service)
-            url = core.format_url(endpoint['url'], d)
             interface_url = '%sURL' % endpoint['interface']
             catalog[region][service_type][interface_url] = url
 
@@ -287,17 +290,24 @@ class Catalog(catalog.Driver):
                     options(sql.joinedload(Service.endpoints)).
                     all())
 
-        def make_v3_endpoint(endpoint):
-            del endpoint['service_id']
-            del endpoint['legacy_endpoint_id']
-            del endpoint['enabled']
+        def make_v3_endpoints(endpoints):
+            for endpoint in (ep.to_dict() for ep in endpoints if ep.enabled):
+                del endpoint['service_id']
+                del endpoint['legacy_endpoint_id']
+                del endpoint['enabled']
+                try:
+                    endpoint['url'] = core.format_url(endpoint['url'], d)
+                except exception.MalformedEndpoint:
+                    continue  # this failure is already logged in format_url()
 
-            endpoint['url'] = core.format_url(endpoint['url'], d)
-            return endpoint
+                yield endpoint
 
-        catalog = [{'endpoints': [make_v3_endpoint(ep.to_dict())
-                                  for ep in svc.endpoints if ep.enabled],
-                    'id': svc.id,
-                    'type': svc.type} for svc in services]
+        def make_v3_service(svc):
+            eps = list(make_v3_endpoints(svc.endpoints))
+            service = {'endpoints': eps, 'id': svc.id, 'type': svc.type}
+            name = svc.extra.get('name')
+            if name:
+                service['name'] = name
+            return service
 
-        return catalog
+        return [make_v3_service(svc) for svc in services]
