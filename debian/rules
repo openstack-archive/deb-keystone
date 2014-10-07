@@ -69,4 +69,4 @@ override_dh_clean:
 	rm -rf $(CURDIR)/vendor
 	rm -f $(CURDIR)/debian/tests/testing.db
 	dh_clean
-	rm debian/*.init debian/*.service debian/*.upstart
+	rm -f debian/*.init debian/*.service debian/*.upstart
