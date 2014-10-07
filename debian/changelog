@@ -1,6 +1,7 @@
 keystone (2014.2~rc1-3) UNRELEASED; urgency=medium
 
   * Mangling upstream rc and beta versions in watch file.
+  * Updated nl.po thanks to Frans Spiesschaert (Closes: #764205).
 
  -- Thomas Goirand <zigo@debian.org>  Sun, 05 Oct 2014 14:36:50 +0800
 
