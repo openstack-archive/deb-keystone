@@ -2,19 +2,21 @@
 # Copyright (C) 2012 THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the nova package.
 # Jeroen Schot <schot@a-eskwadraat.nl>, 2012.
+# Frans Spiesschaert <Frans.Spiesschaert@yucom.be>, 2014.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: keystone 2012.1.1-4\n"
 "Report-Msgid-Bugs-To: keystone@packages.debian.org\n"
 "POT-Creation-Date: 2013-07-10 23:09+0800\n"
-"PO-Revision-Date: 2012-08-22 12:24+0200\n"
-"Last-Translator: Jeroen Schot <schot@a-eskwadraat.nl>\n"
-"Language-Team: Debian l10n Dutch <debian-l10n-dutch@lists.debian.org>\n"
+"PO-Revision-Date: 2014-09-26 23:53+0200\n"
+"Last-Translator: Frans Spiesschaert <Frans.Spiesschaert@yucom.be>\n"
+"Language-Team: Debian Dutch l10n Team <debian-l10n-dutch@lists.debian.org>\n"
 "Language: nl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #  Type: boolean
 #  Description
@@ -27,7 +29,6 @@ msgstr "Een database opzetten voor Keystone?"
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
 #| msgid ""
 #| "No database has been set up for Keystone to use. If you want to set one "
 #| "up now, please make sure you have all needed information:"
@@ -35,14 +36,12 @@ msgid ""
 "No database has been set up for Keystone to use. Before continuing, you "
 "should make sure you have the following information:"
 msgstr ""
-"Er is geen database opgezet voor gebruik door Keystone. Als u deze nu op "
-"wilt zetten, zorg er dan voor dat u alle benodigde informatie bij de hand "
-"heeft:"
+"Er is geen database opgezet voor gebruik door Keystone. Voor u doorgaat moet "
+"u beschikken over de volgende informatie::"
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:2001
-#, fuzzy
 #| msgid ""
 #| " * the host name of the database server (which must allow TCP\n"
 #| "   connections from this machine);\n"
@@ -55,10 +54,10 @@ msgid ""
 "   machine);\n"
 " * a username and password to access the database."
 msgstr ""
-" * de computernaam van de database-server (deze moet TCP-verbindingen van\n"
-"   deze computer accepteren);\n"
-" * een gebruikersnaam en wachtwoord om toegang te krijgen tot de database;\n"
-" * het soort databasebeheersoftware dat u wilt gebruiken."
+" * het type database dat u wenst te gebruiken;\n"
+" * de computernaam van de databese-server (die server moet\n"
+"   TCP-verbindingen vanaf deze computer accepteren);\n"
+" * een gebruikersnaam en wachtwoord voor toegang tot de database."
 
 #. Type: boolean
 #. Description
@@ -67,6 +66,8 @@ msgid ""
 "If some of these requirements are missing, do not choose this option and run "
 "with regular SQLite support."
 msgstr ""
+"Indien sommige van deze gegevens ontbreken, moet u deze optie niet kiezen en "
+"de toepassing gebruiken met gewone SQLite-ondersteuning."
 
 #. Type: boolean
 #. Description
@@ -82,13 +83,14 @@ msgstr ""
 #. Description
 #: ../keystone.templates:3001
 msgid "Authentication server administration token:"
-msgstr "Beheer-token van authenticatieserver:"
+msgstr "Legitimatiebewijs voor het beheer van de authenticatieserver:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:3001
 msgid "Please enter the token to use with the authentication server."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr ""
+"Geef het te gebruiken legitimatiebewijs op voor de authenticatieserver."
 
 #. Type: boolean
 #. Description
@@ -100,10 +102,9 @@ msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:4001
-#, fuzzy
 #| msgid "Authentication server administration token:"
 msgid "Register administration tenants?"
-msgstr "Beheer-token van authenticatieserver:"
+msgstr "Clientruimtes (tenants) voor beheerstaken inschrijven?"
 
 #. Type: boolean
 #. Description
@@ -119,96 +120,94 @@ msgid ""
 "For OpenStack to work, you need a basic tenant configuration. The creation "
 "of these administration tenants can be done automatically."
 msgstr ""
+"Opdat OpenStack zou functioneren moet u beschikken over een basale "
+"configuratie van clientruimte. Het aanmaken van die clientruimtes (tenants) "
+"voor beheerstaken kan automatisch gebeuren."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Username of the administrative user:"
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Gebruikersnaam van de beheerder:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:5001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter a username for the administrative user."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Voer de gebruikersnaam van de beheerder in."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Email address of the administrative user:"
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "E-mailadres van de beheerder:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:6001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the email address of the administrative user."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Geef het e-mailadres op van de beheerder."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Password of the administrative user:"
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Wachtwoord van de beheerder:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:7001
 msgid "Please enter a password for the administrative user."
-msgstr ""
+msgstr "Geef een wachtwoord op voor de beheerder."
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
 msgid "Re-enter password to verify:"
-msgstr ""
+msgstr "voer het wachtwoord nogmaals in ter controle:"
 
 #. Type: password
 #. Description
 #: ../keystone.templates:8001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid ""
 "Please enter the same administrative password again to verify that you have "
 "typed it correctly."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr ""
+"Gelieve nogmaals het wachtwoord voor de beheerder in te voeren om na te gaan "
+"of u het correct intypte."
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "Password input error"
-msgstr ""
+msgstr "fout bij het invoeren van het wachtwoord"
 
 #. Type: error
 #. Description
 #: ../keystone.templates:9001
 msgid "The two passwords you entered were not the same. Please try again."
 msgstr ""
+"De twee wachtwoorden die u opgaf waren niet identiek. Probeer nogmaals."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative role:"
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Naam van de beheersfunctie:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:10001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative role."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Geef de naam op van de beheersfunctie"
 
 #. Type: string
 #. Description
@@ -220,10 +219,9 @@ msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Name of the administrative tenant:"
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Naam van de clientruimte voor beheerstaken:"
 
 #. Type: string
 #. Description
@@ -235,16 +233,15 @@ msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
 #. or keep it parenthezised. Example for French:
 #. locataire ("tenant")
 #: ../keystone.templates:11001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the name of the administrative tenant."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr "Voer de naam in van de clientruimte voor beheerstaken."
 
 #. Type: boolean
 #. Description
 #: ../keystone.templates:12001
 msgid "Register Keystone endpoint?"
-msgstr ""
+msgstr "Een toegangspunt voor Keystone inschrijven?"
 
 #. Type: boolean
 #. Description
@@ -254,26 +251,30 @@ msgid ""
 "accessible. This is done using \"keystone service-create\" and \"keystone "
 "endpoint-create\". This can be done automatically now."
 msgstr ""
+"Elke OpenStack-service (elke API) moet geregistreerd zijn om toegankelijk te "
+"zijn. Dit gebeurt aan de hand van \"keystone service-create\" and \"keystone "
+"endpoint-create\". Dit kan nu automatisch uitgevoerd worden."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
 msgid "Keystone endpoint IP address:"
-msgstr ""
+msgstr "IP-adres van het toegangspunt van Keystone:"
 
 #. Type: string
 #. Description
 #: ../keystone.templates:13001
-#, fuzzy
 #| msgid "Please enter the token to use with the authentication server."
 msgid "Please enter the IP address that will be used to contact Keystone."
-msgstr "Welke token moet er met de authenticatieserver worden gebruikt?"
+msgstr ""
+"Geef het IP-adres op dat gebruikt zal worden om verbinding te maken met "
+"Keystone."
 
 #. Type: string
 #. Description
 #: ../keystone.templates:14001
 msgid "Name of the region to register:"
-msgstr ""
+msgstr "Naam van de te registreren regio:"
 
 #. Type: string
 #. Description
@@ -283,6 +284,9 @@ msgid ""
 "location. Please enter the zone that you wish to use when registering the "
 "endpoint."
 msgstr ""
+"Openstack ondersteunt het gebruik van zones van beschikbaarheid, waarbij "
+"elke regio een locatie vertegenwoordigt. Geef aan welke zone u wenst te "
+"gebruiken bij het registreren van het toegangspunt."
 
 #~ msgid ""
 #~ "If you don't choose this option, no database will be set up and Keystone "
