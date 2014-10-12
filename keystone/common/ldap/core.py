@@ -287,9 +287,9 @@ def is_dn_equal(dn1, dn2):
     """
 
     if not isinstance(dn1, list):
-        dn1 = ldap.dn.str2dn(dn1)
+        dn1 = ldap.dn.str2dn(utf8_encode(dn1))
     if not isinstance(dn2, list):
-        dn2 = ldap.dn.str2dn(dn2)
+        dn2 = ldap.dn.str2dn(utf8_encode(dn2))
 
     if len(dn1) != len(dn2):
         return False
@@ -309,9 +309,9 @@ def dn_startswith(descendant_dn, dn):
     """
 
     if not isinstance(descendant_dn, list):
-        descendant_dn = ldap.dn.str2dn(descendant_dn)
+        descendant_dn = ldap.dn.str2dn(utf8_encode(descendant_dn))
     if not isinstance(dn, list):
-        dn = ldap.dn.str2dn(dn)
+        dn = ldap.dn.str2dn(utf8_encode(dn))
 
     if len(descendant_dn) <= len(dn):
         return False
@@ -1670,10 +1670,10 @@ class EnabledEmuMixIn(BaseLdap):
             naming_attr = (naming_attr_name, [naming_attr_value])
         else:
             # Extract the attribute name and value from the configured DN.
-            naming_dn = utf8_decode(
-                ldap.dn.str2dn(utf8_encode(self.enabled_emulation_dn)))
+            naming_dn = ldap.dn.str2dn(utf8_encode(self.enabled_emulation_dn))
             naming_rdn = naming_dn[0][0]
-            naming_attr = (naming_rdn[0], [naming_rdn[1]])
+            naming_attr = (utf8_decode(naming_rdn[0]),
+                           utf8_decode(naming_rdn[1]))
         self.enabled_emulation_naming_attr = naming_attr
 
     def _get_enabled(self, object_id):
