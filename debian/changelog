@@ -2,6 +2,8 @@ keystone (2014.2.1-1) experimental; urgency=medium
 
   * New upstream release.
   * Added oslo.serialization as (build-)depends.
+  * Added depends: init-system-helpers (>= 1.18~), and deb-systemd-helper
+    manual calls to activate the keystone.service.
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 12 Dec 2014 17:29:27 +0800
 
