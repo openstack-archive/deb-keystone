@@ -130,4 +130,12 @@ if [ "$1" = "configure" ] ; then
 	db_stop
 fi
 
+# Activate the keystone.service
+deb-systemd-helper unmask keystone.service >/dev/null || true
+if deb-systemd-helper --quiet was-enabled keystone.service ; then
+	deb-systemd-helper enable keystone.service >/dev/null || true
+else
+	deb-systemd-helper update-state keystone.service >/dev/null || true
+fi
+
 exit 0
