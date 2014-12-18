@@ -17,7 +17,7 @@ ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
 	mkdir -p $(CURDIR)/keystone/tests/tmp
 	patch -p1 -R <debian/patches/fixes-default-connection.patch
-	./run_tests.sh -N -P || true
+	./run_tests.sh -N -P 'tests\.(?!.*KcMaster.*)' || true
 	patch -p1 <debian/patches/fixes-default-connection.patch
 endif
 
