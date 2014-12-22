@@ -17,6 +17,7 @@ import uuid
 
 from lxml import etree
 import mock
+from oslo.serialization import jsonutils
 from oslotest import mockpatch
 import saml2
 from saml2 import saml
@@ -32,7 +33,6 @@ from keystone.contrib.federation import idp as keystone_idp
 from keystone.contrib.federation import utils as mapping_utils
 from keystone import exception
 from keystone import notifications
-from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.tests import federation_fixtures
 from keystone.tests import mapping_fixtures
@@ -613,16 +613,16 @@ class MappingRuleEngineTests(FederationTests):
         This will not match since the email in the assertion will fail
         the regex test. It is set to match any @example.com address.
         But the incoming value is set to eviltester@example.org.
-        RuleProcessor should raise exception.Unauthorized exception.
+        RuleProcessor should return list of empty group_ids.
 
         """
 
         mapping = mapping_fixtures.MAPPING_LARGE
         assertion = mapping_fixtures.BAD_TESTER_ASSERTION
         rp = mapping_utils.RuleProcessor(mapping['rules'])
-
-        self.assertRaises(exception.Unauthorized,
-                          rp.process, assertion)
+        mapped_properties = rp.process(assertion)
+        self.assertIsNone(mapped_properties['name'])
+        self.assertListEqual(list(), mapped_properties['group_ids'])
 
     def test_rule_engine_regex_many_groups(self):
         """Should return group CONTRACTOR_GROUP_ID.
@@ -755,16 +755,16 @@ class MappingRuleEngineTests(FederationTests):
         """Check whether RuleProcessor discards non string objects.
 
         Expect RuleProcessor to discard non string object, which
-        is required for a correct rule match. Since no rules are
-        matched expect RuleProcessor to raise exception.Unauthorized
-        exception.
+        is required for a correct rule match. RuleProcessor will result with
+        empty list of groups.
 
         """
         mapping = mapping_fixtures.MAPPING_SMALL
         rp = mapping_utils.RuleProcessor(mapping['rules'])
         assertion = mapping_fixtures.CONTRACTOR_MALFORMED_ASSERTION
-        self.assertRaises(exception.Unauthorized,
-                          rp.process, assertion)
+        mapped_properties = rp.process(assertion)
+        self.assertIsNone(mapped_properties['name'])
+        self.assertListEqual(list(), mapped_properties['group_ids'])
 
 
 class FederatedTokenTests(FederationTests):
@@ -1021,6 +1021,19 @@ class FederatedTokenTests(FederationTests):
             self.assertEqual(project_id, project_id_ref)
             self._check_scoped_token_attributes(token_resp)
 
+    def test_scope_to_project_with_only_inherited_roles(self):
+        """Try to scope token whose only roles are inherited."""
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        r = self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_INHERITED_FROM_CUSTOMER)
+        token_resp = r.result['token']
+        project_id = token_resp['project']['id']
+        self.assertEqual(project_id, self.project_inherited['id'])
+        self._check_scoped_token_attributes(token_resp)
+        roles_ref = [self.role_customer]
+        projects_ref = self.project_inherited
+        self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
+
     def test_scope_token_from_nonexistent_unscoped_token(self):
         """Try to scope token from non-existent unscoped token."""
         self.v3_authenticate_token(
@@ -1077,6 +1090,12 @@ class FederatedTokenTests(FederationTests):
             self.assertEqual(domain_id, domain_id_ref)
             self._check_scoped_token_attributes(token_resp)
 
+    def test_scope_to_domain_with_only_inherited_roles_fails(self):
+        """Try to scope to a domain that has no direct roles."""
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_DOMAIN_D_FROM_CUSTOMER,
+            expected_status=401)
+
     def test_list_projects(self):
         urls = ('/OS-FEDERATION/projects', '/auth/projects')
 
@@ -1084,12 +1103,15 @@ class FederatedTokenTests(FederationTests):
                  self.tokens['EMPLOYEE_ASSERTION'],
                  self.tokens['ADMIN_ASSERTION'])
 
-        projects_refs = (set([self.proj_customers['id']]),
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        projects_refs = (set([self.proj_customers['id'],
+                              self.project_inherited['id']]),
                          set([self.proj_employees['id'],
                               self.project_all['id']]),
                          set([self.proj_employees['id'],
                               self.project_all['id'],
-                              self.proj_customers['id']]))
+                              self.proj_customers['id'],
+                              self.project_inherited['id']]))
 
         for token, projects_ref in zip(token, projects_refs):
             for url in urls:
@@ -1105,6 +1127,10 @@ class FederatedTokenTests(FederationTests):
         tokens = (self.tokens['CUSTOMER_ASSERTION'],
                   self.tokens['EMPLOYEE_ASSERTION'],
                   self.tokens['ADMIN_ASSERTION'])
+
+        # NOTE(henry-nash): domain D does not appear in the expected results
+        # since it only had inherited roles (which only apply to projects
+        # within the domain)
 
         domain_refs = (set([self.domainA['id']]),
                        set([self.domainA['id'],
@@ -1265,6 +1291,10 @@ class FederatedTokenTests(FederationTests):
         self.assignment_api.create_domain(self.domainC['id'],
                                           self.domainC)
 
+        self.domainD = self.new_domain_ref()
+        self.assignment_api.create_domain(self.domainD['id'],
+                                          self.domainD)
+
         # Create and add projects
         self.proj_employees = self.new_project_ref(
             domain_id=self.domainA['id'])
@@ -1279,6 +1309,11 @@ class FederatedTokenTests(FederationTests):
             domain_id=self.domainA['id'])
         self.assignment_api.create_project(self.project_all['id'],
                                            self.project_all)
+
+        self.project_inherited = self.new_project_ref(
+            domain_id=self.domainD['id'])
+        self.assignment_api.create_project(self.project_inherited['id'],
+                                           self.project_inherited)
 
         # Create and add groups
         self.group_employees = self.new_group_ref(
@@ -1345,6 +1380,13 @@ class FederatedTokenTests(FederationTests):
         self.assignment_api.create_grant(self.role_customer['id'],
                                          group_id=self.group_customers['id'],
                                          domain_id=self.domainA['id'])
+
+        # Customers can access projects via inheritance:
+        # * domain D
+        self.assignment_api.create_grant(self.role_customer['id'],
+                                         group_id=self.group_customers['id'],
+                                         domain_id=self.domainD['id'],
+                                         inherited_to_projects=True)
 
         # Employees can access:
         # * domain A
@@ -1603,15 +1645,19 @@ class FederatedTokenTests(FederationTests):
             self.tokens['CUSTOMER_ASSERTION'], 'project',
             self.proj_employees['id'])
 
+        self.TOKEN_SCOPE_PROJECT_INHERITED_FROM_CUSTOMER = self._scope_request(
+            self.tokens['CUSTOMER_ASSERTION'], 'project',
+            self.project_inherited['id'])
+
         self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER = self._scope_request(
             self.tokens['CUSTOMER_ASSERTION'], 'domain', self.domainA['id'])
 
         self.TOKEN_SCOPE_DOMAIN_B_FROM_CUSTOMER = self._scope_request(
-            self.tokens['CUSTOMER_ASSERTION'], 'domain', self.domainB['id'])
-
-        self.TOKEN_SCOPE_DOMAIN_B_FROM_CUSTOMER = self._scope_request(
             self.tokens['CUSTOMER_ASSERTION'], 'domain',
             self.domainB['id'])
+
+        self.TOKEN_SCOPE_DOMAIN_D_FROM_CUSTOMER = self._scope_request(
+            self.tokens['CUSTOMER_ASSERTION'], 'domain', self.domainD['id'])
 
         self.TOKEN_SCOPE_DOMAIN_A_FROM_ADMIN = self._scope_request(
             self.tokens['ADMIN_ASSERTION'], 'domain', self.domainA['id'])
@@ -1816,6 +1862,32 @@ class SAMLGenerationTests(FederationTests):
         token_id = resp.headers.get('X-Subject-Token')
         return token_id
 
+    def _fetch_domain_scoped_token(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            user_domain_id=self.domain['id'])
+        resp = self.v3_authenticate_token(auth_data)
+        token_id = resp.headers.get('X-Subject-Token')
+        return token_id
+
+    def test_not_project_scoped_token(self):
+        """Test that the SAML generation fails when passing tokens
+        not scoped by project.
+
+        The server should return a 403 Forbidden Action.
+
+        """
+        self.config_fixture.config(group='saml', idp_entity_id=self.ISSUER)
+        region_id = self._create_region_with_url()
+        token_id = self._fetch_domain_scoped_token()
+        body = self._create_generate_saml_request(token_id, region_id)
+
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               return_value=self.signed_assertion):
+            self.post(self.SAML_GENERATION_ROUTE, body=body,
+                      expected_status=403)
+
     def test_generate_saml_route(self):
         """Test that the SAML generation endpoint produces XML.
 
@@ -1827,7 +1899,7 @@ class SAMLGenerationTests(FederationTests):
         provide a valid SAML (XML) document back.
 
         """
-        CONF.saml.idp_entity_id = self.ISSUER
+        self.config_fixture.config(group='saml', idp_entity_id=self.ISSUER)
         region_id = self._create_region_with_url()
         token_id = self._fetch_valid_token()
         body = self._create_generate_saml_request(token_id, region_id)
@@ -2032,7 +2104,8 @@ class IdPMetadataGenerationTests(FederationTests):
         self.get(self.METADATA_URL, expected_status=500)
 
     def test_get_metadata(self):
-        CONF.saml.idp_metadata_path = XMLDIR + '/idp_saml2_metadata.xml'
+        self.config_fixture.config(
+            group='saml', idp_metadata_path=XMLDIR + '/idp_saml2_metadata.xml')
         r = self.get(self.METADATA_URL, response_content_type='text/xml',
                      expected_status=200)
         self.assertEqual('text/xml', r.headers.get('Content-Type'))

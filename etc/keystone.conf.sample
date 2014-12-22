@@ -59,6 +59,11 @@
 # server. (string value)
 #admin_endpoint=<None>
 
+# Maximum depth of the project hierarchy. WARNING: setting it
+# to a large value may adversely impact performance. (integer
+# value)
+#max_project_tree_depth=5
+
 # The number of worker processes to serve the public WSGI
 # application. Defaults to number of CPUs (minimum of 2).
 # (integer value)
@@ -81,17 +86,16 @@
 # token values. (integer value)
 #max_token_size=8192
 
-# During a SQL upgrade member_role_id will be used to create a
-# new role that will replace records in the assignment table
-# with explicit role grants. After migration, the
-# member_role_id will be used in the API add_user_to_project.
-# (string value)
+# Similar to the member_role_name option, this represents the
+# default role ID used to associate users with their default
+# projects in the v2 API. This will be used as the explicit
+# role where one is not specified by the v2 API. (string
+# value)
 #member_role_id=9fe2ff9ee4384b1894a90878d3e92bab
 
-# During a SQL upgrade member_role_name will be used to create
-# a new role that will replace records in the assignment table
-# with explicit role grants. After migration, member_role_name
-# will be ignored. (string value)
+# This is the role name used in combination with the
+# member_role_id option; see that option for more detail.
+# (string value)
 #member_role_name=_member_
 
 # The value passed as the keyword "rounds" to passlib's
@@ -104,8 +108,8 @@
 #tcp_keepalive=false
 
 # Sets the value of TCP_KEEPIDLE in seconds for each server
-# socket. Only applies if tcp_keepalive is true. Not supported
-# on OS X. (integer value)
+# socket. Only applies if tcp_keepalive is true. (integer
+# value)
 #tcp_keepidle=600
 
 # The maximum number of entities that will be returned in a
@@ -135,11 +139,11 @@
 # Options defined in oslo.messaging
 #
 
-# Use durable queues in amqp. (boolean value)
+# Use durable queues in AMQP. (boolean value)
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
 #amqp_durable_queues=false
 
-# Auto-delete queues in amqp. (boolean value)
+# Auto-delete queues in AMQP. (boolean value)
 #amqp_auto_delete=false
 
 # Size of RPC connection pool. (integer value)
@@ -187,8 +191,8 @@
 #qpid_topology_version=1
 
 # SSL version to use (valid only if SSL enabled). valid values
-# are TLSv1, SSLv23 and SSLv3. SSLv2 may be available on some
-# distributions. (string value)
+# are TLSv1 and SSLv23. SSLv2 and SSLv3 may be available on
+# some distributions. (string value)
 #kombu_ssl_version=
 
 # SSL key file (valid only if SSL enabled). (string value)
@@ -225,7 +229,7 @@
 # The RabbitMQ password. (string value)
 #rabbit_password=guest
 
-# the RabbitMQ login method (string value)
+# The RabbitMQ login method. (string value)
 #rabbit_login_method=AMQPLAIN
 
 # The RabbitMQ virtual host. (string value)
@@ -248,7 +252,8 @@
 # value)
 #rabbit_ha_queues=false
 
-# If passed, use a fake RabbitMQ provider. (boolean value)
+# Deprecated, use rpc_backend=kombu+memory or rpc_backend=fake
+# (boolean value)
 #fake_rabbit=false
 
 # ZeroMQ bind address. Should be a wildcard (*), an ethernet
@@ -445,6 +450,10 @@
 # (string value)
 #policy_default_rule=default
 
+# Directories where policy configuration files are stored
+# (multi valued)
+#policy_dirs=policy.d
+
 
 [assignment]
 
@@ -536,27 +545,27 @@
 
 # Memcache servers in the format of "host:port".
 # (dogpile.cache.memcache and keystone.cache.memcache_pool
-# backends only) (list value)
+# backends only). (list value)
 #memcache_servers=localhost:11211
 
 # Number of seconds memcached server is considered dead before
 # it is tried again. (dogpile.cache.memcache and
-# keystone.cache.memcache_pool backends only) (integer value)
+# keystone.cache.memcache_pool backends only). (integer value)
 #memcache_dead_retry=300
 
 # Timeout in seconds for every call to a server.
 # (dogpile.cache.memcache and keystone.cache.memcache_pool
-# backends only) (integer value)
+# backends only). (integer value)
 #memcache_socket_timeout=3
 
 # Max total number of open connections to every memcached
-# server. (keystone.cache.memcache_pool backend only) (integer
-# value)
+# server. (keystone.cache.memcache_pool backend only).
+# (integer value)
 #memcache_pool_maxsize=10
 
 # Number of seconds a connection to memcached is held unused
 # in the pool before it is closed.
-# (keystone.cache.memcache_pool backend only) (integer value)
+# (keystone.cache.memcache_pool backend only). (integer value)
 #memcache_pool_unused_timeout=60
 
 # Number of seconds that an operation will wait to get a
@@ -589,13 +598,6 @@
 # Maximum number of entities that will be returned in a
 # catalog collection. (integer value)
 #list_limit=<None>
-
-# (Deprecated) List of possible substitutions for use in
-# formatting endpoints. Use caution when modifying this list.
-# It will give users with permission to create endpoints the
-# ability to see those values in your configuration file. This
-# option will be removed in Juno. (list value)
-#endpoint_substitution_whitelist=tenant_id,user_id,public_bind_host,admin_bind_host,compute_host,compute_port,admin_port,public_port,public_endpoint,admin_endpoint
 
 
 [credential]
@@ -661,8 +663,9 @@
 # Deprecated group/name - [DATABASE]/sql_max_pool_size
 #max_pool_size=<None>
 
-# Maximum db connection retries during startup. Set to -1 to
-# specify an infinite retry count. (integer value)
+# Maximum number of database connection retries during
+# startup. Set to -1 to specify an infinite retry count.
+# (integer value)
 # Deprecated group/name - [DEFAULT]/sql_max_retries
 # Deprecated group/name - [DATABASE]/sql_max_retries
 #max_retries=10
@@ -713,16 +716,6 @@
 # Set to -1 to specify an infinite retry count. (integer
 # value)
 #db_max_retries=20
-
-
-[ec2]
-
-#
-# Options defined in keystone
-#
-
-# EC2Credential backend driver. (string value)
-#driver=keystone.contrib.ec2.backends.kvs.Ec2
 
 
 [endpoint_filter]
@@ -1299,6 +1292,54 @@
 #enabled=false
 
 
+[oslo_messaging_amqp]
+
+#
+# Options defined in oslo.messaging
+#
+
+# address prefix used when sending to a specific server
+# (string value)
+#server_request_prefix=exclusive
+
+# address prefix used when broadcasting to all servers (string
+# value)
+#broadcast_prefix=broadcast
+
+# address prefix when sending to any server in group (string
+# value)
+#group_request_prefix=unicast
+
+# Name for the AMQP container (string value)
+#container_name=<None>
+
+# Timeout for inactive connections (in seconds) (integer
+# value)
+#idle_timeout=0
+
+# Debug: dump AMQP frames to stdout (boolean value)
+#trace=false
+
+# CA certificate PEM file for verifing server certificate
+# (string value)
+#ssl_ca_file=
+
+# Identifying certificate PEM file to present to clients
+# (string value)
+#ssl_cert_file=
+
+# Private key PEM file used to sign cert_file certificate
+# (string value)
+#ssl_key_file=
+
+# Password for decrypting ssl_key_file (if encrypted) (string
+# value)
+#ssl_key_password=<None>
+
+# Accept clients using either SSL or plain TCP (boolean value)
+#allow_insecure_clients=false
+
+
 [paste_deploy]
 
 #
@@ -1332,7 +1373,7 @@
 
 # An implementation of the backend for persisting revocation
 # events. (string value)
-#driver=keystone.contrib.revoke.backends.kvs.Revoke
+#driver=keystone.contrib.revoke.backends.sql.Revoke
 
 # This value (calculated in seconds) is added to token
 # expiration before a revocation event may be removed from the
@@ -1479,7 +1520,7 @@
 # Path of the keyfile for SSL. (string value)
 #keyfile=/etc/keystone/ssl/private/keystonekey.pem
 
-# Path of the ca cert file for SSL. (string value)
+# Path of the CA cert file for SSL. (string value)
 #ca_certs=/etc/keystone/ssl/certs/ca.pem
 
 # Path of the CA key file for SSL. (string value)
@@ -1499,16 +1540,6 @@
 # SSL certificate subject (auto generated certificate).
 # (string value)
 #cert_subject=/C=US/ST=Unset/L=Unset/O=Unset/CN=localhost
-
-
-[stats]
-
-#
-# Options defined in keystone
-#
-
-# Stats backend driver. (string value)
-#driver=keystone.contrib.stats.backends.kvs.Stats
 
 
 [token]

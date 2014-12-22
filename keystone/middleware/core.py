@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo.serialization import jsonutils
 import six
 import webob.dec
 
@@ -21,9 +22,8 @@ from keystone.common import serializer
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _LW
 from keystone.models import token_model
-from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
 
@@ -99,10 +99,6 @@ class JsonBodyMiddleware(wsgi.Middleware):
 
     Accepting arguments as JSON is useful for accepting data that may be more
     complex than simple primitives.
-
-    In this case we accept it as urlencoded data under the key 'json' as in
-    json=<urlencoded_json> but this could be extended to accept raw JSON
-    in the POST body.
 
     Filters out the parameters `self`, `context` and anything beginning with
     an underscore.
@@ -262,7 +258,7 @@ class AuthContextMiddleware(wsgi.Middleware):
             wsgi.validate_token_bind(context, token_ref)
             return authorization.token_to_auth_context(token_ref)
         except exception.TokenNotFound:
-            LOG.warning(_('RBAC: Invalid token'))
+            LOG.warning(_LW('RBAC: Invalid token'))
             raise exception.Unauthorized()
 
     def process_request(self, request):
@@ -272,7 +268,7 @@ class AuthContextMiddleware(wsgi.Middleware):
             return
 
         if authorization.AUTH_CONTEXT_ENV in request.environ:
-            msg = _('Auth context already exists in the request environment')
+            msg = _LW('Auth context already exists in the request environment')
             LOG.warning(msg)
             return
 

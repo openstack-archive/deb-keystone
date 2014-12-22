@@ -4,13 +4,14 @@
 #
 # Translators:
 # Gabriel Wainer, 2013
-# vmoliveira <volmar.oliveira.jr@gmail.com>, 2013
+# Lucas Ribeiro <lucasribeiro1990@gmail.com>, 2014
+# Volmar Oliveira Junior <volmar.oliveira.jr@gmail.com>, 2013
 msgid ""
 msgstr ""
 "Project-Id-Version:  Keystone\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/keystone\n"
-"POT-Creation-Date: 2014-10-07 14:35+0000\n"
-"PO-Revision-Date: 2014-04-19 01:30+0000\n"
+"POT-Creation-Date: 2014-11-17 06:02+0000\n"
+"PO-Revision-Date: 2014-11-13 19:21+0000\n"
 "Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
 "Language-Team: Portuguese (Brazil) "
 "(http://www.transifex.com/projects/p/keystone/language/pt_BR/)\n"
@@ -40,23 +41,23 @@ msgstr "%(property_name)s não deve ter mais de %(max_length)s caracteres."
 msgid "%(property_name)s is not a %(display_expected_type)s"
 msgstr "%(property_name)s não é um %(display_expected_type)s"
 
-#: keystone/cli.py:141
+#: keystone/cli.py:144
 msgid "keystone-manage pki_setup is not recommended for production use."
-msgstr ""
+msgstr "keystone-manage pki_setup não é recomendado para uso em produção."
 
-#: keystone/cli.py:160
+#: keystone/cli.py:164
 msgid "keystone-manage ssl_setup is not recommended for production use."
-msgstr ""
+msgstr "keystone-manage ssl_setup não é recomendado para uso em produção."
 
-#: keystone/cli.py:218
+#: keystone/cli.py:223
 msgid "At least one option must be provided"
 msgstr ""
 
-#: keystone/cli.py:225
+#: keystone/cli.py:230
 msgid "--all option cannot be mixed with other options"
 msgstr ""
 
-#: keystone/cli.py:234
+#: keystone/cli.py:239
 #, python-format
 msgid "Unknown domain '%(name)s' specified by --domain-name"
 msgstr ""
@@ -385,6 +386,11 @@ msgstr ""
 msgid "%(event)s is not a valid notification event, must be one of: %(actions)s"
 msgstr ""
 
+#: keystone/notifications.py:176
+#, python-format
+msgid "Method not callable: %s"
+msgstr ""
+
 #: keystone/notifications.py:223
 msgid "Failed to construct notifier"
 msgstr ""
@@ -434,8 +440,8 @@ msgstr ""
 "Grupo %(group)s não encontrado para a atribuição de role - %(target)s com"
 " Role: %(role)s"
 
-#: keystone/assignment/core.py:103 keystone/token/core.py:72
-#: keystone/token/core.py:88
+#: keystone/assignment/core.py:103 keystone/token/core.py:66
+#: keystone/token/core.py:82
 #, python-format
 msgid "Domain is disabled: %s"
 msgstr "O domínio está desativado: %s"
@@ -477,28 +483,18 @@ msgstr "Alvo Desconhecido"
 msgid "Expected dict or list: %s"
 msgstr "Esperado dict ou list: %s"
 
-#: keystone/assignment/backends/kvs.py:257
-#: keystone/assignment/backends/ldap.py:551
-#: keystone/assignment/backends/sql.py:405
-#, python-format
-msgid "Cannot remove role that has not been granted, %s"
-msgstr "Não é possível remover role que não foi concedido, %s"
-
 #: keystone/assignment/backends/ldap.py:119
 msgid "Domain metadata not supported by LDAP"
 msgstr ""
 
 #: keystone/assignment/backends/ldap.py:215
 #: keystone/assignment/backends/ldap.py:259 keystone/catalog/core.py:100
-#: keystone/common/ldap/core.py:1378 keystone/identity/backends/kvs.py:120
-#: keystone/identity/backends/kvs.py:225
+#: keystone/common/ldap/core.py:1396
 #, python-format
 msgid "Duplicate ID, %s."
 msgstr "ID duplicado, %s."
 
-#: keystone/assignment/backends/ldap.py:223 keystone/common/ldap/core.py:1368
-#: keystone/identity/backends/kvs.py:128 keystone/identity/backends/kvs.py:155
-#: keystone/identity/backends/kvs.py:232 keystone/identity/backends/kvs.py:260
+#: keystone/assignment/backends/ldap.py:223 keystone/common/ldap/core.py:1386
 #, python-format
 msgid "Duplicate name, %s."
 msgstr "Nome duplicado, %s."
@@ -510,7 +506,7 @@ msgid "Domains are read-only against LDAP"
 msgstr ""
 
 #: keystone/assignment/backends/ldap.py:313
-#: keystone/assignment/backends/sql.py:145
+#: keystone/assignment/backends/sql.py:146
 msgid "Inherited roles can only be assigned to domains"
 msgstr "Roles herdados podem ser atribuídos somente à domínios"
 
@@ -524,23 +520,29 @@ msgstr ""
 msgid "Role %s not found"
 msgstr "Role %s não localizada"
 
+#: keystone/assignment/backends/ldap.py:551
+#: keystone/assignment/backends/sql.py:458
+#, python-format
+msgid "Cannot remove role that has not been granted, %s"
+msgstr "Não é possível remover role que não foi concedido, %s"
+
 #: keystone/assignment/backends/ldap.py:647
 #, python-format
 msgid "Cannot duplicate name %s"
 msgstr ""
 
-#: keystone/assignment/backends/sql.py:132
+#: keystone/assignment/backends/sql.py:133
 #, python-format
 msgid ""
 "Unexpected combination of grant attributes - User, Group, Project, "
 "Domain: %s"
 msgstr ""
 
-#: keystone/assignment/backends/sql.py:323
+#: keystone/assignment/backends/sql.py:355
 msgid "Must specify either domain or project"
 msgstr ""
 
-#: keystone/assignment/backends/sql.py:426
+#: keystone/assignment/backends/sql.py:479
 #, python-format
 msgid "Unexpected assignment type encountered, %s"
 msgstr ""
@@ -620,6 +622,10 @@ msgstr "Não é possível consultar o usuário %s"
 msgid "auth_type is not Negotiate"
 msgstr ""
 
+#: keystone/auth/plugins/mapped.py:175
+msgid "Could not map user"
+msgstr ""
+
 #: keystone/auth/plugins/oauth1.py:39
 #, python-format
 msgid "%s not supported"
@@ -647,7 +653,7 @@ msgstr ""
 msgid "Malformed endpoint - %(url)r is not a string"
 msgstr ""
 
-#: keystone/common/authorization.py:46 keystone/common/wsgi.py:60
+#: keystone/common/authorization.py:46 keystone/common/wsgi.py:61
 #, python-format
 msgid "token reference must be a KeystoneToken type, got: %s"
 msgstr ""
@@ -762,16 +768,16 @@ msgstr ""
 msgid "Multiple truncation attributes found"
 msgstr ""
 
-#: keystone/common/utils.py:98
+#: keystone/common/utils.py:104
 #, python-format
 msgid "Truncating user password to %d characters."
 msgstr ""
 
-#: keystone/common/utils.py:196 keystone/credential/controllers.py:43
+#: keystone/common/utils.py:202 keystone/credential/controllers.py:44
 msgid "Invalid blob in credential"
 msgstr "BLOB inválido na credencial"
 
-#: keystone/common/utils.py:275
+#: keystone/common/utils.py:281
 msgid ""
 "Error setting up the debug environment. Verify that the option --debug-"
 "url has the format <host>:<port> and that a debugger processes is "
@@ -781,26 +787,26 @@ msgstr ""
 "possui o formato <host>:<port> e que o processo debugger está escutando "
 "nesta porta."
 
-#: keystone/common/wsgi.py:315
+#: keystone/common/wsgi.py:316
 #, python-format
 msgid "%s field is required and cannot be empty"
 msgstr ""
 
-#: keystone/common/wsgi.py:327
+#: keystone/common/wsgi.py:328
 #, python-format
 msgid "%s field(s) cannot be empty"
 msgstr ""
 
-#: keystone/common/wsgi.py:544
+#: keystone/common/wsgi.py:545
 msgid "The resource could not be found."
 msgstr "O recurso não pôde ser localizado."
 
-#: keystone/common/cache/_memcache_pool.py:100
+#: keystone/common/cache/_memcache_pool.py:111
 #, python-format
 msgid "Unable to get a connection from pool id %(id)s after %(seconds)s seconds."
 msgstr ""
 
-#: keystone/common/cache/core.py:101
+#: keystone/common/cache/core.py:100
 #, python-format
 msgid ""
 "Unable to build cache config-key. Expected format \"<argname>:<value>\". "
@@ -809,7 +815,7 @@ msgstr ""
 "Não é possível construir chave de configuração do cache. Formato esperado"
 " \"<argname>:<value>\".  Pulando formato desconhecido: %s"
 
-#: keystone/common/cache/core.py:133
+#: keystone/common/cache/core.py:132
 msgid "region not type dogpile.cache.CacheRegion"
 msgstr "região não é do tipo dogpile.cache.CacheRegion"
 
@@ -940,37 +946,37 @@ msgstr "tls_cacertfile %s não encontrada ou não é um arquivo"
 msgid "tls_cacertdir %s not found or is not a directory"
 msgstr "tls_cacertdir %s não encontrado ou não é um diretório"
 
-#: keystone/common/ldap/core.py:1303
+#: keystone/common/ldap/core.py:1321
 #, python-format
 msgid "ID attribute %(id_attr)s not found in LDAP object %(dn)s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:1347
+#: keystone/common/ldap/core.py:1365
 #, python-format
 msgid "LDAP %s create"
 msgstr "Criação de LDAP %s"
 
-#: keystone/common/ldap/core.py:1352
+#: keystone/common/ldap/core.py:1370
 #, python-format
 msgid "LDAP %s update"
 msgstr "Atualização de LDAP %s"
 
-#: keystone/common/ldap/core.py:1357
+#: keystone/common/ldap/core.py:1375
 #, python-format
 msgid "LDAP %s delete"
 msgstr "Exclusão de LDAP %s"
 
-#: keystone/common/ldap/core.py:1499
+#: keystone/common/ldap/core.py:1517
 #, python-format
 msgid "Cannot change %(option_name)s %(attr)s"
 msgstr "Não é possível alterar %(option_name)s %(attr)s"
 
-#: keystone/common/ldap/core.py:1586
+#: keystone/common/ldap/core.py:1604
 #, python-format
 msgid "Member %(member)s is already a member of group %(group)s"
 msgstr ""
 
-#: keystone/common/ldap/core.py:1635
+#: keystone/common/ldap/core.py:1653
 #, python-format
 msgid ""
 "When deleting entries for %(search_base)s, could not delete nonexistent "
@@ -1059,11 +1065,7 @@ msgstr ""
 msgid "Federation token is expired"
 msgstr ""
 
-#: keystone/contrib/federation/utils.py:225
-msgid "Could not map user"
-msgstr ""
-
-#: keystone/contrib/federation/utils.py:254
+#: keystone/contrib/federation/utils.py:258
 #, python-format
 msgid "Ignoring user name %s"
 msgstr ""
@@ -1189,15 +1191,14 @@ msgstr ""
 msgid "Unable to locate domain config directory: %s"
 msgstr "Não é possível localizar diretório de configuração de domínio: %s"
 
-#: keystone/identity/core.py:220 keystone/identity/backends/kvs.py:75
-#: keystone/identity/backends/kvs.py:77 keystone/identity/backends/ldap.py:59
-#: keystone/identity/backends/ldap.py:61 keystone/identity/backends/ldap.py:67
-#: keystone/identity/backends/ldap.py:69 keystone/identity/backends/sql.py:112
-#: keystone/identity/backends/sql.py:114
+#: keystone/identity/core.py:220 keystone/identity/backends/ldap.py:58
+#: keystone/identity/backends/ldap.py:60 keystone/identity/backends/ldap.py:66
+#: keystone/identity/backends/ldap.py:68 keystone/identity/backends/sql.py:109
+#: keystone/identity/backends/sql.py:111
 msgid "Invalid user / password"
 msgstr ""
 
-#: keystone/identity/core.py:594 keystone/token/core.py:64
+#: keystone/identity/core.py:594 keystone/token/core.py:58
 #, python-format
 msgid "User is disabled: %s"
 msgstr "O usuário está desativado: %s"
@@ -1206,21 +1207,17 @@ msgstr "O usuário está desativado: %s"
 msgid "Cannot change user ID"
 msgstr ""
 
-#: keystone/identity/backends/kvs.py:179 keystone/identity/backends/kvs.py:188
-msgid "User not found in group"
-msgstr "Usuário não localizado no grupo"
-
-#: keystone/identity/backends/ldap.py:99
+#: keystone/identity/backends/ldap.py:98
 msgid "Cannot change user name"
 msgstr ""
 
-#: keystone/identity/backends/ldap.py:183 keystone/identity/backends/sql.py:196
-#: keystone/identity/backends/sql.py:214
+#: keystone/identity/backends/ldap.py:182 keystone/identity/backends/sql.py:193
+#: keystone/identity/backends/sql.py:211
 #, python-format
 msgid "User '%(user_id)s' not found in group '%(group_id)s'"
 msgstr ""
 
-#: keystone/identity/backends/ldap.py:337
+#: keystone/identity/backends/ldap.py:332
 #, python-format
 msgid "User %(user_id)s is already a member of group %(group_id)s"
 msgstr "Usuário %(user_id)s já é membro do grupo %(group_id)s"
@@ -1235,107 +1232,57 @@ msgstr ""
 
 #: keystone/openstack/common/gettextutils.py:301
 msgid "Message objects do not support addition."
-msgstr ""
+msgstr "Objetos mensagem não suportam adição."
 
 #: keystone/openstack/common/gettextutils.py:311
 msgid ""
 "Message objects do not support str() because they may contain non-ascii "
 "characters. Please use unicode() or translate() instead."
 msgstr ""
+"Objetos mensagem não suportam str() pois podem conter carácteres "
+"não-ascii. Use unicode() ou translate()."
 
-#: keystone/openstack/common/log.py:290
+#: keystone/openstack/common/log.py:287
 #, python-format
 msgid "Deprecated: %s"
 msgstr "Deprecado: %s"
 
-#: keystone/openstack/common/log.py:398
+#: keystone/openstack/common/log.py:395
 #, python-format
 msgid "Error loading logging config %(log_config)s: %(err_msg)s"
 msgstr "Erro carregando configuração de logging: %(log_config)s: %(err_msg)s"
 
-#: keystone/openstack/common/log.py:459
+#: keystone/openstack/common/log.py:456
 #, python-format
 msgid "syslog facility must be one of: %s"
 msgstr "Recurso syslog deve ser um destes: %s"
 
-#: keystone/openstack/common/log.py:710
+#: keystone/openstack/common/log.py:707
 #, python-format
 msgid "Fatal call to deprecated config: %(msg)s"
 msgstr "Chamada fatal à configuração deprecada: %(msg)s"
 
-#: keystone/openstack/common/policy.py:96
+#: keystone/openstack/common/policy.py:97
 msgid "The JSON file that defines policies."
 msgstr ""
 
-#: keystone/openstack/common/policy.py:99
+#: keystone/openstack/common/policy.py:100
 msgid "Default rule. Enforced when a requested rule is not found."
 msgstr ""
 
-#: keystone/openstack/common/policy.py:114
+#: keystone/openstack/common/policy.py:104
+msgid "Directories where policy configuration files are stored"
+msgstr ""
+
+#: keystone/openstack/common/policy.py:119
 #, python-format
 msgid "Policy doesn't allow %s to be performed."
 msgstr "Política não permite a realização de %s."
 
-#: keystone/openstack/common/policy.py:208
+#: keystone/openstack/common/policy.py:213
 #, python-format
 msgid "Rules must be an instance of dict or Rules, got %s instead"
 msgstr "Regras devem ser uma instância de dict ou Rules, recebeu %s em seu lugar"
-
-#: keystone/openstack/common/processutils.py:59
-msgid "Unexpected error while running command."
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:62
-#, python-format
-msgid ""
-"%(description)s\n"
-"Command: %(cmd)s\n"
-"Exit code: %(exit_code)s\n"
-"Stdout: %(stdout)r\n"
-"Stderr: %(stderr)r"
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:143
-#, python-format
-msgid "Got unknown keyword args: %r"
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:148
-msgid "Command requested root, but did not specify a root helper."
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:158
-#, python-format
-msgid "Running cmd (subprocess): %s"
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:206
-#, python-format
-msgid "%r failed. Retrying."
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:248
-msgid "Environment not supported over SSH"
-msgstr ""
-
-#: keystone/openstack/common/processutils.py:252
-msgid "process_input not supported over SSH"
-msgstr ""
-
-#: keystone/openstack/common/strutils.py:114
-#, python-format
-msgid "Unrecognized value '%(val)s', acceptable values are: %(acceptable)s"
-msgstr "Valor desconhecido '%(val)s', valores aceitáveis são: %(acceptable)s"
-
-#: keystone/openstack/common/strutils.py:219
-#, python-format
-msgid "Invalid unit system: \"%s\""
-msgstr ""
-
-#: keystone/openstack/common/strutils.py:228
-#, python-format
-msgid "Invalid string format: %s"
-msgstr "formato de string inválido: %s"
 
 #: keystone/openstack/common/versionutils.py:90
 #, python-format
@@ -1370,16 +1317,16 @@ msgstr ""
 msgid "Failed to checkout %s"
 msgstr "Falha ao fazer check out %s"
 
-#: keystone/token/controllers.py:391
+#: keystone/token/controllers.py:389
 #, python-format
 msgid "User %(u_id)s is unauthorized for tenant %(t_id)s"
 msgstr "Usuário %(u_id)s  não está autorizado para o tenant %(t_id)s"
 
-#: keystone/token/controllers.py:410 keystone/token/controllers.py:413
+#: keystone/token/controllers.py:408 keystone/token/controllers.py:411
 msgid "Token does not belong to specified tenant."
 msgstr "O token não pertence ao tenant especificado."
 
-#: keystone/token/core.py:79
+#: keystone/token/core.py:73
 #, python-format
 msgid "Tenant is disabled: %s"
 msgstr ""
@@ -1406,22 +1353,22 @@ msgstr "Erro inesperado ou token mal formado ao determinar validade do token: %s
 #: keystone/token/persistence/backends/kvs.py:57
 msgid ""
 "It is recommended to only use the base key-value-store implementation for"
-" the token driver for testing purposes.  Please use "
-"keystone.token.backends.memcache.Token or "
-"keystone.token.backends.sql.Token instead."
+" the token driver for testing purposes. Please use "
+"keystone.token.persistence.backends.memcache.Token or "
+"keystone.token.persistence.backends.sql.Token instead."
 msgstr ""
 
-#: keystone/token/persistence/backends/kvs.py:132
+#: keystone/token/persistence/backends/kvs.py:133
 #, python-format
 msgid "Unknown token version %s"
 msgstr ""
 
-#: keystone/token/persistence/backends/kvs.py:205
+#: keystone/token/persistence/backends/kvs.py:206
 #, python-format
 msgid "Token `%s` is expired, not adding to the revocation list."
 msgstr ""
 
-#: keystone/token/persistence/backends/kvs.py:225
+#: keystone/token/persistence/backends/kvs.py:226
 #, python-format
 msgid ""
 "Reinitializing revocation list due to error in loading revocation list "
@@ -1429,7 +1376,7 @@ msgid ""
 "data: %(list)r"
 msgstr ""
 
-#: keystone/token/persistence/backends/kvs.py:239
+#: keystone/token/persistence/backends/kvs.py:240
 #, python-format
 msgid ""
 "Removing `%s` from revocation list due to invalid expires data in "
@@ -1477,11 +1424,11 @@ msgstr "O domínio não padrão não é suportado"
 msgid "Domain scoped token is not supported"
 msgstr "O token de escopo de domínio não é suportado"
 
-#: keystone/token/providers/pki.py:45
+#: keystone/token/providers/pki.py:47
 msgid "Unable to sign token"
 msgstr ""
 
-#: keystone/token/providers/pki.py:46 keystone/token/providers/pkiz.py:29
+#: keystone/token/providers/pki.py:48 keystone/token/providers/pkiz.py:30
 msgid "Unable to sign token."
 msgstr "Não é possível assinar o token."
 

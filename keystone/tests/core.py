@@ -45,15 +45,16 @@ from keystone.common import config as common_cfg
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
-from keystone.common import utils as common_utils
 from keystone import config
 from keystone import controllers
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _LW
 from keystone import notifications
 from keystone.openstack.common import log
 from keystone import service
 from keystone.tests import ksfixtures
+from keystone.tests import utils
+
 
 # NOTE(dstanek): Tests inheriting from TestCase depend on having the
 #   policy_file command-line option declared before setUp runs. Importing the
@@ -132,18 +133,18 @@ def checkout_vendor(repo, rev):
                 return revdir
 
         if not os.path.exists(revdir):
-            common_utils.git('clone', repo, revdir)
+            utils.git('clone', repo, revdir)
 
         os.chdir(revdir)
-        common_utils.git('checkout', '-q', 'master')
-        common_utils.git('pull', '-q')
-        common_utils.git('checkout', '-q', rev)
+        utils.git('checkout', '-q', 'master')
+        utils.git('pull', '-q')
+        utils.git('checkout', '-q', rev)
 
         # write out a modified time
         with open(modcheck, 'w') as fd:
             fd.write('1')
     except environment.subprocess.CalledProcessError:
-        LOG.warning(_('Failed to checkout %s'), repo)
+        LOG.warning(_LW('Failed to checkout %s'), repo)
     os.chdir(working_dir)
     return revdir
 
@@ -229,6 +230,11 @@ def skip_if_no_multiple_domains_support(f):
 
 
 class UnexpectedExit(Exception):
+    pass
+
+
+class BadLog(Exception):
+    """Raised on invalid call to logging (parameter mismatch)."""
     pass
 
 
@@ -378,7 +384,7 @@ class TestCase(BaseTestCase):
             driver='keystone.token.persistence.backends.kvs.Token')
         self.config_fixture.config(
             group='trust',
-            driver='keystone.trust.backends.kvs.Trust')
+            driver='keystone.trust.backends.sql.Trust')
         self.config_fixture.config(
             group='saml', certfile=signing_certfile, keyfile=signing_keyfile)
         self.config_fixture.config(
@@ -419,7 +425,7 @@ class TestCase(BaseTestCase):
         super(TestCase, self).setUp()
         self.addCleanup(self.cleanup_instance(
             '_paths', '_memo', '_overrides', '_group_overrides', 'maxDiff',
-            'exit_patch', 'config_fixture', 'logger'))
+            'config_fixture', 'logger'))
 
         self._paths = []
 
@@ -438,8 +444,10 @@ class TestCase(BaseTestCase):
 
         self.addCleanup(CONF.reset)
 
-        self.exit_patch = self.useFixture(mockpatch.PatchObject(sys, 'exit'))
-        self.exit_patch.mock.side_effect = UnexpectedExit
+        self.useFixture(mockpatch.PatchObject(sys, 'exit',
+                                              side_effect=UnexpectedExit))
+        self.useFixture(mockpatch.PatchObject(logging.Handler, 'handleError',
+                                              side_effect=BadLog))
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.config(self.config_files())
 
@@ -785,9 +793,6 @@ class SQLDriverOverrides(object):
         self.config_fixture.config(
             group='catalog',
             driver='keystone.catalog.backends.sql.Catalog')
-        self.config_fixture.config(
-            group='ec2',
-            driver='keystone.contrib.ec2.backends.sql.Ec2')
         self.config_fixture.config(
             group='identity',
             driver='keystone.identity.backends.sql.Identity')

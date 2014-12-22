@@ -16,6 +16,7 @@ import datetime
 import uuid
 
 from lxml import etree
+from oslo.serialization import jsonutils
 from oslo.utils import timeutils
 import six
 from testtools import matchers
@@ -27,10 +28,8 @@ from keystone.common import serializer
 from keystone import config
 from keystone import exception
 from keystone import middleware
-from keystone.openstack.common import jsonutils
 from keystone.policy.backends import rules
 from keystone import tests
-from keystone.tests.ksfixtures import database
 from keystone.tests import rest
 
 
@@ -154,8 +153,6 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.addCleanup(self.remove_generated_paste_config)
         if new_paste_file:
             app_conf = 'config:%s' % (new_paste_file)
-
-        self.useFixture(database.Database(self.get_extensions()))
 
         super(RestfulTestCase, self).setUp(app_conf=app_conf)
 
@@ -298,9 +295,10 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         ref = self.new_ref()
         return ref
 
-    def new_project_ref(self, domain_id):
+    def new_project_ref(self, domain_id, parent_id=None):
         ref = self.new_ref()
         ref['domain_id'] = domain_id
+        ref['parent_id'] = parent_id
         return ref
 
     def new_user_ref(self, domain_id, project_id=None):
@@ -545,7 +543,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.assertIsNotNone(entities)
 
         if expected_length is not None:
-            self.assertEqual(len(entities), expected_length)
+            self.assertEqual(expected_length, len(entities))
         elif ref is not None:
             # we're at least expecting the ref
             self.assertNotEmpty(entities)
@@ -1023,17 +1021,13 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             self.assertEqual(ref['name'], entity['name'])
         return entity
 
-    def assertValidRoleAssignmentListResponse(self, resp, ref=None,
-                                              expected_length=None,
+    def assertValidRoleAssignmentListResponse(self, resp, expected_length=None,
                                               resource_url=None):
 
         entities = resp.result.get('role_assignments')
 
         if expected_length is not None:
-            self.assertEqual(len(entities), expected_length)
-        elif ref is not None:
-            # we're at least expecting the ref
-            self.assertNotEmpty(entities)
+            self.assertEqual(expected_length, len(entities))
 
         # collections should have relational links
         self.assertValidListLinks(resp.result.get('links'),
@@ -1042,8 +1036,6 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         for entity in entities:
             self.assertIsNotNone(entity)
             self.assertValidRoleAssignment(entity)
-        if ref:
-            self.assertValidRoleAssignment(entity, ref)
         return entities
 
     def assertValidRoleAssignment(self, entity, ref=None, url=None):
@@ -1082,6 +1074,9 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             if ref['scope'].get('domain'):
                 self.assertEqual(ref['scope']['domain']['id'],
                                  entity['scope']['domain']['id'])
+            if ref['scope'].get('OS-INHERIT:inherited_to'):
+                self.assertEqual(ref['scope']['OS-INHERIT:inherited_to'],
+                                 entity['scope']['OS-INHERIT:inherited_to'])
         if url:
             self.assertIn(url, entity['links']['assignment'])
 
@@ -1098,7 +1093,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
                 pass
             else:
                 found_count += 1
-        self.assertEqual(found_count, expected)
+        self.assertEqual(expected, found_count)
 
     def assertRoleAssignmentNotInListResponse(
             self, resp, ref, link_url=None):
@@ -1242,8 +1237,8 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         application = None
         middleware.AuthContextMiddleware(application).process_request(req)
         self.assertEqual(
-            req.environ.get(authorization.AUTH_CONTEXT_ENV)['user_id'],
-            self.user['id'])
+            self.user['id'],
+            req.environ.get(authorization.AUTH_CONTEXT_ENV)['user_id'])
 
     def test_auth_context_override(self):
         overridden_context = 'OVERRIDDEN_CONTEXT'
@@ -1254,8 +1249,8 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         application = None
         middleware.AuthContextMiddleware(application).process_request(req)
         # make sure overridden context take precedence
-        self.assertEqual(req.environ.get(authorization.AUTH_CONTEXT_ENV),
-                         overridden_context)
+        self.assertEqual(overridden_context,
+                         req.environ.get(authorization.AUTH_CONTEXT_ENV))
 
     def test_admin_token_auth_context(self):
         # test to make sure AuthContextMiddleware does not attempt to build

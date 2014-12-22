@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo.serialization import jsonutils
 from oslo.utils import timeutils
 import six
 from six.moves.urllib import parse
@@ -20,8 +21,7 @@ from keystone.common import dependency
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
-from keystone.i18n import _
-from keystone.openstack.common import jsonutils
+from keystone.i18n import _, _LE
 from keystone.openstack.common import log
 from keystone import token
 from keystone.token import provider
@@ -341,10 +341,10 @@ class V3TokenDataHelper(object):
         elif isinstance(audit_info, list):
             token_data['audit_ids'] = audit_info
         else:
-            msg = _('Invalid audit info data type: %(data)s (%(type)s)')
-            msg_subst = {'data': audit_info, 'type': type(audit_info)}
-            LOG.error(msg, msg_subst)
-            raise exception.UnexpectedError(msg % msg_subst)
+            msg = (_('Invalid audit info data type: %(data)s (%(type)s)') %
+                   {'data': audit_info, 'type': type(audit_info)})
+            LOG.error(msg)
+            raise exception.UnexpectedError(msg)
 
     def get_token_data(self, user_id, method_names, extras,
                        domain_id=None, project_id=None, expires=None,
@@ -419,6 +419,10 @@ class BaseProvider(provider.Provider):
         token_data['access']['token']['id'] = token_id
         return token_id, token_data
 
+    def _is_mapped_token(self, auth_context):
+        return (federation.IDENTITY_PROVIDER in auth_context and
+                federation.PROTOCOL in auth_context)
+
     def issue_v3_token(self, user_id, method_names, expires_at=None,
                        project_id=None, domain_id=None, auth_context=None,
                        trust=None, metadata_ref=None, include_catalog=True,
@@ -429,9 +433,9 @@ class BaseProvider(provider.Provider):
             trust = self.trust_api.get_trust(metadata_ref['trust_id'])
 
         token_ref = None
-        if 'saml2' in method_names:
-            token_ref = self._handle_saml2_tokens(auth_context, project_id,
-                                                  domain_id)
+        if auth_context and self._is_mapped_token(auth_context):
+            token_ref = self._handle_mapped_tokens(
+                auth_context, project_id, domain_id)
 
         access_token = None
         if 'oauth1' in method_names:
@@ -458,7 +462,7 @@ class BaseProvider(provider.Provider):
         token_id = self._get_token_id(token_data)
         return token_id, token_data
 
-    def _handle_saml2_tokens(self, auth_context, project_id, domain_id):
+    def _handle_mapped_tokens(self, auth_context, project_id, domain_id):
         user_id = auth_context['user_id']
         group_ids = auth_context['group_ids']
         idp = auth_context[federation.IDENTITY_PROVIDER]
@@ -573,7 +577,7 @@ class BaseProvider(provider.Provider):
                     token_ref, roles_ref, catalog_ref, trust_ref)
             return token_data
         except exception.ValidationError as e:
-            LOG.exception(_('Failed to validate token'))
+            LOG.exception(_LE('Failed to validate token'))
             raise exception.TokenNotFound(e)
 
     def validate_v3_token(self, token_ref):

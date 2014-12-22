@@ -23,6 +23,7 @@ from keystone.contrib.federation import idp as keystone_idp
 from keystone.contrib.federation import schema
 from keystone.contrib.federation import utils
 from keystone import exception
+from keystone.i18n import _
 from keystone.models import token_model
 
 
@@ -273,12 +274,12 @@ class Auth(auth_controllers.Auth):
         subject = token_ref.user_name
         roles = token_ref.role_names
 
-        if token_ref.project_scoped:
-            project = token_ref.project_name
-        else:
-            raise ValueError(_('Use a project scoped token when attempting to'
-                               'create a SAML assertion'))
+        if not token_ref.project_scoped:
+            action = _('Use a project scoped token when attempting to create '
+                       'a SAML assertion')
+            raise exception.ForbiddenAction(action=action)
 
+        project = token_ref.project_name
         generator = keystone_idp.SAMLGenerator()
         response = generator.samlize_token(issuer, recipient, subject, roles,
                                            project)

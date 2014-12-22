@@ -13,12 +13,13 @@
 """Keystone Compressed PKI Token Provider"""
 
 from keystoneclient.common import cms
+from oslo.serialization import jsonutils
 
 from keystone.common import environment
+from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
-from keystone.openstack.common import jsonutils
 from keystone.openstack.common import log
 from keystone.token.providers import common
 
@@ -36,7 +37,8 @@ class Provider(common.BaseProvider):
             # produces unicode. This can be removed if the client returns
             # str()
             # TODO(ayoung): Make to a byte_str for Python3
-            token_id = str(cms.pkiz_sign(jsonutils.dumps(token_data),
+            token_json = jsonutils.dumps(token_data, cls=utils.PKIEncoder)
+            token_id = str(cms.pkiz_sign(token_json,
                                          CONF.signing.certfile,
                                          CONF.signing.keyfile))
             return token_id

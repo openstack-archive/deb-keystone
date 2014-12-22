@@ -18,6 +18,7 @@ import uuid
 
 import mock
 from oslo import i18n
+from oslo.serialization import jsonutils
 import six
 from testtools import matchers
 import webob
@@ -25,7 +26,6 @@ import webob
 from keystone.common import environment
 from keystone.common import wsgi
 from keystone import exception
-from keystone.openstack.common import jsonutils
 from keystone import tests
 
 
@@ -374,7 +374,6 @@ class ServerTest(tests.TestCase):
 
     def setUp(self):
         super(ServerTest, self).setUp()
-        environment.use_eventlet()
         self.host = '127.0.0.1'
         self.port = '1234'
 
@@ -387,6 +386,7 @@ class ServerTest(tests.TestCase):
         server = environment.Server(mock.MagicMock(), host=self.host,
                                     port=self.port)
         server.start()
+        self.addCleanup(server.stop)
         self.assertTrue(mock_listen.called)
         self.assertFalse(mock_sock_dup.setsockopt.called)
 
@@ -399,6 +399,7 @@ class ServerTest(tests.TestCase):
         server = environment.Server(mock.MagicMock(), host=self.host,
                                     port=self.port, keepalive=True)
         server.start()
+        self.addCleanup(server.stop)
         mock_sock_dup.setsockopt.assert_called_once_with(socket.SOL_SOCKET,
                                                          socket.SO_KEEPALIVE,
                                                          1)
@@ -414,16 +415,13 @@ class ServerTest(tests.TestCase):
                                     port=self.port, keepalive=True,
                                     keepidle=1)
         server.start()
+        self.addCleanup(server.stop)
 
-        # keepidle isn't available in the OS X version of eventlet
-        if hasattr(socket, 'TCP_KEEPIDLE'):
-            self.assertEqual(mock_sock_dup.setsockopt.call_count, 2)
+        self.assertEqual(mock_sock_dup.setsockopt.call_count, 2)
 
-            # Test the last set of call args i.e. for the keepidle
-            mock_sock_dup.setsockopt.assert_called_with(socket.IPPROTO_TCP,
-                                                        socket.TCP_KEEPIDLE,
-                                                        1)
-        else:
-            self.assertEqual(mock_sock_dup.setsockopt.call_count, 1)
+        # Test the last set of call args i.e. for the keepidle
+        mock_sock_dup.setsockopt.assert_called_with(socket.IPPROTO_TCP,
+                                                    socket.TCP_KEEPIDLE,
+                                                    1)
 
         self.assertTrue(mock_listen.called)

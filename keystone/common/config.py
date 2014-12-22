@@ -77,6 +77,10 @@ FILE_OPTIONS = {
                         'to set this value if the base URL contains a path '
                         '(e.g. /prefix/v2.0) or the endpoint should be found '
                         'on a different server.'),
+        cfg.IntOpt('max_project_tree_depth', default=5,
+                   help='Maximum depth of the project hierarchy. WARNING: '
+                        'setting it to a large value may adversely impact '
+                        'performance.'),
         cfg.IntOpt('public_workers',
                    help='The number of worker processes to serve the public '
                         'WSGI application. Defaults to number of CPUs '
@@ -97,16 +101,15 @@ FILE_OPTIONS = {
                         'exception for token values.'),
         cfg.StrOpt('member_role_id',
                    default='9fe2ff9ee4384b1894a90878d3e92bab',
-                   help='During a SQL upgrade member_role_id will be used '
-                        'to create a new role that will replace records in '
-                        'the assignment table with explicit role grants. '
-                        'After migration, the member_role_id will be used in '
-                        'the API add_user_to_project.'),
+                   help='Similar to the member_role_name option, this '
+                        'represents the default role ID used to associate '
+                        'users with their default projects in the v2 API. '
+                        'This will be used as the explicit role where one is '
+                        'not specified by the v2 API.'),
         cfg.StrOpt('member_role_name', default='_member_',
-                   help='During a SQL upgrade member_role_name will be used '
-                        'to create a new role that will replace records in '
-                        'the assignment table with explicit role grants. '
-                        'After migration, member_role_name will be ignored.'),
+                   help='This is the role name used in combination with the '
+                        'member_role_id option; see that option for more '
+                        'detail.'),
         cfg.IntOpt('crypt_strength', default=40000,
                    help='The value passed as the keyword "rounds" to '
                         'passlib\'s encrypt method.'),
@@ -119,7 +122,7 @@ FILE_OPTIONS = {
                    default=600,
                    help='Sets the value of TCP_KEEPIDLE in seconds for each '
                         'server socket. Only applies if tcp_keepalive is '
-                        'true. Not supported on OS X.'),
+                        'true.'),
         cfg.IntOpt('list_limit',
                    help='The maximum number of entities that will be '
                         'returned in a collection, with no limit set by '
@@ -275,7 +278,7 @@ FILE_OPTIONS = {
     ],
     'revoke': [
         cfg.StrOpt('driver',
-                   default='keystone.contrib.revoke.backends.kvs.Revoke',
+                   default='keystone.contrib.revoke.backends.sql.Revoke',
                    help='An implementation of the backend for persisting '
                         'revocation events.'),
         cfg.IntOpt('expiration_buffer', default=1800,
@@ -336,27 +339,27 @@ FILE_OPTIONS = {
         cfg.ListOpt('memcache_servers', default=['localhost:11211'],
                     help='Memcache servers in the format of "host:port".'
                     ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
-                    ' backends only)'),
+                    ' backends only).'),
         cfg.IntOpt('memcache_dead_retry',
                    default=5 * 60,
                    help='Number of seconds memcached server is considered dead'
                    ' before it is tried again. (dogpile.cache.memcache and'
-                   ' keystone.cache.memcache_pool backends only)'),
+                   ' keystone.cache.memcache_pool backends only).'),
         cfg.IntOpt('memcache_socket_timeout',
                    default=3,
                    help='Timeout in seconds for every call to a server.'
                    ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
-                   ' backends only)'),
+                   ' backends only).'),
         cfg.IntOpt('memcache_pool_maxsize',
                    default=10,
                    help='Max total number of open connections to every'
                    ' memcached server. (keystone.cache.memcache_pool backend'
-                   ' only)'),
+                   ' only).'),
         cfg.IntOpt('memcache_pool_unused_timeout',
                    default=60,
                    help='Number of seconds a connection to memcached is held'
                    ' unused in the pool before it is closed.'
-                   ' (keystone.cache.memcache_pool backend only)'),
+                   ' (keystone.cache.memcache_pool backend only).'),
         cfg.IntOpt('memcache_pool_connection_get_timeout',
                    default=10,
                    help='Number of seconds that an operation will wait to get '
@@ -377,7 +380,7 @@ FILE_OPTIONS = {
                    help='Path of the keyfile for SSL.'),
         cfg.StrOpt('ca_certs',
                    default='/etc/keystone/ssl/certs/ca.pem',
-                   help='Path of the ca cert file for SSL.'),
+                   help='Path of the CA cert file for SSL.'),
         cfg.StrOpt('ca_key',
                    default='/etc/keystone/ssl/private/cakey.pem',
                    help='Path of the CA key file for SSL.'),
@@ -473,11 +476,6 @@ FILE_OPTIONS = {
                    help='Maximum number of entities that will be returned '
                         'in a policy collection.'),
     ],
-    'ec2': [
-        cfg.StrOpt('driver',
-                   default='keystone.contrib.ec2.backends.kvs.Ec2',
-                   help='EC2Credential backend driver.'),
-    ],
     'endpoint_filter': [
         cfg.StrOpt('driver',
                    default='keystone.contrib.endpoint_filter.backends'
@@ -492,12 +490,6 @@ FILE_OPTIONS = {
                    default='keystone.contrib.endpoint_policy.backends'
                            '.sql.EndpointPolicy',
                    help='Endpoint policy backend driver'),
-    ],
-    'stats': [
-        cfg.StrOpt('driver',
-                   default=('keystone.contrib.stats.backends'
-                            '.kvs.Stats'),
-                   help='Stats backend driver.'),
     ],
     'ldap': [
         cfg.StrOpt('url', default='ldap://localhost',
@@ -848,17 +840,6 @@ FILE_OPTIONS = {
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a catalog collection.'),
-        cfg.ListOpt('endpoint_substitution_whitelist',
-                    default=['tenant_id', 'user_id', 'public_bind_host',
-                             'admin_bind_host', 'compute_host', 'compute_port',
-                             'admin_port', 'public_port', 'public_endpoint',
-                             'admin_endpoint'],
-                    help='(Deprecated) List of possible substitutions for use '
-                         'in formatting endpoints. Use caution when modifying '
-                         'this list. It will give users with permission to '
-                         'create endpoints the ability to see those values '
-                         'in your configuration file. This option will be '
-                         'removed in Juno.'),
     ],
     'kvs': [
         cfg.ListOpt('backends', default=[],

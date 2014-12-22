@@ -41,11 +41,18 @@ this would be accomplished by:
 
     $ sysctl -w 'sys.net.ipv4.ip_local_reserved_ports=35357'
 
-To make the above change persistent, `net.ipv4.ip_local_reserved_ports = 35357`
-should be added to ``/etc/sysctl.conf`` or to ``/etc/sysctl.d/keystone.conf``.
+To make the above change persistent,
+``net.ipv4.ip_local_reserved_ports = 35357`` should be added to
+``/etc/sysctl.conf`` or to ``/etc/sysctl.d/keystone.conf``.
 
-Starting and Stopping Keystone
-==============================
+Starting and Stopping Keystone under Eventlet
+=============================================
+
+Keystone can be run using either its built-in eventlet server or it can be run
+embedded in a web server. While the eventlet server is convenient and easy to
+use, it's lacking in security features that have been developed into Internet-
+based web servers over the years. As such, running the eventlet server as
+described in this section is not recommended.
 
 Start Keystone services using the command:
 
@@ -56,6 +63,15 @@ Start Keystone services using the command:
 Invoking this command starts up two ``wsgi.Server`` instances, ``admin`` (the
 administration API) and ``main`` (the primary/public API interface). Both
 services are configured to run in a single process.
+
+.. NOTE::
+
+    The separation into ``admin`` and ``main`` interfaces is an historical
+    anomaly. The new V3 API provides the same interface on both the admin and
+    main interfaces (this can be configured in ``keystone-paste.ini``, but the
+    default is to have both the same). The V2.0 API provides a limited public
+    API (getting and validating tokens) on ``main``, and an administrative API
+    (which can include creating users and such) on the ``admin`` interface.
 
 Stop the process using ``Control-C``.
 
@@ -81,7 +97,6 @@ following sections:
 * ``[cache]`` - Caching layer configuration
 * ``[catalog]`` - Service catalog driver configuration
 * ``[credential]`` - Credential system driver configuration
-* ``[ec2]`` - Amazon EC2 authentication driver configuration
 * ``[endpoint_filter]`` - Endpoint filtering extension configuration
 * ``[endpoint_policy]`` - Endpoint policy extension configuration
 * ``[federation]`` - Federation driver configuration
@@ -98,7 +113,6 @@ following sections:
 * ``[saml]`` - SAML configuration options
 * ``[signing]`` - Cryptographic signatures for PKI based tokens
 * ``[ssl]`` - SSL configuration
-* ``[stats]`` - Stats system driver configuration
 * ``[token]`` - Token driver & token provider configuration
 * ``[trust]`` - Trust extension configuration
 
@@ -150,9 +164,23 @@ configuration file.
 
 .. NOTE::
 
+    It is important to notice that by enabling this configuration, the
+    operations of listing all users and listing all groups are not supported,
+    those calls will need that either a domain filter is specified or the usage
+    of a domain scoped token.
+
+.. NOTE::
+
     Keystone does not support moving the contents of a domain (i.e. "it's"
     users and groups) from one backend to another, nor group membership across
     backend boundaries.
+
+.. NOTE::
+
+    To delete a domain that uses a domain specific backend, it's necessary
+    to first disable it, remove its specific configuration file (i.e. it's
+    corresponding keystone.<domain_name>.conf) and then restart the Identity
+    server.
 
 .. NOTE::
 
@@ -316,28 +344,27 @@ configuration option.
 
 The drivers Keystone provides are:
 
-* ``keystone.token.persistence.backends.sql.Token`` - The SQL-based (default)
-  token persistence engine. This backend stores all token data in the same SQL
-  store that is used for Identity/Assignment/etc.
-
-* ``keystone.token.persistence.backends.memcache.Token`` - The memcached based
-  token persistence backend. This backend relies on ``dogpile.cache`` and stores
-  the token data in a set of memcached servers. The servers urls are specified
-  in the ``[memcache]\servers`` configuration option in the Keystone config.
-
 * ``keystone.token.persistence.backends.memcache_pool.Token`` - The pooled memcached
   token persistence engine. This backend supports the concept of pooled memcache
   client object (allowing for the re-use of the client objects). This backend has
   a number of extra tunable options in the ``[memcache]`` section of the config.
 
+* ``keystone.token.persistence.backends.sql.Token`` - The SQL-based (default)
+  token persistence engine.
+
+* ``keystone.token.persistence.backends.memcache.Token`` - The memcached based
+  token persistence backend. This backend relies on ``dogpile.cache`` and stores
+  the token data in a set of memcached servers. The servers URLs are specified
+  in the ``[memcache]\servers`` configuration option in the Keystone config.
+
 
 .. WARNING::
-    It is recommended you use the ``keystone.token.persistence.backend.memcache_pool.Token``
-    backend instead of ``keystone.token.persistence.backend.memcache.Token`` as the token
+    It is recommended you use the ``keystone.token.persistence.backends.memcache_pool.Token``
+    backend instead of ``keystone.token.persistence.backends.memcache.Token`` as the token
     persistence driver if you are deploying Keystone under eventlet instead of
-    Apache + mod_wsgi. This recommendation are due to known issues with the use of
-    ``thread.local`` under eventlet that can allow the leaking of memcache client objects
-    and consumption of extra sockets.
+    Apache + mod_wsgi. This recommendation is due to known issues with the
+    use of ``thread.local`` under eventlet that can allow the leaking of
+    memcache client objects and consumption of extra sockets.
 
 
 Token Provider
@@ -357,7 +384,8 @@ to ``keystone.token.providers.pki.Provider``, ``token_format`` must be ``PKI``.
 Conversely, if ``provider`` is ``keystone.token.providers.uuid.Provider``,
 ``token_format`` must be ``UUID``.
 
-For a customized provider, ``token_format`` must not set to ``PKI`` or ``UUID``.
+For a customized provider, ``token_format`` must not be set to ``PKI`` or
+``UUID``.
 
 PKI or UUID?
 ^^^^^^^^^^^^
@@ -382,8 +410,9 @@ additional attributes.
     be protected from unnecessary disclosure to prevent unauthorized access.
 
 The current architectural approaches for both UUID and PKI-based tokens have
-pain points exposed by environments under heavy load (search bugs and
-blueprints for the latest details and potential solutions).
+pain points exposed by environments under heavy load or with a large service
+catalog (search bugs and blueprints for the latest details and potential
+solutions).
 
 Caching Layer
 -------------
@@ -391,7 +420,7 @@ Caching Layer
 Keystone supports a caching layer that is above the configurable subsystems (e.g. ``token``,
 ``identity``, etc).  Keystone uses the `dogpile.cache`_ library which allows for flexible
 cache backends. The majority of the caching configuration options are set in the ``[cache]``
-section.  However, each section that has the capability to be cached usually has a ``caching``
+section. However, each section that has the capability to be cached usually has a ``caching``
 boolean value that will toggle caching for that specific section.  The current default
 behavior is that subsystem caching is enabled, but the global toggle is set to disabled.
 
@@ -504,51 +533,30 @@ PKI stands for Public Key Infrastructure.  Tokens are documents,
 cryptographically signed using the X509 standard.  In order to work correctly
 token generation requires a public/private key pair.  The public key must be
 signed in an X509 certificate, and the certificate used to sign it must be
-available as Certificate Authority (CA) certificate.  These files can be
-generated either using the keystone-manage utility, or externally generated.
+available as Certificate Authority (CA) certificate.  These files can be either
+externally generated or generated using the ``keystone-manage`` utility.
 
-``keystone-manage pki_setup`` is a development tool. We recommend that you do
-not use ``keystone-manage pki_setup`` in a production environment. In
-production, an external CA should be used instead. This is because the CA
-secret key should generally be kept apart from the token signing secret keys
-so that a compromise of a node does not lead to an attacker being able to
-generate valid signed Keystone tokens. This is a low probability attack
-vector, as compromise of a Keystone service machine's filesystem security
-almost certainly means the attacker will be able to gain direct access to the
-token backend.
-
-The files need to be in the locations specified by the top level Keystone
-configuration file as specified in the above section.  Additionally, the
-private key should only be readable by the system user that will run Keystone.
-The values that specify where to read the certificates are under the
+The files used for signing and verifying certificates are set in the Keystone
+configuration file. The private key should only be readable by the system user
+that will run Keystone. The values that specify the certificates are under the
 ``[signing]`` section of the configuration file.  The configuration values are:
 
-* ``token_format`` - Determines the algorithm used to generate tokens.  Can be
-  either ``UUID`` or ``PKI``. Defaults to ``PKI``. This option must be used in
-  conjunction with ``provider`` configuration in the ``[token]`` section.
 * ``certfile`` - Location of certificate used to verify tokens.  Default is
   ``/etc/keystone/ssl/certs/signing_cert.pem``
 * ``keyfile`` - Location of private key used to sign tokens.  Default is
   ``/etc/keystone/ssl/private/signing_key.pem``
 * ``ca_certs`` - Location of certificate for the authority that issued the
   above certificate. Default is ``/etc/keystone/ssl/certs/ca.pem``
-* ``ca_key`` - Default is ``/etc/keystone/ssl/private/cakey.pem``
-* ``key_size`` - Default is ``2048``
-* ``valid_days`` - Default is ``3650``
 
 Signing Certificate Issued by External CA
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You may use a signing certificate issued by an external CA instead of generated
-by keystone-manage. However, certificate issued by external CA must satisfy
+by ``keystone-manage``. However, certificate issued by external CA must satisfy
 the following conditions:
 
 * all certificate and key files must be in Privacy Enhanced Mail (PEM) format
 * private key files must not be protected by a password
-
-When using signing certificate issued by an external CA, you do not need to
-specify ``key_size``, ``valid_days`` and ``ca_key`` as they
-will be ignored.
 
 The basic workflow for using a signing certificate issued by an external CA involves:
 
@@ -585,7 +593,7 @@ First create a certificate request configuration file (e.g. ``cert_req.conf``):
     emailAddress            = keystone@openstack.org
 
 Then generate a CRS with OpenSSL CLI. **Do not encrypt the generated private
-key. Must use the -nodes option.**
+key. The -nodes option must be used.**
 
 For example:
 
@@ -626,6 +634,30 @@ If your certificate directory path is different from the default
 ``[signing]`` section of the configuration file.
 
 
+Generating a Signing Certificate using pki_setup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``keystone-manage pki_setup`` is a development tool. We recommend that you do
+not use ``keystone-manage pki_setup`` in a production environment. In
+production, an external CA should be used instead. This is because the CA
+secret key should generally be kept apart from the token signing secret keys
+so that a compromise of a node does not lead to an attacker being able to
+generate valid signed Keystone tokens. This is a low probability attack
+vector, as compromise of a Keystone service machine's filesystem security
+almost certainly means the attacker will be able to gain direct access to the
+token backend.
+
+When using the ``keystone-manage pki_setup`` to generate the certificates, the
+following configuration options in the ``[signing]`` section are used:
+
+* ``ca_key`` - Default is ``/etc/keystone/ssl/private/cakey.pem``
+* ``key_size`` - Default is ``2048``
+* ``valid_days`` - Default is ``3650``
+
+If ``keystone-manage pki_setup`` is not used then these options don't need to
+be set.
+
+
 Service Catalog
 ---------------
 
@@ -651,9 +683,9 @@ To build your service catalog using this driver, see the built-in help:
 
 .. code-block:: bash
 
-    $ keystone
-    $ keystone help service-create
-    $ keystone help endpoint-create
+    $ openstack --help
+    $ openstack help service create
+    $ openstack help endpoint create
 
 You can also refer to `an example in Keystone (tools/sample_data.sh)
 <https://github.com/openstack/keystone/blob/master/tools/sample_data.sh>`_.
@@ -667,8 +699,7 @@ service catalog will not change very much over time.
 
 .. NOTE::
 
-    Attempting to manage your service catalog using keystoneclient commands
-    (e.g. ``keystone endpoint-create``) against this driver will result in
+    Attempting to change your service catalog against this driver will result in
     ``HTTP 501 Not Implemented`` errors. This is the expected behavior. If you
     want to use these commands, you must instead use the SQL-based Service
     Catalog driver.
@@ -704,47 +735,6 @@ choosing the output levels and formats.
 
 .. _Paste: http://pythonpaste.org/
 .. _`Python logging module`: http://docs.python.org/library/logging.html
-
-Monitoring
-----------
-
-Keystone provides some basic request/response monitoring statistics out of the
-box.
-
-Enable data collection by defining a ``stats_monitoring`` filter and including
-it at the beginning of any desired WSGI pipelines:
-
-.. code-block:: ini
-
-    [filter:stats_monitoring]
-    paste.filter_factory = keystone.contrib.stats:StatsMiddleware.factory
-
-    [pipeline:public_api]
-    pipeline = stats_monitoring [...] public_service
-
-Enable the reporting of collected data by defining a ``stats_reporting`` filter
-and including it near the end of your ``admin_api`` WSGI pipeline (After
-``*_body`` middleware and before ``*_extension`` filters is recommended):
-
-.. code-block:: ini
-
-    [filter:stats_reporting]
-    paste.filter_factory = keystone.contrib.stats:StatsExtension.factory
-
-    [pipeline:admin_api]
-    pipeline = [...] json_body stats_reporting ec2_extension [...] admin_service
-
-Query the admin API for statistics using:
-
-.. code-block:: bash
-
-    $ curl -H 'X-Auth-Token: ADMIN' http://localhost:35357/v2.0/OS-STATS/stats
-
-Reset collected data using:
-
-.. code-block:: bash
-
-    $ curl -H 'X-Auth-Token: ADMIN' -X DELETE http://localhost:35357/v2.0/OS-STATS/stats
 
 SSL
 ---
@@ -803,7 +793,7 @@ When generating SSL certificates the following values are read
 Generating SSL certificates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Certificates for secure HTTP communication can be generated by:
+Certificates for encrypted HTTP communication can be generated by:
 
 .. code-block:: bash
 
@@ -819,12 +809,17 @@ and is only recommended for developments environment. We do not recommend using
 ``ssl_setup`` for production environments.
 
 
-User CRUD
----------
+User CRUD extension for the V2.0 API
+------------------------------------
 
-Keystone provides a user CRUD filter that can be added to the public_api
-pipeline. This user crud filter allows users to use a HTTP PATCH to change
-their own password. To enable this extension you should define a
+.. NOTE::
+
+    The core V3 API includes user operations so no extension needs to be
+    enabled for the V3 API.
+
+For the V2.0 API, Keystone provides a user CRUD filter that can be added to the
+public_api pipeline. This user crud filter allows users to use a HTTP PATCH to
+change their own password. To enable this extension you should define a
 user_crud_extension filter, insert it after the ``*_body`` middleware
 and before the ``public_service`` app in the public_api WSGI pipeline in
 ``keystone-paste.ini`` e.g.:
@@ -835,7 +830,7 @@ and before the ``public_service`` app in the public_api WSGI pipeline in
     paste.filter_factory = keystone.contrib.user_crud:CrudExtension.factory
 
     [pipeline:public_api]
-    pipeline = stats_monitoring url_normalize token_auth admin_token_auth xml_body json_body debug ec2_extension user_crud_extension public_service
+    pipeline = url_normalize token_auth admin_token_auth xml_body json_body debug ec2_extension user_crud_extension public_service
 
 Each user can then change their own password with a HTTP PATCH :
 
@@ -844,8 +839,8 @@ Each user can then change their own password with a HTTP PATCH :
     $ curl -X PATCH http://localhost:5000/v2.0/OS-KSCRUD/users/<userid> -H "Content-type: application/json"  \
     -H "X_Auth_Token: <authtokenid>" -d '{"user": {"password": "ABCD", "original_password": "DCBA"}}'
 
-In addition to changing their password all of the users current tokens will be
-deleted (if the backend used is SQL)
+In addition to changing their password all of the user's current tokens will be
+revoked.
 
 
 Inherited Role Assignment Extension
@@ -1056,12 +1051,12 @@ Ensure that your ``keystone.conf`` is configured to use a SQL driver:
     [identity]
     driver = keystone.identity.backends.sql.Identity
 
-You may also want to configure your ``[sql]`` settings to better reflect your
+You may also want to configure your ``[database]`` settings to better reflect your
 environment:
 
 .. code-block:: ini
 
-    [sql]
+    [database]
     connection = sqlite:///keystone.db
     idle_timeout = 200
 
@@ -1080,23 +1075,19 @@ You should now be ready to initialize your new database without error, using:
     $ keystone-manage db_sync
 
 To test this, you should now be able to start ``keystone-all`` and use the
-Keystone Client to list your tenants (which should successfully return an
+OpenStack Client to list your projects (which should successfully return an
 empty list from your new database):
 
 .. code-block:: bash
 
-    $ keystone --os-token ADMIN --os-endpoint http://127.0.0.1:35357/v2.0/ tenant-list
-    +----+------+---------+
-    | id | name | enabled |
-    +----+------+---------+
-    +----+------+---------+
+    $ openstack --os-token ADMIN --os-url http://127.0.0.1:35357/v2.0/ project list
 
 .. NOTE::
 
-    We're providing the default OS_SERVICE_TOKEN and OS_SERVICE_ENDPOINT values
-    from ``keystone.conf`` to connect to the Keystone service. If you changed
-    those values, or deployed Keystone to a different endpoint, you will need
-    to change the provided command accordingly.
+    We're providing the default OS_TOKEN and OS_URL values from ``keystone.conf``
+    to connect to the Keystone service. If you changed those values, or deployed
+    Keystone to a different endpoint, you will need to change the provided
+    command accordingly.
 
 Initializing Keystone
 =====================
@@ -1121,12 +1112,29 @@ prevents unauthorized users from spuriously signing tokens.
 be running the Keystone service to ensure proper ownership for the private key
 file and the associated certificates.
 
-Adding Users, Tenants, and Roles with python-keystoneclient
-===========================================================
+Adding Users, Projects, and Roles via Command Line Interfaces
+=============================================================
 
-Users, tenants, and roles must be administered using admin credentials.
-There are two ways to configure ``python-keystoneclient`` to use admin
-credentials, using the either an existing token or password credentials.
+Keystone APIs are protected by the rules in the policy file. The default policy
+rules require admin credentials to administer ``users``, ``projects``, and
+``roles``. See section `Keystone API protection with Role Based Access Control (RBAC)`_
+for more details on policy files.
+
+The Keystone command line interface packaged in `python-keystoneclient`_ only
+supports the Identity v2.0 API. The OpenStack common command line interface
+packaged in `python-openstackclient`_  supports both v2.0 and v3 APIs.
+
+With both command line interfaces there are two ways to configure the client to
+use admin credentials, using either an existing token or password credentials.
+
+.. NOTE::
+
+    As of the Juno release, it is recommended to use ``python-openstackclient``,
+    as it supports both v2.0 and v3 APIs. For the purpose of backwards compatibility,
+    the CLI packaged in ``python-keystoneclient`` is not being removed.
+
+.. _`python-openstackclient`: http://docs.openstack.org/developer/python-openstackclient/
+.. _`python-keystoneclient`: http://docs.openstack.org/developer/python-keystoneclient/
 
 Authenticating with a Token
 ---------------------------
@@ -1136,11 +1144,11 @@ Authenticating with a Token
     If your Keystone deployment is brand new, you will need to use this
     authentication method, along with your ``[DEFAULT] admin_token``.
 
-To use Keystone with a token, set the following flags:
+To authenticate with Keystone using a token and ``python-openstackclient``, set
+the following flags.
 
-* ``--os-endpoint OS_SERVICE_ENDPOINT``: allows you to specify the Keystone endpoint
-  to communicate with. The default endpoint is ``http://localhost:35357/v2.0``
-* ``--os-token OS_SERVICE_TOKEN``: your service token
+* ``--os-url OS_URL``: Keystone endpoint the user communicates with
+* ``--os-token OS_TOKEN``: User's service token
 
 To administer a Keystone endpoint, your token should be either belong to a user
 with the ``admin`` role, or, if you haven't created one yet, should be equal to
@@ -1151,20 +1159,27 @@ to be passed as arguments each time:
 
 .. code-block:: bash
 
-    $ export OS_SERVICE_ENDPOINT=http://localhost:35357/v2.0
-    $ export OS_SERVICE_TOKEN=ADMIN
+    $ export OS_URL=http://localhost:35357/v2.0
+    $ export OS_TOKEN=ADMIN
+
+Instead of ``python-openstackclient``, if using ``python-keystoneclient``,
+set the following:
+
+* ``--os-endpoint OS_SERVICE_ENDPOINT``: equivalent to ``--os-url OS_URL``
+* ``--os-service-token OS_SERVICE_TOKEN``: equivalent to ``--os-token OS_TOKEN``
+
 
 Authenticating with a Password
 ------------------------------
 
-To administer a Keystone endpoint, the following user referenced below should
+To authenticate with Keystone using a password and ``python-openstackclient``, set
+the following flags, note that the following user referenced below should
 be granted the ``admin`` role.
 
-* ``--os_username OS_USERNAME``: Name of your user
-* ``--os_password OS_PASSWORD``: Password for your user
-* ``--os_tenant_name OS_TENANT_NAME``: Name of your tenant
-* ``--os_auth_url OS_AUTH_URL``: URL of your Keystone auth server, e.g.
-  ``http://localhost:35357/v2.0``
+* ``--os-username OS_USERNAME``: Name of your user
+* ``--os-password OS_PASSWORD``: Password for your user
+* ``--os-project-name OS_PROJECT_NAME``: Name of your project
+* ``--os-auth-url OS_AUTH_URL``: URL of the Keystone authentication server
 
 You can also set these variables in your environment so that they do not need
 to be passed as arguments each time:
@@ -1173,42 +1188,55 @@ to be passed as arguments each time:
 
     $ export OS_USERNAME=my_username
     $ export OS_PASSWORD=my_password
-    $ export OS_TENANT_NAME=my_tenant
+    $ export OS_PROJECT_NAME=my_project
+    $ export OS_AUTH_URL=http://localhost:35357/v2.0
+
+If using ``python-keystoneclient``, set the following instead:
+
+* ``--os-tenant-name OS_TENANT_NAME``: equivalent to ``--os-project-name OS_PROJECT_NAME``
+
 
 Example usage
 -------------
 
-``keystone`` is set up to expect commands in the general form of
-``keystone`` ``command`` ``argument``, followed by flag-like keyword arguments to
-provide additional (often optional) information. For example, the command
-``user-list`` and ``tenant-create`` can be invoked as follows:
+``python-openstackclient`` is set up to expect commands in the general form of:
 
 .. code-block:: bash
 
-    # Using token auth env variables
-    $ export OS_SERVICE_ENDPOINT=http://127.0.0.1:35357/v2.0/
-    $ export OS_SERVICE_TOKEN=secrete_token
-    $ keystone user-list
-    $ keystone tenant-create --name=demo
+  $ openstack [<global-options>] <object-1> <action> [<object-2>] [<command-arguments>]
 
-    # Using token auth flags
-    $ keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ user-list
-    $ keystone --os-token=secrete --os-endpoint=http://127.0.0.1:35357/v2.0/ tenant-create --name=demo
+For example, the commands ``user list`` and ``project create`` can be invoked
+as follows:
 
-    # Using user + password + tenant_name env variables
+.. code-block:: bash
+
+    # Using token authentication, with environment variables
+    $ export OS_URL=http://127.0.0.1:35357/v2.0/
+    $ export OS_TOKEN=secrete_token
+    $ openstack user list
+    $ openstack project create demo
+
+    # Using token authentication, with flags
+    $ openstack --os-token=secrete --os-url=http://127.0.0.1:35357/v2.0/ user list
+    $ openstack --os-token=secrete --os-url=http://127.0.0.1:35357/v2.0/ project create demo
+
+    # Using password authentication, with environment variables
     $ export OS_USERNAME=admin
     $ export OS_PASSWORD=secrete
-    $ export OS_TENANT_NAME=admin
-    $ keystone user-list
-    $ keystone tenant-create --name=demo
+    $ export OS_PROJECT_NAME=admin
+    $ export OS_AUTH_URL=http://localhost:35357/v2.0
+    $ openstack user list
+    $ openstack project create demo
 
-    # Using user + password + tenant_name flags
-    $ keystone --os_username=admin --os_password=secrete --os_tenant_name=admin user-list
-    $ keystone --os_username=admin --os_password=secrete --os_tenant_name=admin tenant-create --name=demo
+    # Using password authentication, with flags
+    $ openstack --os-username=admin --os-password=secrete --os-project-name=admin --os-auth-url=http://localhost:35357/v2.0 user list
+    $ openstack --os-username=admin --os-password=secrete --os-project-name=admin --os-auth-url=http://localhost:35357/v2.0 project create demo
 
-For additional examples refer to `CLI Examples`_.
+For additional examples using ``python-keystoneclient`` refer to `python-keystoneclient examples`_,
+likewise, for additional examples using ``python-openstackclient``, refer to `python-openstackclient examples`_.
 
-.. _`CLI Examples`: cli_examples.html
+.. _`python-keystoneclient examples`: cli_examples.html#using-python-keystoneclient-v2-0
+.. _`python-openstackclient examples`: cli_examples.html#using-python-openstackclient-v3
 
 
 Removing Expired Tokens

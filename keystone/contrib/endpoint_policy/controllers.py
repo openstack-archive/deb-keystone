@@ -46,7 +46,7 @@ class EndpointPolicyV3Controller(controller.V3Controller):
             payload['resource_info'])
 
     def _on_policy_delete(self, service, resource_type, operation, payload):
-        self.endpoint_policy_api.delete_association_by_polcy(
+        self.endpoint_policy_api.delete_association_by_policy(
             payload['resource_info'])
 
     @controller.protected()
@@ -120,7 +120,7 @@ class EndpointPolicyV3Controller(controller.V3Controller):
         self.policy_api.get_policy(policy_id)
         self.catalog_api.get_service(service_id)
         self.catalog_api.get_region(region_id)
-        self.endpoint_policy_api.create_policy_association(
+        self.endpoint_policy_api.check_policy_association(
             policy_id, service_id=service_id, region_id=region_id)
 
     @controller.protected()
@@ -130,7 +130,7 @@ class EndpointPolicyV3Controller(controller.V3Controller):
         self.policy_api.get_policy(policy_id)
         self.catalog_api.get_service(service_id)
         self.catalog_api.get_region(region_id)
-        self.endpoint_policy_api.create_policy_association(
+        self.endpoint_policy_api.delete_policy_association(
             policy_id, service_id=service_id, region_id=region_id)
 
     @controller.protected()

@@ -20,7 +20,7 @@ import six
 
 from keystone.common import config
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 from keystone.openstack.common import log
 
 
@@ -107,14 +107,14 @@ MAPPING_SCHEMA = {
 
 
 def validate_mapping_structure(ref):
-        v = jsonschema.Draft4Validator(MAPPING_SCHEMA)
+    v = jsonschema.Draft4Validator(MAPPING_SCHEMA)
 
-        messages = ''
-        for error in sorted(v.iter_errors(ref), key=str):
-            messages = messages + error.message + "\n"
+    messages = ''
+    for error in sorted(v.iter_errors(ref), key=str):
+        messages = messages + error.message + "\n"
 
-        if messages:
-            raise exception.ValidationError(messages)
+    if messages:
+        raise exception.ValidationError(messages)
 
 
 def validate_expiration(token_ref):
@@ -135,6 +135,7 @@ def validate_groups(group_ids, mapping_id, identity_api):
 
 
 def get_assertion_params_from_env(context):
+    LOG.debug('Environment variables: %s', context['environment'])
     prefix = CONF.federation.assertion_prefix
     for k, v in context['environment'].items():
         if k.startswith(prefix):
@@ -197,10 +198,13 @@ class RuleProcessor(object):
         # semi-colon to indicate multiple values, i.e. groups.
         # This will create a new dictionary where the values are arrays, and
         # any multiple values are stored in the arrays.
+        LOG.debug('assertion data: %s', assertion_data)
         assertion = dict((n, v.split(';')) for n, v in assertion_data.items()
                          if isinstance(v, six.string_types))
+        LOG.debug('assertion: %s', assertion)
         identity_values = []
 
+        LOG.debug('rules: %s', self.rules)
         for rule in self.rules:
             direct_maps = self._verify_all_requirements(rule['remote'],
                                                         assertion)
@@ -220,9 +224,9 @@ class RuleProcessor(object):
                     new_local = self._update_local_mapping(local, direct_maps)
                     identity_values.append(new_local)
 
+        LOG.debug('identity_values: %s', identity_values)
         mapped_properties = self._transform(identity_values)
-        if mapped_properties.get('name') is None:
-            raise exception.Unauthorized(_("Could not map user"))
+        LOG.debug('mapped_properties: %s', mapped_properties)
         return mapped_properties
 
     def _transform(self, identity_values):
@@ -251,7 +255,7 @@ class RuleProcessor(object):
             if 'user' in identity_value:
                 # if a mapping outputs more than one user name, log it
                 if user_name is not None:
-                    LOG.warning(_('Ignoring user name %s'),
+                    LOG.warning(_LW('Ignoring user name %s'),
                                 identity_value['user']['name'])
                 else:
                     user_name = identity_value['user']['name']
@@ -284,6 +288,8 @@ class RuleProcessor(object):
 
         """
 
+        LOG.debug('direct_maps: %s', direct_maps)
+        LOG.debug('local: %s', local)
         new = {}
         for k, v in six.iteritems(local):
             if isinstance(v, dict):
@@ -370,6 +376,7 @@ class RuleProcessor(object):
             # within 'type'. Attempt to find that 'type' within the assertion.
             direct_map_values = assertion.get(requirement_type)
             if direct_map_values:
+                LOG.debug('updating a direct mapping: %s', direct_map_values)
                 direct_maps += direct_map_values
 
         return direct_maps

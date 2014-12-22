@@ -20,6 +20,8 @@ import sys
 import migrate
 from migrate import exceptions
 from oslo.db.sqlalchemy import migration
+from oslo.serialization import jsonutils
+from oslo.utils import importutils
 import six
 import sqlalchemy
 
@@ -29,8 +31,6 @@ from keystone import config
 from keystone import contrib
 from keystone import exception
 from keystone.i18n import _
-from keystone.openstack.common import importutils
-from keystone.openstack.common import jsonutils
 
 
 CONF = config.CONF
@@ -55,8 +55,8 @@ def get_default_domain():
 #  This fails on MySQL.
 def get_constraints_names(table, column_name):
     fkeys = [fk.name for fk in table.constraints
-             if (column_name in fk.columns and
-                 isinstance(fk, sqlalchemy.ForeignKeyConstraint))]
+             if (isinstance(fk, sqlalchemy.ForeignKeyConstraint) and
+                 column_name in fk.columns)]
     return fkeys
 
 

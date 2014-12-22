@@ -15,6 +15,8 @@
 import functools
 import uuid
 
+import six
+
 from keystone.common import authorization
 from keystone.common import dependency
 from keystone.common import driver_hints
@@ -22,7 +24,7 @@ from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 from keystone.models import token_model
 from keystone.openstack.common import log
 
@@ -74,7 +76,7 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         # backing store.
         wsgi.validate_token_bind(context, token_ref)
     except exception.TokenNotFound:
-        LOG.warning(_('RBAC: Invalid token'))
+        LOG.warning(_LW('RBAC: Invalid token'))
         raise exception.Unauthorized()
 
     auth_context = authorization.token_to_auth_context(token_ref)
@@ -99,7 +101,7 @@ def protected(callback=None):
         @functools.wraps(f)
         def inner(self, context, *args, **kwargs):
             if 'is_admin' in context and context['is_admin']:
-                LOG.warning(_('RBAC: Bypassing authorization'))
+                LOG.warning(_LW('RBAC: Bypassing authorization'))
             elif callback is not None:
                 prep_info = {'f_name': f.__name__,
                              'input_attr': kwargs}
@@ -196,7 +198,7 @@ def filterprotected(*filters):
 
                 LOG.debug('RBAC: Authorization granted')
             else:
-                LOG.warning(_('RBAC: Bypassing authorization'))
+                LOG.warning(_LW('RBAC: Bypassing authorization'))
             return f(self, context, filters, **kwargs)
         return wrapper
     return _filterprotected
@@ -316,6 +318,12 @@ class V3Controller(wsgi.Application):
 
         return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
 
+    def get_auth_context(cls, context):
+        # TODO(dolphm): this method of accessing the auth context is terrible,
+        # but context needs to be refactored to always have reasonable values.
+        env_context = context.get('environment', {})
+        return env_context.get(authorization.AUTH_CONTEXT_ENV, {})
+
     @classmethod
     def full_url(cls, context, path=None):
         url = cls.base_url(context, path)
@@ -323,6 +331,27 @@ class V3Controller(wsgi.Application):
             url = '%s?%s' % (url, context['environment']['QUERY_STRING'])
 
         return url
+
+    @classmethod
+    def query_filter_is_true(cls, filter_value):
+        """Determine if bool query param is 'True'.
+
+        We treat this the same way as we do for policy
+        enforcement:
+
+        {bool_param}=0 is treated as False
+
+        Any other value is considered to be equivalent to
+        True, including the absence of a value
+
+        """
+
+        if (isinstance(filter_value, six.string_types) and
+                filter_value == '0'):
+            val = False
+        else:
+            val = True
+        return val
 
     @classmethod
     def _add_self_referential_link(cls, context, ref):
@@ -585,15 +614,15 @@ class V3Controller(wsgi.Application):
                 _('domain_id is required as part of entity'))
         except (exception.TokenNotFound,
                 exception.UnsupportedTokenVersionException):
-            LOG.warning(_('Invalid token found while getting domain ID '
-                          'for list request'))
+            LOG.warning(_LW('Invalid token found while getting domain ID '
+                            'for list request'))
             raise exception.Unauthorized()
 
         if token_ref.domain_scoped:
             return token_ref.domain_id
         else:
             LOG.warning(
-                _('No domain information specified as part of list request'))
+                _LW('No domain information specified as part of list request'))
             raise exception.Unauthorized()
 
     def _get_domain_id_from_token(self, context):
@@ -620,8 +649,8 @@ class V3Controller(wsgi.Application):
                 _('A domain-scoped token must be used'))
         except (exception.TokenNotFound,
                 exception.UnsupportedTokenVersionException):
-            LOG.warning(_('Invalid token found while getting domain ID '
-                          'for list request'))
+            LOG.warning(_LW('Invalid token found while getting domain ID '
+                            'for list request'))
             raise exception.Unauthorized()
 
         if token_ref.domain_scoped:
@@ -656,7 +685,7 @@ class V3Controller(wsgi.Application):
 
          """
         if 'is_admin' in context and context['is_admin']:
-            LOG.warning(_('RBAC: Bypassing authorization'))
+            LOG.warning(_LW('RBAC: Bypassing authorization'))
         else:
             action = 'identity:%s' % prep_info['f_name']
             # TODO(henry-nash) need to log the target attributes as well

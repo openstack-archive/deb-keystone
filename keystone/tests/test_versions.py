@@ -18,12 +18,12 @@ import functools
 import random
 
 import mock
+from oslo.serialization import jsonutils
 from testtools import matchers as tt_matchers
 
 from keystone.common import json_home
 from keystone import config
 from keystone import controllers
-from keystone.openstack.common import jsonutils
 from keystone import tests
 from keystone.tests import matchers
 
@@ -356,6 +356,32 @@ V3_JSON_HOME_RESOURCES_INHERIT_ENABLED.update(
                 'href-vars': {
                     'domain_id': json_home.Parameters.DOMAIN_ID,
                     'group_id': json_home.Parameters.GROUP_ID,
+                },
+            }
+        ),
+        (
+            build_os_inherit_relation(
+                resource_name='project_user_role_inherited_to_projects'),
+            {
+                'href-template': '/OS-INHERIT/projects/{project_id}/users/'
+                '{user_id}/roles/{role_id}/inherited_to_projects',
+                'href-vars': {
+                    'project_id': json_home.Parameters.PROJECT_ID,
+                    'role_id': json_home.Parameters.ROLE_ID,
+                    'user_id': json_home.Parameters.USER_ID,
+                },
+            }
+        ),
+        (
+            build_os_inherit_relation(
+                resource_name='project_group_role_inherited_to_projects'),
+            {
+                'href-template': '/OS-INHERIT/projects/{project_id}/groups/'
+                '{group_id}/roles/{role_id}/inherited_to_projects',
+                'href-vars': {
+                    'project_id': json_home.Parameters.PROJECT_ID,
+                    'group_id': json_home.Parameters.GROUP_ID,
+                    'role_id': json_home.Parameters.ROLE_ID,
                 },
             }
         ),
@@ -888,3 +914,14 @@ vnd.openstack.identity-v3+xml"/>
         self.assertEqual(resp.status_int, 300)
         data = resp.body
         self.assertThat(data, matchers.XMLEquals(v2_only_response))
+
+    @mock.patch.object(controllers, '_VERSIONS', [])
+    def test_no_json_home_document_returned_when_v3_disabled(self):
+        json_home_document = controllers.request_v3_json_home('some_prefix')
+        expected_document = {'resources': {}}
+        self.assertEqual(expected_document, json_home_document)
+
+    def test_extension_property_method_returns_none(self):
+        extension_obj = controllers.Extensions()
+        extensions_property = extension_obj.extensions
+        self.assertIsNone(extensions_property)

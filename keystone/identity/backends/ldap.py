@@ -21,7 +21,6 @@ from keystone import clean
 from keystone.common import driver_hints
 from keystone.common import ldap as common_ldap
 from keystone.common import models
-from keystone.common import utils
 from keystone import config
 from keystone import exception
 from keystone.i18n import _
@@ -129,6 +128,11 @@ class Identity(identity.Driver):
 
     def get_group(self, group_id):
         return self.group.get_filtered(group_id)
+
+    def get_group_by_name(self, group_name, domain_id):
+        # domain_id will already have been handled in the Manager layer,
+        # parameter left in so this matches the Driver specification
+        return self.group.get_filtered_by_name(group_name)
 
     def update_group(self, group_id, group):
         self.group.check_allow_update()
@@ -254,10 +258,6 @@ class UserApi(common_ldap.EnabledEmuMixIn, common_ldap.BaseLdap):
                                  not self.enabled_emulation):
             values['enabled'] = orig_enabled
         return values
-
-    def check_password(self, user_id, password):
-        user = self.get(user_id)
-        return utils.check_password(password, user.password)
 
     def get_filtered(self, user_id):
         user = self.get(user_id)
@@ -388,6 +388,10 @@ class GroupApi(common_ldap.BaseLdap):
 
     def get_filtered(self, group_id):
         group = self.get(group_id)
+        return common_ldap.filter_entity(group)
+
+    def get_filtered_by_name(self, group_name):
+        group = self.get_by_name(group_name)
         return common_ldap.filter_entity(group)
 
     def get_all_filtered(self, query=None):

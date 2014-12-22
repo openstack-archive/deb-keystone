@@ -17,11 +17,11 @@ import os
 import uuid
 
 import mock
+from oslo.serialization import jsonutils
 from oslo.utils import timeutils
 import webob
 
 from keystone import config
-from keystone.openstack.common import jsonutils
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import appserver
@@ -1097,8 +1097,8 @@ class KcOptTestCase(KcMasterTestCase):
     #
     # For example, to test your local keystoneclient,
     #
-    # KSCTEST_PATH=/opt/stack/python-keystoneclient \
-    #  tox -e py27 test_keystoneclient.KcOptTestCase
+    # KSCTEST_PATH=/opt/stack/python-keystoneclient;
+    # tox -e py27 test_keystoneclient.KcOptTestCase
 
     def setUp(self):
         self.checkout_info = os.environ.get('KSCTEST_PATH')

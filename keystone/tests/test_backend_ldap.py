@@ -409,6 +409,21 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
     def test_get_roles_for_user_and_domain(self):
         self.skipTest('N/A: LDAP does not support multiple domains')
 
+    def test_get_roles_for_groups_on_domain(self):
+        self.skipTest('Blocked by bug: 1390125')
+
+    def test_get_roles_for_groups_on_project(self):
+        self.skipTest('Blocked by bug: 1390125')
+
+    def test_list_domains_for_groups(self):
+        self.skipTest('N/A: LDAP does not support multiple domains')
+
+    def test_list_projects_for_groups(self):
+        self.skipTest('Blocked by bug: 1390125')
+
+    def test_domain_delete_hierarchy(self):
+        self.skipTest('Domains are read-only against LDAP')
+
     def test_list_role_assignments_unfiltered(self):
         new_domain = self._get_domain_fixture()
         new_user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
@@ -770,28 +785,74 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
 
         self.assertEqual(role_id, role_ref['id'])
 
-    def test_utf8_conversion(self):
-        value_unicode = u'fäké1'
-        value_utf8 = value_unicode.encode('utf-8')
+    def test_user_enabled_ignored_disable_error(self):
+        # When the server is configured so that the enabled attribute is
+        # ignored for users, users cannot be disabled.
 
-        result_utf8 = common_ldap_core.utf8_encode(value_unicode)
-        self.assertEqual(value_utf8, result_utf8)
+        self.config_fixture.config(group='ldap',
+                                   user_attribute_ignore=['enabled'])
 
-        result_utf8 = common_ldap_core.utf8_encode(value_utf8)
-        self.assertEqual(value_utf8, result_utf8)
+        # Need to re-load backends for the config change to take effect.
+        self.load_backends()
 
-        result_unicode = common_ldap_core.utf8_decode(value_utf8)
-        self.assertEqual(value_unicode, result_unicode)
+        # Attempt to disable the user.
+        self.assertRaises(exception.ForbiddenAction,
+                          self.identity_api.update_user, self.user_foo['id'],
+                          {'enabled': False})
 
-        result_unicode = common_ldap_core.utf8_decode(value_unicode)
-        self.assertEqual(value_unicode, result_unicode)
+        user_info = self.identity_api.get_user(self.user_foo['id'])
 
-        self.assertRaises(TypeError,
-                          common_ldap_core.utf8_encode,
-                          100)
+        # If 'enabled' is ignored then 'enabled' isn't returned as part of the
+        # ref.
+        self.assertNotIn('enabled', user_info)
 
-        result_unicode = common_ldap_core.utf8_decode(100)
-        self.assertEqual(u'100', result_unicode)
+    def test_group_enabled_ignored_disable_error(self):
+        # When the server is configured so that the enabled attribute is
+        # ignored for groups, groups cannot be disabled.
+
+        self.config_fixture.config(group='ldap',
+                                   group_attribute_ignore=['enabled'])
+
+        # Need to re-load backends for the config change to take effect.
+        self.load_backends()
+
+        # There's no group fixture so create a group.
+        new_domain = self._get_domain_fixture()
+        new_group = {'domain_id': new_domain['id'],
+                     'name': uuid.uuid4().hex}
+        new_group = self.identity_api.create_group(new_group)
+
+        # Attempt to disable the group.
+        self.assertRaises(exception.ForbiddenAction,
+                          self.identity_api.update_group, new_group['id'],
+                          {'enabled': False})
+
+        group_info = self.identity_api.get_group(new_group['id'])
+
+        # If 'enabled' is ignored then 'enabled' isn't returned as part of the
+        # ref.
+        self.assertNotIn('enabled', group_info)
+
+    def test_project_enabled_ignored_disable_error(self):
+        # When the server is configured so that the enabled attribute is
+        # ignored for projects, projects cannot be disabled.
+
+        self.config_fixture.config(group='ldap',
+                                   project_attribute_ignore=['enabled'])
+
+        # Need to re-load backends for the config change to take effect.
+        self.load_backends()
+
+        # Attempt to disable the project.
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.update_project,
+                          self.tenant_baz['id'], {'enabled': False})
+
+        project_info = self.assignment_api.get_project(self.tenant_baz['id'])
+
+        # Unlike other entities, if 'enabled' is ignored then 'enabled' is
+        # returned as part of the ref.
+        self.assertIs(True, project_info['enabled'])
 
 
 class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
@@ -1374,21 +1435,6 @@ class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
         self.assertEqual(mock_ldap_get.return_value[1]['MaIl'][0],
                          user['email'])
 
-    def test_binary_attribute_values(self):
-        result = [(
-            'cn=junk,dc=example,dc=com',
-            {
-                'cn': ['junk'],
-                'sn': [uuid.uuid4().hex],
-                'mail': [uuid.uuid4().hex],
-                'binary_attr': ['\x00\xFF\x00\xFF']
-            }
-        ), ]
-        py_result = common_ldap_core.convert_ldap_result(result)
-        # The attribute containing the binary value should
-        # not be present in the converted result.
-        self.assertNotIn('binary_attr', py_result[0][1])
-
     def test_parse_extra_attribute_mapping(self):
         option_list = ['description:name', 'gecos:password',
                        'fake:invalid', 'invalid1', 'invalid2:',
@@ -1471,10 +1517,12 @@ class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
         # NOTE(topol): LDAP implementation does not currently support the
         #              updating of a project name so this method override
         #              provides a different update test
-        project = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+        project = {'id': uuid.uuid4().hex,
+                   'name': uuid.uuid4().hex,
                    'domain_id': CONF.identity.default_domain_id,
-                   'description': uuid.uuid4().hex, 'enabled': True
-                   }
+                   'description': uuid.uuid4().hex,
+                   'enabled': True,
+                   'parent_id': None}
         self.assignment_api.create_project(project['id'], project)
         project_ref = self.assignment_api.get_project(project['id'])
 
@@ -1543,6 +1591,92 @@ class LDAPIdentity(BaseLDAPIdentity, tests.TestCase):
         self.assertRaises(exception.ProjectNotFound,
                           self.assignment_api.get_project,
                           project_id)
+
+    def _assert_create_hierarchy_not_allowed(self):
+        domain = self._get_domain_fixture()
+
+        project1 = {'id': uuid.uuid4().hex,
+                    'name': uuid.uuid4().hex,
+                    'description': '',
+                    'domain_id': domain['id'],
+                    'enabled': True,
+                    'parent_id': None}
+        self.assignment_api.create_project(project1['id'], project1)
+
+        # Creating project2 under project1. LDAP will not allow
+        # the creation of a project with parent_id being set
+        project2 = {'id': uuid.uuid4().hex,
+                    'name': uuid.uuid4().hex,
+                    'description': '',
+                    'domain_id': domain['id'],
+                    'enabled': True,
+                    'parent_id': project1['id']}
+
+        self.assertRaises(exception.InvalidParentProject,
+                          self.assignment_api.create_project,
+                          project2['id'],
+                          project2)
+
+        # Now, we'll create project 2 with no parent
+        project2['parent_id'] = None
+        self.assignment_api.create_project(project2['id'], project2)
+
+        # Returning projects to be used across the tests
+        return [project1, project2]
+
+    def test_check_leaf_projects(self):
+        projects = self._assert_create_hierarchy_not_allowed()
+        for project in projects:
+            self.assertTrue(self.assignment_api.is_leaf_project(project))
+
+    def test_list_projects_in_subtree(self):
+        projects = self._assert_create_hierarchy_not_allowed()
+        for project in projects:
+            subtree_list = self.assignment_api.list_projects_in_subtree(
+                project)
+            self.assertEqual(0, len(subtree_list))
+
+    def test_list_project_parents(self):
+        projects = self._assert_create_hierarchy_not_allowed()
+        for project in projects:
+            parents_list = self.assignment_api.list_project_parents(project)
+            self.assertEqual(0, len(parents_list))
+
+    def test_hierarchical_projects_crud(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_create_project_under_disabled_one(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_create_project_with_invalid_parent(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_create_leaf_project_with_invalid_domain(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_update_project_parent(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_enable_project_with_disabled_parent(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_disable_hierarchical_leaf_project(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_disable_hierarchical_not_leaf_project(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_delete_hierarchical_leaf_project(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_delete_hierarchical_not_leaf_project(self):
+        self._assert_create_hierarchy_not_allowed()
+
+    def test_check_hierarchy_depth(self):
+        projects = self._assert_create_hierarchy_not_allowed()
+        for project in projects:
+            depth = self._get_hierarchy_depth(project['id'])
+            self.assertEqual(1, depth)
 
     def test_multi_role_grant_by_user_group_on_project_domain(self):
         # This is a partial implementation of the standard test that
@@ -1812,7 +1946,8 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             'id': uuid.uuid4().hex,
             'name': uuid.uuid4().hex,
             'domain_id': CONF.identity.default_domain_id,
-            'description': uuid.uuid4().hex}
+            'description': uuid.uuid4().hex,
+            'parent_id': None}
 
         self.assignment_api.create_project(project['id'], project)
         project_ref = self.assignment_api.get_project(project['id'])
@@ -2036,6 +2171,11 @@ class LdapIdentitySqlAssignment(BaseLDAPIdentity, tests.SQLDriverOverrides,
                           group_id=new_group['id'],
                           domain_id=new_domain['id'],
                           role_id='member')
+
+    def test_project_enabled_ignored_disable_error(self):
+        # Override
+        self.skipTest("Doesn't apply since LDAP configuration is ignored for "
+                      "SQL assignment backend.")
 
 
 class LdapIdentitySqlAssignmentWithMapping(LdapIdentitySqlAssignment):
@@ -2426,10 +2566,12 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, tests.SQLDriverOverrides,
     def test_delete_domain_with_user_added(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                   'enabled': True}
-        project = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+        project = {'id': uuid.uuid4().hex,
+                   'name': uuid.uuid4().hex,
                    'domain_id': domain['id'],
-                   'description': uuid.uuid4().hex, 'enabled': True
-                   }
+                   'description': uuid.uuid4().hex,
+                   'parent_id': None,
+                   'enabled': True}
         self.assignment_api.create_domain(domain['id'], domain)
         self.assignment_api.create_project(project['id'], project)
         project_ref = self.assignment_api.get_project(project['id'])
@@ -2447,6 +2589,21 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, tests.SQLDriverOverrides,
         self.assertRaises(exception.DomainNotFound,
                           self.assignment_api.get_domain,
                           domain['id'])
+
+    def test_user_enabled_ignored_disable_error(self):
+        # Override.
+        self.skipTest("Doesn't apply since LDAP config has no affect on the "
+                      "SQL identity backend.")
+
+    def test_group_enabled_ignored_disable_error(self):
+        # Override.
+        self.skipTest("Doesn't apply since LDAP config has no affect on the "
+                      "SQL identity backend.")
+
+    def test_project_enabled_ignored_disable_error(self):
+        # Override
+        self.skipTest("Doesn't apply since LDAP configuration is ignored for "
+                      "SQL assignment backend.")
 
 
 class DomainSpecificLDAPandSQLIdentity(
@@ -2594,6 +2751,21 @@ class DomainSpecificLDAPandSQLIdentity(
     def test_user_id_comma_grants(self):
         self.skipTest('Only valid if it is guaranteed to be talking to '
                       'the fakeldap backend')
+
+    def test_user_enabled_ignored_disable_error(self):
+        # Override.
+        self.skipTest("Doesn't apply since LDAP config has no affect on the "
+                      "SQL identity backend.")
+
+    def test_group_enabled_ignored_disable_error(self):
+        # Override.
+        self.skipTest("Doesn't apply since LDAP config has no affect on the "
+                      "SQL identity backend.")
+
+    def test_project_enabled_ignored_disable_error(self):
+        # Override
+        self.skipTest("Doesn't apply since LDAP configuration is ignored for "
+                      "SQL assignment backend.")
 
 
 class DomainSpecificSQLIdentity(DomainSpecificLDAPandSQLIdentity):

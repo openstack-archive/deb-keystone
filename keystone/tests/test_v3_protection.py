@@ -15,9 +15,10 @@
 
 import uuid
 
+from oslo.serialization import jsonutils
+
 from keystone import config
 from keystone import exception
-from keystone.openstack.common import jsonutils
 from keystone.policy.backends import rules
 from keystone import tests
 from keystone.tests.ksfixtures import temporaryfile
@@ -585,6 +586,16 @@ class IdentityTestv3CloudPolicySample(test_v3.RestfulTestCase):
             password=self.domain_admin_user['password'],
             domain_id=self.domainA['id'])
 
+        self._test_project_management(self.domainA['id'])
+
+    def test_project_management_by_cloud_admin(self):
+        self.auth = self.build_authentication_request(
+            user_id=self.cloud_admin_user['id'],
+            password=self.cloud_admin_user['password'],
+            domain_id=self.admin_domain['id'])
+
+        # Check whether cloud admin can operate a domain
+        # other than its own domain or not
         self._test_project_management(self.domainA['id'])
 
     def test_domain_grants(self):

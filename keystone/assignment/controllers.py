@@ -19,7 +19,6 @@ import copy
 import functools
 import uuid
 
-import six
 from six.moves import urllib
 
 from keystone.assignment import schema
@@ -28,7 +27,7 @@ from keystone.common import dependency
 from keystone.common import validation
 from keystone import config
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 from keystone.models import token_model
 from keystone.openstack.common import log
 
@@ -74,7 +73,7 @@ class Tenant(controller.V2Controller):
             token_ref = token_model.KeystoneToken(token_id=context['token_id'],
                                                   token_data=token_data)
         except exception.NotFound as e:
-            LOG.warning(_('Authentication failed: %s'), e)
+            LOG.warning(_LW('Authentication failed: %s'), e)
             raise exception.Unauthorized(e)
 
         tenant_refs = (
@@ -402,7 +401,8 @@ class ProjectV3(controller.V3Controller):
         ref = self.assignment_api.create_project(ref['id'], ref)
         return ProjectV3.wrap_member(context, ref)
 
-    @controller.filterprotected('domain_id', 'enabled', 'name')
+    @controller.filterprotected('domain_id', 'enabled', 'name',
+                                'parent_id')
     def list_projects(self, context, filters):
         hints = ProjectV3.build_driver_hints(context, filters)
         refs = self.assignment_api.list_projects(hints=hints)
@@ -415,9 +415,28 @@ class ProjectV3(controller.V3Controller):
                                                           hints=hints)
         return ProjectV3.wrap_collection(context, refs, hints=hints)
 
+    def _expand_project_ref(self, context, ref):
+        user_id = self.get_auth_context(context).get('user_id')
+        if ('parents_as_list' in context['query_string'] and
+                self.query_filter_is_true(
+                    context['query_string']['parents_as_list'])):
+            parents = self.assignment_api.list_project_parents(
+                ref['id'], user_id)
+            ref['parents'] = [ProjectV3.wrap_member(context, p)
+                              for p in parents]
+
+        if ('subtree_as_list' in context['query_string'] and
+                self.query_filter_is_true(
+                    context['query_string']['subtree_as_list'])):
+            subtree = self.assignment_api.list_projects_in_subtree(
+                ref['id'], user_id)
+            ref['subtree'] = [ProjectV3.wrap_member(context, p)
+                              for p in subtree]
+
     @controller.protected()
     def get_project(self, context, project_id):
         ref = self.assignment_api.get_project(project_id)
+        self._expand_project_ref(context, ref)
         return ProjectV3.wrap_member(context, ref)
 
     @controller.protected()
@@ -642,7 +661,13 @@ class RoleAssignmentV3(controller.V3Controller):
         if 'project_id' in entity:
             formatted_entity['scope'] = (
                 {'project': {'id': entity['project_id']}})
-            target_link = '/projects/%s' % entity['project_id']
+            if 'inherited_to_projects' in entity:
+                formatted_entity['scope']['OS-INHERIT:inherited_to'] = (
+                    'projects')
+                target_link = '/OS-INHERIT/projects/%s' % entity['project_id']
+                suffix = '/inherited_to_projects'
+            else:
+                target_link = '/projects/%s' % entity['project_id']
         if 'domain_id' in entity:
             formatted_entity['scope'] = (
                 {'domain': {'id': entity['domain_id']}})
@@ -709,10 +734,10 @@ class RoleAssignmentV3(controller.V3Controller):
                 if 'role' in ref and 'id' in ref['role']:
                     role_id = ref['role']['id']
                 LOG.warning(
-                    _('Group %(group)s not found for role-assignment - '
-                      '%(target)s with Role: %(role)s'), {
-                          'group': ref['group']['id'], 'target': target,
-                          'role': role_id})
+                    _LW('Group %(group)s not found for role-assignment - '
+                        '%(target)s with Role: %(role)s'), {
+                            'group': ref['group']['id'], 'target': target,
+                            'role': role_id})
             return members
 
         def _build_user_assignment_equivalent_of_group(
@@ -733,8 +758,8 @@ class RoleAssignmentV3(controller.V3Controller):
                               (group_id, user['id'])))
             return user_entry
 
-        def _build_project_equivalent_of_user_domain_role(
-                project_id, domain_id, template):
+        def _build_project_equivalent_of_user_target_role(
+                project_id, target_id, target_type, template):
             """Create a user project assignment equivalent to the domain one.
 
             The template has had the 'domain' entity removed, so
@@ -747,14 +772,15 @@ class RoleAssignmentV3(controller.V3Controller):
             project_entry['links']['assignment'] = (
                 self.base_url(
                     context,
-                    '/OS-INHERIT/domains/%s/users/%s/roles/%s'
+                    '/OS-INHERIT/%s/%s/users/%s/roles/%s'
                     '/inherited_to_projects' % (
-                        domain_id, project_entry['user']['id'],
+                        target_type, target_id, project_entry['user']['id'],
                         project_entry['role']['id'])))
             return project_entry
 
-        def _build_project_equivalent_of_group_domain_role(
-                user_id, group_id, project_id, domain_id, template):
+        def _build_project_equivalent_of_group_target_role(
+                user_id, group_id, project_id,
+                target_id, target_type, template):
             """Create a user project equivalent to the domain group one.
 
             The template has had the 'domain' and 'group' entities removed, so
@@ -767,9 +793,9 @@ class RoleAssignmentV3(controller.V3Controller):
             project_entry['scope']['project'] = {'id': project_id}
             project_entry['links']['assignment'] = (
                 self.base_url(context,
-                              '/OS-INHERIT/domains/%s/groups/%s/roles/%s'
+                              '/OS-INHERIT/%s/%s/groups/%s/roles/%s'
                               '/inherited_to_projects' % (
-                                  domain_id, group_id,
+                                  target_type, target_id, group_id,
                                   project_entry['role']['id'])))
             project_entry['links']['membership'] = (
                 self.base_url(context, '/groups/%s/users/%s' %
@@ -793,16 +819,30 @@ class RoleAssignmentV3(controller.V3Controller):
         new_refs = []
         for r in refs:
             if 'OS-INHERIT:inherited_to' in r['scope']:
-                # It's an inherited domain role - so get the list of projects
-                # owned by this domain. A domain scope is guaranteed since we
-                # checked this when we built the refs list
-                project_ids = (
-                    [x['id'] for x in
-                        self.assignment_api.list_projects_in_domain(
-                            r['scope']['domain']['id'])])
-                base_entry = copy.deepcopy(r)
-                domain_id = base_entry['scope']['domain']['id']
-                base_entry['scope'].pop('domain')
+                if 'domain' in r['scope']:
+                    # It's an inherited domain role - so get the list of
+                    # projects owned by this domain.
+                    project_ids = (
+                        [x['id'] for x in
+                            self.assignment_api.list_projects_in_domain(
+                                r['scope']['domain']['id'])])
+                    base_entry = copy.deepcopy(r)
+                    target_type = 'domains'
+                    target_id = base_entry['scope']['domain']['id']
+                    base_entry['scope'].pop('domain')
+                else:
+                    # It's an inherited project role - so get the list of
+                    # projects in this project subtree.
+                    project_id = r['scope']['project']['id']
+                    project_ids = (
+                        [x['id'] for x in
+                            self.assignment_api.list_projects_in_subtree(
+                                project_id)])
+                    base_entry = copy.deepcopy(r)
+                    target_type = 'projects'
+                    target_id = base_entry['scope']['project']['id']
+                    base_entry['scope'].pop('project')
+
                 # For each project, create an equivalent role assignment
                 for p in project_ids:
                     # If it's a group assignment, then create equivalent user
@@ -814,14 +854,14 @@ class RoleAssignmentV3(controller.V3Controller):
                         sub_entry.pop('group')
                         for m in members:
                             new_entry = (
-                                _build_project_equivalent_of_group_domain_role(
+                                _build_project_equivalent_of_group_target_role(
                                     m['id'], group_id, p,
-                                    domain_id, sub_entry))
+                                    target_id, target_type, sub_entry))
                             new_refs.append(new_entry)
                     else:
                         new_entry = (
-                            _build_project_equivalent_of_user_domain_role(
-                                p, domain_id, base_entry))
+                            _build_project_equivalent_of_user_target_role(
+                                p, target_id, target_type, base_entry))
                         new_refs.append(new_entry)
             elif 'group' in r:
                 # It's a non-inherited group role assignment, so get the list
@@ -842,30 +882,10 @@ class RoleAssignmentV3(controller.V3Controller):
 
         return new_refs
 
-    def _query_filter_is_true(self, filter_value):
-        """Determine if bool query param is 'True'.
-
-        We treat this the same way as we do for policy
-        enforcement:
-
-        {bool_param}=0 is treated as False
-
-        Any other value is considered to be equivalent to
-        True, including the absence of a value
-
-        """
-
-        if (isinstance(filter_value, six.string_types) and
-                filter_value == '0'):
-            val = False
-        else:
-            val = True
-        return val
-
     def _filter_inherited(self, entry):
         if ('inherited_to_projects' in entry and
                 not CONF.os_inherit.enabled):
-                    return False
+            return False
         else:
             return True
 
@@ -887,7 +907,7 @@ class RoleAssignmentV3(controller.V3Controller):
              if self._filter_inherited(x)])
 
         if ('effective' in context['query_string'] and
-                self._query_filter_is_true(
+                self.query_filter_is_true(
                     context['query_string']['effective'])):
 
             formatted_refs = self._expand_indirect_assignments(context,

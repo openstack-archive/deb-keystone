@@ -2031,6 +2031,108 @@ class IdentityTests(object):
         self.assertIn(project1['id'], project_ids)
         self.assertIn(project2['id'], project_ids)
 
+    def _create_projects_hierarchy(self, hierarchy_size=2,
+                                   domain_id=DEFAULT_DOMAIN_ID):
+        """Creates a project hierarchy with specified size.
+
+        :param hierarchy_size: the desired hierarchy size, default is 2 -
+                               a project with one child.
+        :param domain_id: domain where the projects hierarchy will be created.
+
+        :returns projects: a list of the projects in the created hierarchy.
+
+        """
+        project_id = uuid.uuid4().hex
+        project = {'id': project_id,
+                   'description': '',
+                   'domain_id': domain_id,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None}
+        self.assignment_api.create_project(project_id, project)
+
+        projects = [project]
+        for i in range(1, hierarchy_size):
+            new_project = {'id': uuid.uuid4().hex,
+                           'description': '',
+                           'domain_id': domain_id,
+                           'enabled': True,
+                           'name': uuid.uuid4().hex,
+                           'parent_id': project_id}
+            self.assignment_api.create_project(new_project['id'], new_project)
+            projects.append(new_project)
+            project_id = new_project['id']
+
+        return projects
+
+    def test_check_leaf_projects(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project = projects_hierarchy[0]
+        leaf_project = projects_hierarchy[1]
+
+        self.assertFalse(self.assignment_api.is_leaf_project(
+            root_project['id']))
+        self.assertTrue(self.assignment_api.is_leaf_project(
+            leaf_project['id']))
+
+        # Delete leaf_project
+        self.assignment_api.delete_project(leaf_project['id'])
+
+        # Now, root_project should be leaf
+        self.assertTrue(self.assignment_api.is_leaf_project(
+            root_project['id']))
+
+    def test_list_projects_in_subtree(self):
+        projects_hierarchy = self._create_projects_hierarchy(hierarchy_size=3)
+        project1 = projects_hierarchy[0]
+        project2 = projects_hierarchy[1]
+        project3 = projects_hierarchy[2]
+        project4 = {'id': uuid.uuid4().hex,
+                    'description': '',
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'enabled': True,
+                    'name': uuid.uuid4().hex,
+                    'parent_id': project2['id']}
+        self.assignment_api.create_project(project4['id'], project4)
+
+        subtree = self.assignment_api.list_projects_in_subtree(project1['id'])
+        self.assertEqual(3, len(subtree))
+        self.assertIn(project2, subtree)
+        self.assertIn(project3, subtree)
+        self.assertIn(project4, subtree)
+
+        subtree = self.assignment_api.list_projects_in_subtree(project2['id'])
+        self.assertEqual(2, len(subtree))
+        self.assertIn(project3, subtree)
+        self.assertIn(project4, subtree)
+
+        subtree = self.assignment_api.list_projects_in_subtree(project3['id'])
+        self.assertEqual(0, len(subtree))
+
+    def test_list_project_parents(self):
+        projects_hierarchy = self._create_projects_hierarchy(hierarchy_size=3)
+        project1 = projects_hierarchy[0]
+        project2 = projects_hierarchy[1]
+        project3 = projects_hierarchy[2]
+        project4 = {'id': uuid.uuid4().hex,
+                    'description': '',
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'enabled': True,
+                    'name': uuid.uuid4().hex,
+                    'parent_id': project2['id']}
+        self.assignment_api.create_project(project4['id'], project4)
+
+        parents1 = self.assignment_api.list_project_parents(project3['id'])
+        self.assertEqual(2, len(parents1))
+        self.assertIn(project1, parents1)
+        self.assertIn(project2, parents1)
+
+        parents2 = self.assignment_api.list_project_parents(project4['id'])
+        self.assertEqual(parents1, parents2)
+
+        parents = self.assignment_api.list_project_parents(project1['id'])
+        self.assertEqual(0, len(parents))
+
     def test_list_roles(self):
         roles = self.assignment_api.list_roles()
         self.assertEqual(len(default_fixtures.ROLES), len(roles))
@@ -2432,6 +2534,23 @@ class IdentityTests(object):
                           self.identity_api.get_group,
                           group['id'])
 
+    def test_get_group_by_name(self):
+        group_name = uuid.uuid4().hex
+        group = {'domain_id': DEFAULT_DOMAIN_ID, 'name': group_name}
+        group = self.identity_api.create_group(group)
+        spoiler = {'domain_id': DEFAULT_DOMAIN_ID, 'name': uuid.uuid4().hex}
+        self.identity_api.create_group(spoiler)
+
+        group_ref = self.identity_api.get_group_by_name(
+            group_name, DEFAULT_DOMAIN_ID)
+        self.assertDictEqual(group_ref, group)
+
+    def test_get_group_by_name_404(self):
+        self.assertRaises(exception.GroupNotFound,
+                          self.identity_api.get_group_by_name,
+                          uuid.uuid4().hex,
+                          DEFAULT_DOMAIN_ID)
+
     def test_create_duplicate_group_name_fails(self):
         group1 = {'domain_id': DEFAULT_DOMAIN_ID, 'name': uuid.uuid4().hex}
         group2 = {'domain_id': DEFAULT_DOMAIN_ID, 'name': group1['name']}
@@ -2502,12 +2621,235 @@ class IdentityTests(object):
                           self.assignment_api.get_project,
                           project['id'])
 
+    def test_domain_delete_hierarchy(self):
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                  'enabled': True}
+        self.assignment_api.create_domain(domain['id'], domain)
+
+        # Creating a root and a leaf project inside the domain
+        projects_hierarchy = self._create_projects_hierarchy(
+            domain_id=domain['id'])
+        root_project = projects_hierarchy[0]
+        leaf_project = projects_hierarchy[0]
+
+        # Disable the domain
+        domain['enabled'] = False
+        self.assignment_api.update_domain(domain['id'], domain)
+
+        # Delete the domain
+        self.assignment_api.delete_domain(domain['id'])
+
+        # Make sure the domain no longer exists
+        self.assertRaises(exception.DomainNotFound,
+                          self.assignment_api.get_domain,
+                          domain['id'])
+
+        # Make sure the root project no longer exists
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.get_project,
+                          root_project['id'])
+
+        # Make sure the leaf project no longer exists
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.get_project,
+                          leaf_project['id'])
+
+    def test_hierarchical_projects_crud(self):
+        # create a hierarchy with just a root project (which is a leaf as well)
+        projects_hierarchy = self._create_projects_hierarchy(hierarchy_size=1)
+        root_project1 = projects_hierarchy[0]
+
+        # create a hierarchy with one root project and one leaf project
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project2 = projects_hierarchy[0]
+        leaf_project = projects_hierarchy[1]
+
+        # update description from leaf_project
+        leaf_project['description'] = 'new description'
+        self.assignment_api.update_project(leaf_project['id'], leaf_project)
+        proj_ref = self.assignment_api.get_project(leaf_project['id'])
+        self.assertDictEqual(proj_ref, leaf_project)
+
+        # update the parent_id is not allowed
+        leaf_project['parent_id'] = root_project1['id']
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.update_project,
+                          leaf_project['id'],
+                          leaf_project)
+
+        # delete root_project1
+        self.assignment_api.delete_project(root_project1['id'])
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.get_project,
+                          root_project1['id'])
+
+        # delete root_project2 is not allowed since it is not a leaf project
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.delete_project,
+                          root_project2['id'])
+
+    def test_create_project_with_invalid_parent(self):
+        project = {'id': uuid.uuid4().hex,
+                   'name': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': DEFAULT_DOMAIN_ID,
+                   'enabled': True,
+                   'parent_id': 'fake'}
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.create_project,
+                          project['id'],
+                          project)
+
+    def test_create_leaf_project_with_invalid_domain(self):
+        root_project = {'id': uuid.uuid4().hex,
+                        'name': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': DEFAULT_DOMAIN_ID,
+                        'enabled': True,
+                        'parent_id': None}
+        self.assignment_api.create_project(root_project['id'], root_project)
+
+        leaf_project = {'id': uuid.uuid4().hex,
+                        'name': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': 'fake',
+                        'enabled': True,
+                        'parent_id': root_project['id']}
+
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.create_project,
+                          leaf_project['id'],
+                          leaf_project)
+
+    def test_delete_hierarchical_leaf_project(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project = projects_hierarchy[0]
+        leaf_project = projects_hierarchy[1]
+
+        self.assignment_api.delete_project(leaf_project['id'])
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.get_project,
+                          leaf_project['id'])
+
+        self.assignment_api.delete_project(root_project['id'])
+        self.assertRaises(exception.ProjectNotFound,
+                          self.assignment_api.get_project,
+                          root_project['id'])
+
+    def test_delete_hierarchical_not_leaf_project(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project = projects_hierarchy[0]
+
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.delete_project,
+                          root_project['id'])
+
+    def test_update_project_parent(self):
+        projects_hierarchy = self._create_projects_hierarchy(hierarchy_size=3)
+        project1 = projects_hierarchy[0]
+        project2 = projects_hierarchy[1]
+        project3 = projects_hierarchy[2]
+
+        # project2 is the parent from project3
+        self.assertEqual(project3.get('parent_id'), project2['id'])
+
+        # try to update project3 parent to parent1
+        project3['parent_id'] = project1['id']
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.update_project,
+                          project3['id'],
+                          project3)
+
+    def test_create_project_under_disabled_one(self):
+        project1 = {'id': uuid.uuid4().hex,
+                    'name': uuid.uuid4().hex,
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'enabled': False,
+                    'parent_id': None}
+        self.assignment_api.create_project(project1['id'], project1)
+
+        project2 = {'id': uuid.uuid4().hex,
+                    'name': uuid.uuid4().hex,
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'parent_id': project1['id']}
+
+        # It's not possible to create a project under a disabled one in the
+        # hierarchy
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.create_project,
+                          project2['id'],
+                          project2)
+
+    def test_disable_hierarchical_leaf_project(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        leaf_project = projects_hierarchy[1]
+
+        leaf_project['enabled'] = False
+        self.assignment_api.update_project(leaf_project['id'], leaf_project)
+
+        project_ref = self.assignment_api.get_project(leaf_project['id'])
+        self.assertEqual(project_ref['enabled'], leaf_project['enabled'])
+
+    def test_disable_hierarchical_not_leaf_project(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project = projects_hierarchy[0]
+
+        root_project['enabled'] = False
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.update_project,
+                          root_project['id'],
+                          root_project)
+
+    def test_enable_project_with_disabled_parent(self):
+        projects_hierarchy = self._create_projects_hierarchy()
+        root_project = projects_hierarchy[0]
+        leaf_project = projects_hierarchy[1]
+
+        # Disable leaf and root
+        leaf_project['enabled'] = False
+        self.assignment_api.update_project(leaf_project['id'], leaf_project)
+        root_project['enabled'] = False
+        self.assignment_api.update_project(root_project['id'], root_project)
+
+        # Try to enable the leaf project, it's not possible since it has
+        # a disabled parent
+        leaf_project['enabled'] = True
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.update_project,
+                          leaf_project['id'],
+                          leaf_project)
+
+    def _get_hierarchy_depth(self, project_id):
+        return len(self.assignment_api.list_project_parents(project_id)) + 1
+
+    def test_check_hierarchy_depth(self):
+        # First create a hierarchy with the max allowed depth
+        projects_hierarchy = self._create_projects_hierarchy(
+            CONF.max_project_tree_depth)
+        leaf_project = projects_hierarchy[CONF.max_project_tree_depth - 1]
+
+        depth = self._get_hierarchy_depth(leaf_project['id'])
+        self.assertEqual(CONF.max_project_tree_depth, depth)
+
+        # Creating another project in the hierarchy shouldn't be allowed
+        project_id = uuid.uuid4().hex
+        project = {
+            'id': project_id,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'parent_id': leaf_project['id']}
+        self.assertRaises(exception.ForbiddenAction,
+                          self.assignment_api.create_project,
+                          project_id,
+                          project)
+
     def test_project_update_missing_attrs_with_a_value(self):
         # Creating a project with no description attribute.
         project = {'id': uuid.uuid4().hex,
                    'name': uuid.uuid4().hex,
                    'domain_id': DEFAULT_DOMAIN_ID,
-                   'enabled': True}
+                   'enabled': True,
+                   'parent_id': None}
         self.assignment_api.create_project(project['id'], project)
 
         # Add a description attribute.
@@ -2522,7 +2864,8 @@ class IdentityTests(object):
         project = {'id': uuid.uuid4().hex,
                    'name': uuid.uuid4().hex,
                    'domain_id': DEFAULT_DOMAIN_ID,
-                   'enabled': True}
+                   'enabled': True,
+                   'parent_id': None}
         self.assignment_api.create_project(project['id'], project)
 
         # Add a description attribute.
@@ -3040,6 +3383,300 @@ class IdentityTests(object):
 
         self.assertThat(member_assignments,
                         matchers.Equals(orig_member_assignments))
+
+    def test_get_roles_for_groups_on_domain(self):
+        """Test retrieving group domain roles.
+
+        Test Plan:
+
+        - Create a domain, three groups and three roles
+        - Assign one an inherited and the others a non-inherited group role
+          to the domain
+        - Ensure that only the non-inherited roles are returned on the domain
+
+        """
+        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain1['id'], domain1)
+        group_list = []
+        group_id_list = []
+        role_list = []
+        for _ in range(3):
+            group = {'name': uuid.uuid4().hex, 'domain_id': domain1['id']}
+            group = self.identity_api.create_group(group)
+            group_list.append(group)
+            group_id_list.append(group['id'])
+
+            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            self.assignment_api.create_role(role['id'], role)
+            role_list.append(role)
+
+        # Assign the roles - one is inherited
+        self.assignment_api.create_grant(group_id=group_list[0]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[0]['id'])
+        self.assignment_api.create_grant(group_id=group_list[1]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[1]['id'])
+        self.assignment_api.create_grant(group_id=group_list[2]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[2]['id'],
+                                         inherited_to_projects=True)
+
+        # Now get the effective roles for the groups on the domain project. We
+        # shouldn't get back the inherited role.
+
+        role_refs = self.assignment_api.get_roles_for_groups(
+            group_id_list, domain_id=domain1['id'])
+
+        self.assertThat(role_refs, matchers.HasLength(2))
+        self.assertIn(role_list[0], role_refs)
+        self.assertIn(role_list[1], role_refs)
+
+    def test_get_roles_for_groups_on_project(self):
+        """Test retrieving group project roles.
+
+        Test Plan:
+
+        - Create two domains, two projects, six groups and six roles
+        - Project1 is in Domain1, Project2 is in Domain2
+        - Domain2/Project2 are spoilers
+        - Assign a different direct group role to each project as well
+          as both an inherited and non-inherited role to each domain
+        - Get the group roles for Project 1 - depending on whether we have
+          enabled inheritance, we should either get back just the direct role
+          or both the direct one plus the inherited domain role from Domain 1
+
+        """
+        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain1['id'], domain1)
+        domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain2['id'], domain2)
+        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain1['id']}
+        self.assignment_api.create_project(project1['id'], project1)
+        project2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain2['id']}
+        self.assignment_api.create_project(project2['id'], project2)
+        group_list = []
+        group_id_list = []
+        role_list = []
+        for _ in range(6):
+            group = {'name': uuid.uuid4().hex, 'domain_id': domain1['id']}
+            group = self.identity_api.create_group(group)
+            group_list.append(group)
+            group_id_list.append(group['id'])
+
+            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            self.assignment_api.create_role(role['id'], role)
+            role_list.append(role)
+
+        # Assign the roles - one inherited and one non-inherited on Domain1,
+        # plus one on Project1
+        self.assignment_api.create_grant(group_id=group_list[0]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[0]['id'])
+        self.assignment_api.create_grant(group_id=group_list[1]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[1]['id'],
+                                         inherited_to_projects=True)
+        self.assignment_api.create_grant(group_id=group_list[2]['id'],
+                                         project_id=project1['id'],
+                                         role_id=role_list[2]['id'])
+
+        # ...and a duplicate set of spoiler assignments to Domain2/Project2
+        self.assignment_api.create_grant(group_id=group_list[3]['id'],
+                                         domain_id=domain2['id'],
+                                         role_id=role_list[3]['id'])
+        self.assignment_api.create_grant(group_id=group_list[4]['id'],
+                                         domain_id=domain2['id'],
+                                         role_id=role_list[4]['id'],
+                                         inherited_to_projects=True)
+        self.assignment_api.create_grant(group_id=group_list[5]['id'],
+                                         project_id=project2['id'],
+                                         role_id=role_list[5]['id'])
+
+        # Now get the effective roles for all groups on the Project1. With
+        # inheritance off, we should only get back the direct role.
+
+        self.config_fixture.config(group='os_inherit', enabled=False)
+        role_refs = self.assignment_api.get_roles_for_groups(
+            group_id_list, project_id=project1['id'])
+
+        self.assertThat(role_refs, matchers.HasLength(1))
+        self.assertIn(role_list[2], role_refs)
+
+        # With inheritance on, we should also get back the inherited role from
+        # its owning domain.
+
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        role_refs = self.assignment_api.get_roles_for_groups(
+            group_id_list, project_id=project1['id'])
+
+        self.assertThat(role_refs, matchers.HasLength(2))
+        self.assertIn(role_list[1], role_refs)
+        self.assertIn(role_list[2], role_refs)
+
+    def test_list_domains_for_groups(self):
+        """Test retrieving domains for a list of groups.
+
+        Test Plan:
+
+        - Create three domains, three groups and one role
+        - Assign a non-inherited group role to two domains, and an inherited
+          group role to the third
+        - Ensure only the domains with non-inherited roles are returned
+
+        """
+        domain_list = []
+        group_list = []
+        group_id_list = []
+        for _ in range(3):
+            domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            self.assignment_api.create_domain(domain['id'], domain)
+            domain_list.append(domain)
+
+            group = {'name': uuid.uuid4().hex, 'domain_id': domain['id']}
+            group = self.identity_api.create_group(group)
+            group_list.append(group)
+            group_id_list.append(group['id'])
+
+        role1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_role(role1['id'], role1)
+
+        # Assign the roles - one is inherited
+        self.assignment_api.create_grant(group_id=group_list[0]['id'],
+                                         domain_id=domain_list[0]['id'],
+                                         role_id=role1['id'])
+        self.assignment_api.create_grant(group_id=group_list[1]['id'],
+                                         domain_id=domain_list[1]['id'],
+                                         role_id=role1['id'])
+        self.assignment_api.create_grant(group_id=group_list[2]['id'],
+                                         domain_id=domain_list[2]['id'],
+                                         role_id=role1['id'],
+                                         inherited_to_projects=True)
+
+        # Now list the domains that have roles for any of the 3 groups
+        # We shouldn't get back domain[2] since that had an inherited role.
+
+        domain_refs = (
+            self.assignment_api.list_domains_for_groups(group_id_list))
+
+        self.assertThat(domain_refs, matchers.HasLength(2))
+        self.assertIn(domain_list[0], domain_refs)
+        self.assertIn(domain_list[1], domain_refs)
+
+    def test_list_projects_for_groups(self):
+        """Test retrieving projects for a list of groups.
+
+        Test Plan:
+
+        - Create two domains, four projects, seven groups and seven roles
+        - Project1-3 are in Domain1, Project4 is in Domain2
+        - Domain2/Project4 are spoilers
+        - Project1 and 2 have direct group roles, Project3 has no direct
+          roles but should inherit a group role from Domain1
+        - Get the projects for the group roles that are assigned to Project1
+          Project2 and the inherited one on Domain1. Depending on whether we
+          have enabled inheritance, we should either get back just the projects
+          with direct roles (Project 1 and 2) or also Project3 due to its
+          inherited role from Domain1.
+
+        """
+        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain1['id'], domain1)
+        domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.assignment_api.create_domain(domain2['id'], domain2)
+        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain1['id']}
+        project1 = self.assignment_api.create_project(project1['id'], project1)
+        project2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain1['id']}
+        project2 = self.assignment_api.create_project(project2['id'], project2)
+        project3 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain1['id']}
+        project3 = self.assignment_api.create_project(project3['id'], project3)
+        project4 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                    'domain_id': domain2['id']}
+        project4 = self.assignment_api.create_project(project4['id'], project4)
+        group_list = []
+        role_list = []
+        for _ in range(7):
+            group = {'name': uuid.uuid4().hex, 'domain_id': domain1['id']}
+            group = self.identity_api.create_group(group)
+            group_list.append(group)
+
+            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            self.assignment_api.create_role(role['id'], role)
+            role_list.append(role)
+
+        # Assign the roles - one inherited and one non-inherited on Domain1,
+        # plus one on Project1 and Project2
+        self.assignment_api.create_grant(group_id=group_list[0]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[0]['id'])
+        self.assignment_api.create_grant(group_id=group_list[1]['id'],
+                                         domain_id=domain1['id'],
+                                         role_id=role_list[1]['id'],
+                                         inherited_to_projects=True)
+        self.assignment_api.create_grant(group_id=group_list[2]['id'],
+                                         project_id=project1['id'],
+                                         role_id=role_list[2]['id'])
+        self.assignment_api.create_grant(group_id=group_list[3]['id'],
+                                         project_id=project2['id'],
+                                         role_id=role_list[3]['id'])
+
+        # ...and a few of spoiler assignments to Domain2/Project4
+        self.assignment_api.create_grant(group_id=group_list[4]['id'],
+                                         domain_id=domain2['id'],
+                                         role_id=role_list[4]['id'])
+        self.assignment_api.create_grant(group_id=group_list[5]['id'],
+                                         domain_id=domain2['id'],
+                                         role_id=role_list[5]['id'],
+                                         inherited_to_projects=True)
+        self.assignment_api.create_grant(group_id=group_list[6]['id'],
+                                         project_id=project4['id'],
+                                         role_id=role_list[6]['id'])
+
+        # Now get the projects for the groups that have roles on Project1,
+        # Project2 and the inherited role on Domain!. With inheritance off,
+        # we should only get back the projects with direct role.
+
+        self.config_fixture.config(group='os_inherit', enabled=False)
+        group_id_list = [group_list[1]['id'], group_list[2]['id'],
+                         group_list[3]['id']]
+        project_refs = (
+            self.assignment_api.list_projects_for_groups(group_id_list))
+
+        self.assertThat(project_refs, matchers.HasLength(2))
+        self.assertIn(project1, project_refs)
+        self.assertIn(project2, project_refs)
+
+        # With inheritance on, we should also get back the Project3 due to the
+        # inherited role from its owning domain.
+
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        project_refs = (
+            self.assignment_api.list_projects_for_groups(group_id_list))
+
+        self.assertThat(project_refs, matchers.HasLength(3))
+        self.assertIn(project1, project_refs)
+        self.assertIn(project2, project_refs)
+        self.assertIn(project3, project_refs)
+
+    def test_update_role_no_name(self):
+        # A user can update a role and not include the name.
+
+        # description is picked just because it's not name.
+        self.assignment_api.update_role(self.role_member['id'],
+                                        {'description': uuid.uuid4().hex})
+        # If the previous line didn't raise an exception then the test passes.
+
+    def test_update_role_same_name(self):
+        # A user can update a role and set the name to be the same as it was.
+
+        self.assignment_api.update_role(self.role_member['id'],
+                                        {'name': self.role_member['name']})
+        # If the previous line didn't raise an exception then the test passes.
 
 
 class TokenTests(object):
@@ -4380,7 +5017,7 @@ class InheritanceTests(object):
         self.assertIn(role_list[3]['id'], combined_list)
 
     def test_list_projects_for_user_with_inherited_grants(self):
-        """Test inherited group roles.
+        """Test inherited user roles.
 
         Test Plan:
 
@@ -4417,6 +5054,64 @@ class InheritanceTests(object):
         # grant, plus both projects in the domain
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
         self.assertEqual(3, len(user_projects))
+
+    def test_list_projects_for_user_with_inherited_user_project_grants(self):
+        """Test inherited role assignments for users on nested projects.
+
+        Test Plan:
+
+        - Enable OS-INHERIT extension
+        - Create a hierarchy of projects with one root and one leaf project
+        - Assign an inherited user role on root project
+        - Assign a non-inherited user role on root project
+        - Get a list of projects for user, should return both projects
+        - Disable OS-INHERIT extension
+        - Get a list of projects for user, should return only root project
+
+        """
+        # Enable OS-INHERIT extension
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        root_project = {'id': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': DEFAULT_DOMAIN_ID,
+                        'enabled': True,
+                        'name': uuid.uuid4().hex,
+                        'parent_id': None}
+        self.assignment_api.create_project(root_project['id'], root_project)
+        leaf_project = {'id': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': DEFAULT_DOMAIN_ID,
+                        'enabled': True,
+                        'name': uuid.uuid4().hex,
+                        'parent_id': root_project['id']}
+        self.assignment_api.create_project(leaf_project['id'], leaf_project)
+
+        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
+                'domain_id': DEFAULT_DOMAIN_ID, 'enabled': True}
+        user = self.identity_api.create_user(user)
+
+        # Grant inherited user role
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         project_id=root_project['id'],
+                                         role_id=self.role_admin['id'],
+                                         inherited_to_projects=True)
+        # Grant non-inherited user role
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         project_id=root_project['id'],
+                                         role_id=self.role_member['id'])
+        # Should get back both projects: because the direct role assignment for
+        # the root project and inherited role assignment for leaf project
+        user_projects = self.assignment_api.list_projects_for_user(user['id'])
+        self.assertEqual(2, len(user_projects))
+        self.assertIn(root_project, user_projects)
+        self.assertIn(leaf_project, user_projects)
+
+        # Disable OS-INHERIT extension
+        self.config_fixture.config(group='os_inherit', enabled=False)
+        # Should get back just root project - due the direct role assignment
+        user_projects = self.assignment_api.list_projects_for_user(user['id'])
+        self.assertEqual(1, len(user_projects))
+        self.assertIn(root_project, user_projects)
 
     def test_list_projects_for_user_with_inherited_group_grants(self):
         """Test inherited group roles.
@@ -4481,6 +5176,67 @@ class InheritanceTests(object):
         # project3 (since it has both a direct user role and an inherited role)
         user_projects = self.assignment_api.list_projects_for_user(user1['id'])
         self.assertEqual(5, len(user_projects))
+
+    def test_list_projects_for_user_with_inherited_group_project_grants(self):
+        """Test inherited role assignments for groups on nested projects.
+
+        Test Plan:
+
+        - Enable OS-INHERIT extension
+        - Create a hierarchy of projects with one root and one leaf project
+        - Assign an inherited group role on root project
+        - Assign a non-inherited group role on root project
+        - Get a list of projects for user, should return both projects
+        - Disable OS-INHERIT extension
+        - Get a list of projects for user, should return only root project
+
+        """
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        root_project = {'id': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': DEFAULT_DOMAIN_ID,
+                        'enabled': True,
+                        'name': uuid.uuid4().hex,
+                        'parent_id': None}
+        self.assignment_api.create_project(root_project['id'], root_project)
+        leaf_project = {'id': uuid.uuid4().hex,
+                        'description': '',
+                        'domain_id': DEFAULT_DOMAIN_ID,
+                        'enabled': True,
+                        'name': uuid.uuid4().hex,
+                        'parent_id': root_project['id']}
+        self.assignment_api.create_project(leaf_project['id'], leaf_project)
+
+        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
+                'domain_id': DEFAULT_DOMAIN_ID, 'enabled': True}
+        user = self.identity_api.create_user(user)
+
+        group = {'name': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID}
+        group = self.identity_api.create_group(group)
+        self.identity_api.add_user_to_group(user['id'], group['id'])
+
+        # Grant inherited group role
+        self.assignment_api.create_grant(group_id=group['id'],
+                                         project_id=root_project['id'],
+                                         role_id=self.role_admin['id'],
+                                         inherited_to_projects=True)
+        # Grant non-inherited group role
+        self.assignment_api.create_grant(group_id=group['id'],
+                                         project_id=root_project['id'],
+                                         role_id=self.role_member['id'])
+        # Should get back both projects: because the direct role assignment for
+        # the root project and inherited role assignment for leaf project
+        user_projects = self.assignment_api.list_projects_for_user(user['id'])
+        self.assertEqual(2, len(user_projects))
+        self.assertIn(root_project, user_projects)
+        self.assertIn(leaf_project, user_projects)
+
+        # Disable OS-INHERIT extension
+        self.config_fixture.config(group='os_inherit', enabled=False)
+        # Should get back just root project - due the direct role assignment
+        user_projects = self.assignment_api.list_projects_for_user(user['id'])
+        self.assertEqual(1, len(user_projects))
+        self.assertIn(root_project, user_projects)
 
 
 class FilterTests(filtering.FilterTests):

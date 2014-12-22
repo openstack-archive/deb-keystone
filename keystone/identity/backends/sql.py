@@ -91,9 +91,6 @@ class Identity(identity.Driver):
     def _check_password(self, password, user_ref):
         """Check the specified password against the data store.
 
-        This is modeled on ldap/core.py.  The idea is to make it easier to
-        subclass Identity so that you can still use it to store all the data,
-        but use some other means to check the password.
         Note that we'll pass in the entire user_ref in case the subclass
         needs things like user_ref.get('name')
         For further justification, please see the follow up suggestion at
@@ -281,6 +278,17 @@ class Identity(identity.Driver):
     def get_group(self, group_id):
         session = sql.get_session()
         return self._get_group(session, group_id).to_dict()
+
+    def get_group_by_name(self, group_name, domain_id):
+        session = sql.get_session()
+        query = session.query(Group)
+        query = query.filter_by(name=group_name)
+        query = query.filter_by(domain_id=domain_id)
+        try:
+            group_ref = query.one()
+        except sql.NotFound:
+            raise exception.GroupNotFound(group_id=group_name)
+        return group_ref.to_dict()
 
     @sql.handle_conflicts(conflict_type='group')
     def update_group(self, group_id, group):

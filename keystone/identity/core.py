@@ -20,6 +20,7 @@ import os
 import uuid
 
 from oslo.config import cfg
+from oslo.utils import importutils
 import six
 
 from keystone import clean
@@ -28,10 +29,9 @@ from keystone.common import driver_hints
 from keystone.common import manager
 from keystone import config
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 from keystone.identity.mapping_backends import mapping
 from keystone import notifications
-from keystone.openstack.common import importutils
 from keystone.openstack.common import log
 
 
@@ -115,7 +115,7 @@ class DomainConfigs(dict):
             domain_ref = assignment_api.get_domain_by_name(domain_name)
         except exception.DomainNotFound:
             LOG.warning(
-                _('Invalid domain name (%s) found in config file name'),
+                _LW('Invalid domain name (%s) found in config file name'),
                 domain_name)
             return
 
@@ -141,7 +141,7 @@ class DomainConfigs(dict):
 
         conf_dir = CONF.identity.domain_config_dir
         if not os.path.exists(conf_dir):
-            LOG.warning(_('Unable to locate domain config directory: %s'),
+            LOG.warning(_LW('Unable to locate domain config directory: %s'),
                         conf_dir)
             return
 
@@ -693,6 +693,14 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.GROUP)
 
+    @domains_configured
+    @exception_translated('group')
+    def get_group_by_name(self, group_name, domain_id):
+        driver = self._select_identity_driver(domain_id)
+        ref = driver.get_group_by_name(group_name, domain_id)
+        return self._set_domain_id_and_mapping(
+            ref, domain_id, driver, mapping.EntityType.GROUP)
+
     @notifications.updated(_GROUP)
     @domains_configured
     @exception_translated('group')
@@ -1025,6 +1033,16 @@ class Driver(object):
     @abc.abstractmethod
     def get_group(self, group_id):
         """Get a group by ID.
+
+        :returns: group_ref
+        :raises: keystone.exception.GroupNotFound
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def get_group_by_name(self, group_name, domain_id):
+        """Get a group by name.
 
         :returns: group_ref
         :raises: keystone.exception.GroupNotFound

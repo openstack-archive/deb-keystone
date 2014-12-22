@@ -15,20 +15,19 @@
 import sys
 
 from keystoneclient.common import cms
+from oslo.serialization import jsonutils
+from oslo.utils import importutils
 from oslo.utils import timeutils
 import six
 
 from keystone.assignment import controllers as assignment_controllers
-from keystone.common import authorization
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import config
 from keystone.contrib import federation
 from keystone import exception
-from keystone.i18n import _, _LI
-from keystone.openstack.common import importutils
-from keystone.openstack.common import jsonutils
+from keystone.i18n import _, _LI, _LW
 from keystone.openstack.common import log
 
 
@@ -438,25 +437,26 @@ class Auth(controller.V3Controller):
                         user_ref['id'], default_project_id):
                     auth_info.set_scope(project_id=default_project_id)
                 else:
-                    msg = _("User %(user_id)s doesn't have access to"
-                            " default project %(project_id)s. The token will"
-                            " be unscoped rather than scoped to the project.")
+                    msg = _LW("User %(user_id)s doesn't have access to"
+                              " default project %(project_id)s. The token"
+                              " will be unscoped rather than scoped to the"
+                              " project.")
                     LOG.warning(msg,
                                 {'user_id': user_ref['id'],
                                  'project_id': default_project_id})
             else:
-                msg = _("User %(user_id)s's default project %(project_id)s is"
-                        " disabled. The token will be unscoped rather than"
-                        " scoped to the project.")
+                msg = _LW("User %(user_id)s's default project %(project_id)s"
+                          " is disabled. The token will be unscoped rather"
+                          " than scoped to the project.")
                 LOG.warning(msg,
                             {'user_id': user_ref['id'],
                              'project_id': default_project_id})
         except (exception.ProjectNotFound, exception.DomainNotFound):
             # default project or default project domain doesn't exist,
             # will issue unscoped token instead
-            msg = _("User %(user_id)s's default project %(project_id)s not"
-                    " found. The token will be unscoped rather than"
-                    " scoped to the project.")
+            msg = _LW("User %(user_id)s's default project %(project_id)s not"
+                      " found. The token will be unscoped rather than"
+                      " scoped to the project.")
             LOG.warning(msg, {'user_id': user_ref['id'],
                               'project_id': default_project_id})
 
@@ -545,12 +545,6 @@ class Auth(controller.V3Controller):
                                         CONF.signing.keyfile)
 
         return {'signed': signed_text}
-
-    def get_auth_context(self, context):
-        # TODO(dolphm): this method of accessing the auth context is terrible,
-        # but context needs to be refactored to always have reasonable values.
-        env_context = context.get('environment', {})
-        return env_context.get(authorization.AUTH_CONTEXT_ENV, {})
 
     def _combine_lists_uniquely(self, a, b):
         # it's most likely that only one of these will be filled so avoid

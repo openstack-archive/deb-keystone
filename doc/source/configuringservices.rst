@@ -32,11 +32,11 @@ In general:
 * The Keystone middleware will look for and validate that token, taking the
   appropriate action.
 * It will also retrieve additional information from the token such as user
-  name, id, tenant name, id, roles, etc...
+  name, user id, project name, project id, roles, etc...
 
 The middleware will pass those data down to the service as headers. More
-details on the architecture of that setup is described in
-:doc:`middlewarearchitecture`
+details on the architecture of that setup is described in the
+`authentication middleware documentation`_.
 
 Setting up credentials
 ======================
@@ -57,10 +57,10 @@ represent a user, and carries no explicit authorization.
 To disable in production (highly recommended), remove AdminTokenAuthMiddleware
 from your paste application pipelines (for example, in keystone-paste.ini)
 
-Setting up tenants, users, and roles
-------------------------------------
+Setting up projects, users, and roles
+-------------------------------------
 
-You need to minimally define a tenant, user, and role to link the tenant and
+You need to minimally define a project, user, and role to link the project and
 user as the most basic set of details to get other services authenticating
 and authorizing with Keystone.
 
@@ -69,7 +69,7 @@ be able to use to authenticate users against Keystone. The ``auth_token``
 middleware supports using either the shared secret described above as
 `admin_token` or users for each service.
 
-See :doc:`configuration` for a walk through on how to create tenants, users,
+See :doc:`configuration` for a walk through on how to create projects, users,
 and roles.
 
 Setting up services
@@ -79,53 +79,44 @@ Creating Service Users
 ----------------------
 
 To configure the OpenStack services with service users, we need to create
-a tenant for all the services, and then users for each of the services. We
-then assign those service users an Admin role on the service tenant. This
-allows them to validate tokens - and authenticate and authorize other user
+a project for all the services, and then users for each of the services. We
+then assign those service users an ``admin`` role on the service project. This
+allows them to validate tokens - and to authenticate and authorize other user
 requests.
 
-Create a tenant for the services, typically named 'service' (however, the
+Create a project for the services, typically named ``service`` (however, the
 name can be whatever you choose):
 
 .. code-block:: bash
 
-    $ keystone tenant-create --name=service
+    $ openstack project create service
 
-This returns a UUID of the tenant - keep that, you'll need it when creating
-the users and specifying the roles.
-
-Create service users for nova, glance, swift, and neutron (or whatever
-subset is relevant to your deployment):
+Create service users for ``nova``, ``glance``, ``swift``, and ``neutron``
+(or whatever subset is relevant to your deployment):
 
 .. code-block:: bash
 
-    $ keystone user-create --name=nova \
-                           --pass=Sekr3tPass \
-                           --tenant_id=[the uuid of the tenant] \
-                           --email=nova@nothing.com
+    $ openstack user create nova --password Sekr3tPass --project service
 
-Repeat this for each service you want to enable. Email is a required field
-in Keystone right now, but not used in relation to the service accounts. Each
-of these commands will also return a UUID of the user. Keep those to assign
-the Admin role.
+Repeat this for each service you want to enable.
 
-For adding the Admin role to the service accounts, you'll need to know the UUID
-of the role you want to add. If you don't have them handy, you can look it
+Create an administrative role for the service accounts, typically named
+``admin`` (however the name can be whatever you choose). For adding the
+administrative role to the service accounts, you'll need to know the
+name of the role you want to add. If you don't have it handy, you can look it
 up quickly with:
 
 .. code-block:: bash
 
-    $ keystone role-list
+    $ openstack role list
 
-Once you have it, assign the service users to the Admin role. This is all
-assuming that you've already created the basic roles and settings as described
-in :doc:`configuration`:
+Once you have it, grant the administrative role to the service users. This is
+all assuming that you've already created the basic roles and settings as
+described in :doc:`configuration`:
 
 .. code-block:: bash
 
-    $ keystone user-role-add --tenant_id=[uuid of the service tenant] \
-                             --user=[uuid of the service account] \
-                             --role=[uuid of the Admin role]
+    $ openstack role add admin --project service --user nova
 
 Defining Services
 -----------------
@@ -147,87 +138,25 @@ Keystone is online, you need to add the services to the catalog:
 
 .. code-block:: bash
 
-    $ keystone service-create --name=nova \
-                                     --type=compute \
-                                     --description="Nova Compute Service"
-    $ keystone service-create --name=ec2 \
-                                     --type=ec2 \
-                                     --description="EC2 Compatibility Layer"
-    $ keystone service-create --name=glance \
-                                     --type=image \
-                                     --description="Glance Image Service"
-    $ keystone service-create --name=keystone \
-                                     --type=identity \
-                                     --description="Keystone Identity Service"
-    $ keystone service-create --name=swift \
-                                     --type=object-store \
-                                     --description="Swift Service"
+    $ openstack service create nova --type compute \
+                                    --description "Nova Compute Service"
+    $ openstack service create ec2 --type ec2 \
+                                   --description "EC2 Compatibility Layer"
+    $ openstack service create glance --type image \
+                                      --description "Glance Image Service"
+    $ openstack service create keystone --type identity \
+                                        --description "Keystone Identity Service"
+    $ openstack service create swift --type object-store \
+                                     --description "Swift Service"
 
 
-Setting Up Middleware
-=====================
+Setting Up Auth-Token Middleware
+================================
 
-Keystone Auth-Token Middleware
---------------------------------
+The Keystone project provides the auth-token middleware which validates that
+the request is valid before passing it on to the application. This must be
+installed and configured in the applications (such as Nova, Glance, Swift,
+etc.). The `authentication middleware documentation`_ describes how to install
+and configure this middleware.
 
-The Keystone auth_token middleware is a WSGI component that can be inserted in
-the WSGI pipeline to handle authenticating tokens with Keystone. You can
-get more details of the middleware in :doc:`middlewarearchitecture`.
-
-Configuring Nova to use Keystone
---------------------------------
-
-When configuring Nova, it is important to create an admin service token for
-the service (from the Configuration step above) and include that as the key
-'admin_token' in Nova's api-paste.ini [filter:authtoken] section or in
-nova.conf [keystone_authtoken] section.
-
-Configuring Swift to use Keystone
----------------------------------
-
-Similar to Nova, Swift can be configured to use Keystone for authentication
-rather than its built in 'tempauth'. Refer to the `overview_auth` documentation
-in Swift. 
-
-Auth-Token Middleware with Username and Password
-------------------------------------------------
-
-It is also possible to configure Keystone's auth_token middleware using the
-'admin_user' and 'admin_password' options. When using the 'admin_user' and
-'admin_password' options the 'admin_token' parameter is optional. If
-'admin_token' is specified it will be used only if the specified token is
-still valid.
-
-Here is an example paste config filter that makes use of the 'admin_user' and
-'admin_password' parameters::
-
-    [filter:authtoken]
-    paste.filter_factory = keystoneclient.middleware.auth_token:filter_factory
-    auth_port = 35357
-    auth_host = 127.0.0.1
-    auth_token = 012345SECRET99TOKEN012345
-    admin_user = admin
-    admin_password = keystone123
-
-It should be noted that when using this option an admin tenant/role
-relationship is required. The admin user is granted access to the 'Admin'
-role to the 'admin' tenant.
-
-The auth_token middleware can also be configured in nova.conf
-[keystone_authtoken] section to keep paste config clean of site-specific
-parameters::
-
-    [filter:authtoken]
-    paste.filter_factory = keystoneclient.middleware.auth_token:filter_factory
-
-and in nova.conf::
-
-    [DEFAULT]
-    ...
-    auth_strategy=keystone
-
-    [keystone_authtoken]
-    auth_port = 35357
-    auth_host = 127.0.0.1
-    admin_user = admin
-    admin_password = keystone123
+.. _`authentication middleware documentation`: http://docs.openstack.org/developer/keystonemiddleware/middlewarearchitecture.html
