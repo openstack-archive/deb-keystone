@@ -6,9 +6,9 @@ Last-Update: 2014-03-28
 
 Index: keystone/etc/keystone.conf.sample
 ===================================================================
---- keystone.orig/etc/keystone.conf.sample
-+++ keystone/etc/keystone.conf.sample
-@@ -629,7 +629,7 @@
+--- keystone.orig/etc/keystone.conf.sample	2014-12-22 12:11:32.000000000 +0800
++++ keystone/etc/keystone.conf.sample	2014-12-22 12:24:00.000000000 +0800
+@@ -631,7 +631,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
  # Deprecated group/name - [sql]/connection
