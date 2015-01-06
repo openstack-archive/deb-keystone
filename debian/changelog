@@ -1,6 +1,7 @@
 keystone (2014.1.3-5) unstable; urgency=medium
 
   * Fix cron job to not error after package removal (Closes: #773494).
+  * Rebuild against openstack-pkg-tools >= 21~ to fix sysv-rc script.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 06 Jan 2015 20:23:24 +0000
 
