@@ -2,4 +2,6 @@
 
 set -e
 
-su -c '/usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' keystone
+if [ -x /usr/bin/keystone-manage ] ; then
+	su -c '/usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' keystone
+fi

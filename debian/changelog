@@ -1,3 +1,9 @@
+keystone (2014.1.3-5) unstable; urgency=medium
+
+  * Fix cron job to not error after package removal (Closes: #773494).
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 06 Jan 2015 20:23:24 +0000
+
 keystone (2014.1.3-4) unstable; urgency=medium
 
   * Manually activates keystone.service since we're not using #DEBHELPER#.
