@@ -97,6 +97,14 @@ if [ "$1" = "configure" ] ; then
 	# isn't a problem.
 	su keystone -c "keystone-manage pki_setup"
 
+	# Activate the keystone.service
+	deb-systemd-helper unmask keystone.service >/dev/null || true
+	if deb-systemd-helper --quiet was-enabled keystone.service ; then
+		deb-systemd-helper enable keystone.service >/dev/null || true
+	else
+		deb-systemd-helper update-state keystone.service >/dev/null || true
+	fi
+
 	# Setup init script and start keystone
 	pkgos_init keystone
 
@@ -128,14 +136,6 @@ if [ "$1" = "configure" ] ; then
 		echo "done!"
 	fi
 	db_stop
-fi
-
-# Activate the keystone.service
-deb-systemd-helper unmask keystone.service >/dev/null || true
-if deb-systemd-helper --quiet was-enabled keystone.service ; then
-	deb-systemd-helper enable keystone.service >/dev/null || true
-else
-	deb-systemd-helper update-state keystone.service >/dev/null || true
 fi
 
 exit 0
