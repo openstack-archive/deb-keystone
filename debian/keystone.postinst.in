@@ -79,8 +79,6 @@ if [ "$1" = "configure" ] ; then
 		AUTH_TOKEN=`pkgos_gen_pass`
 	fi
 	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
-	# Configure the SQL connection of keystone.conf according to dbconfig-common
-	pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
 
 	# Make sure /var/log/keystone/keystone.log is owned by keystone
 	# BEFORE any keystone-manage calls.
@@ -89,6 +87,8 @@ if [ "$1" = "configure" ] ; then
 	# Upgrade or create the db if directed to do so
 	db_get keystone/configure_db
 	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
+		# Configure the SQL connection of keystone.conf according to dbconfig-common
+		pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
 		su keystone -c "keystone-manage db_sync"
 	fi
 
