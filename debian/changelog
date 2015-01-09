@@ -1,6 +1,8 @@
 keystone (2014.1.3-6) unstable; urgency=medium
 
   * unmask systemd service before starting the init script / unit file.
+  * Removed dbc_upgrade = true check before pkgos_dbc_postinst and
+    db_sync calls (Closes: #767715).
 
  -- Thomas Goirand <zigo@debian.org>  Thu, 08 Jan 2015 23:05:48 +0000
 
