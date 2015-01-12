@@ -86,7 +86,7 @@ if [ "$1" = "configure" ] ; then
 
 	# Upgrade or create the db if directed to do so
 	db_get keystone/configure_db
-	if [ "$RET" = "true" ] && [ "$dbc_upgrade" = "true" ] ; then
+	if [ "$RET" = "true" ] ; then
 		# Configure the SQL connection of keystone.conf according to dbconfig-common
 		pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
 		su keystone -c "keystone-manage db_sync"
