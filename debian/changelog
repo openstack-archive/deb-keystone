@@ -1,3 +1,15 @@
+keystone (2014.2.1-2) UNRELEASED; urgency=medium
+
+  * Do not call keystone-manage in the cron job if the package is removed
+    (Closes: #773494).
+  * Do not test on dbc_upgrade when doing the db sync.
+  * Only runs pkgos_dbc_postinst if the user asked for dbconfig-common handling
+    through debconf.
+  * Build-depends on openstack-pkg-tools (>= 21~).
+  * Calls deb-systemd-helper unmask before invoke-rc.d.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 14 Jan 2015 22:33:03 +0100
+
 keystone (2014.2.1-1) experimental; urgency=medium
 
   * New upstream release.
