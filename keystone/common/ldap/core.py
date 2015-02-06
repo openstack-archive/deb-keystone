@@ -107,16 +107,9 @@ def py2ldap(val):
         return six.text_type(val)
 
 
-def ldap2py(val):
-    """Convert an LDAP formatted value to Python type used by OpenStack.
+def enabled2py(val):
+    """Similar to ldap2py, only useful for the enabled attribute."""
 
-    Virtually all LDAP values are stored as UTF-8 encoded strings.
-    OpenStack prefers values which are Python types, e.g. unicode,
-    boolean, integer, etc.
-
-    :param val: LDAP formatted value
-    :returns: val converted to preferred Python type
-    """
     try:
         return LDAP_VALUES[val]
     except KeyError:
@@ -124,6 +117,23 @@ def ldap2py(val):
     try:
         return int(val)
     except ValueError:
+        pass
+    return utf8_decode(val)
+
+
+def ldap2py(val):
+    """Convert an LDAP formatted value to Python type used by OpenStack.
+
+    Virtually all LDAP values are stored as UTF-8 encoded strings.
+    OpenStack prefers values which are Python types, e.g. unicode,
+    boolean, etc.
+
+    :param val: LDAP formatted value
+    :returns: val converted to preferred Python type
+    """
+    try:
+        return LDAP_VALUES[val]
+    except KeyError:
         pass
     return utf8_decode(val)
 
@@ -157,7 +167,8 @@ def convert_ldap_result(ldap_result):
 
         for kind, values in six.iteritems(attrs):
             try:
-                ldap_attrs[kind] = [ldap2py(x) for x in values]
+                val2py = enabled2py if kind == 'enabled' else ldap2py
+                ldap_attrs[kind] = [val2py(x) for x in values]
             except UnicodeDecodeError:
                 LOG.debug('Unable to decode value for attribute %s', kind)
 
@@ -1506,7 +1517,18 @@ class BaseLdap(object):
 
         modlist = []
         for k, v in six.iteritems(values):
-            if k == 'id' or k in self.attribute_ignore:
+            if k == 'id':
+                # id can't be modified.
+                continue
+
+            if k in self.attribute_ignore:
+
+                # Handle 'enabled' specially since can't disable if ignored.
+                if k == 'enabled' and (not v):
+                    action = _("Disabling an entity where the 'enable' "
+                               "attribute is ignored by configuration.")
+                    raise exception.ForbiddenAction(action=action)
+
                 continue
 
             # attribute value has not changed

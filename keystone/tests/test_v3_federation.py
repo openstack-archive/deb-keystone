@@ -1021,6 +1021,19 @@ class FederatedTokenTests(FederationTests):
             self.assertEqual(project_id, project_id_ref)
             self._check_scoped_token_attributes(token_resp)
 
+    def test_scope_to_project_with_only_inherited_roles(self):
+        """Try to scope token whose only roles are inherited."""
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        r = self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_INHERITED_FROM_CUSTOMER)
+        token_resp = r.result['token']
+        project_id = token_resp['project']['id']
+        self.assertEqual(project_id, self.project_inherited['id'])
+        self._check_scoped_token_attributes(token_resp)
+        roles_ref = [self.role_customer]
+        projects_ref = self.project_inherited
+        self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
+
     def test_scope_token_from_nonexistent_unscoped_token(self):
         """Try to scope token from non-existent unscoped token."""
         self.v3_authenticate_token(
@@ -1077,6 +1090,12 @@ class FederatedTokenTests(FederationTests):
             self.assertEqual(domain_id, domain_id_ref)
             self._check_scoped_token_attributes(token_resp)
 
+    def test_scope_to_domain_with_only_inherited_roles_fails(self):
+        """Try to scope to a domain that has no direct roles."""
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_DOMAIN_D_FROM_CUSTOMER,
+            expected_status=401)
+
     def test_list_projects(self):
         urls = ('/OS-FEDERATION/projects', '/auth/projects')
 
@@ -1084,12 +1103,15 @@ class FederatedTokenTests(FederationTests):
                  self.tokens['EMPLOYEE_ASSERTION'],
                  self.tokens['ADMIN_ASSERTION'])
 
-        projects_refs = (set([self.proj_customers['id']]),
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        projects_refs = (set([self.proj_customers['id'],
+                              self.project_inherited['id']]),
                          set([self.proj_employees['id'],
                               self.project_all['id']]),
                          set([self.proj_employees['id'],
                               self.project_all['id'],
-                              self.proj_customers['id']]))
+                              self.proj_customers['id'],
+                              self.project_inherited['id']]))
 
         for token, projects_ref in zip(token, projects_refs):
             for url in urls:
@@ -1105,6 +1127,10 @@ class FederatedTokenTests(FederationTests):
         tokens = (self.tokens['CUSTOMER_ASSERTION'],
                   self.tokens['EMPLOYEE_ASSERTION'],
                   self.tokens['ADMIN_ASSERTION'])
+
+        # NOTE(henry-nash): domain D does not appear in the expected results
+        # since it only had inherited roles (which only apply to projects
+        # within the domain)
 
         domain_refs = (set([self.domainA['id']]),
                        set([self.domainA['id'],
@@ -1265,6 +1291,10 @@ class FederatedTokenTests(FederationTests):
         self.assignment_api.create_domain(self.domainC['id'],
                                           self.domainC)
 
+        self.domainD = self.new_domain_ref()
+        self.assignment_api.create_domain(self.domainD['id'],
+                                          self.domainD)
+
         # Create and add projects
         self.proj_employees = self.new_project_ref(
             domain_id=self.domainA['id'])
@@ -1279,6 +1309,11 @@ class FederatedTokenTests(FederationTests):
             domain_id=self.domainA['id'])
         self.assignment_api.create_project(self.project_all['id'],
                                            self.project_all)
+
+        self.project_inherited = self.new_project_ref(
+            domain_id=self.domainD['id'])
+        self.assignment_api.create_project(self.project_inherited['id'],
+                                           self.project_inherited)
 
         # Create and add groups
         self.group_employees = self.new_group_ref(
@@ -1345,6 +1380,13 @@ class FederatedTokenTests(FederationTests):
         self.assignment_api.create_grant(self.role_customer['id'],
                                          group_id=self.group_customers['id'],
                                          domain_id=self.domainA['id'])
+
+        # Customers can access projects via inheritance:
+        # * domain D
+        self.assignment_api.create_grant(self.role_customer['id'],
+                                         group_id=self.group_customers['id'],
+                                         domain_id=self.domainD['id'],
+                                         inherited_to_projects=True)
 
         # Employees can access:
         # * domain A
@@ -1603,6 +1645,10 @@ class FederatedTokenTests(FederationTests):
             self.tokens['CUSTOMER_ASSERTION'], 'project',
             self.proj_employees['id'])
 
+        self.TOKEN_SCOPE_PROJECT_INHERITED_FROM_CUSTOMER = self._scope_request(
+            self.tokens['CUSTOMER_ASSERTION'], 'project',
+            self.project_inherited['id'])
+
         self.TOKEN_SCOPE_DOMAIN_A_FROM_CUSTOMER = self._scope_request(
             self.tokens['CUSTOMER_ASSERTION'], 'domain', self.domainA['id'])
 
@@ -1612,6 +1658,9 @@ class FederatedTokenTests(FederationTests):
         self.TOKEN_SCOPE_DOMAIN_B_FROM_CUSTOMER = self._scope_request(
             self.tokens['CUSTOMER_ASSERTION'], 'domain',
             self.domainB['id'])
+
+        self.TOKEN_SCOPE_DOMAIN_D_FROM_CUSTOMER = self._scope_request(
+            self.tokens['CUSTOMER_ASSERTION'], 'domain', self.domainD['id'])
 
         self.TOKEN_SCOPE_DOMAIN_A_FROM_ADMIN = self._scope_request(
             self.tokens['ADMIN_ASSERTION'], 'domain', self.domainA['id'])
@@ -1753,6 +1802,37 @@ class SAMLGenerationTests(FederationTests):
 
         project_attribute = assertion[4][2]
         self.assertEqual(self.PROJECT, project_attribute[0].text)
+
+    def test_assertion_using_explicit_namespace_prefixes(self):
+        class MockedPopen(object):
+            def __init__(self, *popenargs, **kwargs):
+                # the last option is the assertion file to be signed
+                filename = popenargs[0][-1]
+                with open(filename, 'r') as f:
+                    self.stdout = f.read()
+
+            def communicate(self, *args, **kwargs):
+                # since we are not testing the signature itself, we can return
+                # the assertion as is without signing it
+                return (self.stdout, None)
+
+            def poll(self):
+                return 0
+
+        with mock.patch('subprocess.Popen',
+                        side_effect=MockedPopen):
+            generator = keystone_idp.SAMLGenerator()
+            response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                               self.SUBJECT, self.ROLES,
+                                               self.PROJECT)
+            assertion_xml = response.assertion.to_string()
+            # make sure we have the proper tag and prefix for the assertion
+            # namespace
+            self.assertIn('<saml:Assertion', assertion_xml)
+            self.assertIn('xmlns:saml="' + saml2.NAMESPACE + '"',
+                          assertion_xml)
+            self.assertIn('xmlns:xmldsig="' + xmldsig.NAMESPACE + '"',
+                          assertion_xml)
 
     def test_saml_signing(self):
         """Test that the SAML generator produces a SAML object.
