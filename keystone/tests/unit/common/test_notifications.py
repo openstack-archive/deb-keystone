@@ -231,7 +231,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_create_role(self):
         role_ref = self.new_role_ref()
-        self.assignment_api.create_role(role_ref['id'], role_ref)
+        self.role_api.create_role(role_ref['id'], role_ref)
         self._assert_last_note(role_ref['id'], CREATED_OPERATION, 'role')
 
     def test_create_user(self):
@@ -245,7 +245,7 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
         trustee = self.new_user_ref(domain_id=self.domain_id)
         trustee = self.identity_api.create_user(trustee)
         role_ref = self.new_role_ref()
-        self.assignment_api.create_role(role_ref['id'], role_ref)
+        self.role_api.create_role(role_ref['id'], role_ref)
         trust_ref = self.new_trust_ref(trustor['id'],
                                        trustee['id'])
         self.trust_api.create_trust(trust_ref['id'],
@@ -269,8 +269,8 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_delete_role(self):
         role_ref = self.new_role_ref()
-        self.assignment_api.create_role(role_ref['id'], role_ref)
-        self.assignment_api.delete_role(role_ref['id'])
+        self.role_api.create_role(role_ref['id'], role_ref)
+        self.role_api.delete_role(role_ref['id'])
         self._assert_last_note(role_ref['id'], DELETED_OPERATION, 'role')
 
     def test_delete_user(self):
@@ -448,8 +448,8 @@ class NotificationsForEntities(test_v3.RestfulTestCase):
 
     def test_update_role(self):
         role_ref = self.new_role_ref()
-        self.assignment_api.create_role(role_ref['id'], role_ref)
-        self.assignment_api.update_role(role_ref['id'], role_ref)
+        self.role_api.create_role(role_ref['id'], role_ref)
+        self.role_api.update_role(role_ref['id'], role_ref)
         self._assert_last_note(role_ref['id'], UPDATED_OPERATION, 'role')
 
     def test_update_user(self):
@@ -509,7 +509,7 @@ class TestEventCallbacks(test_v3.RestfulTestCase):
         callback_called = []
 
         @dependency.provider('foo_api')
-        class Foo:
+        class Foo(object):
             def __init__(self):
                 self.event_callbacks = {
                     CREATED_OPERATION: {'project': [self.foo_callback]}}
@@ -526,7 +526,7 @@ class TestEventCallbacks(test_v3.RestfulTestCase):
 
     def test_invalid_event_callbacks(self):
         @dependency.provider('foo_api')
-        class Foo:
+        class Foo(object):
             def __init__(self):
                 self.event_callbacks = 'bogus'
 
@@ -534,7 +534,7 @@ class TestEventCallbacks(test_v3.RestfulTestCase):
 
     def test_invalid_event_callbacks_event(self):
         @dependency.provider('foo_api')
-        class Foo:
+        class Foo(object):
             def __init__(self):
                 self.event_callbacks = {CREATED_OPERATION: 'bogus'}
 
@@ -581,7 +581,7 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
         note = self._notifications[-1]
         self.assertEqual(note['action'], action)
         initiator = note['initiator']
-        self.assertEqual(initiator.name, user_id)
+        self.assertEqual(initiator.id, user_id)
         self.assertEqual(initiator.host.address, self.LOCAL_HOST)
         self.assertTrue(note['send_notification_called'])
 

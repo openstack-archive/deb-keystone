@@ -29,7 +29,7 @@ column.
 """
 
 from oslo.serialization import jsonutils
-from oslo.utils import strutils
+from oslo_utils import strutils
 import sqlalchemy as sql
 from sqlalchemy.orm import Session
 
@@ -104,11 +104,13 @@ def upgrade(migrate_engine):
 def _downgrade_endpoint_table_with_copy(meta, migrate_engine):
     # Used with databases that don't support dropping a column (e.g., sqlite).
 
+    orig_endpoint_table = sql.Table(
+        'endpoint', meta, autoload=True)
+    orig_endpoint_table.deregister()
+    orig_endpoint_table.rename('orig_endpoint')
+
     session = Session(bind=migrate_engine)
     with session.transaction:
-
-        session.execute('ALTER TABLE endpoint RENAME TO orig_endpoint;')
-
         # Need to load the metadata for the service table since it's used as
         # foreign key.
         sql.Table(
@@ -148,7 +150,7 @@ def _downgrade_endpoint_table_with_copy(meta, migrate_engine):
                             'values ( :id, :legacy_endpoint_id, :interface, '
                             ':region, :service_id, :url, :extra);',
                             new_values)
-        session.execute('drop table orig_endpoint;')
+    orig_endpoint_table.drop()
 
 
 def downgrade(migrate_engine):

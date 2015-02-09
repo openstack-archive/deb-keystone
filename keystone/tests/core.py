@@ -30,6 +30,7 @@ from oslo.config import fixture as config_fixture
 import oslotest.base as oslotest
 from oslotest import mockpatch
 import six
+from sqlalchemy import exc
 from testtools import testcase
 import webob
 
@@ -40,7 +41,6 @@ from keystone.common import environment  # noqa
 environment.use_eventlet()
 
 from keystone import auth
-from keystone import backends
 from keystone.common import config as common_cfg
 from keystone.common import dependency
 from keystone.common import kvs
@@ -51,6 +51,7 @@ from keystone import exception
 from keystone.i18n import _LW
 from keystone import notifications
 from keystone.openstack.common import log
+from keystone.server import common
 from keystone import service
 from keystone.tests import ksfixtures
 from keystone.tests import utils
@@ -91,7 +92,7 @@ os.makedirs(TMPDIR)
 atexit.register(shutil.rmtree, TMPDIR)
 
 
-class dirs:
+class dirs(object):
     @staticmethod
     def root(*p):
         return os.path.join(ROOTDIR, *p)
@@ -268,51 +269,6 @@ class TestClient(object):
         return self.request('PUT', path=path, headers=headers, body=body)
 
 
-class NoModule(object):
-    """A mixin class to provide support for unloading/disabling modules."""
-
-    def setUp(self):
-        super(NoModule, self).setUp()
-
-        self._finders = []
-
-        def cleanup_finders():
-            for finder in self._finders:
-                sys.meta_path.remove(finder)
-            del self._finders
-        self.addCleanup(cleanup_finders)
-
-        self._cleared_modules = {}
-
-        def cleanup_modules():
-            sys.modules.update(self._cleared_modules)
-            del self._cleared_modules
-        self.addCleanup(cleanup_modules)
-
-    def clear_module(self, module):
-        cleared_modules = {}
-        for fullname in sys.modules.keys():
-            if fullname == module or fullname.startswith(module + '.'):
-                cleared_modules[fullname] = sys.modules.pop(fullname)
-        return cleared_modules
-
-    def disable_module(self, module):
-        """Ensure ImportError for the specified module."""
-
-        # Clear 'module' references in sys.modules
-        self._cleared_modules.update(self.clear_module(module))
-
-        # Disallow further imports of 'module'
-        class NoModule(object):
-            def find_module(self, fullname, path):
-                if fullname == module or fullname.startswith(module + '.'):
-                    raise ImportError
-
-        finder = NoModule()
-        self._finders.append(finder)
-        sys.meta_path.insert(0, finder)
-
-
 class BaseTestCase(oslotest.BaseTestCase):
     """Light weight base test class.
 
@@ -407,14 +363,12 @@ class TestCase(BaseTestCase):
 
     def auth_plugin_config_override(self, methods=None, **method_classes):
         if methods is None:
-            methods = ['external', 'password', 'token', 'oauth1', 'saml2']
+            methods = ['external', 'password', 'token', ]
             if not method_classes:
                 method_classes = dict(
                     external='keystone.auth.plugins.external.DefaultDomain',
                     password='keystone.auth.plugins.password.Password',
                     token='keystone.auth.plugins.token.Token',
-                    oauth1='keystone.auth.plugins.oauth1.OAuth',
-                    saml2='keystone.auth.plugins.saml2.Saml2',
                 )
         self.config_fixture.config(group='auth', methods=methods)
         common_cfg.setup_authentication()
@@ -424,20 +378,7 @@ class TestCase(BaseTestCase):
     def setUp(self):
         super(TestCase, self).setUp()
         self.addCleanup(self.cleanup_instance(
-            '_paths', '_memo', '_overrides', '_group_overrides', 'maxDiff',
-            'config_fixture', 'logger'))
-
-        self._paths = []
-
-        def _cleanup_paths():
-            for path in self._paths:
-                if path in sys.path:
-                    sys.path.remove(path)
-        self.addCleanup(_cleanup_paths)
-
-        self._memo = {}
-        self._overrides = []
-        self._group_overrides = {}
+            'maxDiff', 'config_fixture', 'logger'))
 
         # show complete diffs on failure
         self.maxDiff = None
@@ -478,7 +419,11 @@ class TestCase(BaseTestCase):
             else:
                 logger.setLevel(level_name)
 
-        warnings.filterwarnings('ignore', category=DeprecationWarning)
+        warnings.filterwarnings('error', category=DeprecationWarning,
+                                module='^keystone\\.')
+        warnings.simplefilter('error', exc.SAWarning)
+        self.addCleanup(warnings.resetwarnings)
+
         self.useFixture(ksfixtures.Cache())
 
         # Clear the registry of providers so that providers from previous
@@ -514,13 +459,22 @@ class TestCase(BaseTestCase):
         kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
 
         self.clear_auth_plugin_registry()
-        drivers = backends.load_backends()
-
-        drivers.update(dependency.resolve_future_dependencies())
+        drivers, _unused = common.setup_backends(
+            load_extra_backends_fn=self.load_extra_backends)
 
         for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
         self.addCleanup(self.cleanup_instance(*drivers.keys()))
+
+    def load_extra_backends(self):
+        """Override to load managers that aren't loaded by default.
+
+        This is useful to load managers initialized by extensions. No extra
+        backends are loaded by default.
+
+        :return: dict of name -> manager
+        """
+        return {}
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -535,13 +489,14 @@ class TestCase(BaseTestCase):
 
         # TODO(termie): doing something from json, probably based on Django's
         #               loaddata will be much preferred.
-        if hasattr(self, 'identity_api') and hasattr(self, 'assignment_api'):
+        if (hasattr(self, 'identity_api') and
+            hasattr(self, 'assignment_api') and
+                hasattr(self, 'resource_api')):
             for domain in fixtures.DOMAINS:
                 try:
-                    rv = self.assignment_api.create_domain(domain['id'],
-                                                           domain)
+                    rv = self.resource_api.create_domain(domain['id'], domain)
                 except exception.Conflict:
-                    rv = self.assignment_api.get_domain(domain['id'])
+                    rv = self.resource_api.get_domain(domain['id'])
                 except exception.NotImplemented:
                     rv = domain
                 attrname = 'domain_%s' % domain['id']
@@ -552,10 +507,10 @@ class TestCase(BaseTestCase):
                 if hasattr(self, 'tenant_%s' % tenant['id']):
                     try:
                         # This will clear out any roles on the project as well
-                        self.assignment_api.delete_project(tenant['id'])
+                        self.resource_api.delete_project(tenant['id'])
                     except exception.ProjectNotFound:
                         pass
-                rv = self.assignment_api.create_project(
+                rv = self.resource_api.create_project(
                     tenant['id'], tenant)
 
                 attrname = 'tenant_%s' % tenant['id']
@@ -564,9 +519,9 @@ class TestCase(BaseTestCase):
 
             for role in fixtures.ROLES:
                 try:
-                    rv = self.assignment_api.create_role(role['id'], role)
+                    rv = self.role_api.create_role(role['id'], role)
                 except exception.Conflict:
-                    rv = self.assignment_api.get_role(role['id'])
+                    rv = self.role_api.get_role(role['id'])
                 attrname = 'role_%s' % role['id']
                 setattr(self, attrname, rv)
                 fixtures_to_cleanup.append(attrname)
@@ -617,10 +572,6 @@ class TestCase(BaseTestCase):
 
     def client(self, app, *args, **kw):
         return TestClient(app, *args, **kw)
-
-    def add_path(self, path):
-        sys.path.insert(0, path)
-        self._paths.append(path)
 
     def clear_auth_plugin_registry(self):
         auth.controllers.AUTH_METHODS.clear()
@@ -730,59 +681,6 @@ class TestCase(BaseTestCase):
     def skip_if_env_not_set(self, env_var):
         if not os.environ.get(env_var):
             self.skipTest('Env variable %s is not set.' % env_var)
-
-    def assertSetEqual(self, set1, set2, msg=None):
-        # TODO(morganfainberg): Remove this and self._assertSetEqual once
-        # support for python 2.6 is no longer needed.
-        if (sys.version_info < (2, 7)):
-            return self._assertSetEqual(set1, set2, msg=None)
-        else:
-            # use the native assertSetEqual
-            return super(TestCase, self).assertSetEqual(set1, set2, msg=msg)
-
-    def _assertSetEqual(self, set1, set2, msg=None):
-        """A set-specific equality assertion.
-
-        Args:
-            set1: The first set to compare.
-            set2: The second set to compare.
-            msg: Optional message to use on failure instead of a list of
-                    differences.
-
-        assertSetEqual uses ducktyping to support different types of sets, and
-        is optimized for sets specifically (parameters must support a
-        difference method).
-        """
-        try:
-            difference1 = set1.difference(set2)
-        except TypeError as e:
-            self.fail('invalid type when attempting set difference: %s' % e)
-        except AttributeError as e:
-            self.fail('first argument does not support set difference: %s' % e)
-
-        try:
-            difference2 = set2.difference(set1)
-        except TypeError as e:
-            self.fail('invalid type when attempting set difference: %s' % e)
-        except AttributeError as e:
-            self.fail('second argument does not support set difference: %s' %
-                      e)
-
-        if not (difference1 or difference2):
-            return
-
-        lines = []
-        if difference1:
-            lines.append('Items in the first set but not the second:')
-            for item in difference1:
-                lines.append(repr(item))
-        if difference2:
-            lines.append('Items in the second set but not the first:')
-            for item in difference2:
-                lines.append(repr(item))
-
-        standardMsg = '\n'.join(lines)
-        self.fail(self._formatMessage(msg, standardMsg))
 
 
 class SQLDriverOverrides(object):

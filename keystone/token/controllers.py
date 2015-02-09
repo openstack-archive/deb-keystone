@@ -17,7 +17,7 @@ import sys
 
 from keystoneclient.common import cms
 from oslo.serialization import jsonutils
-from oslo.utils import timeutils
+from oslo_utils import timeutils
 import six
 
 from keystone.common import controller
@@ -41,7 +41,8 @@ class ExternalAuthNotApplicable(Exception):
 
 
 @dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'token_provider_api', 'trust_api')
+                     'resource_api', 'role_api', 'token_provider_api',
+                     'trust_api')
 class Auth(controller.V2Controller):
 
     @controller.v2_deprecated
@@ -105,7 +106,7 @@ class Auth(controller.V2Controller):
             self.identity_api.assert_user_enabled(
                 user_id=user_ref['id'], user=user_ref)
             if tenant_ref:
-                self.assignment_api.assert_project_enabled(
+                self.resource_api.assert_project_enabled(
                     project_id=tenant_ref['id'], project=tenant_ref)
         except AssertionError as e:
             six.reraise(exception.Unauthorized, exception.Unauthorized(e),
@@ -136,7 +137,7 @@ class Auth(controller.V2Controller):
 
         roles_ref = []
         for role_id in metadata_ref.get('roles', []):
-            role_ref = self.assignment_api.get_role(role_id)
+            role_ref = self.role_api.get_role(role_id)
             roles_ref.append(dict(name=role_ref['name']))
 
         (token_id, token_data) = self.token_provider_api.issue_v2_token(
@@ -314,11 +315,6 @@ class Auth(controller.V2Controller):
         if not environment.get('REMOTE_USER'):
             raise ExternalAuthNotApplicable()
 
-        # NOTE(jamielennox): xml and json differ and get confused about what
-        # empty auth should look like so just reset it.
-        if not auth:
-            auth = {}
-
         username = environment['REMOTE_USER']
         try:
             user_ref = self.identity_api.get_user_by_name(
@@ -365,7 +361,7 @@ class Auth(controller.V2Controller):
 
         if tenant_name:
             try:
-                tenant_ref = self.assignment_api.get_project_by_name(
+                tenant_ref = self.resource_api.get_project_by_name(
                     tenant_name, CONF.identity.default_domain_id)
                 tenant_id = tenant_ref['id']
             except exception.ProjectNotFound as e:
@@ -379,7 +375,7 @@ class Auth(controller.V2Controller):
         role_list = []
         if tenant_id:
             try:
-                tenant_ref = self.assignment_api.get_project(tenant_id)
+                tenant_ref = self.resource_api.get_project(tenant_id)
                 role_list = self.assignment_api.get_roles_for_user_and_project(
                     user_id, tenant_id)
             except exception.ProjectNotFound:
@@ -424,7 +420,6 @@ class Auth(controller.V2Controller):
         the content body.
 
         """
-        # TODO(ayoung) validate against revocation API
         belongs_to = context['query_string'].get('belongsTo')
         return self.token_provider_api.validate_v2_token(token_id, belongs_to)
 

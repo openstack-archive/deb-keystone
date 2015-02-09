@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo.utils import encodeutils
+from oslo_utils import encodeutils
 import six
 
 from keystone.common import config
@@ -111,6 +111,13 @@ class ValidationSizeError(Error):
                        " could not comply with the request because"
                        " the attribute size is invalid (too large)."
                        " The client is assumed to be in error.")
+    code = 400
+    title = 'Bad Request'
+
+
+class CircularRegionHierarchyError(Error):
+    message_format = _("The specified parent region %(parent_region_id)s "
+                       "would create a circular region hierarchy.")
     code = 400
     title = 'Bad Request'
 
@@ -307,6 +314,10 @@ class IdentityProviderNotFound(NotFound):
     message_format = _("Could not find Identity Provider: %(idp_id)s")
 
 
+class ServiceProviderNotFound(NotFound):
+    message_format = _("Could not find Service Provider: %(sp_id)s")
+
+
 class FederatedProtocolNotFound(NotFound):
     message_format = _("Could not find federated protocol %(protocol_id)s for"
                        " Identity Provider: %(idp_id)s")
@@ -323,12 +334,6 @@ class Conflict(Error):
                        " %(details)s")
     code = 409
     title = 'Conflict'
-
-
-class RequestTooLarge(Error):
-    message_format = _("Request is too large.")
-    code = 413
-    title = 'Request is too large.'
 
 
 class UnexpectedError(SecurityError):
@@ -385,6 +390,13 @@ class MappedGroupNotFound(UnexpectedError):
 
 class MetadataFileError(UnexpectedError):
     message_format = _("Error while reading metadata file, %(reason)s")
+
+
+class AssignmentTypeCalculationError(UnexpectedError):
+    message_format = _(
+        'Unexpected combination of grant attributes - '
+        'User: %(user_id)s, Group: %(group_id)s, Project: %(project_id)s, '
+        'Domain: %(domain_id)s')
 
 
 class NotImplemented(Error):

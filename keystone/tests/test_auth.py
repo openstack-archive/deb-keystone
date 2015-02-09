@@ -17,13 +17,14 @@ import datetime
 import uuid
 
 import mock
-from oslo.utils import timeutils
+from oslo_utils import timeutils
 from testtools import matchers
 
 from keystone import assignment
 from keystone import auth
 from keystone.common import authorization
 from keystone import config
+from keystone.contrib import revoke
 from keystone import exception
 from keystone.models import token_model
 from keystone import tests
@@ -221,6 +222,9 @@ class AuthBadRequests(AuthTest):
 
 
 class AuthWithToken(AuthTest):
+    def load_extra_backends(self):
+        return {'revoke_api': revoke.Manager()}
+
     def test_unscoped_token(self):
         """Verify getting an unscoped token with password creds."""
         body_dict = _build_user_auth(username='FOO',
@@ -289,7 +293,7 @@ class AuthWithToken(AuthTest):
             self.role_member['id'])
         # Now create a group role for this user as well
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(domain1['id'], domain1)
+        self.resource_api.create_domain(domain1['id'], domain1)
         new_group = {'domain_id': domain1['id'], 'name': uuid.uuid4().hex}
         new_group = self.identity_api.create_group(new_group)
         self.identity_api.add_user_to_group(self.user_foo['id'],
@@ -382,9 +386,9 @@ class AuthWithToken(AuthTest):
         role_controller = assignment.controllers.Role()
         project1 = {'id': 'Project1', 'name': uuid.uuid4().hex,
                     'domain_id': DEFAULT_DOMAIN_ID}
-        self.assignment_api.create_project(project1['id'], project1)
+        self.resource_api.create_project(project1['id'], project1)
         role_one = {'id': 'role_one', 'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_one['id'], role_one)
+        self.role_api.create_role(role_one['id'], role_one)
         self.assignment_api.add_role_to_user_and_project(
             self.user_foo['id'], project1['id'], role_one['id'])
         no_context = {}
@@ -624,7 +628,7 @@ class AuthWithPasswordCredentials(AuthTest):
             'name': uuid.uuid4().hex,
         }
 
-        self.assignment_api.create_domain(new_domain_id, new_domain)
+        self.resource_api.create_domain(new_domain_id, new_domain)
 
         # 2) Create user "foo" in new domain with different password than
         #    default-domain foo.

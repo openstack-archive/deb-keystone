@@ -79,7 +79,7 @@ of pipelines of WSGI middleware, such as:
 
     [pipeline:api_v3]
     pipeline = sizelimit url_normalize build_auth_context token_auth admin_token_auth
-    xml_body_v3 json_body ec2_extension_v3 s3_extension service_v3
+    json_body ec2_extension_v3 s3_extension service_v3
 
 These in turn use a subclass of :mod:`keystone.common.wsgi.ComposingRouter` to
 link URLs to Controllers (a subclass of
@@ -125,7 +125,7 @@ on the Keystone configuration.
 Service Backends
 ----------------
 
-Each of the services can configured to use a backend to allow Keystone to fit a
+Each of the services can be configured to use a backend to allow Keystone to fit a
 variety of environments and needs. The backend for each service is defined in
 the keystone.conf file with the key ``driver`` under a group associated with
 each service.
@@ -135,9 +135,11 @@ abstract base class for any implementations, identifying the expected service
 implementations. The drivers for the services are:
 
 * :mod:`keystone.assignment.core.Driver`
+* :mod:`keystone.assignment.core.RoleDriver`
 * :mod:`keystone.catalog.core.Driver`
 * :mod:`keystone.identity.core.Driver`
 * :mod:`keystone.policy.core.Driver`
+* :mod:`keystone.resource.core.Driver`
 * :mod:`keystone.token.core.Driver`
 
 If you implement a backend driver for one of the Keystone services, you're
@@ -173,7 +175,7 @@ interpolation)::
 LDAP Backend
 ------------
 
-The LDAP backend stores Users and Projects in separate Subtrees.  Roles are recorded
+The LDAP backend stores Users and Projects in separate Subtrees. Roles are recorded
 as entries under the Projects.
 
 

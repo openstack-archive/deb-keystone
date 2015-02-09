@@ -16,8 +16,8 @@ import sys
 
 from keystoneclient.common import cms
 from oslo.serialization import jsonutils
-from oslo.utils import importutils
-from oslo.utils import timeutils
+from oslo_utils import importutils
+from oslo_utils import timeutils
 import six
 
 from keystone.assignment import controllers as assignment_controllers
@@ -124,7 +124,7 @@ class AuthContext(dict):
 # available for consumers. Consumers should probably not be getting
 # identity_api from this since it's available in global registry, then
 # identity_api should be removed from this list.
-@dependency.requires('assignment_api', 'identity_api', 'trust_api')
+@dependency.requires('identity_api', 'resource_api', 'trust_api')
 class AuthInfo(object):
     """Encapsulation of "auth" request."""
 
@@ -137,17 +137,17 @@ class AuthInfo(object):
     def __init__(self, context, auth=None):
         self.context = context
         self.auth = auth
-        self._scope_data = (None, None, None)
-        # self._scope_data is (domain_id, project_id, trust_ref)
-        # project scope: (None, project_id, None)
-        # domain scope: (domain_id, None, None)
-        # trust scope: (None, None, trust_ref)
-        # unscoped: (None, None, None)
+        self._scope_data = (None, None, None, None)
+        # self._scope_data is (domain_id, project_id, trust_ref, unscoped)
+        # project scope: (None, project_id, None, None)
+        # domain scope: (domain_id, None, None, None)
+        # trust scope: (None, None, trust_ref, None)
+        # unscoped: (None, None, None, 'unscoped')
 
     def _assert_project_is_enabled(self, project_ref):
         # ensure the project is enabled
         try:
-            self.assignment_api.assert_project_enabled(
+            self.resource_api.assert_project_enabled(
                 project_id=project_ref['id'],
                 project=project_ref)
         except AssertionError as e:
@@ -157,7 +157,7 @@ class AuthInfo(object):
 
     def _assert_domain_is_enabled(self, domain_ref):
         try:
-            self.assignment_api.assert_domain_enabled(
+            self.resource_api.assert_domain_enabled(
                 domain_id=domain_ref['id'],
                 domain=domain_ref)
         except AssertionError as e:
@@ -174,10 +174,10 @@ class AuthInfo(object):
                                             target='domain')
         try:
             if domain_name:
-                domain_ref = self.assignment_api.get_domain_by_name(
+                domain_ref = self.resource_api.get_domain_by_name(
                     domain_name)
             else:
-                domain_ref = self.assignment_api.get_domain(domain_id)
+                domain_ref = self.resource_api.get_domain(domain_id)
         except exception.DomainNotFound as e:
             LOG.exception(e)
             raise exception.Unauthorized(e)
@@ -197,10 +197,10 @@ class AuthInfo(object):
                     raise exception.ValidationError(attribute='domain',
                                                     target='project')
                 domain_ref = self._lookup_domain(project_info['domain'])
-                project_ref = self.assignment_api.get_project_by_name(
+                project_ref = self.resource_api.get_project_by_name(
                     project_name, domain_ref['id'])
             else:
-                project_ref = self.assignment_api.get_project(project_id)
+                project_ref = self.resource_api.get_project(project_id)
                 # NOTE(morganfainberg): The _lookup_domain method will raise
                 # exception.Unauthorized if the domain isn't found or is
                 # disabled.
@@ -227,17 +227,20 @@ class AuthInfo(object):
             return
         if sum(['project' in self.auth['scope'],
                 'domain' in self.auth['scope'],
+                'unscoped' in self.auth['scope'],
                 'OS-TRUST:trust' in self.auth['scope']]) != 1:
             raise exception.ValidationError(
-                attribute='project, domain, or OS-TRUST:trust',
+                attribute='project, domain, OS-TRUST:trust or unscoped',
                 target='scope')
-
+        if 'unscoped' in self.auth['scope']:
+            self._scope_data = (None, None, None, 'unscoped')
+            return
         if 'project' in self.auth['scope']:
             project_ref = self._lookup_project(self.auth['scope']['project'])
-            self._scope_data = (None, project_ref['id'], None)
+            self._scope_data = (None, project_ref['id'], None, None)
         elif 'domain' in self.auth['scope']:
             domain_ref = self._lookup_domain(self.auth['scope']['domain'])
-            self._scope_data = (domain_ref['id'], None, None)
+            self._scope_data = (domain_ref['id'], None, None, None)
         elif 'OS-TRUST:trust' in self.auth['scope']:
             if not CONF.trust.enabled:
                 raise exception.Forbidden('Trusts are disabled.')
@@ -247,9 +250,9 @@ class AuthInfo(object):
             if trust_ref.get('project_id') is not None:
                 project_ref = self._lookup_project(
                     {'id': trust_ref['project_id']})
-                self._scope_data = (None, project_ref['id'], trust_ref)
+                self._scope_data = (None, project_ref['id'], trust_ref, None)
             else:
-                self._scope_data = (None, None, trust_ref)
+                self._scope_data = (None, None, trust_ref, None)
 
     def _validate_auth_methods(self):
         if 'identity' not in self.auth:
@@ -312,20 +315,22 @@ class AuthInfo(object):
 
         Verify and return the scoping information.
 
-        :returns: (domain_id, project_id, trust_ref).
-                   If scope to a project, (None, project_id, None)
+        :returns: (domain_id, project_id, trust_ref, unscoped).
+                   If scope to a project, (None, project_id, None, None)
                    will be returned.
-                   If scoped to a domain, (domain_id, None, None)
+                   If scoped to a domain, (domain_id, None, None, None)
                    will be returned.
-                   If scoped to a trust, (None, project_id, trust_ref),
+                   If scoped to a trust, (None, project_id, trust_ref, None),
                    Will be returned, where the project_id comes from the
                    trust definition.
-                   If unscoped, (None, None, None) will be returned.
+                   If unscoped, (None, None, None, 'unscoped') will be
+                   returned.
 
         """
         return self._scope_data
 
-    def set_scope(self, domain_id=None, project_id=None, trust=None):
+    def set_scope(self, domain_id=None, project_id=None, trust=None,
+                  unscoped=None):
         """Set scope information."""
         if domain_id and project_id:
             msg = _('Scoping to both domain and project is not allowed')
@@ -336,11 +341,11 @@ class AuthInfo(object):
         if project_id and trust:
             msg = _('Scoping to both project and trust is not allowed')
             raise ValueError(msg)
-        self._scope_data = (domain_id, project_id, trust)
+        self._scope_data = (domain_id, project_id, trust, unscoped)
 
 
 @dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'token_provider_api', 'trust_api')
+                     'resource_api', 'token_provider_api', 'trust_api')
 class Auth(controller.V3Controller):
 
     # Note(atiwari): From V3 auth controller code we are
@@ -373,7 +378,7 @@ class Auth(controller.V3Controller):
             if auth_context.get('access_token_id'):
                 auth_info.set_scope(None, auth_context['project_id'], None)
             self._check_and_set_default_scoping(auth_info, auth_context)
-            (domain_id, project_id, trust) = auth_info.get_scope()
+            (domain_id, project_id, trust, unscoped) = auth_info.get_scope()
 
             method_names = auth_info.get_method_names()
             method_names += auth_context.get('method_names', [])
@@ -402,7 +407,7 @@ class Auth(controller.V3Controller):
             raise exception.Unauthorized(e)
 
     def _check_and_set_default_scoping(self, auth_info, auth_context):
-        (domain_id, project_id, trust) = auth_info.get_scope()
+        (domain_id, project_id, trust, unscoped) = auth_info.get_scope()
         if trust:
             project_id = trust['project_id']
         if domain_id or project_id or trust:
@@ -411,6 +416,10 @@ class Auth(controller.V3Controller):
 
         # Skip scoping when unscoped federated token is being issued
         if federation.IDENTITY_PROVIDER in auth_context:
+            return
+
+        # Do not scope if request is for explicitly unscoped token
+        if unscoped is not None:
             return
 
         # fill in default_project_id if it is available
@@ -427,9 +436,9 @@ class Auth(controller.V3Controller):
 
         # make sure user's default project is legit before scoping to it
         try:
-            default_project_ref = self.assignment_api.get_project(
+            default_project_ref = self.resource_api.get_project(
                 default_project_id)
-            default_project_domain_ref = self.assignment_api.get_domain(
+            default_project_domain_ref = self.resource_api.get_domain(
                 default_project_ref['domain_id'])
             if (default_project_ref.get('enabled', True) and
                     default_project_domain_ref.get('enabled', True)):

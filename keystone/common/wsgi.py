@@ -22,8 +22,8 @@ import copy
 
 from oslo import i18n
 from oslo.serialization import jsonutils
-from oslo.utils import importutils
-from oslo.utils import strutils
+from oslo_utils import importutils
+from oslo_utils import strutils
 import routes.middleware
 import six
 import webob.dec
@@ -196,6 +196,16 @@ class Application(BaseApplication):
         context['query_string'] = dict(six.iteritems(req.params))
         context['headers'] = dict(six.iteritems(req.headers))
         context['path'] = req.environ['PATH_INFO']
+        scheme = (None if not CONF.secure_proxy_ssl_header
+                  else req.environ.get(CONF.secure_proxy_ssl_header))
+        if scheme:
+            # NOTE(andrey-mp): "wsgi.url_scheme" contains the protocol used
+            # before the proxy removed it ('https' usually). So if
+            # the webob.Request instance is modified in order to use this
+            # scheme instead of the one defined by API, the call to
+            # webob.Request.relative_url() will return a URL with the correct
+            # scheme.
+            req.environ['wsgi.url_scheme'] = scheme
         context['host_url'] = req.host_url
         params = req.environ.get(PARAMS_ENV, {})
         # authentication and authorization attributes are set as environment
@@ -217,7 +227,6 @@ class Application(BaseApplication):
         # be the same.
         req_method = req.environ['REQUEST_METHOD'].upper()
 
-        # NOTE(vish): make sure we have no unicode keys for py2.6.
         params = self._normalize_dict(params)
 
         try:
@@ -266,7 +275,7 @@ class Application(BaseApplication):
         return code
 
     def _normalize_arg(self, arg):
-        return str(arg).replace(':', '_').replace('-', '_')
+        return arg.replace(':', '_').replace('-', '_')
 
     def _normalize_dict(self, d):
         return dict([(self._normalize_arg(k), v)

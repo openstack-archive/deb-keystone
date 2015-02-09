@@ -47,8 +47,10 @@ class IdentityProvider(_ControllerBase):
     collection_name = 'identity_providers'
     member_name = 'identity_provider'
 
-    _mutable_parameters = frozenset(['description', 'enabled'])
-    _public_parameters = frozenset(['id', 'enabled', 'description', 'links'])
+    _mutable_parameters = frozenset(['description', 'enabled', 'remote_id'])
+    _public_parameters = frozenset(['id', 'enabled', 'description',
+                                    'remote_id', 'links'
+                                    ])
 
     @classmethod
     def _add_related_links(cls, context, ref):
@@ -234,6 +236,7 @@ class MappingController(_ControllerBase):
         return MappingController.wrap_member(context, mapping_ref)
 
 
+@dependency.requires('federation_api')
 class Auth(auth_controllers.Auth):
 
     def federated_authentication(self, context, identity_provider, protocol):
@@ -259,14 +262,17 @@ class Auth(auth_controllers.Auth):
     def create_saml_assertion(self, context, auth):
         """Exchange a scoped token for a SAML assertion.
 
-        :param auth: Dictionary that contains a token id and region id
+        :param auth: Dictionary that contains a token and service provider id
         :returns: SAML Assertion based on properties from the token
         """
 
         issuer = CONF.saml.idp_entity_id
-        region_id = auth['scope']['region']['id']
-        region = self.catalog_api.get_region(region_id)
-        recipient = region['url']
+        sp_id = auth['scope']['service_provider']['id']
+        service_provider = self.federation_api.get_sp(sp_id)
+        utils.assert_enabled_service_provider_object(service_provider)
+
+        sp_url = service_provider.get('sp_url')
+        auth_url = service_provider.get('auth_url')
 
         token_id = auth['identity']['token']['id']
         token_data = self.token_provider_api.validate_token(token_id)
@@ -281,22 +287,24 @@ class Auth(auth_controllers.Auth):
 
         project = token_ref.project_name
         generator = keystone_idp.SAMLGenerator()
-        response = generator.samlize_token(issuer, recipient, subject, roles,
+        response = generator.samlize_token(issuer, sp_url, subject, roles,
                                            project)
 
         return wsgi.render_response(body=response.to_string(),
                                     status=('200', 'OK'),
-                                    headers=[('Content-Type', 'text/xml')])
+                                    headers=[('Content-Type', 'text/xml'),
+                                             ('X-sp-url', sp_url),
+                                             ('X-auth-url', auth_url)])
 
 
-@dependency.requires('assignment_api')
+@dependency.requires('assignment_api', 'resource_api')
 class DomainV3(controller.V3Controller):
     collection_name = 'domains'
     member_name = 'domain'
 
     def __init__(self):
         super(DomainV3, self).__init__()
-        self.get_member_from_driver = self.assignment_api.get_domain
+        self.get_member_from_driver = self.resource_api.get_domain
 
     @controller.protected()
     def list_domains_for_groups(self, context):
@@ -312,14 +320,14 @@ class DomainV3(controller.V3Controller):
         return DomainV3.wrap_collection(context, domains)
 
 
-@dependency.requires('assignment_api')
+@dependency.requires('assignment_api', 'resource_api')
 class ProjectV3(controller.V3Controller):
     collection_name = 'projects'
     member_name = 'project'
 
     def __init__(self):
         super(ProjectV3, self).__init__()
-        self.get_member_from_driver = self.assignment_api.get_project
+        self.get_member_from_driver = self.resource_api.get_project
 
     @controller.protected()
     def list_projects_for_groups(self, context):
@@ -333,6 +341,50 @@ class ProjectV3(controller.V3Controller):
         projects = self.assignment_api.list_projects_for_groups(
             auth_context['group_ids'])
         return ProjectV3.wrap_collection(context, projects)
+
+
+@dependency.requires('federation_api')
+class ServiceProvider(_ControllerBase):
+    """Service Provider representation."""
+
+    collection_name = 'service_providers'
+    member_name = 'service_provider'
+
+    _mutable_parameters = frozenset(['auth_url', 'description', 'enabled',
+                                     'sp_url'])
+    _public_parameters = frozenset(['auth_url', 'id', 'enabled', 'description',
+                                    'links', 'sp_url'])
+
+    @controller.protected()
+    def create_service_provider(self, context, sp_id, service_provider):
+        service_provider = self._normalize_dict(service_provider)
+        service_provider.setdefault('enabled', False)
+        ServiceProvider.check_immutable_params(service_provider)
+        sp_ref = self.federation_api.create_sp(sp_id, service_provider)
+        response = ServiceProvider.wrap_member(context, sp_ref)
+        return wsgi.render_response(body=response, status=('201', 'Created'))
+
+    @controller.protected()
+    def list_service_providers(self, context):
+        ref = self.federation_api.list_sps()
+        ref = [self.filter_params(x) for x in ref]
+        return ServiceProvider.wrap_collection(context, ref)
+
+    @controller.protected()
+    def get_service_provider(self, context, sp_id):
+        ref = self.federation_api.get_sp(sp_id)
+        return ServiceProvider.wrap_member(context, ref)
+
+    @controller.protected()
+    def delete_service_provider(self, context, sp_id):
+        self.federation_api.delete_sp(sp_id)
+
+    @controller.protected()
+    def update_service_provider(self, context, sp_id, service_provider):
+        service_provider = self._normalize_dict(service_provider)
+        ServiceProvider.check_immutable_params(service_provider)
+        sp_ref = self.federation_api.update_sp(sp_id, service_provider)
+        return ServiceProvider.wrap_member(context, sp_ref)
 
 
 class SAMLMetadataV3(_ControllerBase):

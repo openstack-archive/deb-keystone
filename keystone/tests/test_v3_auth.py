@@ -19,15 +19,17 @@ import operator
 import uuid
 
 from keystoneclient.common import cms
-from oslo.utils import timeutils
+import mock
+from oslo_utils import timeutils
 import six
 from testtools import matchers
 from testtools import testcase
 
 from keystone import auth
-from keystone.common import dependency
 from keystone import config
+from keystone.contrib import revoke
 from keystone import exception
+from keystone.policy.backends import rules
 from keystone import tests
 from keystone.tests import test_v3
 
@@ -182,7 +184,7 @@ class TokenAPITests(object):
             'name': uuid.uuid4().hex,
         }
 
-        self.assignment_api.create_domain(new_domain_id, new_domain)
+        self.resource_api.create_domain(new_domain_id, new_domain)
 
         # 2) Create user in new domain.
         new_user_password = uuid.uuid4().hex
@@ -468,7 +470,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
         super(TestTokenRevokeSelfAndAdmin, self).load_sample_data()
         # DomainA setup
         self.domainA = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainA['id'], self.domainA)
+        self.resource_api.create_domain(self.domainA['id'], self.domainA)
 
         self.userAdminA = self.new_user_ref(domain_id=self.domainA['id'])
         password = self.userAdminA['password']
@@ -563,7 +565,7 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
     def test_adminB_fails_revoking_userA_token(self):
         # DomainB setup
         self.domainB = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainB['id'], self.domainB)
+        self.resource_api.create_domain(self.domainB['id'], self.domainB)
         self.userAdminB = self.new_user_ref(domain_id=self.domainB['id'])
         password = self.userAdminB['password']
         self.userAdminB = self.identity_api.create_user(self.userAdminB)
@@ -591,9 +593,11 @@ class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
                     token=adminB_token)
 
 
-@dependency.requires('revoke_api')
 class TestTokenRevokeById(test_v3.RestfulTestCase):
     """Test token revocation on the v3 Identity API."""
+
+    def load_extra_backends(self):
+        return {'revoke_api': revoke.Manager()}
 
     def config_overrides(self):
         super(TestTokenRevokeById, self).config_overrides()
@@ -632,13 +636,13 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
 
         # Start by creating a couple of domains and projects
         self.domainA = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainA['id'], self.domainA)
+        self.resource_api.create_domain(self.domainA['id'], self.domainA)
         self.domainB = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainB['id'], self.domainB)
+        self.resource_api.create_domain(self.domainB['id'], self.domainB)
         self.projectA = self.new_project_ref(domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.projectA['id'], self.projectA)
+        self.resource_api.create_project(self.projectA['id'], self.projectA)
         self.projectB = self.new_project_ref(domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.projectB['id'], self.projectB)
+        self.resource_api.create_project(self.projectB['id'], self.projectB)
 
         # Now create some users
         self.user1 = self.new_user_ref(
@@ -679,9 +683,9 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
                                             self.group2['id'])
 
         self.role1 = self.new_role_ref()
-        self.assignment_api.create_role(self.role1['id'], self.role1)
+        self.role_api.create_role(self.role1['id'], self.role1)
         self.role2 = self.new_role_ref()
-        self.assignment_api.create_role(self.role2['id'], self.role2)
+        self.role_api.create_role(self.role2['id'], self.role2)
 
         self.assignment_api.create_grant(self.role2['id'],
                                          user_id=self.user1['id'],
@@ -720,7 +724,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
 
         # create a new role
         role = self.new_role_ref()
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
 
         # assign a new role
         self.put(
@@ -770,7 +774,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
 
     def role_data_fixtures(self):
         self.projectC = self.new_project_ref(domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.projectC['id'], self.projectC)
+        self.resource_api.create_project(self.projectC['id'], self.projectC)
         self.user4 = self.new_user_ref(domain_id=self.domainB['id'])
         password = self.user4['password']
         self.user4 = self.identity_api.create_user(self.user4)
@@ -1306,7 +1310,6 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
                   expected_status=200)
 
 
-@dependency.requires('revoke_api')
 class TestTokenRevokeApi(TestTokenRevokeById):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
@@ -1675,8 +1678,7 @@ class TestAuthKerberos(TestAuthExternalDomain):
             token='keystone.auth.plugins.token.Token')
 
 
-class TestAuthJSON(test_v3.RestfulTestCase):
-    content_type = 'json'
+class TestAuth(test_v3.RestfulTestCase):
 
     def test_unscoped_token_with_user_id(self):
         auth_data = self.build_authentication_request(
@@ -1709,8 +1711,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectScopedTokenResponse(r)
 
-    def test_default_project_id_scoped_token_with_user_id(self):
-        # create a second project to work with
+    def _second_project_as_default(self):
         ref = self.new_project_ref(domain_id=self.domain_id)
         r = self.post('/projects', body={'project': ref})
         project = self.assertValidProjectResponse(r, ref)
@@ -1728,6 +1729,11 @@ class TestAuthJSON(test_v3.RestfulTestCase):
             'user_id': self.user['id']},
             body=body)
         self.assertValidUserResponse(r)
+
+        return project
+
+    def test_default_project_id_scoped_token_with_user_id(self):
+        project = self._second_project_as_default()
 
         # attempt to authenticate without requesting a project
         auth_data = self.build_authentication_request(
@@ -1738,24 +1744,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         self.assertEqual(r.result['token']['project']['id'], project['id'])
 
     def test_default_project_id_scoped_token_with_user_id_no_catalog(self):
-        # create a second project to work with
-        ref = self.new_project_ref(domain_id=self.domain_id)
-        r = self.post('/projects', body={'project': ref})
-        project = self.assertValidProjectResponse(r, ref)
-
-        # grant the user a role on the project
-        self.put(
-            '/projects/%(project_id)s/users/%(user_id)s/roles/%(role_id)s' % {
-                'user_id': self.user['id'],
-                'project_id': project['id'],
-                'role_id': self.role['id']})
-
-        # set the user's preferred project
-        body = {'user': {'default_project_id': project['id']}}
-        r = self.patch('/users/%(user_id)s' % {
-            'user_id': self.user['id']},
-            body=body)
-        self.assertValidUserResponse(r)
+        project = self._second_project_as_default()
 
         # attempt to authenticate without requesting a project
         auth_data = self.build_authentication_request(
@@ -1764,6 +1753,20 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         r = self.post('/auth/tokens?nocatalog', body=auth_data, noauth=True)
         self.assertValidProjectScopedTokenResponse(r, require_catalog=False)
         self.assertEqual(r.result['token']['project']['id'], project['id'])
+
+    def test_explicit_unscoped_token(self):
+        self._second_project_as_default()
+
+        # attempt to authenticate without requesting a project
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            unscoped="unscoped")
+        r = self.post('/auth/tokens', body=auth_data, noauth=True)
+
+        self.assertIsNone(r.result['token'].get('project'))
+        self.assertIsNone(r.result['token'].get('domain'))
+        self.assertIsNone(r.result['token'].get('scope'))
 
     def test_implicit_project_id_scoped_token_with_user_id_no_catalog(self):
         # attempt to authenticate without requesting a project
@@ -1777,9 +1780,6 @@ class TestAuthJSON(test_v3.RestfulTestCase):
                          self.project['id'])
 
     def test_auth_catalog_attributes(self):
-        if self.content_type == 'xml':
-            self.skipTest('XML catalog parsing is just broken')
-
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
             password=self.user['password'],
@@ -1823,8 +1823,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
             project_id=self.project['id'])
         r = self.v3_authenticate_token(auth_data)
 
-        # In JSON, this is an empty list. In XML, this is an empty string.
-        self.assertFalse(r.result['token']['catalog'])
+        self.assertEqual([], r.result['token']['catalog'])
 
     def test_auth_catalog_disabled_endpoint(self):
         """On authenticate, get a catalog that excludes disabled endpoints."""
@@ -1852,7 +1851,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
     def test_project_id_scoped_token_with_user_id_401(self):
         project_id = uuid.uuid4().hex
         project = self.new_project_ref(domain_id=self.domain_id)
-        self.assignment_api.create_project(project_id, project)
+        self.resource_api.create_project(project_id, project)
 
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -1884,9 +1883,9 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         """
 
         domainA = self.new_domain_ref()
-        self.assignment_api.create_domain(domainA['id'], domainA)
+        self.resource_api.create_domain(domainA['id'], domainA)
         projectA = self.new_project_ref(domain_id=domainA['id'])
-        self.assignment_api.create_project(projectA['id'], projectA)
+        self.resource_api.create_project(projectA['id'], projectA)
 
         user1 = self.new_user_ref(
             domain_id=domainA['id'])
@@ -1917,7 +1916,7 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         role_list = []
         for _ in range(8):
             role = self.new_role_ref()
-            self.assignment_api.create_role(role['id'], role)
+            self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
         self.assignment_api.create_grant(role_list[0]['id'],
@@ -1998,30 +1997,26 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         """Verify getting a token in cross domain group/project roles."""
         # create domain, project and group and grant roles to user
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(domain1['id'], domain1)
+        self.resource_api.create_domain(domain1['id'], domain1)
         project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
                     'domain_id': domain1['id']}
-        self.assignment_api.create_project(project1['id'], project1)
+        self.resource_api.create_project(project1['id'], project1)
         user_foo = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
         password = user_foo['password']
         user_foo = self.identity_api.create_user(user_foo)
         user_foo['password'] = password
         role_member = {'id': uuid.uuid4().hex,
                        'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_member['id'],
-                                        role_member)
+        self.role_api.create_role(role_member['id'], role_member)
         role_admin = {'id': uuid.uuid4().hex,
                       'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_admin['id'],
-                                        role_admin)
+        self.role_api.create_role(role_admin['id'], role_admin)
         role_foo_domain1 = {'id': uuid.uuid4().hex,
                             'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_foo_domain1['id'],
-                                        role_foo_domain1)
+        self.role_api.create_role(role_foo_domain1['id'], role_foo_domain1)
         role_group_domain1 = {'id': uuid.uuid4().hex,
                               'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role_group_domain1['id'],
-                                        role_group_domain1)
+        self.role_api.create_role(role_group_domain1['id'], role_group_domain1)
         self.assignment_api.add_user_to_project(project1['id'],
                                                 user_foo['id'])
         new_group = {'domain_id': domain1['id'], 'name': uuid.uuid4().hex}
@@ -2502,11 +2497,11 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         # create a disabled domain
         domain = self.new_domain_ref()
         domain['enabled'] = False
-        self.assignment_api.create_domain(domain['id'], domain)
+        self.resource_api.create_domain(domain['id'], domain)
 
         # create a project in the disabled domain
         project = self.new_project_ref(domain_id=domain['id'])
-        self.assignment_api.create_project(project['id'], project)
+        self.resource_api.create_project(project['id'], project)
 
         # assign some role to self.user for the project in the disabled domain
         self.assignment_api.add_role_to_user_and_project(
@@ -2563,18 +2558,6 @@ class TestAuthJSONExternal(test_v3.RestfulTestCase):
                           auth_context)
 
 
-class TestAuthXML(TestAuthJSON):
-    content_type = 'xml'
-
-    def _check_disabled_endpoint_result(self, catalog, disabled_endpoint_id):
-        # FIXME(blk-u): As far as I can tell the catalog in the XML result is
-        # broken. Looks like it includes only one endpoint or the other, and
-        # which one is included is random.
-
-        endpoint = catalog['service']['endpoint']
-        self.assertEqual(self.endpoint_id, endpoint['id'])
-
-
 class TestTrustOptional(test_v3.RestfulTestCase):
     def config_overrides(self):
         super(TestTrustOptional, self).config_overrides()
@@ -2592,10 +2575,395 @@ class TestTrustOptional(test_v3.RestfulTestCase):
         self.v3_authenticate_token(auth_data, expected_status=403)
 
 
-@dependency.requires('revoke_api')
+class TestTrustRedelegation(test_v3.RestfulTestCase):
+    """Redelegation valid and secure
+
+    Redelegation is a hierarchical structure of trusts between initial trustor
+    and a group of users allowed to impersonate trustor and act in his name.
+    Hierarchy is created in a process of trusting already trusted permissions
+    and organized as an adjacency list using 'redelegated_trust_id' field.
+    Redelegation is valid if each subsequent trust in a chain passes 'not more'
+    permissions than being redelegated.
+
+    Trust constraints are:
+     * roles - set of roles trusted by trustor
+     * expiration_time
+     * allow_redelegation - a flag
+     * redelegation_count - decreasing value restricting length of trust chain
+     * remaining_uses - DISALLOWED when allow_redelegation == True
+
+    Trust becomes invalid in case:
+     * trust roles were revoked from trustor
+     * one of the users in the delegation chain was disabled or deleted
+     * expiration time passed
+     * one of the parent trusts has become invalid
+     * one of the parent trusts was deleted
+
+    """
+
+    def config_overrides(self):
+        super(TestTrustRedelegation, self).config_overrides()
+        self.config_fixture.config(
+            group='trust',
+            enabled=True,
+            allow_redelegation=True,
+            max_redelegation_count=10
+        )
+
+    def setUp(self):
+        super(TestTrustRedelegation, self).setUp()
+        # Create a trustee to delegate stuff to
+        trustee_user_ref = self.new_user_ref(domain_id=self.domain_id)
+        self.trustee_user = self.identity_api.create_user(trustee_user_ref)
+        self.trustee_user['password'] = trustee_user_ref['password']
+
+        # trustor->trustee
+        self.redelegated_trust_ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user['id'],
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id],
+            allow_redelegation=True)
+
+        # trustor->trustee (no redelegation)
+        self.chained_trust_ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user['id'],
+            project_id=self.project_id,
+            impersonation=True,
+            role_ids=[self.role_id],
+            allow_redelegation=True)
+
+    def _get_trust_token(self, trust):
+        trust_id = trust['id']
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'],
+            trust_id=trust_id)
+        trust_token = self.get_requested_token(auth_data)
+        return trust_token
+
+    def test_depleted_redelegation_count_error(self):
+        self.redelegated_trust_ref['redelegation_count'] = 0
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Attempt to create a redelegated trust.
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': self.chained_trust_ref},
+                  token=trust_token,
+                  expected_status=403)
+
+    def test_modified_redelegation_count_error(self):
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Attempt to create a redelegated trust with incorrect
+        # redelegation_count.
+        correct = trust['redelegation_count'] - 1
+        incorrect = correct - 1
+        self.chained_trust_ref['redelegation_count'] = incorrect
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': self.chained_trust_ref},
+                  token=trust_token,
+                  expected_status=403)
+
+    def test_max_redelegation_count_constraint(self):
+        incorrect = CONF.trust.max_redelegation_count + 1
+        self.redelegated_trust_ref['redelegation_count'] = incorrect
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': self.redelegated_trust_ref},
+                  expected_status=403)
+
+    def test_redelegation_expiry(self):
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Attempt to create a redelegated trust supposed to last longer
+        # than the parent trust: let's give it 10 minutes (>1 minute).
+        too_long_live_chained_trust_ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user['id'],
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=10),
+            role_ids=[self.role_id])
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': too_long_live_chained_trust_ref},
+                  token=trust_token,
+                  expected_status=403)
+
+    def test_redelegation_remaining_uses(self):
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Attempt to create a redelegated trust with remaining_uses defined.
+        # It must fail according to specification: remaining_uses must be
+        # omitted for trust redelegation. Any number here.
+        self.chained_trust_ref['remaining_uses'] = 5
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': self.chained_trust_ref},
+                  token=trust_token,
+                  expected_status=403)
+
+    def test_roles_subset(self):
+        # Build second role
+        role = self.new_role_ref()
+        self.assignment_api.create_role(role['id'], role)
+        # assign a new role to the user
+        self.assignment_api.create_grant(role_id=role['id'],
+                                         user_id=self.user_id,
+                                         project_id=self.project_id)
+
+        # Create first trust with extended set of roles
+        ref = self.redelegated_trust_ref
+        ref['roles'].append({'id': role['id']})
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+        # Trust created with exact set of roles (checked by role id)
+        role_id_set = set(r['id'] for r in ref['roles'])
+        trust_role_id_set = set(r['id'] for r in trust['roles'])
+        self.assertEqual(role_id_set, trust_role_id_set)
+
+        trust_token = self._get_trust_token(trust)
+
+        # Chain second trust with roles subset
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.chained_trust_ref},
+                      token=trust_token)
+        trust2 = self.assertValidTrustResponse(r)
+        # First trust contains roles superset
+        # Second trust contains roles subset
+        role_id_set1 = set(r['id'] for r in trust['roles'])
+        role_id_set2 = set(r['id'] for r in trust2['roles'])
+        self.assertThat(role_id_set1, matchers.GreaterThan(role_id_set2))
+
+    def test_redelegate_new_role_fails(self):
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Build second trust with a role not in parent's roles
+        role = self.new_role_ref()
+        self.assignment_api.create_role(role['id'], role)
+        # assign a new role to the user
+        self.assignment_api.create_grant(role_id=role['id'],
+                                         user_id=self.user_id,
+                                         project_id=self.project_id)
+
+        # Try to chain a trust with the role not from parent trust
+        self.chained_trust_ref['roles'] = [{'id': role['id']}]
+
+        # Bypass policy enforcement
+        with mock.patch.object(rules, 'enforce', return_value=True):
+            self.post('/OS-TRUST/trusts',
+                      body={'trust': self.chained_trust_ref},
+                      token=trust_token,
+                      expected_status=403)
+
+    def test_redelegation_terminator(self):
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': self.redelegated_trust_ref})
+        trust = self.assertValidTrustResponse(r)
+        trust_token = self._get_trust_token(trust)
+
+        # Build second trust - the terminator
+        ref = dict(self.chained_trust_ref,
+                   redelegation_count=1,
+                   allow_redelegation=False)
+
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': ref},
+                      token=trust_token)
+
+        trust = self.assertValidTrustResponse(r)
+        # Check that allow_redelegation == False caused redelegation_count
+        # to be set to 0, while allow_redelegation is removed
+        self.assertNotIn('allow_redelegation', trust)
+        self.assertEqual(trust['redelegation_count'], 0)
+        trust_token = self._get_trust_token(trust)
+
+        # Build third trust, same as second
+        self.post('/OS-TRUST/trusts',
+                  body={'trust': ref},
+                  token=trust_token,
+                  expected_status=403)
+
+
+class TestTrustChain(test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(TestTrustChain, self).config_overrides()
+        self.config_fixture.config(
+            group='trust',
+            enabled=True,
+            allow_redelegation=True,
+            max_redelegation_count=10
+        )
+
+    def setUp(self):
+        super(TestTrustChain, self).setUp()
+        # Create trust chain
+        self.user_chain = list()
+        self.trust_chain = list()
+        for _ in xrange(3):
+            user_ref = self.new_user_ref(domain_id=self.domain_id)
+            user = self.identity_api.create_user(user_ref)
+            user['password'] = user_ref['password']
+            self.user_chain.append(user)
+
+        # trustor->trustee
+        trustee = self.user_chain[0]
+        trust_ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=trustee['id'],
+            project_id=self.project_id,
+            impersonation=True,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        trust_ref.update(
+            allow_redelegation=True,
+            redelegation_count=3)
+
+        r = self.post('/OS-TRUST/trusts',
+                      body={'trust': trust_ref})
+
+        trust = self.assertValidTrustResponse(r)
+        auth_data = self.build_authentication_request(
+            user_id=trustee['id'],
+            password=trustee['password'],
+            trust_id=trust['id'])
+        trust_token = self.get_requested_token(auth_data)
+        self.trust_chain.append(trust)
+
+        for trustee in self.user_chain[1:]:
+            trust_ref = self.new_trust_ref(
+                trustor_user_id=self.user_id,
+                trustee_user_id=trustee['id'],
+                project_id=self.project_id,
+                impersonation=True,
+                role_ids=[self.role_id])
+            trust_ref.update(
+                allow_redelegation=True)
+            r = self.post('/OS-TRUST/trusts',
+                          body={'trust': trust_ref},
+                          token=trust_token)
+            trust = self.assertValidTrustResponse(r)
+            auth_data = self.build_authentication_request(
+                user_id=trustee['id'],
+                password=trustee['password'],
+                trust_id=trust['id'])
+            trust_token = self.get_requested_token(auth_data)
+            self.trust_chain.append(trust)
+
+        trustee = self.user_chain[-1]
+        trust = self.trust_chain[-1]
+        auth_data = self.build_authentication_request(
+            user_id=trustee['id'],
+            password=trustee['password'],
+            trust_id=trust['id'])
+
+        self.last_token = self.get_requested_token(auth_data)
+
+    def assert_user_authenticate(self, user):
+        auth_data = self.build_authentication_request(
+            user_id=user['id'],
+            password=user['password']
+        )
+        r = self.v3_authenticate_token(auth_data)
+        self.assertValidTokenResponse(r)
+
+    def assert_trust_tokens_revoked(self, trust_id):
+        trustee = self.user_chain[0]
+        auth_data = self.build_authentication_request(
+            user_id=trustee['id'],
+            password=trustee['password']
+        )
+        r = self.v3_authenticate_token(auth_data)
+        self.assertValidTokenResponse(r)
+
+        revocation_response = self.get('/OS-REVOKE/events')
+        revocation_events = revocation_response.json_body['events']
+        found = False
+        for event in revocation_events:
+            if event.get('OS-TRUST:trust_id') == trust_id:
+                found = True
+        self.assertTrue(found, 'event with trust_id %s not found in list' %
+                        trust_id)
+
+    def test_delete_trust_cascade(self):
+        self.assert_user_authenticate(self.user_chain[0])
+        self.delete('/OS-TRUST/trusts/%(trust_id)s' % {
+            'trust_id': self.trust_chain[0]['id']},
+            expected_status=204)
+
+        headers = {'X-Subject-Token': self.last_token}
+        self.head('/auth/tokens', headers=headers, expected_status=404)
+        self.assert_trust_tokens_revoked(self.trust_chain[0]['id'])
+
+    def test_delete_broken_chain(self):
+        self.assert_user_authenticate(self.user_chain[0])
+        self.delete('/OS-TRUST/trusts/%(trust_id)s' % {
+            'trust_id': self.trust_chain[1]['id']},
+            expected_status=204)
+
+        self.delete('/OS-TRUST/trusts/%(trust_id)s' % {
+            'trust_id': self.trust_chain[0]['id']},
+            expected_status=204)
+
+    def test_trustor_roles_revoked(self):
+        self.assert_user_authenticate(self.user_chain[0])
+
+        self.assignment_api.remove_role_from_user_and_project(
+            self.user_id, self.project_id, self.role_id
+        )
+
+        auth_data = self.build_authentication_request(
+            token=self.last_token,
+            trust_id=self.trust_chain[-1]['id'])
+        self.v3_authenticate_token(auth_data, expected_status=404)
+
+    def test_intermediate_user_disabled(self):
+        self.assert_user_authenticate(self.user_chain[0])
+
+        disabled = self.user_chain[0]
+        disabled['enabled'] = False
+        self.identity_api.update_user(disabled['id'], disabled)
+
+        # Bypass policy enforcement
+        with mock.patch.object(rules, 'enforce', return_value=True):
+            headers = {'X-Subject-Token': self.last_token}
+            self.head('/auth/tokens', headers=headers, expected_status=403)
+
+    def test_intermediate_user_deleted(self):
+        self.assert_user_authenticate(self.user_chain[0])
+
+        self.identity_api.delete_user(self.user_chain[0]['id'])
+
+        # Bypass policy enforcement
+        with mock.patch.object(rules, 'enforce', return_value=True):
+            headers = {'X-Subject-Token': self.last_token}
+            self.head('/auth/tokens', headers=headers, expected_status=403)
+
+
 class TestTrustAuth(test_v3.RestfulTestCase):
     EXTENSION_NAME = 'revoke'
     EXTENSION_TO_ADD = 'revoke_extension'
+
+    def load_extra_backends(self):
+        return {'revoke_api': revoke.Manager()}
 
     def config_overrides(self):
         super(TestTrustAuth, self).config_overrides()
@@ -3104,7 +3472,7 @@ class TestTrustAuth(test_v3.RestfulTestCase):
     def test_trust_deleted_grant(self):
         # create a new role
         role = self.new_role_ref()
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
 
         grant_url = (
             '/projects/%(project_id)s/users/%(user_id)s/'
@@ -3156,7 +3524,7 @@ class TestTrustAuth(test_v3.RestfulTestCase):
 
         # create a new role
         role = self.new_role_ref()
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
 
         # assign the new role to trustee
         self.put(

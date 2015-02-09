@@ -12,13 +12,41 @@
 
 """Useful utilities for tests."""
 
+import functools
+import os
+import time
 import uuid
+
+import six
+from testtools import testcase
 
 from keystone.common import environment
 from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
+
+TZ = None
+
+
+def timezone(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        tz_original = os.environ.get('TZ')
+        try:
+            if TZ:
+                os.environ['TZ'] = TZ
+                time.tzset()
+            return func(*args, **kwargs)
+        finally:
+            if TZ:
+                if tz_original:
+                    os.environ['TZ'] = tz_original
+                else:
+                    if 'TZ' in os.environ:
+                        del os.environ['TZ']
+                time.tzset()
+    return wrapper
 
 
 def new_uuid():
@@ -65,3 +93,40 @@ def check_output(*popenargs, **kwargs):
 
 def git(*args):
     return check_output(['git'] + list(args))
+
+
+def wip(message):
+    """Mark a test as work in progress.
+
+    Based on code by Nat Pryce:
+    https://gist.github.com/npryce/997195#file-wip-py
+
+    The test will always be run. If the test fails then a TestSkipped
+    exception is raised. If the test passes an AssertionError exception
+    is raised so that the developer knows they made the test pass. This
+    is a reminder to remove the decorator.
+
+    :param message: a string message to help clarify why the test is
+                    marked as a work in progress
+
+    usage:
+      >>> @wip('waiting on bug #000000')
+      >>> def test():
+      >>>     pass
+
+    """
+
+    def _wip(f):
+        @six.wraps(f)
+        def run_test(*args, **kwargs):
+            try:
+                f(*args, **kwargs)
+            except Exception:
+                raise testcase.TestSkipped('work in progress test failed: ' +
+                                           message)
+
+            raise AssertionError('work in progress test passed: ' + message)
+
+        return run_test
+
+    return _wip

@@ -15,16 +15,14 @@
 import datetime
 import uuid
 
-from lxml import etree
 from oslo.serialization import jsonutils
-from oslo.utils import timeutils
+from oslo_utils import timeutils
 import six
 from testtools import matchers
 
 from keystone import auth
 from keystone.common import authorization
 from keystone.common import cache
-from keystone.common import serializer
 from keystone import config
 from keystone import exception
 from keystone import middleware
@@ -43,8 +41,11 @@ class AuthTestMixin(object):
     """To hold auth building helper functions."""
     def build_auth_scope(self, project_id=None, project_name=None,
                          project_domain_id=None, project_domain_name=None,
-                         domain_id=None, domain_name=None, trust_id=None):
+                         domain_id=None, domain_name=None, trust_id=None,
+                         unscoped=None):
         scope_data = {}
+        if unscoped:
+            scope_data['unscoped'] = {}
         if project_id or project_name:
             scope_data['project'] = {}
             if project_id:
@@ -177,7 +178,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
             # a migration, but the in-mem db uses model definitions  to create
             # the schema (no migrations are run).
             try:
-                self.assignment_api.get_domain(DEFAULT_DOMAIN_ID)
+                self.resource_api.get_domain(DEFAULT_DOMAIN_ID)
             except exception.DomainNotFound:
                 domain = {'description': (u'Owns users and tenants (i.e. '
                                           u'projects) available on Identity '
@@ -185,20 +186,20 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
                           'enabled': True,
                           'id': DEFAULT_DOMAIN_ID,
                           'name': u'Default'}
-                self.assignment_api.create_domain(DEFAULT_DOMAIN_ID, domain)
+                self.resource_api.create_domain(DEFAULT_DOMAIN_ID, domain)
 
     def load_sample_data(self):
         self._populate_default_domain()
         self.domain_id = uuid.uuid4().hex
         self.domain = self.new_domain_ref()
         self.domain['id'] = self.domain_id
-        self.assignment_api.create_domain(self.domain_id, self.domain)
+        self.resource_api.create_domain(self.domain_id, self.domain)
 
         self.project_id = uuid.uuid4().hex
         self.project = self.new_project_ref(
             domain_id=self.domain_id)
         self.project['id'] = self.project_id
-        self.assignment_api.create_project(self.project_id, self.project)
+        self.resource_api.create_project(self.project_id, self.project)
 
         self.user = self.new_user_ref(domain_id=self.domain_id)
         password = self.user['password']
@@ -210,8 +211,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.default_domain_project = self.new_project_ref(
             domain_id=DEFAULT_DOMAIN_ID)
         self.default_domain_project['id'] = self.default_domain_project_id
-        self.assignment_api.create_project(self.default_domain_project_id,
-                                           self.default_domain_project)
+        self.resource_api.create_project(self.default_domain_project_id,
+                                         self.default_domain_project)
 
         self.default_domain_user = self.new_user_ref(
             domain_id=DEFAULT_DOMAIN_ID)
@@ -226,7 +227,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         self.role = self.new_role_ref()
         self.role['id'] = self.role_id
         self.role['name'] = 'admin'
-        self.assignment_api.create_role(self.role_id, self.role)
+        self.role_api.create_role(self.role_id, self.role)
         self.assignment_api.add_role_to_user_and_project(
             self.user_id, self.project_id, self.role_id)
         self.assignment_api.add_role_to_user_and_project(
@@ -344,7 +345,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
 
     def new_trust_ref(self, trustor_user_id, trustee_user_id, project_id=None,
                       impersonation=None, expires=None, role_ids=None,
-                      role_names=None, remaining_uses=None):
+                      role_names=None, remaining_uses=None,
+                      allow_redelegation=False):
         ref = dict()
         ref['id'] = uuid.uuid4().hex
         ref['trustor_user_id'] = trustor_user_id
@@ -352,6 +354,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         ref['impersonation'] = impersonation or False
         ref['project_id'] = project_id
         ref['remaining_uses'] = remaining_uses
+        ref['allow_redelegation'] = allow_redelegation
 
         if isinstance(expires, six.string_types):
             ref['expires_at'] = expires
@@ -397,8 +400,6 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
 
         """
         r = super(RestfulTestCase, self).admin_request(*args, **kwargs)
-        if r.headers.get('Content-Type') == 'application/xml':
-            r.result = serializer.from_xml(etree.tostring(r.result))
         return r
 
     def get_scoped_token(self):
@@ -502,10 +503,7 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         return r
 
     def assertValidErrorResponse(self, r):
-        if r.headers.get('Content-Type') == 'application/xml':
-            resp = serializer.from_xml(etree.tostring(r.result))
-        else:
-            resp = r.result
+        resp = r.result
         self.assertIsNotNone(resp.get('error'))
         self.assertIsNotNone(resp['error'].get('code'))
         self.assertIsNotNone(resp['error'].get('title'))
@@ -601,6 +599,20 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
 
         return entity
 
+    def assertDictContainsSubset(self, expected, actual):
+        """"Asserts if dictionary actual is a superset of expected.
+
+        Tests whether the key/value pairs in dictionary actual are a superset
+        of those in expected.
+
+        """
+        for k, v in expected.iteritems():
+            self.assertIn(k, actual)
+            if isinstance(v, dict):
+                self.assertDictContainsSubset(v, actual[k])
+            else:
+                self.assertEqual(v, actual[k])
+
     # auth validation
 
     def assertValidISO8601ExtendedFormatDatetime(self, dt):
@@ -665,9 +677,8 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
 
             # sub test for the OS-EP-FILTER extension enabled
             if endpoint_filter:
-                # verify the catalog hs no more than the endpoints
-                # associated in the catalog using the ep filter assoc
-                self.assertTrue(len(token['catalog']) < ep_filter_assoc + 1)
+                self.assertThat(token['catalog'],
+                                matchers.HasLength(ep_filter_assoc))
         else:
             self.assertNotIn('catalog', token)
 
@@ -1039,44 +1050,39 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase,
         return entities
 
     def assertValidRoleAssignment(self, entity, ref=None, url=None):
+        # A role should be present
         self.assertIsNotNone(entity.get('role'))
-        self.assertIsNotNone(entity.get('scope'))
+        self.assertIsNotNone(entity['role'].get('id'))
 
         # Only one of user or group should be present
-        self.assertIsNotNone(entity.get('user') or
-                             entity.get('group'))
-        self.assertIsNone(entity.get('user') and
-                          entity.get('group'))
+        if entity.get('user'):
+            self.assertIsNone(entity.get('group'))
+            self.assertIsNotNone(entity['user'].get('id'))
+        else:
+            self.assertIsNotNone(entity.get('group'))
+            self.assertIsNotNone(entity['group'].get('id'))
 
-        # Only one of domain or project should be present
-        self.assertIsNotNone(entity['scope'].get('project') or
-                             entity['scope'].get('domain'))
-        self.assertIsNone(entity['scope'].get('project') and
-                          entity['scope'].get('domain'))
+        # A scope should be present and have only one of domain or project
+        self.assertIsNotNone(entity.get('scope'))
 
         if entity['scope'].get('project'):
+            self.assertIsNone(entity['scope'].get('domain'))
             self.assertIsNotNone(entity['scope']['project'].get('id'))
         else:
+            self.assertIsNotNone(entity['scope'].get('domain'))
             self.assertIsNotNone(entity['scope']['domain'].get('id'))
+
+        # An assignment link should be present
         self.assertIsNotNone(entity.get('links'))
         self.assertIsNotNone(entity['links'].get('assignment'))
 
         if ref:
-            if ref.get('user'):
-                self.assertEqual(ref['user']['id'], entity['user']['id'])
-            if ref.get('group'):
-                self.assertEqual(ref['group']['id'], entity['group']['id'])
-            if ref.get('role'):
-                self.assertEqual(ref['role']['id'], entity['role']['id'])
-            if ref['scope'].get('project'):
-                self.assertEqual(ref['scope']['project']['id'],
-                                 entity['scope']['project']['id'])
-            if ref['scope'].get('domain'):
-                self.assertEqual(ref['scope']['domain']['id'],
-                                 entity['scope']['domain']['id'])
-            if ref['scope'].get('OS-INHERIT:inherited_to'):
-                self.assertEqual(ref['scope']['OS-INHERIT:inherited_to'],
-                                 entity['scope']['OS-INHERIT:inherited_to'])
+            links = ref.pop('links', None)
+            try:
+                self.assertDictContainsSubset(ref, entity)
+            finally:
+                if links:
+                    ref['links'] = links
         if url:
             self.assertIn(url, entity['links']['assignment'])
 
@@ -1223,7 +1229,7 @@ class VersionTestCase(RestfulTestCase):
 class AuthContextMiddlewareTestCase(RestfulTestCase):
     def _mock_request_object(self, token_id):
 
-        class fake_req:
+        class fake_req(object):
             headers = {middleware.AUTH_TOKEN_HEADER: token_id}
             environ = {}
 

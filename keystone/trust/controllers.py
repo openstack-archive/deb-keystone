@@ -14,19 +14,22 @@
 
 import uuid
 
-from oslo.utils import timeutils
+from oslo_utils import timeutils
 import six
 
 from keystone import assignment
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import validation
+from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.models import token_model
 from keystone.openstack.common import log
 from keystone.trust import schema
 
+
+CONF = config.CONF
 
 LOG = log.getLogger(__name__)
 
@@ -42,8 +45,8 @@ def _admin_trustor_only(context, trust, user_id):
         raise exception.Forbidden()
 
 
-@dependency.requires('assignment_api', 'identity_api', 'token_provider_api',
-                     'trust_api')
+@dependency.requires('assignment_api', 'identity_api', 'role_api',
+                     'token_provider_api', 'trust_api')
 class TrustV3(controller.V3Controller):
     collection_name = "trusts"
     member_name = "trust"
@@ -73,7 +76,7 @@ class TrustV3(controller.V3Controller):
             raise exception.TrustNotFound(trust_id=trust_id)
         _trustor_trustee_only(trust, user_id)
         self._fill_in_roles(context, trust,
-                            self.assignment_api.list_roles())
+                            self.role_api.list_roles())
         return TrustV3.wrap_member(context, trust)
 
     def _fill_in_roles(self, context, trust, all_roles):
@@ -127,28 +130,37 @@ class TrustV3(controller.V3Controller):
         The user creating the trust must be the trustor.
 
         """
-        # Explicitly prevent a trust token from creating a new trust.
-        auth_context = context.get('environment',
-                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
-        if auth_context.get('is_delegated_auth'):
-            raise exception.Forbidden(
-                _('Cannot create a trust'
-                  ' with a token issued via delegation.'))
-
         if not trust:
             raise exception.ValidationError(attribute='trust',
                                             target='request')
+
+        auth_context = context.get('environment',
+                                   {}).get('KEYSTONE_AUTH_CONTEXT', {})
+
+        # Check if delegated via trust
+        if auth_context.get('is_delegated_auth'):
+            # Redelegation case
+            src_trust_id = auth_context['trust_id']
+            if not src_trust_id:
+                raise exception.Forbidden(
+                    _('Redelegation allowed for delegated by trust only'))
+
+            redelegated_trust = self.trust_api.get_trust(src_trust_id)
+        else:
+            redelegated_trust = None
+
         if trust.get('project_id'):
             self._require_role(trust)
         self._require_user_is_trustor(context, trust)
         self._require_trustee_exists(trust['trustee_user_id'])
-        all_roles = self.assignment_api.list_roles()
+        all_roles = self.role_api.list_roles()
         clean_roles = self._clean_role_list(context, trust, all_roles)
         self._require_trustor_has_role_in_project(trust, clean_roles)
         trust['expires_at'] = self._parse_expiration_date(
             trust.get('expires_at'))
         trust_id = uuid.uuid4().hex
-        new_trust = self.trust_api.create_trust(trust_id, trust, clean_roles)
+        new_trust = self.trust_api.create_trust(trust_id, trust, clean_roles,
+                                                redelegated_trust)
         self._fill_in_roles(context, new_trust, all_roles)
         return TrustV3.wrap_member(context, new_trust)
 
@@ -258,5 +270,5 @@ class TrustV3(controller.V3Controller):
     def get_role_for_trust(self, context, trust_id, role_id):
         """Get a role that has been assigned to a trust."""
         self.check_role_for_trust(context, trust_id, role_id)
-        role = self.assignment_api.get_role(role_id)
+        role = self.role_api.get_role(role_id)
         return assignment.controllers.RoleV3.wrap_member(context, role)

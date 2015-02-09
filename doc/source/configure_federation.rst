@@ -90,9 +90,9 @@ correspond to the Identity Provider's groups; additionally, these groups should
 be assigned roles on one or more projects or domains.
 
 You may be interested in more information on `group management
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3.md#create-group-post-groups>`_
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3.html#create-group>`_
 and `role assignments
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3.md#grant-role-to-group-on-project-put-projectsproject_idgroupsgroup_idrolesrole_id>`_,
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3.html#grant-role-to-group-on-project>`_,
 both of which are exposed to the CLI via `python-openstackclient
 <https://pypi.python.org/pypi/python-openstackclient/>`_.
 
@@ -106,7 +106,7 @@ To utilize federation the following must be created in the Identity Service:
 * Protocol
 
 More information on ``OS-FEDERATION`` can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html>`__.
 
 ~~~~~~~~~~~~~~~~~
 Identity Provider
@@ -116,7 +116,7 @@ Create an Identity Provider object in Keystone, which represents the Identity
 Provider we will use to authenticate end users.
 
 More information on identity providers can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#register-an-identity-provider-put-os-federationidentity_providersidp_id>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#register-an-identity-provider>`__.
 
 ~~~~~~~
 Mapping
@@ -130,7 +130,7 @@ An Identity Provider has exactly one mapping specified per protocol.
 Mapping objects can be used multiple times by different combinations of Identity Provider and Protocol.
 
 More information on mapping can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#create-a-mapping-put-os-federationmappingsmapping_id>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#create-a-mapping>`__.
 
 ~~~~~~~~
 Protocol
@@ -140,7 +140,7 @@ A protocol contains information that dictates which Mapping rules to use for an 
 request made by an IdP. An IdP may have multiple supported protocols.
 
 Add `Protocol object
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#add-a-supported-protocol-and-attribute-mapping-combination-to-an-identity-provider-put-os-federationidentity_providersidp_idprotocolsprotocol_id>`__ and specify the mapping id
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#add-a-protocol-and-attribute-mapping-to-an-identity-provider>`__ and specify the mapping id
 you want to use with the combination of the IdP and Protocol.
 
 Performing federated authentication
@@ -170,7 +170,7 @@ In the returned unscoped token, a list of Identity Service groups the user
 belongs to will be included.
 
 More information on getting an unscoped token can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#authenticating>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#authenticating>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -195,7 +195,7 @@ projects and domains that are accessible.
 * List domains a federated user can access: ``GET /OS-FEDERATION/domains``
 
 More information on listing resources can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#listing-projects-and-domains>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#listing-projects-and-domains>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -219,7 +219,7 @@ project or domain may be specified by either ``id`` or ``name``. An ``id`` is
 sufficient to uniquely identify a project or domain.
 
 More information on getting a scoped token can be found `here
-<https://github.com/openstack/identity-api/blob/master/v3/src/markdown/identity-api-v3-os-federation-ext.md#request-a-scoped-os-federation-token-post-authtokens>`__.
+<http://specs.openstack.org/openstack/keystone-specs/api/v3/identity-api-v3-os-federation-ext.html#request-a-scoped-os-federation-token>`__.
 
 ~~~~~~~~~~~~
 Example cURL
@@ -292,21 +292,23 @@ and pipe the output to a file. For example:
     The file location should match the value of the configuration option
     ``idp_metadata_path`` that was assigned in the previous section.
 
-Create a region for the Service Provider (SP)
----------------------------------------------
+Create a Service Provider (SP)
+------------------------------
 
-Create a new region for the service provider, in this example, we are creating
-a new region with an ID of ``BETA``, and URL of
-``https://beta.com/Shibboleth.sso/SAML2/POST``. This URL will be used when
-creating a SAML assertion for ``BETA``, and signed by the current Keystone IdP.
+In this example we are creating a new Service Provider with an ID of ``BETA``,
+a ``sp_url`` of ``http://beta.example.com/Shibboleth.sso/POST/ECP`` and a
+``auth_url`` of ``http://beta.example.com:5000/v3/OS-FEDERATION/identity_providers/beta/protocols/saml2/auth``
+. The ``sp_url`` will be used when creating a SAML assertion for ``BETA`` and
+signed by the current Keystone IdP. The ``auth_url`` is used to retrieve the
+token for ``BETA`` once the SAML assertion is sent.
 
 .. code-block:: bash
 
     $ curl -s -X PUT \
       -H "X-Auth-Token: $OS_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"region": {"url": "http://beta.com/Shibboleth.sso/SAML2/POST"}}' \
-      http://localhost:5000/v3/regions/BETA | python -mjson.tool
+      -d '{"service_provider": {"auth_url": "http://beta.example.com:5000/v3/OS-FEDERATION/identity_providers/beta/protocols/saml2/auth", "sp_url": "https://example.com:5000/Shibboleth.sso/SAML2/ECP"}' \
+      http://localhost:5000/v3/service_providers/BETA | python -mjson.tool
 
 Testing it all out
 ------------------
@@ -319,9 +321,11 @@ Keystone, specifically intended for the Service Provider Keystone.
 
     $ curl -s -X POST \
       -H "Content-Type: application/json" \
-      -d '{"auth": {"scope": {"region": {"id": "BETA"}}, "identity": {"token": {"id": "d793d935b9c343f783955cf39ee7dc3c"}, "methods": ["token"]}}}' \
+      -d '{"auth": {"scope": {"service_provider": {"id": "BETA"}}, "identity": {"token": {"id": "d793d935b9c343f783955cf39ee7dc3c"}, "methods": ["token"]}}}' \
       http://localhost:5000/v3/auth/OS-FEDERATION/saml2
 
-At this point the SAML Assertion can be sent to the Service Provider Keystone,
-and a valid OpenStack token, issued by a Service Provider Keystone, will be
-returned.
+At this point the SAML Assertion can be sent to the Service Provider Keystone
+using the provided ``auth_url`` in the ``X-Auth-Url`` header present in the
+response containing the SAML Assertion, and a valid OpenStack token, issued by
+a Service Provider Keystone, will be returned.
+

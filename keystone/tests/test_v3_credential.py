@@ -85,11 +85,6 @@ class CredentialTestCase(CredentialBaseTestCase):
         r = self.get('/credentials')
         self.assertValidCredentialListResponse(r, ref=self.credential)
 
-    def test_list_credentials_xml(self):
-        """Call ``GET /credentials`` (xml data)."""
-        r = self.get('/credentials', content_type='xml')
-        self.assertValidCredentialListResponse(r, ref=self.credential)
-
     def test_list_credentials_filtered_by_user_id(self):
         """Call ``GET  /credentials?user_id={user_id}``."""
         credential = self.new_credential_ref(
@@ -374,10 +369,10 @@ class TestCredentialEc2(CredentialBaseTestCase):
 
     def test_ec2_list_credentials(self):
         """Test ec2 credential listing."""
-        self._get_ec2_cred_uri()
+        self._get_ec2_cred()
         uri = self._get_ec2_cred_uri()
         r = self.get(uri)
-        cred_list = r.result
+        cred_list = r.result['credentials']
         self.assertEqual(1, len(cred_list))
 
     def test_ec2_delete_credential(self):

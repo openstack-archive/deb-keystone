@@ -13,7 +13,9 @@
 #   under the License.
 
 import sys
+import warnings
 
+from sqlalchemy import exc
 from testtools import matchers
 
 from keystone.openstack.common import log
@@ -35,3 +37,22 @@ class TestTestCase(tests.TestCase):
         self.assertThat(
             lambda: LOG.warn('String %(p1)s %(p2)s', {'p1': 'something'}),
             matchers.raises(tests.BadLog))
+
+    def test_sa_warning(self):
+        self.assertThat(
+            lambda: warnings.warn('test sa warning error', exc.SAWarning),
+            matchers.raises(exc.SAWarning))
+
+    def test_deprecations(self):
+        # If any deprecation warnings occur during testing it's raised as
+        # exception.
+
+        def use_deprecated():
+            # DeprecationWarning: BaseException.message has been deprecated as
+            # of Python 2.6
+            try:
+                raise Exception('something')
+            except Exception as e:
+                e.message
+
+        self.assertThat(use_deprecated, matchers.raises(DeprecationWarning))

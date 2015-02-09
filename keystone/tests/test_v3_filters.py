@@ -30,7 +30,6 @@ CONF = config.CONF
 class IdentityTestFilteredCase(filtering.FilterTests,
                                test_v3.RestfulTestCase):
     """Test filter enforcement on the v3 Identity API."""
-    content_type = 'json'
 
     def setUp(self):
         """Setup for Identity Filter Test Cases."""
@@ -66,12 +65,12 @@ class IdentityTestFilteredCase(filtering.FilterTests,
         # Start by creating a few domains
         self._populate_default_domain()
         self.domainA = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainA['id'], self.domainA)
+        self.resource_api.create_domain(self.domainA['id'], self.domainA)
         self.domainB = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainB['id'], self.domainB)
+        self.resource_api.create_domain(self.domainB['id'], self.domainB)
         self.domainC = self.new_domain_ref()
         self.domainC['enabled'] = False
-        self.assignment_api.create_domain(self.domainC['id'], self.domainC)
+        self.resource_api.create_domain(self.domainC['id'], self.domainC)
 
         # Now create some users, one in domainA and two of them in domainB
         self.user1 = self.new_user_ref(domain_id=self.domainA['id'])
@@ -91,7 +90,7 @@ class IdentityTestFilteredCase(filtering.FilterTests,
         self.user3['password'] = password
 
         self.role = self.new_role_ref()
-        self.assignment_api.create_role(self.role['id'], self.role)
+        self.role_api.create_role(self.role['id'], self.role)
         self.assignment_api.create_grant(self.role['id'],
                                          user_id=self.user1['id'],
                                          domain_id=self.domainA['id'])
@@ -401,7 +400,7 @@ class IdentityTestListLimitCase(IdentityTestFilteredCase):
         self._test_entity_list_limit('group', 'identity')
 
     def test_projects_list_limit(self):
-        self._test_entity_list_limit('project', 'assignment')
+        self._test_entity_list_limit('project', 'resource')
 
     def test_services_list_limit(self):
         self._test_entity_list_limit('service', 'catalog')
@@ -435,11 +434,3 @@ class IdentityTestListLimitCase(IdentityTestFilteredCase):
         r = self.get('/services', auth=self.auth)
         self.assertEqual(len(r.result.get('services')), 10)
         self.assertIsNone(r.result.get('truncated'))
-
-
-class IdentityTestFilteredCaseXML(IdentityTestFilteredCase):
-    content_type = 'xml'
-
-
-class IdentityTestListLimitCaseXML(IdentityTestListLimitCase):
-    content_type = 'xml'

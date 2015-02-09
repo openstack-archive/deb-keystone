@@ -360,6 +360,29 @@ class ProjectValidationTestCase(testtools.TestCase):
                           self.create_project_validator.validate,
                           request_to_validate)
 
+    def test_validate_project_request_with_valid_parent_id(self):
+        """Test that we validate `parent_id` in create project requests."""
+        # parent_id is nullable
+        request_to_validate = {'name': self.project_name,
+                               'parent_id': None}
+        self.create_project_validator.validate(request_to_validate)
+        request_to_validate = {'name': self.project_name,
+                               'parent_id': uuid.uuid4().hex}
+        self.create_project_validator.validate(request_to_validate)
+
+    def test_validate_project_request_with_invalid_parent_id_fails(self):
+        """Exception is raised when `parent_id` as a non-id value."""
+        request_to_validate = {'name': self.project_name,
+                               'parent_id': False}
+        self.assertRaises(exception.SchemaValidationError,
+                          self.create_project_validator.validate,
+                          request_to_validate)
+        request_to_validate = {'name': self.project_name,
+                               'parent_id': 'fake project'}
+        self.assertRaises(exception.SchemaValidationError,
+                          self.create_project_validator.validate,
+                          request_to_validate)
+
     def test_validate_project_update_request(self):
         """Test that we validate a project update request."""
         request_to_validate = {'domain_id': uuid.uuid4().hex}
@@ -748,20 +771,6 @@ class RegionValidationTestCase(testtools.TestCase):
         request_to_validate = {'other_attr': uuid.uuid4().hex}
         self.create_region_validator.validate(request_to_validate)
 
-    def test_validate_region_create_succeeds_with_url(self):
-        """Validate `url` attribute in region create request."""
-        for url in _VALID_URLS:
-            request_to_validate = {'url': url}
-            self.create_region_validator.validate(request_to_validate)
-
-    def test_validate_region_create_fails_with_invalid_url(self):
-        """Exception raised when passing invalid `url` in request."""
-        for url in _INVALID_URLS:
-            request_to_validate = {'url': url}
-            self.assertRaises(exception.SchemaValidationError,
-                              self.create_region_validator.validate,
-                              request_to_validate)
-
     def test_validate_region_update_succeeds(self):
         """Test that we validate a region update request."""
         request_to_validate = {'id': 'us-west',
@@ -781,20 +790,6 @@ class RegionValidationTestCase(testtools.TestCase):
         self.assertRaises(exception.SchemaValidationError,
                           self.update_region_validator.validate,
                           request_to_validate)
-
-    def test_validate_region_update_succeeds_with_url(self):
-        """Validate `url` attribute in region update request."""
-        for url in _VALID_URLS:
-            request_to_validate = {'url': url}
-            self.update_region_validator.validate(request_to_validate)
-
-    def test_validate_region_update_fails_with_invalid_url(self):
-        """Exception raised when passing invalid `url` in request."""
-        for url in _INVALID_URLS:
-            request_to_validate = {'url': url}
-            self.assertRaises(exception.SchemaValidationError,
-                              self.update_region_validator.validate,
-                              request_to_validate)
 
 
 class ServiceValidationTestCase(testtools.TestCase):

@@ -209,11 +209,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         for region in r.result['regions']:
             self.assertEqual(parent_id, region['parent_region_id'])
 
-    def test_list_regions_xml(self):
-        """Call ``GET /regions (xml data)``."""
-        r = self.get('/regions', content_type='xml')
-        self.assertValidRegionListResponse(r, ref=self.region)
-
     def test_get_region(self):
         """Call ``GET /regions/{region_id}``."""
         r = self.get('/regions/%(region_id)s' % {
@@ -240,48 +235,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
         self.delete('/regions/%(region_id)s' % {
             'region_id': ref['id']})
-
-    def test_create_region_with_url(self):
-        """Call ``POST /regions`` with a custom url field."""
-        ref = self.new_region_ref()
-        ref['url'] = 'http://beta.com:5000/v3'
-
-        r = self.post(
-            '/regions',
-            body={'region': ref},
-            expected_status=201)
-
-        self.assertEqual(ref['url'], r.json['region']['url'])
-        self.assertValidRegionResponse(r, ref)
-
-        r = self.get(
-            '/regions/%(region_id)s' % {
-                'region_id': ref['id']})
-        self.assertEqual(ref['url'], r.json['region']['url'])
-        self.assertValidRegionResponse(r, ref)
-
-    def test_update_region_with_url(self):
-        """Call ``PUT /regions`` with a custom url field."""
-        ref = self.new_region_ref()
-
-        r = self.post(
-            '/regions',
-            body={'region': ref},
-            expected_status=201)
-
-        self.assertIsNone(r.json['region']['url'])
-        self.assertValidRegionResponse(r, ref)
-
-        region_id = r.json['region']['id']
-        ref = self.new_region_ref()
-        del ref['id']
-        ref['url'] = 'http://beta.com:5000/v3'
-
-        r = self.patch('/regions/%(region_id)s' % {
-            'region_id': region_id},
-            body={'region': ref})
-        self.assertEqual(ref['url'], r.json['region']['url'])
-        self.assertValidRegionResponse(r, ref)
 
     # service crud tests
 
@@ -389,11 +342,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         filtered_service = filtered_service_list[0]
         self.assertEqual(target_ref['name'], filtered_service['name'])
 
-    def test_list_services_xml(self):
-        """Call ``GET /services (xml data)``."""
-        r = self.get('/services', content_type='xml')
-        self.assertValidServiceListResponse(r, ref=self.service)
-
     def test_get_service(self):
         """Call ``GET /services/{service_id}``."""
         r = self.get('/services/%(service_id)s' % {
@@ -419,11 +367,6 @@ class CatalogTestCase(test_v3.RestfulTestCase):
     def test_list_endpoints(self):
         """Call ``GET /endpoints``."""
         r = self.get('/endpoints')
-        self.assertValidEndpointListResponse(r, ref=self.endpoint)
-
-    def test_list_endpoints_xml(self):
-        """Call ``GET /endpoints`` (xml data)."""
-        r = self.get('/endpoints', content_type='xml')
         self.assertValidEndpointListResponse(r, ref=self.endpoint)
 
     def test_create_endpoint_no_enabled(self):
@@ -689,6 +632,39 @@ class TestCatalogAPISQL(tests.TestCase):
         self.assertEqual(1, len(catalog[0]['endpoints']))
         # all three appear in the backend
         self.assertEqual(3, len(self.catalog_api.list_endpoints()))
+
+    def test_get_catalog_always_returns_service_name(self):
+        user_id = uuid.uuid4().hex
+        tenant_id = uuid.uuid4().hex
+
+        # create a service, with a name
+        named_svc = {
+            'id': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_service(named_svc['id'], named_svc)
+        endpoint = self.new_endpoint_ref(service_id=named_svc['id'])
+        self.catalog_api.create_endpoint(endpoint['id'], endpoint)
+
+        # create a service, with no name
+        unnamed_svc = {
+            'id': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex
+        }
+        self.catalog_api.create_service(unnamed_svc['id'], unnamed_svc)
+        endpoint = self.new_endpoint_ref(service_id=unnamed_svc['id'])
+        self.catalog_api.create_endpoint(endpoint['id'], endpoint)
+
+        catalog = self.catalog_api.get_v3_catalog(user_id, tenant_id)
+
+        named_endpoint = [ep for ep in catalog
+                          if ep['type'] == named_svc['type']][0]
+        self.assertEqual(named_svc['name'], named_endpoint['name'])
+
+        unnamed_endpoint = [ep for ep in catalog
+                            if ep['type'] == unnamed_svc['type']][0]
+        self.assertEqual('', unnamed_endpoint['name'])
 
 
 # TODO(dstanek): this needs refactoring with the test above, but we are in a

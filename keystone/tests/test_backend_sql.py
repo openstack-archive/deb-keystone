@@ -28,6 +28,7 @@ from keystone.common import sql
 from keystone import config
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
+from keystone.openstack.common import log as logging
 from keystone import tests
 from keystone.tests import default_fixtures
 from keystone.tests.ksfixtures import database
@@ -159,14 +160,14 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                   'name': None,
                   'domain_id': DEFAULT_DOMAIN_ID}
         self.assertRaises(exception.ValidationError,
-                          self.assignment_api.create_project,
+                          self.resource_api.create_project,
                           tenant['id'],
                           tenant)
         self.assertRaises(exception.ProjectNotFound,
-                          self.assignment_api.get_project,
+                          self.resource_api.get_project,
                           tenant['id'])
         self.assertRaises(exception.ProjectNotFound,
-                          self.assignment_api.get_project_by_name,
+                          self.resource_api.get_project_by_name,
                           tenant['name'],
                           DEFAULT_DOMAIN_ID)
 
@@ -174,11 +175,11 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         role = {'id': uuid.uuid4().hex,
                 'name': None}
         self.assertRaises(exception.UnexpectedError,
-                          self.assignment_api.create_role,
+                          self.role_api.create_role,
                           role['id'],
                           role)
         self.assertRaises(exception.RoleNotFound,
-                          self.assignment_api.get_role,
+                          self.role_api.get_role,
                           role['id'])
 
     def test_delete_project_with_user_association(self):
@@ -188,7 +189,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
-        self.assignment_api.delete_project(self.tenant_bar['id'])
+        self.resource_api.delete_project(self.tenant_bar['id'])
         tenants = self.assignment_api.list_projects_for_user(user['id'])
         self.assertEqual([], tenants)
 
@@ -201,7 +202,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         user = self.identity_api.create_user(user)
         role = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
         self.assignment_api.add_role_to_user_and_project(
             user['id'],
             self.tenant_bar['id'],
@@ -224,12 +225,12 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         user = self.identity_api.create_user(user)
         role = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
         self.assignment_api.add_role_to_user_and_project(
             user['id'],
             self.tenant_bar['id'],
             role['id'])
-        self.assignment_api.delete_project(self.tenant_bar['id'])
+        self.resource_api.delete_project(self.tenant_bar['id'])
 
         # Now check whether the internal representation of roles
         # has been deleted
@@ -256,12 +257,12 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
             'name': uuid.uuid4().hex,
             'domain_id': DEFAULT_DOMAIN_ID,
             arbitrary_key: arbitrary_value}
-        ref = self.assignment_api.create_project(tenant_id, tenant)
+        ref = self.resource_api.create_project(tenant_id, tenant)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('extra'))
 
         tenant['name'] = uuid.uuid4().hex
-        ref = self.assignment_api.update_project(tenant_id, tenant)
+        ref = self.resource_api.update_project(tenant_id, tenant)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
@@ -313,14 +314,14 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
 
     def test_list_domains_for_user(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(domain['id'], domain)
+        self.resource_api.create_domain(domain['id'], domain)
         user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
                 'domain_id': domain['id'], 'enabled': True}
 
         test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(test_domain1['id'], test_domain1)
+        self.resource_api.create_domain(test_domain1['id'], test_domain1)
         test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(test_domain2['id'], test_domain2)
+        self.resource_api.create_domain(test_domain2['id'], test_domain2)
 
         user = self.identity_api.create_user(user)
         user_domains = self.assignment_api.list_domains_for_user(user['id'])
@@ -339,7 +340,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # make user1 a member of both groups.  Both these new domains
         # should now be included, along with any direct user grants.
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(domain['id'], domain)
+        self.resource_api.create_domain(domain['id'], domain)
         user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
                 'domain_id': domain['id'], 'enabled': True}
         user = self.identity_api.create_user(user)
@@ -349,11 +350,11 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         group2 = self.identity_api.create_group(group2)
 
         test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(test_domain1['id'], test_domain1)
+        self.resource_api.create_domain(test_domain1['id'], test_domain1)
         test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(test_domain2['id'], test_domain2)
+        self.resource_api.create_domain(test_domain2['id'], test_domain2)
         test_domain3 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_domain(test_domain3['id'], test_domain3)
+        self.resource_api.create_domain(test_domain3['id'], test_domain3)
 
         self.identity_api.add_user_to_group(user['id'], group1['id'])
         self.identity_api.add_user_to_group(user['id'], group2['id'])
@@ -383,9 +384,9 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
 
         """
         domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        domain1 = self.assignment_api.create_domain(domain1['id'], domain1)
+        domain1 = self.resource_api.create_domain(domain1['id'], domain1)
         domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        domain2 = self.assignment_api.create_domain(domain2['id'], domain2)
+        domain2 = self.resource_api.create_domain(domain2['id'], domain2)
         user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
                 'domain_id': domain1['id'], 'enabled': True}
         user = self.identity_api.create_user(user)
@@ -393,7 +394,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         group = self.identity_api.create_group(group)
         self.identity_api.add_user_to_group(user['id'], group['id'])
         role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.assignment_api.create_role(role['id'], role)
+        self.role_api.create_role(role['id'], role)
 
         # Create a grant on each domain, one user grant, one group grant,
         # both inherited.
@@ -511,6 +512,10 @@ class SqlToken(SqlTests, test_backend.TokenTests):
 
 
 class SqlCatalog(SqlTests, test_backend.CatalogTests):
+
+    _legacy_endpoint_id_in_endpoint = True
+    _enabled_default_to_true_when_creating_endpoint = True
+
     def test_catalog_ignored_malformed_urls(self):
         service = {
             'id': uuid.uuid4().hex,
@@ -669,7 +674,35 @@ class SqlTokenCacheInvalidation(SqlTests, test_backend.TokenCacheInvalidation):
 
 
 class SqlFilterTests(SqlTests, test_backend.FilterTests):
-    pass
+    def test_filter_sql_injection_attack(self):
+        """Test against sql injection attack on filters
+
+        Test Plan:
+        - Attempt to get all entities back by passing a two-term attribute
+        - Attempt to piggyback filter to damage DB (e.g. drop table)
+
+        """
+        # Check we have some users
+        users = self.identity_api.list_users()
+        self.assertTrue(len(users) > 0)
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', "anything' or 'x'='x")
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual(0, len(users))
+
+        # See if we can add a SQL command...use the group table instead of the
+        # user table since 'user' is reserved word for SQLAlchemy.
+        group = {'name': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID}
+        group = self.identity_api.create_group(group)
+
+        hints = driver_hints.Hints()
+        hints.add_filter('name', "x'; drop table group")
+        groups = self.identity_api.list_groups(hints=hints)
+        self.assertEqual(0, len(groups))
+
+        groups = self.identity_api.list_groups()
+        self.assertTrue(len(groups) > 0)
 
 
 class SqlLimitTests(SqlTests, test_backend.LimitTests):
@@ -776,3 +809,68 @@ class SqlCredential(SqlTests):
         credentials = self.credential_api.list_credentials_for_user(
             self.user_foo['id'])
         self._validateCredentialList(credentials, self.user_credentials)
+
+
+class DeprecatedDecorators(SqlTests):
+
+    def test_assignment_to_role_api(self):
+        """Test that calling one of the methods does call LOG.deprecated.
+
+        This method is really generic to the type of backend, but we need
+        one to execute the test, so the SQL backend is as good as any.
+
+        """
+
+        # Rather than try and check that a log message is issued, we
+        # enable fatal_deprecations so that we can check for the
+        # raising of the exception.
+
+        # First try to create a role without enabling fatal deprecations,
+        # which should work due to the cross manager deprecated calls.
+        role_ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex}
+        self.assignment_api.create_role(role_ref['id'], role_ref)
+        self.role_api.get_role(role_ref['id'])
+
+        # Now enable fatal exceptions - creating a role by calling the
+        # old manager should now fail.
+        self.config_fixture.config(fatal_deprecations=True)
+        role_ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex}
+        self.assertRaises(logging.DeprecatedConfig,
+                          self.assignment_api.create_role,
+                          role_ref['id'], role_ref)
+
+    def test_assignment_to_resource_api(self):
+        """Test that calling one of the methods does call LOG.deprecated.
+
+        This method is really generic to the type of backend, but we need
+        one to execute the test, so the SQL backend is as good as any.
+
+        """
+
+        # Rather than try and check that a log message is issued, we
+        # enable fatal_deprecations so that we can check for the
+        # raising of the exception.
+
+        # First try to create a project without enabling fatal deprecations,
+        # which should work due to the cross manager deprecated calls.
+        project_ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.resource_api.create_project(project_ref['id'], project_ref)
+        self.resource_api.get_project(project_ref['id'])
+
+        # Now enable fatal exceptions - creating a project by calling the
+        # old manager should now fail.
+        self.config_fixture.config(fatal_deprecations=True)
+        project_ref = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.assertRaises(logging.DeprecatedConfig,
+                          self.assignment_api.create_project,
+                          project_ref['id'], project_ref)

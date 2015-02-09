@@ -25,9 +25,8 @@ from saml2 import sigver
 import xmldsig
 
 from keystone.auth import controllers as auth_controllers
-from keystone.common import dependency
-from keystone.common import serializer
 from keystone import config
+from keystone.contrib import federation
 from keystone.contrib.federation import controllers as federation_controllers
 from keystone.contrib.federation import idp as keystone_idp
 from keystone.contrib.federation import utils as mapping_utils
@@ -49,7 +48,6 @@ def dummy_validator(*args, **kwargs):
     pass
 
 
-@dependency.requires('federation_api')
 class FederationTests(test_v3.RestfulTestCase):
 
     EXTENSION_NAME = 'federation'
@@ -141,6 +139,19 @@ class FederatedIdentityProviderTests(FederationTests):
 
         keys_to_check = self.idp_keys
         body = self._http_idp_input()
+        resp = self._create_default_idp(body=body)
+        self.assertValidResponse(resp, 'identity_provider', dummy_validator,
+                                 keys_to_check=keys_to_check,
+                                 ref=body)
+
+    def test_create_idp_remote(self):
+        """Creates the IdentityProvider entity associated to a remote_id."""
+
+        keys_to_check = list(self.idp_keys)
+        keys_to_check.append('remote_id')
+        body = self.default_body.copy()
+        body['description'] = uuid.uuid4().hex
+        body['remote_id'] = uuid.uuid4().hex
         resp = self._create_default_idp(body=body)
         self.assertValidResponse(resp, 'identity_provider', dummy_validator,
                                  keys_to_check=keys_to_check,
@@ -249,7 +260,9 @@ class FederatedIdentityProviderTests(FederationTests):
         self.assertIsNotNone(idp_id)
 
         _enabled = not default_idp.get('enabled')
-        body = {'description': uuid.uuid4().hex, 'enabled': _enabled}
+        body = {'remote_id': uuid.uuid4().hex,
+                'description': uuid.uuid4().hex,
+                'enabled': _enabled}
 
         body = {'identity_provider': body}
         resp = self.patch(url, body=body)
@@ -766,8 +779,49 @@ class MappingRuleEngineTests(FederationTests):
         self.assertIsNone(mapped_properties['name'])
         self.assertListEqual(list(), mapped_properties['group_ids'])
 
+    def test_rule_engine_returns_group_names(self):
+        """Check whether RuleProcessor returns group names with their domains.
+
+        RuleProcessor shold return 'group_names' entry with a list of
+        dictionaries with two entries 'name' and 'domain' identyfing group by
+        its name and domain.
+
+        """
+        mapping = mapping_fixtures.MAPPING_GROUP_NAMES
+        rp = mapping_utils.RuleProcessor(mapping['rules'])
+        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
+        mapped_properties = rp.process(assertion)
+        self.assertIsNotNone(mapped_properties)
+        reference = {
+            mapping_fixtures.DEVELOPER_GROUP_NAME:
+            {
+                "name": mapping_fixtures.DEVELOPER_GROUP_NAME,
+                "domain": {
+                    "name": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_NAME
+                }
+            },
+            mapping_fixtures.TESTER_GROUP_NAME:
+            {
+                "name": mapping_fixtures.TESTER_GROUP_NAME,
+                "domain": {
+                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
+                }
+            }
+        }
+        for rule in mapped_properties['group_names']:
+            self.assertDictEqual(reference.get(rule.get('name')), rule)
+
 
 class FederatedTokenTests(FederationTests):
+
+    def load_extra_backends(self):
+        return {'federation_api': federation.Manager()}
+
+    def auth_plugin_config_override(self):
+        methods = ['saml2']
+        method_classes = {'saml2': 'keystone.auth.plugins.saml2.Saml2'}
+        super(FederatedTokenTests, self).auth_plugin_config_override(
+            methods, **method_classes)
 
     def setUp(self):
         super(FederatedTokenTests, self).setUp()
@@ -794,6 +848,9 @@ class FederatedTokenTests(FederationTests):
     AUTH_METHOD = 'saml2'
     USER = 'user@ORGANIZATION'
     ASSERTION_PREFIX = 'PREFIX_'
+    IDP_WITH_REMOTE = 'ORG_IDP_REMOTE'
+    REMOTE_ID = 'entityID_IDP'
+    REMOTE_ID_ATTR = uuid.uuid4().hex
 
     UNSCOPED_V3_SAML2_REQ = {
         "identity": {
@@ -840,17 +897,6 @@ class FederatedTokenTests(FederationTests):
             'id': uuid.uuid4().hex,
             'rules': rules or self.rules['rules']
         }
-
-    def _assertSerializeToXML(self, json_body):
-        """Serialize JSON body to XML.
-
-        Serialize JSON body to XML, then deserialize to JSON
-        again. Expect both JSON dictionaries to be equal.
-
-        """
-        xml_body = serializer.to_xml(json_body)
-        json_deserialized = serializer.from_xml(xml_body)
-        self.assertDictEqual(json_deserialized, json_body)
 
     def _scope_request(self, unscoped_token_id, scope, scope_id):
         return {
@@ -911,12 +957,15 @@ class FederatedTokenTests(FederationTests):
         self.assertEqual(self.PROTOCOL, os_federation['protocol']['id'])
 
     def _issue_unscoped_token(self,
+                              idp=None,
                               assertion='EMPLOYEE_ASSERTION',
                               environment=None):
         api = federation_controllers.Auth()
         context = {'environment': environment or {}}
         self._inject_assertion(context, assertion)
-        r = api.federated_authentication(context, self.IDP, self.PROTOCOL)
+        if idp is None:
+            idp = self.IDP
+        r = api.federated_authentication(context, idp, self.PROTOCOL)
         return r
 
     def test_issue_unscoped_token_notify(self):
@@ -927,27 +976,73 @@ class FederatedTokenTests(FederationTests):
         r = self._issue_unscoped_token()
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
+    def test_issue_unscoped_token_disabled_idp(self):
+        """Checks if authentication works with disabled identity providers.
+
+        Test plan:
+        1) Disable default IdP
+        2) Try issuing unscoped token for that IdP
+        3) Expect server to forbid authentication
+
+        """
+        enabled_false = {'enabled': False}
+        self.federation_api.update_idp(self.IDP, enabled_false)
+        self.assertRaises(exception.Forbidden,
+                          self._issue_unscoped_token)
+
+    def test_issue_unscoped_token_group_names_in_mapping(self):
+        r = self._issue_unscoped_token(assertion='ANOTHER_CUSTOMER_ASSERTION')
+        ref_groups = set([self.group_customers['id'], self.group_admins['id']])
+        token_resp = r.json_body
+        token_groups = token_resp['token']['user']['OS-FEDERATION']['groups']
+        token_groups = set([group['id'] for group in token_groups])
+        self.assertEqual(ref_groups, token_groups)
+
+    def test_issue_unscoped_tokens_nonexisting_group(self):
+        self.assertRaises(exception.MappedGroupNotFound,
+                          self._issue_unscoped_token,
+                          assertion='ANOTHER_TESTER_ASSERTION')
+
+    def test_issue_unscoped_token_with_remote_no_attribute(self):
+        r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
+                                       environment={
+                                           self.REMOTE_ID_ATTR: self.REMOTE_ID
+                                       })
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_issue_unscoped_token_with_remote(self):
+        self.config_fixture.config(group='federation',
+                                   remote_id_attribute=self.REMOTE_ID_ATTR)
+        r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
+                                       environment={
+                                           self.REMOTE_ID_ATTR: self.REMOTE_ID
+                                       })
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_issue_unscoped_token_with_remote_different(self):
+        self.config_fixture.config(group='federation',
+                                   remote_id_attribute=self.REMOTE_ID_ATTR)
+        self.assertRaises(exception.Forbidden,
+                          self._issue_unscoped_token,
+                          idp=self.IDP_WITH_REMOTE,
+                          environment={
+                              self.REMOTE_ID_ATTR: uuid.uuid4().hex
+                          })
+
+    def test_issue_unscoped_token_with_remote_unavailable(self):
+        self.config_fixture.config(group='federation',
+                                   remote_id_attribute=self.REMOTE_ID_ATTR)
+        self.assertRaises(exception.ValidationError,
+                          self._issue_unscoped_token,
+                          idp=self.IDP_WITH_REMOTE,
+                          environment={
+                              uuid.uuid4().hex: uuid.uuid4().hex
+                          })
+
     def test_issue_unscoped_token_with_remote_user_as_empty_string(self):
         # make sure that REMOTE_USER set as the empty string won't interfere
         r = self._issue_unscoped_token(environment={'REMOTE_USER': ''})
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
-
-    def test_issue_unscoped_token_serialize_to_xml(self):
-        """Issue unscoped token and serialize to XML.
-
-        Make sure common.serializer doesn't complain about
-        the response structure and tag names.
-
-        """
-        r = self._issue_unscoped_token()
-        token_resp = r.json_body
-        # Remove 'extras' if empty or None,
-        # as JSON and XML (de)serializers treat
-        # them differently, making dictionaries
-        # comparisons fail.
-        if not token_resp['token'].get('extras'):
-            token_resp['token'].pop('extras')
-        self._assertSerializeToXML(token_resp)
 
     def test_issue_unscoped_token_no_groups(self):
         self.assertRaises(exception.Unauthorized,
@@ -992,6 +1087,29 @@ class FederatedTokenTests(FederationTests):
         roles_ref = [self.role_employee]
         projects_ref = self.proj_employees
         self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
+
+    def test_scope_token_with_idp_disabled(self):
+        """Scope token issued by disabled IdP.
+
+        Try scoping the token issued by an IdP which is disabled now.
+        Expect server to refuse scoping operatin.
+
+        This test confirms correct behaviour when IdP was enabled and unscoped
+        token was issued, but disabled before user tries to scope the token.
+        Here we assume the unscoped token was already issued and start from
+        the moment where IdP is being disabled and unscoped token is being
+        used.
+
+        Test plan:
+        1) Disable IdP
+        2) Try scoping unscoped token
+
+        """
+        enabled_false = {'enabled': False}
+        self.federation_api.update_idp(self.IDP, enabled_false)
+        self.v3_authenticate_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_CUSTOMER,
+            expected_status=403)
 
     def test_scope_to_bad_project(self):
         """Scope unscoped token with a project we don't have access to."""
@@ -1191,8 +1309,7 @@ class FederatedTokenTests(FederationTests):
             domain_id=self.domainA['id'])
         group = self.identity_api.create_group(group)
         role = self.new_role_ref()
-        self.assignment_api.create_role(role['id'],
-                                        role)
+        self.role_api.create_role(role['id'], role)
 
         # assign role to group and project_admins
         self.assignment_api.create_grant(role['id'],
@@ -1280,40 +1397,40 @@ class FederatedTokenTests(FederationTests):
 
         # Create and add domains
         self.domainA = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainA['id'],
-                                          self.domainA)
+        self.resource_api.create_domain(self.domainA['id'],
+                                        self.domainA)
 
         self.domainB = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainB['id'],
-                                          self.domainB)
+        self.resource_api.create_domain(self.domainB['id'],
+                                        self.domainB)
 
         self.domainC = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainC['id'],
-                                          self.domainC)
+        self.resource_api.create_domain(self.domainC['id'],
+                                        self.domainC)
 
         self.domainD = self.new_domain_ref()
-        self.assignment_api.create_domain(self.domainD['id'],
-                                          self.domainD)
+        self.resource_api.create_domain(self.domainD['id'],
+                                        self.domainD)
 
         # Create and add projects
         self.proj_employees = self.new_project_ref(
             domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.proj_employees['id'],
-                                           self.proj_employees)
+        self.resource_api.create_project(self.proj_employees['id'],
+                                         self.proj_employees)
         self.proj_customers = self.new_project_ref(
             domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.proj_customers['id'],
-                                           self.proj_customers)
+        self.resource_api.create_project(self.proj_customers['id'],
+                                         self.proj_customers)
 
         self.project_all = self.new_project_ref(
             domain_id=self.domainA['id'])
-        self.assignment_api.create_project(self.project_all['id'],
-                                           self.project_all)
+        self.resource_api.create_project(self.project_all['id'],
+                                         self.project_all)
 
         self.project_inherited = self.new_project_ref(
             domain_id=self.domainD['id'])
-        self.assignment_api.create_project(self.project_inherited['id'],
-                                           self.project_inherited)
+        self.resource_api.create_project(self.project_inherited['id'],
+                                         self.project_inherited)
 
         # Create and add groups
         self.group_employees = self.new_group_ref(
@@ -1332,15 +1449,12 @@ class FederatedTokenTests(FederationTests):
 
         # Create and add roles
         self.role_employee = self.new_role_ref()
-        self.assignment_api.create_role(self.role_employee['id'],
-                                        self.role_employee)
+        self.role_api.create_role(self.role_employee['id'], self.role_employee)
         self.role_customer = self.new_role_ref()
-        self.assignment_api.create_role(self.role_customer['id'],
-                                        self.role_customer)
+        self.role_api.create_role(self.role_customer['id'], self.role_customer)
 
         self.role_admin = self.new_role_ref()
-        self.assignment_api.create_role(self.role_admin['id'],
-                                        self.role_admin)
+        self.role_api.create_role(self.role_admin['id'], self.role_admin)
 
         # Employees can access
         # * proj_employees
@@ -1594,8 +1708,87 @@ class FederatedTokenTests(FederationTests):
                         }
                     ]
                 },
-
-
+                # rules with local group names
+                {
+                    "local": [
+                        {
+                            'user': {
+                                'name': '{0}'
+                            }
+                        },
+                        {
+                            "group": {
+                                "name": self.group_customers['name'],
+                                "domain": {
+                                    "name": self.domainA['name']
+                                }
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            'type': 'UserName',
+                        },
+                        {
+                            "type": "orgPersonType",
+                            "any_one_of": [
+                                "CEO",
+                                "CTO"
+                            ],
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            'user': {
+                                'name': '{0}'
+                            }
+                        },
+                        {
+                            "group": {
+                                "name": self.group_admins['name'],
+                                "domain": {
+                                    "id": self.domainA['id']
+                                }
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "UserName",
+                        },
+                        {
+                            "type": "orgPersonType",
+                            "any_one_of": [
+                                "Managers"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "group": {
+                                "name": "NON_EXISTING",
+                                "domain": {
+                                    "id": self.domainA['id']
+                                }
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "UserName",
+                        },
+                        {
+                            "type": "UserName",
+                            "any_one_of": [
+                                "IamTester"
+                            ]
+                        }
+                    ]
+                }
             ]
         }
 
@@ -1603,7 +1796,11 @@ class FederatedTokenTests(FederationTests):
         self.idp = self.idp_ref(id=self.IDP)
         self.federation_api.create_idp(self.idp['id'],
                                        self.idp)
-
+        # Add IDP with remote
+        self.idp_with_remote = self.idp_ref(id=self.IDP_WITH_REMOTE)
+        self.idp_with_remote['remote_id'] = self.REMOTE_ID
+        self.federation_api.create_idp(self.idp_with_remote['id'],
+                                       self.idp_with_remote)
         # Add a mapping
         self.mapping = self.mapping_ref()
         self.federation_api.create_mapping(self.mapping['id'],
@@ -1612,6 +1809,10 @@ class FederatedTokenTests(FederationTests):
         self.proto_saml = self.proto_ref(mapping_id=self.mapping['id'])
         self.proto_saml['id'] = self.PROTOCOL
         self.federation_api.create_protocol(self.idp['id'],
+                                            self.proto_saml['id'],
+                                            self.proto_saml)
+        # Add protocols IDP with remote
+        self.federation_api.create_protocol(self.idp_with_remote['id'],
                                             self.proto_saml['id'],
                                             self.proto_saml)
         # Generate fake tokens
@@ -1675,6 +1876,24 @@ class FederatedTokenTests(FederationTests):
         context['query_string'] = []
 
 
+class FederatedTokenTestsMethodToken(FederatedTokenTests):
+    """Test federation operation with unified scoping auth method.
+
+    Test all the operations with auth method set to ``token`` as a new, unified
+    way for scoping all the tokens.
+
+    """
+    AUTH_METHOD = 'token'
+
+    def auth_plugin_config_override(self):
+        methods = ['saml2', 'token']
+        method_classes = dict(
+            token='keystone.auth.plugins.token.Token',
+            saml2='keystone.auth.plugins.saml2.Saml2')
+        super(FederatedTokenTests,
+              self).auth_plugin_config_override(methods, **method_classes)
+
+
 class JsonHomeTests(FederationTests, test_v3.JsonHomeTestMixin):
     JSON_HOME_DATA = {
         'http://docs.openstack.org/api/openstack-identity/3/ext/OS-FEDERATION/'
@@ -1705,6 +1924,8 @@ def _load_xml(filename):
 
 class SAMLGenerationTests(FederationTests):
 
+    SP_AUTH_URL = ('http://beta.com:5000/v3/OS-FEDERATION/identity_providers'
+                   '/BETA/protocols/saml2/auth')
     ISSUER = 'https://acme.com/FIM/sps/openstack/saml20'
     RECIPIENT = 'http://beta.com/Shibboleth.sso/SAML2/POST'
     SUBJECT = 'test_user'
@@ -1712,11 +1933,24 @@ class SAMLGenerationTests(FederationTests):
     PROJECT = 'development'
     SAML_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2'
     ASSERTION_VERSION = "2.0"
+    SERVICE_PROVDIER_ID = 'ACME'
+
+    def sp_ref(self):
+        ref = {
+            'auth_url': self.SP_AUTH_URL,
+            'enabled': True,
+            'description': uuid.uuid4().hex,
+            'sp_url': self.RECIPIENT,
+
+        }
+        return ref
 
     def setUp(self):
         super(SAMLGenerationTests, self).setUp()
         self.signed_assertion = saml2.create_class_from_xml_string(
             saml.Assertion, _load_xml('signed_saml2_assertion.xml'))
+        self.sp = self.sp_ref()
+        self.federation_api.create_sp(self.SERVICE_PROVDIER_ID, self.sp)
 
     def test_samlize_token_values(self):
         """Test the SAML generator produces a SAML object.
@@ -1800,6 +2034,31 @@ class SAMLGenerationTests(FederationTests):
         project_attribute = assertion[4][2]
         self.assertEqual(self.PROJECT, project_attribute[0].text)
 
+    def test_assertion_using_explicit_namespace_prefixes(self):
+        def mocked_subprocess_check_output(*popenargs, **kwargs):
+            # the last option is the assertion file to be signed
+            filename = popenargs[0][-1]
+            with open(filename, 'r') as f:
+                assertion_content = f.read()
+            # since we are not testing the signature itself, we can return
+            # the assertion as is without signing it
+            return assertion_content
+
+        with mock.patch('subprocess.check_output',
+                        side_effect=mocked_subprocess_check_output):
+            generator = keystone_idp.SAMLGenerator()
+            response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
+                                               self.SUBJECT, self.ROLES,
+                                               self.PROJECT)
+            assertion_xml = response.assertion.to_string()
+            # make sure we have the proper tag and prefix for the assertion
+            # namespace
+            self.assertIn('<saml:Assertion', assertion_xml)
+            self.assertIn('xmlns:saml="' + saml2.NAMESPACE + '"',
+                          assertion_xml)
+            self.assertIn('xmlns:xmldsig="' + xmldsig.NAMESPACE + '"',
+                          assertion_xml)
+
     def test_saml_signing(self):
         """Test that the SAML generator produces a SAML object.
 
@@ -1828,7 +2087,7 @@ class SAMLGenerationTests(FederationTests):
         cert_text = cert_text.replace(os.linesep, '')
         self.assertEqual(idp_public_key, cert_text)
 
-    def _create_generate_saml_request(self, token_id, region_id):
+    def _create_generate_saml_request(self, token_id, sp_id):
         return {
             "auth": {
                 "identity": {
@@ -1840,18 +2099,12 @@ class SAMLGenerationTests(FederationTests):
                     }
                 },
                 "scope": {
-                    "region": {
-                        "id": region_id
+                    "service_provider": {
+                        "id": sp_id
                     }
                 }
             }
         }
-
-    def _create_region_with_url(self):
-        ref = self.new_region_ref()
-        ref['url'] = self.RECIPIENT
-        r = self.post('/regions', body={'region': ref})
-        return r.json['region']['id']
 
     def _fetch_valid_token(self):
         auth_data = self.build_authentication_request(
@@ -1879,10 +2132,9 @@ class SAMLGenerationTests(FederationTests):
 
         """
         self.config_fixture.config(group='saml', idp_entity_id=self.ISSUER)
-        region_id = self._create_region_with_url()
         token_id = self._fetch_domain_scoped_token()
-        body = self._create_generate_saml_request(token_id, region_id)
-
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
         with mock.patch.object(keystone_idp, '_sign_assertion',
                                return_value=self.signed_assertion):
             self.post(self.SAML_GENERATION_ROUTE, body=body,
@@ -1892,17 +2144,17 @@ class SAMLGenerationTests(FederationTests):
         """Test that the SAML generation endpoint produces XML.
 
         The SAML endpoint /v3/auth/OS-FEDERATION/saml2 should take as input,
-        a scoped token ID, and a region ID.
+        a scoped token ID, and a Service Provider ID.
         The controller should fetch details about the user from the token,
-        and details about the service provider from the region.
+        and details about the service provider from its ID.
         This should be enough information to invoke the SAML generator and
         provide a valid SAML (XML) document back.
 
         """
         self.config_fixture.config(group='saml', idp_entity_id=self.ISSUER)
-        region_id = self._create_region_with_url()
         token_id = self._fetch_valid_token()
-        body = self._create_generate_saml_request(token_id, region_id)
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
 
         with mock.patch.object(keystone_idp, '_sign_assertion',
                                return_value=self.signed_assertion):
@@ -1938,9 +2190,9 @@ class SAMLGenerationTests(FederationTests):
 
         """
 
-        region_id = uuid.uuid4().hex
         token_id = uuid.uuid4().hex
-        body = self._create_generate_saml_request(token_id, region_id)
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
         del body['auth']['scope']
 
         self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=400)
@@ -1952,24 +2204,36 @@ class SAMLGenerationTests(FederationTests):
 
         """
 
-        region_id = uuid.uuid4().hex
         token_id = uuid.uuid4().hex
-        body = self._create_generate_saml_request(token_id, region_id)
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
         del body['auth']['identity']['token']
 
         self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=400)
 
-    def test_region_not_found(self):
-        """Test that an invalid region in the request body raises an exception.
+    def test_sp_not_found(self):
+        """Test that an invalid service provider in the request body raises an
+        exception.
 
-        Raises exception.RegionNotFound() - error code 404
+        Raises exception.ServiceProviderNotFound() - error code 404
 
         """
-
-        region_id = uuid.uuid4().hex
+        sp_id = uuid.uuid4().hex
         token_id = self._fetch_valid_token()
-        body = self._create_generate_saml_request(token_id, region_id)
+        body = self._create_generate_saml_request(token_id, sp_id)
         self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=404)
+
+    def test_sp_disabled(self):
+        """Try generating assertion for disabled Service Provider."""
+
+        # Disable Service Provider
+        sp_ref = {'enabled': False}
+        self.federation_api.update_sp(self.SERVICE_PROVDIER_ID, sp_ref)
+
+        token_id = self._fetch_valid_token()
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
+        self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=403)
 
     def test_token_not_found(self):
         """Test that an invalid token in the request body raises an exception.
@@ -1978,9 +2242,9 @@ class SAMLGenerationTests(FederationTests):
 
         """
 
-        region_id = self._create_region_with_url()
         token_id = uuid.uuid4().hex
-        body = self._create_generate_saml_request(token_id, region_id)
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
         self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=404)
 
 
@@ -2112,3 +2376,150 @@ class IdPMetadataGenerationTests(FederationTests):
 
         reference_file = _load_xml('idp_saml2_metadata.xml')
         self.assertEqual(reference_file, r.result)
+
+
+class ServiceProviderTests(FederationTests):
+    """A test class for Service Providers."""
+
+    MEMBER_NAME = 'service_provider'
+    COLLECTION_NAME = 'service_providers'
+    SERVICE_PROVIDER_ID = 'ACME'
+    SP_KEYS = ['auth_url', 'id', 'enabled', 'description', 'sp_url']
+
+    def setUp(self):
+        super(FederationTests, self).setUp()
+        # Add a Service Provider
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        self.SP_REF = self.sp_ref()
+        self.SERVICE_PROVIDER = self.put(
+            url, body={'service_provider': self.SP_REF},
+            expected_status=201).result
+
+    def sp_ref(self):
+        ref = {
+            'auth_url': 8 * uuid.uuid4().hex,
+            'enabled': True,
+            'description': uuid.uuid4().hex,
+            'sp_url': 8 * uuid.uuid4().hex
+        }
+        return ref
+
+    def base_url(self, suffix=None):
+        if suffix is not None:
+            return '/OS-FEDERATION/service_providers/' + str(suffix)
+        return '/OS-FEDERATION/service_providers'
+
+    def test_get_service_provider(self):
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        resp = self.get(url, expected_status=200)
+        self.assertValidEntity(resp.result['service_provider'],
+                               keys_to_check=self.SP_KEYS)
+
+    def test_get_service_provider_fail(self):
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        self.get(url, expected_status=404)
+
+    def test_create_service_provider(self):
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        resp = self.put(url, body={'service_provider': sp},
+                        expected_status=201)
+        self.assertValidEntity(resp.result['service_provider'],
+                               keys_to_check=self.SP_KEYS)
+
+    def test_create_service_provider_fail(self):
+        """Try adding SP object with unallowed attribute."""
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        sp[uuid.uuid4().hex] = uuid.uuid4().hex
+        self.put(url, body={'service_provider': sp},
+                 expected_status=403)
+
+    def test_list_service_providers(self):
+        """Test listing of service provider objects.
+
+        Add two new service providers. List all available service providers.
+        Expect to get list of three service providers (one created by setUp())
+        Test if attributes match.
+
+        """
+        ref_service_providers = {
+            uuid.uuid4().hex: self.sp_ref(),
+            uuid.uuid4().hex: self.sp_ref(),
+        }
+        for id, sp in ref_service_providers.items():
+            url = self.base_url(suffix=id)
+            self.put(url, body={'service_provider': sp}, expected_status=201)
+
+        # Insert ids into service provider object, we will compare it with
+        # responses from server and those include 'id' attribute.
+
+        ref_service_providers[self.SERVICE_PROVIDER_ID] = self.SP_REF
+        for id, sp in ref_service_providers.items():
+            sp['id'] = id
+
+        url = self.base_url()
+        resp = self.get(url)
+        service_providers = resp.result
+        for service_provider in service_providers['service_providers']:
+            id = service_provider['id']
+            self.assertValidEntity(
+                service_provider, ref=ref_service_providers[id],
+                keys_to_check=self.SP_KEYS)
+
+    def test_update_service_provider(self):
+        """Update existing service provider.
+
+        Update default existing service provider and make sure it has been
+        properly change.
+
+        """
+        new_sp_ref = self.sp_ref()
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        resp = self.patch(url, body={'service_provider': new_sp_ref},
+                          expected_status=200)
+        patch_result = resp.result
+        new_sp_ref['id'] = self.SERVICE_PROVIDER_ID
+        self.assertValidEntity(patch_result['service_provider'],
+                               ref=new_sp_ref,
+                               keys_to_check=self.SP_KEYS)
+
+        resp = self.get(url, expected_status=200)
+        get_result = resp.result
+
+        self.assertDictEqual(patch_result['service_provider'],
+                             get_result['service_provider'])
+
+    def test_update_service_provider_immutable_parameters(self):
+        """Update immutable attributes in service provider.
+
+        In this particular case the test will try to change ``id`` attribute.
+        Expectet server to return error code
+
+        """
+        new_sp_ref = {'id': uuid.uuid4().hex}
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        self.patch(url, body={'service_provider': new_sp_ref},
+                   expected_status=403)
+
+    def test_update_service_provider_unknown_parameter(self):
+        new_sp_ref = self.sp_ref()
+        new_sp_ref[uuid.uuid4().hex] = uuid.uuid4().hex
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        self.patch(url, body={'service_provider': new_sp_ref},
+                   expected_status=403)
+
+    def test_update_service_provider_404(self):
+        new_sp_ref = self.sp_ref()
+        new_sp_ref['description'] = uuid.uuid4().hex
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        self.patch(url, body={'service_provider': new_sp_ref},
+                   expected_status=404)
+
+    def test_delete_service_provider(self):
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        self.delete(url, expected_status=204)
+
+    def test_delete_service_provider_404(self):
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        self.delete(url, expected_status=404)

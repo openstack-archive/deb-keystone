@@ -25,7 +25,6 @@ from keystone.openstack.common import log
 LOG = log.getLogger(__name__)
 
 MEDIA_TYPE_JSON = 'application/vnd.openstack.identity-%s+json'
-MEDIA_TYPE_XML = 'application/vnd.openstack.identity-%s+xml'
 
 _VERSIONS = []
 
@@ -89,7 +88,7 @@ def register_version(version):
     _VERSIONS.append(version)
 
 
-class MimeTypes:
+class MimeTypes(object):
     JSON = 'application/json'
     JSON_HOME = 'application/json-home'
 
@@ -141,9 +140,6 @@ class Version(wsgi.Application):
                     {
                         'base': 'application/json',
                         'type': MEDIA_TYPE_JSON % 'v2.0'
-                    }, {
-                        'base': 'application/xml',
-                        'type': MEDIA_TYPE_XML % 'v2.0'
                     }
                 ]
             }
@@ -163,9 +159,6 @@ class Version(wsgi.Application):
                     {
                         'base': 'application/json',
                         'type': MEDIA_TYPE_JSON % 'v3'
-                    }, {
-                        'base': 'application/xml',
-                        'type': MEDIA_TYPE_XML % 'v3'
                     }
                 ]
             }

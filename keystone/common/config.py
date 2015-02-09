@@ -62,20 +62,20 @@ FILE_OPTIONS = {
                         'advertised to clients (NOTE: this does NOT affect '
                         'how Keystone listens for connections). '
                         'Defaults to the base host URL of the request. E.g. a '
-                        'request to http://server:5000/v2.0/users will '
+                        'request to http://server:5000/v3/users will '
                         'default to http://server:5000. You should only need '
                         'to set this value if the base URL contains a path '
-                        '(e.g. /prefix/v2.0) or the endpoint should be found '
+                        '(e.g. /prefix/v3) or the endpoint should be found '
                         'on a different server.'),
         cfg.StrOpt('admin_endpoint',
                    help='The base admin endpoint URL for Keystone that is '
                         'advertised to clients (NOTE: this does NOT affect '
                         'how Keystone listens for connections). '
                         'Defaults to the base host URL of the request. E.g. a '
-                        'request to http://server:35357/v2.0/users will '
+                        'request to http://server:35357/v3/users will '
                         'default to http://server:35357. You should only need '
                         'to set this value if the base URL contains a path '
-                        '(e.g. /prefix/v2.0) or the endpoint should be found '
+                        '(e.g. /prefix/v3) or the endpoint should be found '
                         'on a different server.'),
         cfg.IntOpt('max_project_tree_depth', default=5,
                    help='Maximum depth of the project hierarchy. WARNING: '
@@ -89,10 +89,6 @@ FILE_OPTIONS = {
                    help='The number of worker processes to serve the admin '
                         'WSGI application. Defaults to number of CPUs '
                         '(minimum of 2).'),
-        # default max request size is 112k
-        cfg.IntOpt('max_request_body_size', default=114688,
-                   help='Enforced by optional sizelimit middleware '
-                        '(keystone.middleware:RequestBodySizeLimiter).'),
         cfg.IntOpt('max_param_size', default=64,
                    help='Limit the sizes of user & project ID/names.'),
         # we allow tokens to be a bit larger to accommodate PKI
@@ -143,7 +139,13 @@ FILE_OPTIONS = {
                          'exceeds the maximum length, the operation will fail '
                          'with an HTTP 403 Forbidden error. If set to false, '
                          'passwords are automatically truncated to the '
-                         'maximum length.')],
+                         'maximum length.'),
+        cfg.StrOpt('secure_proxy_ssl_header',
+                   help='The HTTP header used to determine the scheme for the '
+                        'original request, even if it was removed by an SSL '
+                        'terminating proxy. Typical value is '
+                        '"HTTP_X_FORWARDED_PROTO".'),
+    ],
     'identity': [
         cfg.StrOpt('default_domain_id', default='default',
                    help='This references the domain to use for all '
@@ -219,13 +221,18 @@ FILE_OPTIONS = {
         cfg.BoolOpt('enabled', default=True,
                     help='Delegation and impersonation features can be '
                          'optionally disabled.'),
+        cfg.BoolOpt('allow_redelegation', default=False,
+                    help='Enable redelegation feature.'),
+        cfg.IntOpt('max_redelegation_count', default=3,
+                   help='Maximum depth of trust redelegation.'),
         cfg.StrOpt('driver',
                    default='keystone.trust.backends.sql.Trust',
                    help='Trust backend driver.')],
     'os_inherit': [
         cfg.BoolOpt('enabled', default=False,
                     help='role-assignment inheritance to projects from '
-                         'owning domain can be optionally enabled.'),
+                         'owning domain or from projects higher in the '
+                         'hierarchy can be optionally enabled.'),
     ],
     'token': [
         cfg.ListOpt('bind', default=[],
@@ -434,15 +441,43 @@ FILE_OPTIONS = {
         # the backend
         cfg.StrOpt('driver',
                    help='Assignment backend driver.'),
+    ],
+    'resource': [
+        cfg.StrOpt('driver',
+                   help='Resource backend driver. If a resource driver is '
+                        'not specified, the assignment driver will choose '
+                        'the resource driver.'),
         cfg.BoolOpt('caching', default=True,
-                    help='Toggle for assignment caching. This has no effect '
+                    deprecated_opts=[cfg.DeprecatedOpt('caching',
+                                                       group='assignment')],
+                    help='Toggle for resource caching. This has no effect '
                          'unless global caching is enabled.'),
         cfg.IntOpt('cache_time',
-                   help='TTL (in seconds) to cache assignment data. This has '
+                   deprecated_opts=[cfg.DeprecatedOpt('cache_time',
+                                                      group='assignment')],
+                   help='TTL (in seconds) to cache resource data. This has '
+                        'no effect unless global caching is enabled.'),
+        cfg.IntOpt('list_limit',
+                   deprecated_opts=[cfg.DeprecatedOpt('list_limit',
+                                                      group='assignment')],
+                   help='Maximum number of entities that will be returned '
+                        'in a resource collection.'),
+    ],
+    'role': [
+        # The role driver has no default for backward compatibility reasons.
+        # If role driver is not specified, the assignment driver chooses
+        # the backend
+        cfg.StrOpt('driver',
+                   help='Role backend driver.'),
+        cfg.BoolOpt('caching', default=True,
+                    help='Toggle for role caching. This has no effect '
+                         'unless global caching is enabled.'),
+        cfg.IntOpt('cache_time',
+                   help='TTL (in seconds) to cache role data. This has '
                         'no effect unless global caching is enabled.'),
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
-                        'in an assignment collection.'),
+                        'in a role collection.'),
     ],
     'credential': [
         cfg.StrOpt('driver',
@@ -467,6 +502,11 @@ FILE_OPTIONS = {
         cfg.StrOpt('assertion_prefix', default='',
                    help='Value to be used when filtering assertion parameters '
                         'from the environment.'),
+        cfg.StrOpt('remote_id_attribute',
+                   help='Value to be used to obtain the entity ID of the '
+                        'Identity Provider from the environment (e.g. if '
+                        'using the mod_shib plugin this value is '
+                        '`Shib-Identity-Provider`).'),
     ],
     'policy': [
         cfg.StrOpt('driver',
