@@ -11,11 +11,11 @@ Change-Id: Ib9a1e06b2e760a97e3318263b85631c436e23141
 
 Index: keystone/keystone/tests/test_keystoneclient.py
 ===================================================================
---- keystone.orig/keystone/tests/test_keystoneclient.py
-+++ keystone/keystone/tests/test_keystoneclient.py
-@@ -1081,6 +1081,12 @@ class KeystoneClientTests(object):
-         client.auth_token = new_token_id
-         client.tenants.list()
+--- keystone.orig/keystone/tests/test_keystoneclient.py	2015-02-10 01:18:12.000000000 +0100
++++ keystone/keystone/tests/test_keystoneclient.py	2015-02-10 01:18:13.000000000 +0100
+@@ -32,6 +32,12 @@
+ CONF = config.CONF
+ DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
  
 +    def setUp(self):
 +        if os.environ.get('KSCTEST_PATH'):
@@ -24,5 +24,5 @@ Index: keystone/keystone/tests/test_keystoneclient.py
 +        super(KcMasterTestCase, self).setUp()
 +
  
- class KcMasterTestCase(CompatTestCase, KeystoneClientTests):
-     checkout_info = (KEYSTONECLIENT_REPO, 'master')
+ class ClientDrivenTestCase(tests.TestCase):
+ 
