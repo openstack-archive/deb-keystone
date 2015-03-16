@@ -17,7 +17,7 @@ import pep8
 import testtools
 
 from keystone.hacking import checks
-from keystone.tests.ksfixtures import hacking as hacking_fixtures
+from keystone.tests.unit.ksfixtures import hacking as hacking_fixtures
 
 
 class BaseStyleCheck(testtools.TestCase):
@@ -129,4 +129,15 @@ class TestCheckOsloNamespaceImports(BaseStyleCheck):
     def test(self):
         code = self.code_ex.oslo_namespace_imports['code']
         errors = self.code_ex.oslo_namespace_imports['expected_errors']
+        self.assert_has_errors(code, expected_errors=errors)
+
+
+class TestDictConstructorWithSequenceCopy(BaseStyleCheck):
+
+    def get_checker(self):
+        return checks.dict_constructor_with_sequence_copy
+
+    def test(self):
+        code = self.code_ex.dict_constructor['code']
+        errors = self.code_ex.dict_constructor['expected_errors']
         self.assert_has_errors(code, expected_errors=errors)

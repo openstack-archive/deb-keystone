@@ -12,16 +12,16 @@
 
 import datetime
 
+from oslo_config import cfg
 from oslo_utils import timeutils
 
 from keystone.common import kvs
-from keystone import config
 from keystone.contrib import revoke
 from keystone import exception
 from keystone.openstack.common import versionutils
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 _EVENT_KEY = 'os-revoke-events'
 _KVS_BACKEND = 'openstack.kvs.Memory'
@@ -39,7 +39,7 @@ class Revoke(revoke.Driver):
         self._store = kvs.get_key_value_store('os-revoke-driver')
         self._store.configure(backing_store=_KVS_BACKEND, **kwargs)
 
-    def _get_event(self):
+    def _list_events(self):
         try:
             return self._store.get(_EVENT_KEY)
         except exception.NotFound:
@@ -53,7 +53,7 @@ class Revoke(revoke.Driver):
         # TODO(ayoung): Store the time of the oldest event so that the
         # prune process can be skipped if none of the events have timed out.
         with self._store.get_lock(_EVENT_KEY) as lock:
-            events = self._get_event()
+            events = self._list_events()
             if new_event is not None:
                 events.append(new_event)
 
@@ -66,7 +66,7 @@ class Revoke(revoke.Driver):
             self._store.set(_EVENT_KEY, pruned, lock)
         return results
 
-    def get_events(self, last_fetch=None):
+    def list_events(self, last_fetch=None):
         return self._prune_expired_events_and_get(last_fetch=last_fetch)
 
     def revoke(self, event):

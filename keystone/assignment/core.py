@@ -16,22 +16,22 @@
 
 import abc
 
+from oslo_config import cfg
+from oslo_log import log
 import six
 
 from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LI
 from keystone import notifications
-from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 SHOULD_CACHE = cache.should_cache_fn('role')
 
@@ -74,9 +74,8 @@ def deprecated_to_resource_api(f):
 
 
 @dependency.provider('assignment_api')
-@dependency.optional('revoke_api')
 @dependency.requires('credential_api', 'identity_api', 'resource_api',
-                     'role_api')
+                     'revoke_api', 'role_api')
 class Manager(manager.Manager):
     """Default pivot point for the Assignment backend.
 
@@ -96,7 +95,7 @@ class Manager(manager.Manager):
         # compatibility reasons from the time when identity, resource and
         # assignment were all part of identity.
         if assignment_driver is None:
-            identity_driver = dependency.REGISTRY['identity_api'].driver
+            identity_driver = dependency.get_provider('identity_api').driver
             assignment_driver = identity_driver.default_assignment_driver()
 
         super(Manager, self).__init__(assignment_driver)
@@ -242,23 +241,28 @@ class Manager(manager.Manager):
         """
         self.resource_api.get_project(tenant_id)
         try:
-            self.role_api.get_role(config.CONF.member_role_id)
+            self.role_api.get_role(CONF.member_role_id)
             self.driver.add_role_to_user_and_project(
                 user_id,
                 tenant_id,
-                config.CONF.member_role_id)
+                CONF.member_role_id)
         except exception.RoleNotFound:
             LOG.info(_LI("Creating the default role %s "
                          "because it does not exist."),
-                     config.CONF.member_role_id)
+                     CONF.member_role_id)
             role = {'id': CONF.member_role_id,
                     'name': CONF.member_role_name}
-            self.role_api.create_role(config.CONF.member_role_id, role)
+            try:
+                self.role_api.create_role(CONF.member_role_id, role)
+            except exception.Conflict:
+                LOG.info(_LI("Creating the default role %s failed because it "
+                             "was already created"),
+                         CONF.member_role_id)
             # now that default role exists, the add should succeed
             self.driver.add_role_to_user_and_project(
                 user_id,
                 tenant_id,
-                config.CONF.member_role_id)
+                CONF.member_role_id)
 
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
         self.resource_api.get_project(tenant_id)
@@ -280,9 +284,8 @@ class Manager(manager.Manager):
                 self.driver.remove_role_from_user_and_project(user_id,
                                                               tenant_id,
                                                               role_id)
-                if self.revoke_api:
-                    self.revoke_api.revoke_by_grant(role_id, user_id=user_id,
-                                                    project_id=tenant_id)
+                self.revoke_api.revoke_by_grant(role_id, user_id=user_id,
+                                                project_id=tenant_id)
 
             except exception.RoleNotFound:
                 LOG.debug("Removing role %s failed because it does not exist.",
@@ -378,9 +381,8 @@ class Manager(manager.Manager):
         self.driver.remove_role_from_user_and_project(user_id, tenant_id,
                                                       role_id)
         self.identity_api.emit_invalidate_user_token_persistence(user_id)
-        if self.revoke_api:
-            self.revoke_api.revoke_by_grant(role_id, user_id=user_id,
-                                            project_id=tenant_id)
+        self.revoke_api.revoke_by_grant(role_id, user_id=user_id,
+                                        project_id=tenant_id)
 
     @notifications.internal(notifications.INVALIDATE_USER_TOKEN_PERSISTENCE)
     def _emit_invalidate_user_token_persistence(self, user_id):
@@ -427,11 +429,10 @@ class Manager(manager.Manager):
                      domain_id=None, project_id=None,
                      inherited_to_projects=False, context=None):
         if group_id is None:
-            if self.revoke_api:
-                self.revoke_api.revoke_by_grant(user_id=user_id,
-                                                role_id=role_id,
-                                                domain_id=domain_id,
-                                                project_id=project_id)
+            self.revoke_api.revoke_by_grant(user_id=user_id,
+                                            role_id=role_id,
+                                            domain_id=domain_id,
+                                            project_id=project_id)
         else:
             try:
                 # NOTE(morganfainberg): The user ids are the important part
@@ -440,10 +441,9 @@ class Manager(manager.Manager):
                     if user['id'] != user_id:
                         self._emit_invalidate_user_token_persistence(
                             user['id'])
-                        if self.revoke_api:
-                            self.revoke_api.revoke_by_grant(
-                                user_id=user['id'], role_id=role_id,
-                                domain_id=domain_id, project_id=project_id)
+                        self.revoke_api.revoke_by_grant(
+                            user_id=user['id'], role_id=role_id,
+                            domain_id=domain_id, project_id=project_id)
             except exception.GroupNotFound:
                 LOG.debug('Group %s not found, no tokens to invalidate.',
                           group_id)
@@ -725,7 +725,7 @@ class Driver(object):
                             inherited_to_projects=False):
         """Checks an assignment/grant role id.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises: keystone.exception.RoleAssignmentNotFound
         :returns: None or raises an exception if grant not found
 
         """
@@ -737,7 +737,7 @@ class Driver(object):
                      inherited_to_projects=False):
         """Deletes assignments/grants.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises: keystone.exception.RoleAssignmentNotFound
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -897,13 +897,16 @@ class Driver(object):
 class RoleManager(manager.Manager):
     """Default pivot point for the Role backend."""
 
+    _ROLE = 'role'
+
     def __init__(self):
         # If there is a specific driver specified for role, then use it.
         # Otherwise retrieve the driver type from the assignment driver.
         role_driver = CONF.role.driver
 
         if role_driver is None:
-            assignment_driver = dependency.REGISTRY['assignment_api'].driver
+            assignment_driver = (
+                dependency.get_provider('assignment_api').driver)
             role_driver = assignment_driver.default_role_driver()
 
         super(RoleManager, self).__init__(role_driver)
@@ -913,9 +916,9 @@ class RoleManager(manager.Manager):
     def get_role(self, role_id):
         return self.driver.get_role(role_id)
 
-    @notifications.created('role')
-    def create_role(self, role_id, role):
+    def create_role(self, role_id, role, initiator=None):
         ret = self.driver.create_role(role_id, role)
+        notifications.Audit.created(self._ROLE, role_id, initiator)
         if SHOULD_CACHE(ret):
             self.get_role.set(ret, self, role_id)
         return ret
@@ -924,14 +927,13 @@ class RoleManager(manager.Manager):
     def list_roles(self, hints=None):
         return self.driver.list_roles(hints or driver_hints.Hints())
 
-    @notifications.updated('role')
-    def update_role(self, role_id, role):
+    def update_role(self, role_id, role, initiator=None):
         ret = self.driver.update_role(role_id, role)
+        notifications.Audit.updated(self._ROLE, role_id, initiator)
         self.get_role.invalidate(self, role_id)
         return ret
 
-    @notifications.deleted('role')
-    def delete_role(self, role_id):
+    def delete_role(self, role_id, initiator=None):
         try:
             self.assignment_api.delete_tokens_for_role_assignments(role_id)
         except exception.NotImplemented:
@@ -946,6 +948,7 @@ class RoleManager(manager.Manager):
             pass
         self.assignment_api.delete_role_assignments(role_id)
         self.driver.delete_role(role_id)
+        notifications.Audit.deleted(self._ROLE, role_id, initiator)
         self.get_role.invalidate(self, role_id)
 
 

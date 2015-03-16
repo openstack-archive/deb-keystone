@@ -14,14 +14,15 @@
 
 import logging
 
-from oslo import i18n
+from oslo_config import cfg
+import oslo_i18n
 
 
 # NOTE(dstanek): i18n.enable_lazy() must be called before
 # keystone.i18n._() is called to ensure it has the desired lazy lookup
 # behavior. This includes cases, like keystone.exceptions, where
 # keystone.i18n._() is called at import time.
-i18n.enable_lazy()
+oslo_i18n.enable_lazy()
 
 
 from keystone.common import environment
@@ -30,7 +31,7 @@ from keystone.server import common
 from keystone import service as keystone_service
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 def initialize_application(name):

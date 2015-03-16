@@ -17,12 +17,15 @@
 
 import functools
 
+from oslo_config import cfg
+
 from keystone.assignment import controllers
 from keystone.common import json_home
 from keystone.common import router
 from keystone.common import wsgi
-from keystone import config
 
+
+CONF = cfg.CONF
 
 build_os_inherit_relation = functools.partial(
     json_home.build_v3_extension_resource_relation,
@@ -31,7 +34,7 @@ build_os_inherit_relation = functools.partial(
 
 class Public(wsgi.ComposableRouter):
     def add_routes(self, mapper):
-        tenant_controller = controllers.Tenant()
+        tenant_controller = controllers.TenantAssignment()
         mapper.connect('/tenants',
                        controller=tenant_controller,
                        action='get_projects_for_token',
@@ -40,19 +43,8 @@ class Public(wsgi.ComposableRouter):
 
 class Admin(wsgi.ComposableRouter):
     def add_routes(self, mapper):
-        # Tenant Operations
-        tenant_controller = controllers.Tenant()
-        mapper.connect('/tenants',
-                       controller=tenant_controller,
-                       action='get_all_projects',
-                       conditions=dict(method=['GET']))
-        mapper.connect('/tenants/{tenant_id}',
-                       controller=tenant_controller,
-                       action='get_project',
-                       conditions=dict(method=['GET']))
-
         # Role Operations
-        roles_controller = controllers.Role()
+        roles_controller = controllers.RoleAssignmentV2()
         mapper.connect('/tenants/{tenant_id}/users/{user_id}/roles',
                        controller=roles_controller,
                        action='get_user_roles',
@@ -66,17 +58,8 @@ class Admin(wsgi.ComposableRouter):
 class Routers(wsgi.RoutersBase):
 
     def append_v3_routers(self, mapper, routers):
-        routers.append(
-            router.Router(controllers.DomainV3(),
-                          'domains', 'domain',
-                          resource_descriptions=self.v3_resources))
 
-        project_controller = controllers.ProjectV3()
-        routers.append(
-            router.Router(project_controller,
-                          'projects', 'project',
-                          resource_descriptions=self.v3_resources))
-
+        project_controller = controllers.ProjectAssignmentV3()
         self._add_resource(
             mapper, project_controller,
             path='/users/{user_id}/projects',
@@ -86,13 +69,13 @@ class Routers(wsgi.RoutersBase):
                 'user_id': json_home.Parameters.USER_ID,
             })
 
-        role_controller = controllers.RoleV3()
         routers.append(
-            router.Router(role_controller, 'roles', 'role',
+            router.Router(controllers.RoleV3(), 'roles', 'role',
                           resource_descriptions=self.v3_resources))
 
+        grant_controller = controllers.GrantAssignmentV3()
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/projects/{project_id}/users/{user_id}/roles/{role_id}',
             get_head_action='check_grant',
             put_action='create_grant',
@@ -104,7 +87,7 @@ class Routers(wsgi.RoutersBase):
                 'user_id': json_home.Parameters.USER_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/projects/{project_id}/groups/{group_id}/roles/{role_id}',
             get_head_action='check_grant',
             put_action='create_grant',
@@ -116,7 +99,7 @@ class Routers(wsgi.RoutersBase):
                 'role_id': json_home.Parameters.ROLE_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/projects/{project_id}/users/{user_id}/roles',
             get_action='list_grants',
             rel=json_home.build_v3_resource_relation('project_user_roles'),
@@ -125,7 +108,7 @@ class Routers(wsgi.RoutersBase):
                 'user_id': json_home.Parameters.USER_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/projects/{project_id}/groups/{group_id}/roles',
             get_action='list_grants',
             rel=json_home.build_v3_resource_relation('project_group_roles'),
@@ -134,7 +117,7 @@ class Routers(wsgi.RoutersBase):
                 'project_id': json_home.Parameters.PROJECT_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/domains/{domain_id}/users/{user_id}/roles/{role_id}',
             get_head_action='check_grant',
             put_action='create_grant',
@@ -146,7 +129,7 @@ class Routers(wsgi.RoutersBase):
                 'user_id': json_home.Parameters.USER_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/domains/{domain_id}/groups/{group_id}/roles/{role_id}',
             get_head_action='check_grant',
             put_action='create_grant',
@@ -158,7 +141,7 @@ class Routers(wsgi.RoutersBase):
                 'role_id': json_home.Parameters.ROLE_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/domains/{domain_id}/users/{user_id}/roles',
             get_action='list_grants',
             rel=json_home.build_v3_resource_relation('domain_user_roles'),
@@ -167,7 +150,7 @@ class Routers(wsgi.RoutersBase):
                 'user_id': json_home.Parameters.USER_ID,
             })
         self._add_resource(
-            mapper, role_controller,
+            mapper, grant_controller,
             path='/domains/{domain_id}/groups/{group_id}/roles',
             get_action='list_grants',
             rel=json_home.build_v3_resource_relation('domain_group_roles'),
@@ -182,9 +165,9 @@ class Routers(wsgi.RoutersBase):
                           resource_descriptions=self.v3_resources,
                           is_entity_implemented=False))
 
-        if config.CONF.os_inherit.enabled:
+        if CONF.os_inherit.enabled:
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/domains/{domain_id}/users/{user_id}/roles/'
                 '{role_id}/inherited_to_projects',
                 get_head_action='check_grant',
@@ -198,7 +181,7 @@ class Routers(wsgi.RoutersBase):
                     'user_id': json_home.Parameters.USER_ID,
                 })
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/domains/{domain_id}/groups/{group_id}/roles/'
                 '{role_id}/inherited_to_projects',
                 get_head_action='check_grant',
@@ -212,7 +195,7 @@ class Routers(wsgi.RoutersBase):
                     'role_id': json_home.Parameters.ROLE_ID,
                 })
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/domains/{domain_id}/groups/{group_id}/roles/'
                 'inherited_to_projects',
                 get_action='list_grants',
@@ -223,7 +206,7 @@ class Routers(wsgi.RoutersBase):
                     'group_id': json_home.Parameters.GROUP_ID,
                 })
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/domains/{domain_id}/users/{user_id}/roles/'
                 'inherited_to_projects',
                 get_action='list_grants',
@@ -234,7 +217,7 @@ class Routers(wsgi.RoutersBase):
                     'user_id': json_home.Parameters.USER_ID,
                 })
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/projects/{project_id}/users/{user_id}/roles/'
                 '{role_id}/inherited_to_projects',
                 get_head_action='check_grant',
@@ -248,7 +231,7 @@ class Routers(wsgi.RoutersBase):
                     'role_id': json_home.Parameters.ROLE_ID,
                 })
             self._add_resource(
-                mapper, role_controller,
+                mapper, grant_controller,
                 path='/OS-INHERIT/projects/{project_id}/groups/{group_id}/'
                 'roles/{role_id}/inherited_to_projects',
                 get_head_action='check_grant',

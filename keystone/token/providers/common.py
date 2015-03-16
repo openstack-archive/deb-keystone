@@ -12,23 +12,24 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_log import log
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import six
 from six.moves.urllib import parse
 
 from keystone.common import dependency
-from keystone import config
 from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _, _LE
-from keystone.openstack.common import log
+from keystone.openstack.common import versionutils
 from keystone import token
 from keystone.token import provider
 
 
 LOG = log.getLogger(__name__)
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 class V2TokenDataHelper(object):
@@ -143,8 +144,8 @@ class V2TokenDataHelper(object):
         return services.values()
 
 
-@dependency.requires('assignment_api', 'catalog_api', 'identity_api',
-                     'resource_api', 'role_api', 'trust_api')
+@dependency.requires('assignment_api', 'catalog_api', 'federation_api',
+                     'identity_api', 'resource_api', 'role_api', 'trust_api')
 class V3TokenDataHelper(object):
     """Token data helper."""
     def __init__(self):
@@ -325,6 +326,14 @@ class V3TokenDataHelper(object):
             # TODO(ayoung): Enforce Endpoints for trust
             token_data['catalog'] = service_catalog
 
+    def _populate_service_providers(self, token_data):
+        if 'service_providers' in token_data:
+            return
+
+        service_providers = self.federation_api.get_enabled_service_providers()
+        if service_providers:
+            token_data['service_providers'] = service_providers
+
     def _populate_token_dates(self, token_data, expires=None, trust=None,
                               issued_at=None):
         if not expires:
@@ -346,11 +355,18 @@ class V3TokenDataHelper(object):
             LOG.error(msg)
             raise exception.UnexpectedError(msg)
 
-    def get_token_data(self, user_id, method_names, extras,
+    def get_token_data(self, user_id, method_names, extras=None,
                        domain_id=None, project_id=None, expires=None,
                        trust=None, token=None, include_catalog=True,
                        bind=None, access_token=None, issued_at=None,
                        audit_info=None):
+        if extras is None:
+            extras = {}
+        if extras:
+            versionutils.deprecated(
+                what='passing token data with "extras"',
+                as_of=versionutils.deprecated.KILO,
+                in_favor_of='well-defined APIs')
         token_data = {'methods': method_names,
                       'extras': extras}
 
@@ -376,15 +392,15 @@ class V3TokenDataHelper(object):
         if include_catalog:
             self._populate_service_catalog(token_data, user_id, domain_id,
                                            project_id, trust)
+        self._populate_service_providers(token_data)
         self._populate_token_dates(token_data, expires=expires, trust=trust,
                                    issued_at=issued_at)
         self._populate_oauth_section(token_data, access_token)
         return {'token': token_data}
 
 
-@dependency.optional('oauth_api')
-@dependency.requires('catalog_api', 'identity_api', 'resource_api',
-                     'role_api', 'trust_api')
+@dependency.requires('catalog_api', 'identity_api', 'oauth_api',
+                     'resource_api', 'role_api', 'trust_api')
 class BaseProvider(provider.Provider):
     def __init__(self, *args, **kwargs):
         super(BaseProvider, self).__init__(*args, **kwargs)
@@ -439,11 +455,8 @@ class BaseProvider(provider.Provider):
 
         access_token = None
         if 'oauth1' in method_names:
-            if self.oauth_api:
-                access_token_id = auth_context['access_token_id']
-                access_token = self.oauth_api.get_access_token(access_token_id)
-            else:
-                raise exception.Forbidden(_('Oauth is disabled.'))
+            access_token_id = auth_context['access_token_id']
+            access_token = self.oauth_api.get_access_token(access_token_id)
 
         token_data = self.v3_token_data_helper.get_token_data(
             user_id,
@@ -463,6 +476,11 @@ class BaseProvider(provider.Provider):
         return token_id, token_data
 
     def _handle_mapped_tokens(self, auth_context, project_id, domain_id):
+        def get_federated_domain():
+            return (CONF.federation.federated_domain_name or
+                    federation.FEDERATED_DOMAIN_KEYWORD)
+
+        federated_domain = get_federated_domain()
         user_id = auth_context['user_id']
         group_ids = auth_context['group_ids']
         idp = auth_context[federation.IDENTITY_PROVIDER]
@@ -474,6 +492,10 @@ class BaseProvider(provider.Provider):
                 federation.FEDERATION: {
                     'identity_provider': {'id': idp},
                     'protocol': {'id': protocol}
+                },
+                'domain': {
+                    'id': federated_domain,
+                    'name': federated_domain
                 }
             }
         }
@@ -493,6 +515,16 @@ class BaseProvider(provider.Provider):
         if not token_ref:
             raise exception.Unauthorized()
         return token_ref
+
+    def _assert_is_not_federation_token(self, token_ref):
+        """Make sure we aren't using v2 auth on a federation token."""
+        token_data = token_ref.get('token_data')
+        if (token_data and self.get_token_version(token_data) ==
+                token.provider.V3):
+            if 'OS-FEDERATION' in token_data['token']['user']:
+                msg = _('Attempting to use OS-FEDERATION token with V2 '
+                        'Identity Service, use V3 Authentication')
+                raise exception.Unauthorized(msg)
 
     def _assert_default_domain(self, token_ref):
         """Make sure we are operating on default domain only."""
@@ -540,6 +572,7 @@ class BaseProvider(provider.Provider):
 
     def validate_v2_token(self, token_ref):
         try:
+            self._assert_is_not_federation_token(token_ref)
             self._assert_default_domain(token_ref)
             # FIXME(gyee): performance or correctness? Should we return the
             # cached token or reconstruct it? Obviously if we are going with
@@ -615,7 +648,6 @@ class BaseProvider(provider.Provider):
             token_data = self.v3_token_data_helper.get_token_data(
                 token_ref['user']['id'],
                 ['password', 'token'],
-                {},
                 project_id=project_id,
                 bind=token_ref.get('bind'),
                 expires=token_ref['expires'],

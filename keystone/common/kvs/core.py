@@ -22,15 +22,15 @@ from dogpile.cache import proxy
 from dogpile.cache import region
 from dogpile.cache import util as dogpile_util
 from dogpile.core import nameregistry
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import importutils
 import six
 
-from keystone.common import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LI
 from keystone.i18n import _LW
-from keystone.openstack.common import log
 
 
 __all__ = ['KeyValueStore', 'KeyValueStoreLock', 'LockTimeout',
@@ -38,7 +38,7 @@ __all__ = ['KeyValueStore', 'KeyValueStoreLock', 'LockTimeout',
 
 
 BACKENDS_REGISTERED = False
-CONF = config.CONF
+CONF = cfg.CONF
 KEY_VALUE_STORE_REGISTRY = weakref.WeakValueDictionary()
 LOCK_WINDOW = 1
 LOG = log.getLogger(__name__)
@@ -335,7 +335,8 @@ class KeyValueStore(object):
         timeout.
         """
         self._assert_configured()
-        return KeyValueStoreLock(self._mutex(key), key, self.locking)
+        return KeyValueStoreLock(self._mutex(key), key, self.locking,
+                                 self._lock_timeout)
 
     @contextlib.contextmanager
     def _action_with_lock(self, key, lock=None):
@@ -367,10 +368,11 @@ class KeyValueStoreLock(object):
 
     This is only a write lock, and will not prevent reads from occurring.
     """
-    def __init__(self, mutex, key, locking_enabled=True):
+    def __init__(self, mutex, key, locking_enabled=True, lock_timeout=0):
         self.mutex = mutex
         self.key = key
         self.enabled = locking_enabled
+        self.lock_timeout = lock_timeout
         self.active = False
         self.acquire_time = 0
 
@@ -386,11 +388,11 @@ class KeyValueStoreLock(object):
 
     @property
     def expired(self):
-        if self.mutex.lock_timeout == 0:
-            return False
-        else:
+        if self.lock_timeout:
             calculated = time.time() - self.acquire_time + LOCK_WINDOW
-            return calculated > self.mutex.lock_timeout
+            return calculated > self.lock_timeout
+        else:
+            return False
 
     def release(self):
         if self.enabled:

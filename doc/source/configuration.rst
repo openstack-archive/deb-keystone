@@ -48,6 +48,13 @@ To make the above change persistent,
 Starting and Stopping Keystone under Eventlet
 =============================================
 
+.. WARNING::
+
+    Running keystone under eventlet has been deprecated as of the Kilo release.
+    Support for utilizing eventlet will be removed as of the M-release. The
+    recommended deployment is to run keystone in a WSGI server
+    (e.g. ``mod_wsgi`` under ``HTTPD``).
+
 Keystone can be run using either its built-in eventlet server or it can be run
 embedded in a web server. While the eventlet server is convenient and easy to
 use, it's lacking in security features that have been developed into Internet-
@@ -108,6 +115,8 @@ The primary configuration file is organized into the following sections:
 * ``[credential]`` - Credential system driver configuration
 * ``[endpoint_filter]`` - Endpoint filtering extension configuration
 * ``[endpoint_policy]`` - Endpoint policy extension configuration
+* ``[eventlet_server]`` - Eventlet server configuration
+* ``[eventlet_server_ssl]`` - Eventlet server SSL configuration
 * ``[federation]`` - Federation driver configuration
 * ``[identity]`` - Identity system driver configuration
 * ``[identity_mapping]`` - Identity mapping system driver configuration
@@ -123,7 +132,7 @@ The primary configuration file is organized into the following sections:
 * ``[role]`` - Role system driver configuration
 * ``[saml]`` - SAML configuration options
 * ``[signing]`` - Cryptographic signatures for PKI based tokens
-* ``[ssl]`` - SSL configuration
+* ``[ssl]`` - SSL certificate generation configuration
 * ``[token]`` - Token driver & token provider configuration
 * ``[trust]`` - Trust extension configuration
 
@@ -393,41 +402,54 @@ configuring the following property.
 * ``provider`` - token provider driver. Defaults to
   ``keystone.token.providers.uuid.Provider``
 
-Note that ``token_format`` in the ``[signing]`` section is deprecated but still
-being supported for backward compatibility. Therefore, if ``provider`` is set
-to ``keystone.token.providers.pki.Provider``, ``token_format`` must be ``PKI``.
-Conversely, if ``provider`` is ``keystone.token.providers.uuid.Provider``,
-``token_format`` must be ``UUID``.
 
-For a customized provider, ``token_format`` must not be set to ``PKI`` or
-``UUID``.
+UUID, PKI, PKIZ, or Fernet?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PKI or UUID?
-^^^^^^^^^^^^
+Each token format uses different technologies to achieve various performance,
+scaling and architectural requirements.
 
-UUID-based tokens are randomly generated opaque strings that are issued and
-validated by the identity service. They must be persisted by the identity
-service in order to be later validated, and revoking them is simply a matter of
+UUID tokens contain randomly generated UUID4 payloads that are issued and
+validated by the identity service. They are encoded using their hex digest for
+transport and are thus URL-friendly. They must be persisted by the identity
+service in order to be later validated. Revoking them is simply a matter of
 deleting them from the token persistence backend.
 
-PKI-based tokens are Cryptographic Message Syntax (CMS) strings that can be
-verified offline using keystone's public signing key. The only reason for them
-to be persisted by the identity service is to later build token revocation
-lists (explicit lists of tokens that have been revoked), otherwise they are
-theoretically ephemeral. PKI tokens should therefore have much better scaling
-characteristics (decentralized validation). They are base-64 encoded (and are
-therefore not URL-friendly without encoding) and may be too long to fit in
-either headers or URLs if they contain extensive service catalogs or other
-additional attributes.
+Both PKI and PKIZ tokens contain JSON payloads that represent the entire token
+validation response that would normally be retrieved from keystone. The payload
+is then signed using `Cryptographic Message Syntax (CMS)
+<http://en.wikipedia.org/wiki/Cryptographic_Message_Syntax>`_. The combination
+of CMS and the exhaustive payload allows PKI and PKIZ tokens to be verified
+offline using keystone's public signing key. The only reason for them to be
+persisted by the identity service is to later build token revocation *lists*
+(explicit lists of tokens that have been revoked), otherwise they are
+theoretically ephemeral when supported by token revocation *events* (which
+describe invalidated tokens rather than enumerate them). PKIZ tokens add zlib
+compression after signing to achieve a smaller overall token size. To make them
+URL-friendly, PKI tokens are base64 encoded and then arbitrarily manipulated to
+replace unsafe characters with safe ones whereas PKIZ tokens use conventional
+base64url encoding. Due to the size of the payload and the overhead incurred by
+the CMS format, both PKI and PKIZ tokens may be too long to fit in either
+headers or URLs if they contain extensive service catalogs or other additional
+attributes. Some third-party applications such as web servers and clients may
+need to be recompiled from source to customize the limitations that PKI and
+PKIZ tokens would otherwise exceed). Both PKI and PKIZ tokens require signing
+certificates which may be created using ``keystone-manage pki_setup`` for
+demonstration purposes (this is not recommended for production deployments: use
+certificates issued by an trusted CA instead).
+
+Fernet tokens contain a limited amount of identity and authorization data in a
+`MessagePacked <http://msgpack.org/>`_ payload. The payload is then wrapped as
+a `Fernet <https://github.com/fernet/spec>`_ message for transport, where
+Fernet provides the required web safe characteristics for use in URLs and
+headers. Fernet tokens require symmetric encryption keys which can be
+established using ``keystone-manage fernet_setup`` and periodically rotated
+using ``keystone-manage fernet_rotate``.
 
 .. WARNING::
-    Both UUID and PKI-based tokens are bearer tokens, meaning that they must be
-    protected from unnecessary disclosure to prevent unauthorized access.
-
-The current architectural approaches for both UUID and PKI-based tokens have
-pain points exposed by environments under heavy load or with a large service
-catalog (search bugs and blueprints for the latest details and potential
-solutions).
+    UUID, PKI, PKIZ, and Fernet tokens are all bearer tokens, meaning that they
+    must be protected from unnecessary disclosure to prevent unauthorized
+    access.
 
 Caching Layer
 -------------
@@ -705,6 +727,54 @@ If ``keystone-manage pki_setup`` is not used then these options don't need to
 be set.
 
 
+Encryption Keys for Fernet
+--------------------------
+
+``keystone-manage fernet_setup`` will attempt to create a key repository as
+configured in the ``[fernet_tokens]`` section of ``keystone.conf`` and
+bootstrap it with encryption keys.
+
+A single 256-bit key is actually composed of two smaller keys: a 128-bit key
+used for SHA256 HMAC signing and a 128-bit key used for AES encryption. See the
+`Fernet token <https://github.com/fernet/spec>`_ specification for more detail.
+
+``keystone-manage fernet_rotate`` will rotate encryption keys through the
+following states:
+
+* **Staged key**: In a key rotation, a new key is introduced into the rotation
+  in this state. Only one key is considered to be the *staged* key at any given
+  time. This key will become the *primary* during the *next* key rotation. This
+  key is only used to validate tokens and serves to avoid race conditions in
+  multi-node deployments (all nodes should recognize all *primary* keys in the
+  deployment at all times). In a multi-node Keystone deployment this would
+  allow for the *staged* key to be replicated to all Keystone nodes before
+  being promoted to *primary* on a single node. This prevents the case where a
+  *primary* key is created on one Keystone node and tokens encryted/signed with
+  that new *primary* are rejected on another Keystone node because the new
+  *primary* doesn't exist there yet.
+
+* **Primary key**: In a key rotation, the old *staged* key is promoted to be
+  the *primary*. Only one key is considered to be the *primary* key at any
+  given time. This is the key used to generate new tokens. This key is also
+  used to validate previously generated tokens.
+
+* **Secondary keys**: In a key rotation, the old *primary* key is demoted to be
+  a *secondary* key. *Secondary* keys are only used to validate previously
+  generated tokens. You can maintain any number of *secondary* keys, up to
+  ``[fernet_tokens] max_active_keys`` (where "active" refers to the sum of all
+  recognized keys in any state: *staged*, *primary* or *secondary*). When
+  ``max_active_keys`` is exceeded during a key rotation, the oldest keys are
+  discarded.
+
+When a new primary key is created, all new tokens will be encrypted using the
+new primary key. The old primary key is demoted to a secondary key, which can
+still be used for validating tokens. Excess secondary keys (beyond
+``[fernet_tokens] max_active_keys``) are revoked. Revoked keys are permanently
+deleted.
+
+Rotating keys too frequently, or with ``[fernet_tokens] max_active_keys`` set
+too low, will cause tokens to become invalid prior to their expiration.
+
 Service Catalog
 ---------------
 
@@ -787,9 +857,18 @@ SSL
 ---
 
 Keystone may be configured to support SSL and 2-way SSL out-of-the-box. The
-X509 certificates used by Keystone can be generated by keystone-manage or
-obtained externally and configured for use with Keystone as described in this
-section. Here is the description of each of them and their purpose:
+X509 certificates used by Keystone can be generated by ``keystone-manage``
+or obtained externally and configured for use with Keystone as described in
+this section. Here is the description of each of them and their purpose:
+
+.. WARNING::
+
+    The SSL configuration options available to the eventlet server
+    (``keystone-all``) described here are severely limited. A secure
+    deployment should have Keystone running in a web server (such as Apache
+    HTTPd), or behind an SSL terminator. When running Keystone in a web server
+    or behind an SSL terminator the options described in this section have no
+    effect and SSL is configured in the web server or SSL terminator.
 
 Types of certificates
 ^^^^^^^^^^^^^^^^^^^^^
@@ -808,24 +887,29 @@ certificates are just provided as an example.
 Configuration
 ^^^^^^^^^^^^^
 
-To enable SSL modify the etc/keystone.conf file accordingly
-under the [ssl] section. SSL configuration example using the included sample
-certificates:
+To enable SSL modify the ``etc/keystone.conf`` file under the ``[ssl]`` and
+``[eventlet_server_ssl]`` sections. The following is an SSL configuration
+example using the included sample certificates:
 
 .. code-block:: ini
 
-    [ssl]
+    [eventlet_server_ssl]
     enable = True
     certfile = <path to keystone.pem>
     keyfile = <path to keystonekey.pem>
     ca_certs = <path to ca.pem>
-    ca_key = <path to cakey.pem>
     cert_required = False
+
+    [ssl]
+    ca_key = <path to cakey.pem>
+    key_size = 1024
+    valid_days=3650
+    cert_subject=/C=US/ST=Unset/L=Unset/O=Unset/CN=localhost
 
 * ``enable``: True enables SSL. Defaults to False.
 * ``certfile``: Path to Keystone public certificate file.
 * ``keyfile``: Path to Keystone private certificate file. If the private key is
-  included in the certfile, the keyfile maybe omitted.
+  included in the certfile, the keyfile may be omitted.
 * ``ca_certs``: Path to CA trust chain.
 * ``cert_required``: Requires client certificate. Defaults to False.
 
@@ -837,10 +921,10 @@ When generating SSL certificates the following values are read
 * ``ca_key``: The private key for the CA. Defaults to
   ``/etc/keystone/ssl/certs/cakey.pem``.
 * ``cert_subject``: The subject to set in the certificate. Defaults to
-  /C=US/ST=Unset/L=Unset/O=Unset/CN=localhost. When setting the subject it is
-  important to set CN to be the address of the server so client validation will
-  succeed. This generally means having the subject be at least
-  /CN=<keystone ip>
+  ``/C=US/ST=Unset/L=Unset/O=Unset/CN=localhost``. When setting the subject it
+  is important to set CN to be the address of the server so client validation
+  will succeed. This generally means having the subject be at least
+  ``/CN=<keystone ip>``
 
 Generating SSL certificates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1006,7 +1090,7 @@ API call in question. For example:
 
 .. code-block:: javascript
 
-    "identity:create_user": [["role:admin", "domain_id:%(user.domain_id)s"]]
+    "identity:create_user": "role:admin and domain_id:%(user.domain_id)s"
 
 Indicates that to create a user you must have the admin role in your token and
 in addition the domain_id in your token (which implies this must be a domain
@@ -1032,7 +1116,7 @@ The following attributes are available
 
   .. code-block:: javascript
 
-    "identity:delete_user": [["role:admin", "domain_id:%(target.user.domain_id)s"]]
+    "identity:delete_user": "role:admin and domain_id:%(target.user.domain_id)s"
 
   would ensure that the user object that is being deleted is in the same
   domain as the token provided.
@@ -1575,6 +1659,13 @@ section:
   user_allow_create = False
   user_allow_update = False
   user_allow_delete = False
+
+.. NOTE::
+
+    While having identity related infomration backed by LDAP while other
+    information is backed by SQL is a supported configuration, as shown above;
+    the opposite is not true. If either resource or assignment drivers are
+    configured for LDAP, then Identity must also be configured for LDAP.
 
 Connection Pooling
 ------------------

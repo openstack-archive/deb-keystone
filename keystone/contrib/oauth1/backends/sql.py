@@ -13,10 +13,10 @@
 # under the License.
 
 import datetime
-import random
+import random as _random
 import uuid
 
-from oslo.serialization import jsonutils
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import six
 
@@ -24,6 +24,9 @@ from keystone.common import sql
 from keystone.contrib.oauth1 import core
 from keystone import exception
 from keystone.i18n import _
+
+
+random = _random.SystemRandom()
 
 
 class Consumer(sql.ModelBase, sql.DictBase):

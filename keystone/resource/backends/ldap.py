@@ -14,19 +14,20 @@ from __future__ import absolute_import
 
 import uuid
 
+from oslo_config import cfg
+from oslo_log import log
+
 from keystone import clean
 from keystone.common import driver_hints
 from keystone.common import ldap as common_ldap
 from keystone.common import models
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.identity.backends import ldap as ldap_identity
-from keystone.openstack.common import log
 from keystone import resource
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -38,9 +39,9 @@ class Resource(resource.Driver):
         self.LDAP_PASSWORD = CONF.ldap.password
         self.suffix = CONF.ldap.suffix
 
-        # This is the only deep dependency from resource back
-        # to identity.  The assumption is that if you are using
-        # LDAP for resource, you are using it for identity as well.
+        # This is the only deep dependency from resource back to identity.
+        # This is safe to do since if you are using LDAP for resource, it is
+        # required that you are using it for identity as well.
         self.user = ldap_identity.UserApi(CONF)
 
         self.project = ProjectApi(CONF)
@@ -78,7 +79,7 @@ class Resource(resource.Driver):
 
     def list_projects(self, hints):
         return self._set_default_attributes(
-            self.project.get_all())
+            self.project.get_all_filtered(hints))
 
     def list_projects_in_domain(self, domain_id):
         # We don't support multiple domains within this driver, so ignore
@@ -189,3 +190,7 @@ class ProjectApi(common_ldap.ProjectLdapStructureMixin,
     def update(self, project_id, values):
         old_obj = self.get(project_id)
         return super(ProjectApi, self).update(project_id, values, old_obj)
+
+    def get_all_filtered(self, hints):
+        query = self.filter_query(hints)
+        return super(ProjectApi, self).get_all(query)

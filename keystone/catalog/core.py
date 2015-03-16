@@ -17,6 +17,8 @@
 
 import abc
 
+from oslo_config import cfg
+from oslo_log import log
 import six
 
 from keystone.common import cache
@@ -24,15 +26,13 @@ from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
 from keystone.common import utils
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LE
 from keystone import notifications
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 SHOULD_CACHE = cache.should_cache_fn('catalog')
 
@@ -95,8 +95,7 @@ class Manager(manager.Manager):
     def __init__(self):
         super(Manager, self).__init__(CONF.catalog.driver)
 
-    @notifications.created(_REGION, public=False, result_id_arg_attr='id')
-    def create_region(self, region_ref):
+    def create_region(self, region_ref, initiator=None):
         # Check duplicate ID
         try:
             self.get_region(region_ref['id'])
@@ -111,10 +110,13 @@ class Manager(manager.Manager):
         # set it to an empty string.
         region_ref.setdefault('description', '')
         try:
-            return self.driver.create_region(region_ref)
+            ret = self.driver.create_region(region_ref)
         except exception.NotFound:
             parent_region_id = region_ref.get('parent_region_id')
             raise exception.RegionNotFound(region_id=parent_region_id)
+
+        notifications.Audit.created(self._REGION, ret['id'], initiator)
+        return ret
 
     @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
                         expiration_time=EXPIRATION_TIME)
@@ -124,16 +126,16 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
 
-    @notifications.updated(_REGION, public=False)
-    def update_region(self, region_id, region_ref):
+    def update_region(self, region_id, region_ref, initiator=None):
         ref = self.driver.update_region(region_id, region_ref)
+        notifications.Audit.updated(self._REGION, region_id, initiator)
         self.get_region.invalidate(self, region_id)
         return ref
 
-    @notifications.deleted(_REGION, public=False)
-    def delete_region(self, region_id):
+    def delete_region(self, region_id, initiator=None):
         try:
             ret = self.driver.delete_region(region_id)
+            notifications.Audit.deleted(self._REGION, region_id, initiator)
             self.get_region.invalidate(self, region_id)
             return ret
         except exception.NotFound:
@@ -143,10 +145,11 @@ class Manager(manager.Manager):
     def list_regions(self, hints=None):
         return self.driver.list_regions(hints or driver_hints.Hints())
 
-    @notifications.created(_SERVICE, public=False)
-    def create_service(self, service_id, service_ref):
+    def create_service(self, service_id, service_ref, initiator=None):
         service_ref.setdefault('enabled', True)
-        return self.driver.create_service(service_id, service_ref)
+        ref = self.driver.create_service(service_id, service_ref)
+        notifications.Audit.created(self._SERVICE, service_id, initiator)
+        return ref
 
     @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
                         expiration_time=EXPIRATION_TIME)
@@ -156,17 +159,17 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.ServiceNotFound(service_id=service_id)
 
-    @notifications.updated(_SERVICE, public=False)
-    def update_service(self, service_id, service_ref):
+    def update_service(self, service_id, service_ref, initiator=None):
         ref = self.driver.update_service(service_id, service_ref)
+        notifications.Audit.updated(self._SERVICE, service_id, initiator)
         self.get_service.invalidate(self, service_id)
         return ref
 
-    @notifications.deleted(_SERVICE, public=False)
-    def delete_service(self, service_id):
+    def delete_service(self, service_id, initiator=None):
         try:
             endpoints = self.list_endpoints()
             ret = self.driver.delete_service(service_id)
+            notifications.Audit.deleted(self._SERVICE, service_id, initiator)
             self.get_service.invalidate(self, service_id)
             for endpoint in endpoints:
                 if endpoint['service_id'] == service_id:
@@ -179,27 +182,42 @@ class Manager(manager.Manager):
     def list_services(self, hints=None):
         return self.driver.list_services(hints or driver_hints.Hints())
 
-    @notifications.created(_ENDPOINT, public=False)
-    def create_endpoint(self, endpoint_id, endpoint_ref):
+    def _assert_region_exists(self, region_id):
         try:
-            return self.driver.create_endpoint(endpoint_id, endpoint_ref)
+            if region_id is not None:
+                self.get_region(region_id)
         except exception.RegionNotFound:
             raise exception.ValidationError(attribute='endpoint region_id',
                                             target='region table')
-        except exception.NotFound:
-            service_id = endpoint_ref.get('service_id')
-            raise exception.ServiceNotFound(service_id=service_id)
 
-    @notifications.updated(_ENDPOINT, public=False)
-    def update_endpoint(self, endpoint_id, endpoint_ref):
+    def _assert_service_exists(self, service_id):
+        try:
+            if service_id is not None:
+                self.get_service(service_id)
+        except exception.ServiceNotFound:
+            raise exception.ValidationError(attribute='endpoint service_id',
+                                            target='service table')
+
+    def create_endpoint(self, endpoint_id, endpoint_ref, initiator=None):
+        self._assert_region_exists(endpoint_ref.get('region_id'))
+        self._assert_service_exists(endpoint_ref['service_id'])
+        ref = self.driver.create_endpoint(endpoint_id, endpoint_ref)
+
+        notifications.Audit.created(self._ENDPOINT, endpoint_id, initiator)
+        return ref
+
+    def update_endpoint(self, endpoint_id, endpoint_ref, initiator=None):
+        self._assert_region_exists(endpoint_ref.get('region_id'))
+        self._assert_service_exists(endpoint_ref.get('service_id'))
         ref = self.driver.update_endpoint(endpoint_id, endpoint_ref)
+        notifications.Audit.updated(self._ENDPOINT, endpoint_id, initiator)
         self.get_endpoint.invalidate(self, endpoint_id)
         return ref
 
-    @notifications.deleted(_ENDPOINT, public=False)
-    def delete_endpoint(self, endpoint_id):
+    def delete_endpoint(self, endpoint_id, initiator=None):
         try:
             ret = self.driver.delete_endpoint(endpoint_id)
+            notifications.Audit.deleted(self._ENDPOINT, endpoint_id, initiator)
             self.get_endpoint.invalidate(self, endpoint_id)
             return ret
         except exception.NotFound:

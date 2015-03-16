@@ -13,6 +13,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import itertools
+
+from oslo_config import cfg
 import six
 import sqlalchemy
 from sqlalchemy.sql import true
@@ -20,11 +23,10 @@ from sqlalchemy.sql import true
 from keystone import catalog
 from keystone.catalog import core
 from keystone.common import sql
-from keystone import config
 from keystone import exception
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 class Region(sql.ModelBase, sql.DictBase):
@@ -223,13 +225,7 @@ class Catalog(catalog.Driver):
     # Endpoints
     def create_endpoint(self, endpoint_id, endpoint_ref):
         session = sql.get_session()
-        self.get_service(endpoint_ref['service_id'])
         new_endpoint = Endpoint.from_dict(endpoint_ref)
-
-        # NOTE(henry-nash): We'd like to just let the foreign key constraint
-        # check for existence of the region, but this won't work with sqlite.
-        if endpoint_ref.get('region_id') is not None:
-            self.get_region(endpoint_ref['region_id'])
 
         with session.begin():
             session.add(new_endpoint)
@@ -260,10 +256,6 @@ class Catalog(catalog.Driver):
 
     def update_endpoint(self, endpoint_id, endpoint_ref):
         session = sql.get_session()
-        # NOTE(henry-nash): We'd like to just let the foreign key constraint
-        # check for existence of the region, but this won't work with sqlite.
-        if endpoint_ref.get('region_id') is not None:
-            self.get_region(endpoint_ref['region_id'])
 
         with session.begin():
             ref = self._get_endpoint(session, endpoint_id)
@@ -277,7 +269,9 @@ class Catalog(catalog.Driver):
         return ref.to_dict()
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        substitutions = dict(six.iteritems(CONF))
+        substitutions = dict(
+            itertools.chain(six.iteritems(CONF),
+                            six.iteritems(CONF.eventlet_server)))
         substitutions.update({'tenant_id': tenant_id, 'user_id': user_id})
 
         session = sql.get_session()
@@ -310,7 +304,9 @@ class Catalog(catalog.Driver):
         return catalog
 
     def get_v3_catalog(self, user_id, tenant_id, metadata=None):
-        d = dict(six.iteritems(CONF))
+        d = dict(
+            itertools.chain(six.iteritems(CONF),
+                            six.iteritems(CONF.eventlet_server)))
         d.update({'tenant_id': tenant_id,
                   'user_id': user_id})
 

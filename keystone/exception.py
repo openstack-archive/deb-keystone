@@ -12,15 +12,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import encodeutils
 import six
 
-from keystone.common import config
 from keystone.i18n import _, _LW
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 # Tests use this to make exception message format errors fatal
@@ -62,8 +62,8 @@ class Error(Exception):
                 message = self.message_format % kwargs
             except UnicodeDecodeError:
                 try:
-                    kwargs = dict([(k, encodeutils.safe_decode(v)) for k, v in
-                                   six.iteritems(kwargs)])
+                    kwargs = {k: encodeutils.safe_decode(v)
+                              for k, v in six.iteritems(kwargs)}
                 except UnicodeDecodeError:
                     # NOTE(jamielennox): This is the complete failure case
                     # at least by showing the template we have some idea
@@ -224,6 +224,10 @@ class InvalidPolicyAssociation(Forbidden):
                        "Service: %(service_id)s, Region: %(region_id)s")
 
 
+class InvalidDomainConfig(Forbidden):
+    message_format = _("Invalid domain specific configuration: %(reason)s")
+
+
 class NotFound(Error):
     message_format = _("Could not find: %(target)s")
     code = 404
@@ -252,6 +256,12 @@ class PolicyAssociationNotFound(NotFound):
 
 class RoleNotFound(NotFound):
     message_format = _("Could not find role: %(role_id)s")
+
+
+class RoleAssignmentNotFound(NotFound):
+    message_format = _("Could not find role assignment with role: "
+                       "%(role_id)s, user or group: %(actor_id)s, "
+                       "project or domain: %(target_id)s")
 
 
 class RegionNotFound(NotFound):
@@ -329,6 +339,11 @@ class PublicIDNotFound(NotFound):
     message_format = "%(id)s"
 
 
+class DomainConfigNotFound(NotFound):
+    message_format = _('Could not find %(group_or_option)s in domain '
+                       'configuration for domain %(domain_id)s')
+
+
 class Conflict(Error):
     message_format = _("Conflict occurred attempting to store %(type)s -"
                        " %(details)s")
@@ -361,10 +376,6 @@ class UnexpectedError(SecurityError):
 
     code = 500
     title = 'Internal Server Error'
-
-
-class PolicyParsingError(UnexpectedError):
-    message_format = _("Unable to parse policy file %(policy_file)s.")
 
 
 class TrustConsumeMaximumAttempt(UnexpectedError):
@@ -418,10 +429,15 @@ class ConfigFileNotFound(UnexpectedError):
                              "could not be found.")
 
 
+class KeysNotFound(UnexpectedError):
+    message_format = _('No encryption keys found; run keystone-manage '
+                       'fernet_setup to bootstrap one.')
+
+
 class MultipleSQLDriversInConfig(UnexpectedError):
-    message_format = _('The Keystone domain configuration file '
-                       '%(config_file)s defines an additional SQL driver - '
-                       'only one is permitted.')
+    message_format = _('The Keystone domain-specific configuration has '
+                       'specified more than one SQL driver (only one is '
+                       'permitted): %(source)s.')
 
 
 class MigrationNotProvided(Exception):
@@ -443,3 +459,11 @@ class SAMLSigningError(UnexpectedError):
                              'installed, or this is the result of '
                              'misconfiguration. Reason %(reason)s')
     title = 'Error signing SAML assertion'
+
+
+class OAuthHeadersMissingError(UnexpectedError):
+    debug_message_format = _('No Authorization headers found, cannot proceed '
+                             'with OAuth related calls, if running under '
+                             'HTTPd or Apache, ensure WSGIPassAuthorization '
+                             'is set to On.')
+    title = 'Error retrieving OAuth headers'

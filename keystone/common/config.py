@@ -12,13 +12,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo.config import cfg
-from oslo import messaging
+from oslo_config import cfg
+import oslo_messaging
 
 
-_DEFAULT_AUTH_METHODS = ['external', 'password', 'token']
+_DEFAULT_AUTH_METHODS = ['external', 'password', 'token', 'oauth1']
 _CERTFILE = '/etc/keystone/ssl/certs/signing_cert.pem'
 _KEYFILE = '/etc/keystone/ssl/private/signing_key.pem'
+_SSO_CALLBACK = '/etc/keystone/sso_callback_template.html'
 
 
 FILE_OPTIONS = {
@@ -31,18 +32,6 @@ FILE_OPTIONS = {
                         'AdminTokenAuthMiddleware from your paste '
                         'application pipelines (for example, in '
                         'keystone-paste.ini).'),
-        cfg.StrOpt('public_bind_host',
-                   default='0.0.0.0',
-                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
-                                                      group='DEFAULT')],
-                   help='The IP address of the network interface for the '
-                        'public service to listen on.'),
-        cfg.StrOpt('admin_bind_host',
-                   default='0.0.0.0',
-                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
-                                                      group='DEFAULT')],
-                   help='The IP address of the network interface for the '
-                        'admin service to listen on.'),
         cfg.IntOpt('compute_port', default=8774,
                    help='(Deprecated) The port which the OpenStack Compute '
                         'service listens on. This option was only used for '
@@ -51,12 +40,6 @@ FILE_OPTIONS = {
                         '"$(compute_port)s" substitution with the static port '
                         'of the compute service. As of Juno, this option is '
                         'deprecated and will be removed in the L release.'),
-        cfg.IntOpt('admin_port', default=35357,
-                   help='The port number which the admin service listens '
-                        'on.'),
-        cfg.IntOpt('public_port', default=5000,
-                   help='The port number which the public service listens '
-                        'on.'),
         cfg.StrOpt('public_endpoint',
                    help='The base public endpoint URL for Keystone that is '
                         'advertised to clients (NOTE: this does NOT affect '
@@ -81,14 +64,6 @@ FILE_OPTIONS = {
                    help='Maximum depth of the project hierarchy. WARNING: '
                         'setting it to a large value may adversely impact '
                         'performance.'),
-        cfg.IntOpt('public_workers',
-                   help='The number of worker processes to serve the public '
-                        'WSGI application. Defaults to number of CPUs '
-                        '(minimum of 2).'),
-        cfg.IntOpt('admin_workers',
-                   help='The number of worker processes to serve the admin '
-                        'WSGI application. Defaults to number of CPUs '
-                        '(minimum of 2).'),
         cfg.IntOpt('max_param_size', default=64,
                    help='Limit the sizes of user & project ID/names.'),
         # we allow tokens to be a bit larger to accommodate PKI
@@ -109,16 +84,6 @@ FILE_OPTIONS = {
         cfg.IntOpt('crypt_strength', default=40000,
                    help='The value passed as the keyword "rounds" to '
                         'passlib\'s encrypt method.'),
-        cfg.BoolOpt('tcp_keepalive', default=False,
-                    help='Set this to true if you want to enable '
-                         'TCP_KEEPALIVE on server sockets, i.e. sockets used '
-                         'by the Keystone wsgi server for client '
-                         'connections.'),
-        cfg.IntOpt('tcp_keepidle',
-                   default=600,
-                   help='Sets the value of TCP_KEEPIDLE in seconds for each '
-                        'server socket. Only applies if tcp_keepalive is '
-                        'true.'),
         cfg.IntOpt('list_limit',
                    help='The maximum number of entities that will be '
                         'returned in a collection, with no limit set by '
@@ -162,11 +127,22 @@ FILE_OPTIONS = {
                     default=False,
                     help='A subset (or all) of domains can have their own '
                          'identity driver, each with their own partial '
-                         'configuration file in a domain configuration '
-                         'directory. Only values specific to the domain '
-                         'need to be placed in the domain specific '
-                         'configuration file. This feature is disabled by '
+                         'configuration options, stored in either the '
+                         'resource backend or in a file in a domain '
+                         'configuration directory (depending on the setting '
+                         'of domain_configurations_from_database). Only '
+                         'values specific to the domain need to be specified '
+                         'in this manner. This feature is disabled by '
                          'default; set to true to enable.'),
+        cfg.BoolOpt('domain_configurations_from_database',
+                    default=False,
+                    help='Extract the domain specific configuration options '
+                         'from the resource backend where they have been '
+                         'stored with the domain data. This feature is '
+                         'disabled by default (in which case the domain '
+                         'specific options will be loaded from files in the '
+                         'domain configuration directory); set to true to '
+                         'enable.'),
         cfg.StrOpt('domain_config_dir',
                    default='/etc/keystone/domains',
                    help='Path for Keystone to locate the domain specific '
@@ -176,6 +152,13 @@ FILE_OPTIONS = {
                    default=('keystone.identity.backends'
                             '.sql.Identity'),
                    help='Identity backend driver.'),
+        cfg.BoolOpt('caching', default=True,
+                    help='Toggle for identity caching. This has no '
+                         'effect unless global caching is enabled.'),
+        cfg.IntOpt('cache_time', default=600,
+                   help='Time to cache identity data (in seconds). This has '
+                        'no effect unless global and identity caching are '
+                        'enabled.'),
         cfg.IntOpt('max_password_length', default=4096,
                    help='Maximum supported length for user passwords; '
                         'decrease to improve performance.'),
@@ -234,6 +217,20 @@ FILE_OPTIONS = {
                          'owning domain or from projects higher in the '
                          'hierarchy can be optionally enabled.'),
     ],
+    'fernet_tokens': [
+        cfg.StrOpt('key_repository',
+                   default='/etc/keystone/fernet-keys/',
+                   help='Directory containing Fernet token keys.'),
+        cfg.IntOpt('max_active_keys',
+                   default=3,
+                   help='This controls how many keys are held in rotation by '
+                        'keystone-manage fernet_rotate before they are '
+                        'discarded. The default value of 3 means that '
+                        'keystone will maintain one staged key, one primary '
+                        'key, and one secondary key. Increasing this value '
+                        'means that additional secondary keys will be kept in '
+                        'the rotation.'),
+    ],
     'token': [
         cfg.ListOpt('bind', default=[],
                     help='External auth mechanisms that should add bind '
@@ -248,9 +245,10 @@ FILE_OPTIONS = {
                    help='Amount of time a token should remain valid '
                         '(in seconds).'),
         cfg.StrOpt('provider',
+                   default='keystone.token.providers.uuid.Provider',
                    help='Controls the token construction, validation, and '
                         'revocation operations. Core providers are '
-                        '"keystone.token.providers.[pkiz|pki|uuid].'
+                        '"keystone.token.providers.[fernet|pkiz|pki|uuid].'
                         'Provider". The default provider is uuid.'),
         cfg.StrOpt('driver',
                    default='keystone.token.persistence.backends.sql.Token',
@@ -275,6 +273,10 @@ FILE_OPTIONS = {
                     'list of tokens to revoke. Only disable if you are '
                     'switching to using the Revoke extension with a '
                     'backend other than KVS, which stores events in memory.'),
+        cfg.BoolOpt('allow_rescope_scoped_token', default=True,
+                    help='Allow rescoping of scoped token. Setting '
+                    'allow_rescoped_scoped_token to false prevents a user '
+                    'from exchanging a scoped token for any other token.'),
         cfg.StrOpt('hash_algorithm', default='md5',
                    help="The hash algorithm to use for PKI tokens. This can "
                         "be set to any algorithm that hashlib supports. "
@@ -373,26 +375,9 @@ FILE_OPTIONS = {
                         'a memcache client connection.'),
     ],
     'ssl': [
-        cfg.BoolOpt('enable', default=False,
-                    help='Toggle for SSL support on the Keystone '
-                         'eventlet servers.'),
-        cfg.StrOpt('certfile',
-                   default="/etc/keystone/ssl/certs/keystone.pem",
-                   help='Path of the certfile for SSL. For non-production '
-                        'environments, you may be interested in using '
-                        '`keystone-manage ssl_setup` to generate self-signed '
-                        'certificates.'),
-        cfg.StrOpt('keyfile',
-                   default='/etc/keystone/ssl/private/keystonekey.pem',
-                   help='Path of the keyfile for SSL.'),
-        cfg.StrOpt('ca_certs',
-                   default='/etc/keystone/ssl/certs/ca.pem',
-                   help='Path of the CA cert file for SSL.'),
         cfg.StrOpt('ca_key',
                    default='/etc/keystone/ssl/private/cakey.pem',
                    help='Path of the CA key file for SSL.'),
-        cfg.BoolOpt('cert_required', default=False,
-                    help='Require client certificate.'),
         cfg.IntOpt('key_size', default=1024,
                    help='SSL key length (in bits) (auto generated '
                         'certificate).'),
@@ -405,9 +390,6 @@ FILE_OPTIONS = {
                         'certificate).'),
     ],
     'signing': [
-        cfg.StrOpt('token_format',
-                   help='Deprecated in favor of provider in the '
-                        '[token] section.'),
         cfg.StrOpt('certfile',
                    default=_CERTFILE,
                    help='Path of the certfile for token signing. For '
@@ -463,6 +445,12 @@ FILE_OPTIONS = {
                    help='Maximum number of entities that will be returned '
                         'in a resource collection.'),
     ],
+    'domain_config': [
+        cfg.StrOpt('driver',
+                   default='keystone.resource.config_backends.sql.'
+                           'DomainConfig',
+                   help='Domain config backend driver.'),
+    ],
     'role': [
         # The role driver has no default for backward compatibility reasons.
         # If role driver is not specified, the assignment driver chooses
@@ -507,6 +495,26 @@ FILE_OPTIONS = {
                         'Identity Provider from the environment (e.g. if '
                         'using the mod_shib plugin this value is '
                         '`Shib-Identity-Provider`).'),
+        cfg.StrOpt('federated_domain_name', default='Federated',
+                   help='A domain name that is reserved to allow federated '
+                        'ephemeral users to have a domain concept. Note that '
+                        'an admin will not be able to create a domain with '
+                        'this name or update an existing domain to this '
+                        'name. You are not advised to change this value '
+                        'unless you really have to. Changing this option '
+                        'to empty string or None will not have any impact and '
+                        'default name will be used.'),
+        cfg.MultiStrOpt('trusted_dashboard', default=[],
+                        help='A list of trusted dashboard hosts. Before '
+                             'accepting a Single Sign-On request to return a '
+                             'token, the origin host must be a member of the '
+                             'trusted_dashboard list. This configuration '
+                             'option may be repeated for multiple values. '
+                             'For example: trusted_dashboard=http://acme.com '
+                             'trusted_dashboard=http://beta.com'),
+        cfg.StrOpt('sso_callback_template', default=_SSO_CALLBACK,
+                   help='Location of Single Sign-On callback handler, will '
+                        'return a token to a trusted dashboard host.'),
     ],
     'policy': [
         cfg.StrOpt('driver',
@@ -823,6 +831,9 @@ FILE_OPTIONS = {
         cfg.StrOpt('external',
                    default='keystone.auth.plugins.external.DefaultDomain',
                    help='The external (REMOTE_USER) auth plugin module.'),
+        cfg.StrOpt('oauth1',
+                   default='keystone.auth.plugins.oauth1.OAuth',
+                   help='The oAuth1.0 auth plugin module.'),
     ],
     'paste_deploy': [
         cfg.StrOpt('config_file', default='keystone-paste.ini',
@@ -959,11 +970,87 @@ FILE_OPTIONS = {
                         'This file should be generated with the '
                         'keystone-manage saml_idp_metadata command.'),
     ],
+    'eventlet_server': [
+        cfg.IntOpt('public_workers',
+                   deprecated_name='public_workers',
+                   deprecated_group='DEFAULT',
+                   help='The number of worker processes to serve the public '
+                        'eventlet application. Defaults to number of CPUs '
+                        '(minimum of 2).'),
+        cfg.IntOpt('admin_workers',
+                   deprecated_name='admin_workers',
+                   deprecated_group='DEFAULT',
+                   help='The number of worker processes to serve the admin '
+                        'eventlet application. Defaults to number of CPUs '
+                        '(minimum of 2).'),
+        cfg.StrOpt('public_bind_host',
+                   default='0.0.0.0',
+                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
+                                                      group='DEFAULT'),
+                                    cfg.DeprecatedOpt('public_bind_host',
+                                                      group='DEFAULT'), ],
+                   help='The IP address of the network interface for the '
+                        'public service to listen on.'),
+        cfg.IntOpt('public_port', default=5000, deprecated_name='public_port',
+                   deprecated_group='DEFAULT',
+                   help='The port number which the public service listens '
+                        'on.'),
+        cfg.StrOpt('admin_bind_host',
+                   default='0.0.0.0',
+                   deprecated_opts=[cfg.DeprecatedOpt('bind_host',
+                                                      group='DEFAULT'),
+                                    cfg.DeprecatedOpt('admin_bind_host',
+                                                      group='DEFAULT')],
+                   help='The IP address of the network interface for the '
+                        'admin service to listen on.'),
+        cfg.IntOpt('admin_port', default=35357, deprecated_name='admin_port',
+                   deprecated_group='DEFAULT',
+                   help='The port number which the admin service listens '
+                        'on.'),
+        cfg.BoolOpt('tcp_keepalive', default=False,
+                    deprecated_name='tcp_keepalive',
+                    deprecated_group='DEFAULT',
+                    help='Set this to true if you want to enable '
+                         'TCP_KEEPALIVE on server sockets, i.e. sockets used '
+                         'by the Keystone wsgi server for client '
+                         'connections.'),
+        cfg.IntOpt('tcp_keepidle',
+                   default=600,
+                   deprecated_name='tcp_keepidle',
+                   deprecated_group='DEFAULT',
+                   help='Sets the value of TCP_KEEPIDLE in seconds for each '
+                        'server socket. Only applies if tcp_keepalive is '
+                        'true.'),
+    ],
+    'eventlet_server_ssl': [
+        cfg.BoolOpt('enable', default=False, deprecated_name='enable',
+                    deprecated_group='ssl',
+                    help='Toggle for SSL support on the Keystone '
+                         'eventlet servers.'),
+        cfg.StrOpt('certfile',
+                   default="/etc/keystone/ssl/certs/keystone.pem",
+                   deprecated_name='certfile', deprecated_group='ssl',
+                   help='Path of the certfile for SSL. For non-production '
+                        'environments, you may be interested in using '
+                        '`keystone-manage ssl_setup` to generate self-signed '
+                        'certificates.'),
+        cfg.StrOpt('keyfile',
+                   default='/etc/keystone/ssl/private/keystonekey.pem',
+                   deprecated_name='keyfile', deprecated_group='ssl',
+                   help='Path of the keyfile for SSL.'),
+        cfg.StrOpt('ca_certs',
+                   default='/etc/keystone/ssl/certs/ca.pem',
+                   deprecated_name='ca_certs', deprecated_group='ssl',
+                   help='Path of the CA cert file for SSL.'),
+        cfg.BoolOpt('cert_required', default=False,
+                    deprecated_name='cert_required', deprecated_group='ssl',
+                    help='Require client certificate.'),
+    ],
 }
 
 
 CONF = cfg.CONF
-messaging.set_transport_defaults(control_exchange='keystone')
+oslo_messaging.set_transport_defaults(control_exchange='keystone')
 
 
 def _register_auth_plugin_opt(conf, option):
@@ -1006,9 +1093,9 @@ def configure(conf=None):
 
 
 def list_opts():
-    """Return a list of oslo.config options available in Keystone.
+    """Return a list of oslo_config options available in Keystone.
 
-    The returned list includes all oslo.config options which are registered as
+    The returned list includes all oslo_config options which are registered as
     the "FILE_OPTIONS" in keystone.common.config. This list will not include
     the options from the oslo-incubator library or any options registered
     dynamically at run time.
@@ -1018,7 +1105,7 @@ def list_opts():
     second element will be registered. A group name of None corresponds to the
     [DEFAULT] group in config files.
 
-    This function is also discoverable via the 'oslo.config.opts' entry point
+    This function is also discoverable via the 'oslo_config.opts' entry point
     under the 'keystone.config.opts' namespace.
 
     The purpose of this is to allow tools like the Oslo sample config file

@@ -12,11 +12,13 @@
 
 import functools
 
-from oslo.serialization import jsonutils
+from oslo_log import log
+from oslo_serialization import jsonutils
 from pycadf import cadftaxonomy as taxonomy
 from six.moves.urllib import parse
 
 from keystone import auth
+from keystone.auth import plugins as auth_plugins
 from keystone.common import dependency
 from keystone.contrib import federation
 from keystone.contrib.federation import utils
@@ -24,10 +26,11 @@ from keystone import exception
 from keystone.i18n import _
 from keystone.models import token_model
 from keystone import notifications
-from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
+
+METHOD_NAME = 'mapped'
 
 
 @dependency.requires('assignment_api', 'federation_api', 'identity_api',
@@ -104,6 +107,22 @@ def handle_scoped_token(context, auth_payload, auth_context, token_ref,
 
 def handle_unscoped_token(context, auth_payload, auth_context,
                           assignment_api, federation_api, identity_api):
+
+    def is_ephemeral_user(mapped_properties):
+        return mapped_properties['user']['type'] == utils.UserType.EPHEMERAL
+
+    def build_ephemeral_user_context(auth_context, user, mapped_properties,
+                                     identity_provider, protocol):
+        auth_context['user_id'] = user['id']
+        auth_context['group_ids'] = mapped_properties['group_ids']
+        auth_context[federation.IDENTITY_PROVIDER] = identity_provider
+        auth_context[federation.PROTOCOL] = protocol
+
+    def build_local_user_context(auth_context, mapped_properties):
+        user_info = auth_plugins.UserAuthInfo.create(mapped_properties,
+                                                     METHOD_NAME)
+        auth_context['user_id'] = user_info.user_id
+
     assertion = extract_assertion_data(context)
     identity_provider = auth_payload['identity_provider']
     protocol = auth_payload['protocol']
@@ -120,11 +139,22 @@ def handle_unscoped_token(context, auth_payload, auth_context,
     user_id = None
 
     try:
-        mapped_properties = apply_mapping_filter(identity_provider, protocol,
-                                                 assertion, assignment_api,
-                                                 federation_api, identity_api)
-        user_id = setup_username(context, mapped_properties)
-        group_ids = mapped_properties['group_ids']
+        mapped_properties = apply_mapping_filter(
+            identity_provider, protocol, assertion, assignment_api,
+            federation_api, identity_api)
+
+        if is_ephemeral_user(mapped_properties):
+            user = setup_username(context, mapped_properties)
+            user_id = user['id']
+            group_ids = mapped_properties['group_ids']
+            mapping = federation_api.get_mapping_from_idp_and_protocol(
+                identity_provider, protocol)
+            utils.validate_groups_cardinality(group_ids, mapping['id'])
+            build_ephemeral_user_context(auth_context, user,
+                                         mapped_properties,
+                                         identity_provider, protocol)
+        else:
+            build_local_user_context(auth_context, mapped_properties)
 
     except Exception:
         # NOTE(topol): Diaper defense to catch any exception, so we can
@@ -144,11 +174,6 @@ def handle_unscoped_token(context, auth_payload, auth_context,
                                                    identity_provider,
                                                    protocol, token_id,
                                                    outcome)
-
-    auth_context['user_id'] = user_id
-    auth_context['group_ids'] = group_ids
-    auth_context[federation.IDENTITY_PROVIDER] = identity_provider
-    auth_context[federation.PROTOCOL] = protocol
 
 
 def extract_assertion_data(context):
@@ -181,7 +206,6 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
         utils.transform_to_group_ids(
             mapped_properties['group_names'], mapping['id'],
             identity_api, assignment_api))
-    utils.validate_groups_cardinality(group_ids, mapping['id'])
     mapped_properties['group_ids'] = list(set(group_ids))
     return mapped_properties
 
@@ -189,24 +213,40 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
 def setup_username(context, mapped_properties):
     """Setup federated username.
 
-    If ``user_name`` is specified in the mapping_properties use this
-    value.Otherwise try fetching value from an environment variable
-    ``REMOTE_USER``.
-    This method also url encodes user_name and saves this value in user_id.
-    If user_name cannot be mapped raise exception.Unauthorized.
+    Function covers all the cases for properly setting user id, a primary
+    identifier for identity objects. Initial version of the mapping engine
+    assumed user is identified by ``name`` and his ``id`` is built from the
+    name. We, however need to be able to accept local rules that identify user
+    by either id or name/domain.
+
+    The following use-cases are covered:
+
+    1) If neither user_name nor user_id is set raise exception.Unauthorized
+    2) If user_id is set and user_name not, set user_name equal to user_id
+    3) If user_id is not set and user_name is, set user_id as url safe version
+       of user_name.
 
     :param context: authentication context
     :param mapped_properties: Properties issued by a RuleProcessor.
     :type: dictionary
 
     :raises: exception.Unauthorized
-    :returns: tuple with user_name and user_id values.
+    :returns: dictionary with user identification
+    :rtype: dict
 
     """
-    user_name = mapped_properties['name']
-    if user_name is None:
-        user_name = context['environment'].get('REMOTE_USER')
-        if user_name is None:
-            raise exception.Unauthorized(_("Could not map user"))
-    user_id = parse.quote(user_name)
-    return user_id
+    user = mapped_properties['user']
+
+    user_id = user.get('id')
+    user_name = user.get('name') or context['environment'].get('REMOTE_USER')
+
+    if not any([user_id, user_name]):
+        raise exception.Unauthorized(_("Could not map user"))
+
+    elif not user_name:
+        user['name'] = user_id
+
+    elif not user_id:
+        user['id'] = parse.quote(user_name)
+
+    return user

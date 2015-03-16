@@ -14,13 +14,13 @@
 
 """Extensions supporting OAuth1."""
 
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
-from keystone import config
 from keystone.contrib.oauth1 import core as oauth1
 from keystone.contrib.oauth1 import validator
 from keystone import exception
@@ -29,7 +29,7 @@ from keystone.models import token_model
 from keystone import notifications
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 @notifications.internal(notifications.INVALIDATE_USER_OAUTH_CONSUMER_TOKENS,
@@ -59,7 +59,8 @@ class ConsumerCrudV3(controller.V3Controller):
     @controller.protected()
     def create_consumer(self, context, consumer):
         ref = self._assign_unique_id(self._normalize_dict(consumer))
-        consumer_ref = self.oauth_api.create_consumer(ref)
+        initiator = notifications._get_request_audit_info(context)
+        consumer_ref = self.oauth_api.create_consumer(ref, initiator)
         return ConsumerCrudV3.wrap_member(context, consumer_ref)
 
     @controller.protected()
@@ -67,7 +68,8 @@ class ConsumerCrudV3(controller.V3Controller):
         self._require_matching_id(consumer_id, consumer)
         ref = self._normalize_dict(consumer)
         self._validate_consumer_ref(ref)
-        ref = self.oauth_api.update_consumer(consumer_id, ref)
+        initiator = notifications._get_request_audit_info(context)
+        ref = self.oauth_api.update_consumer(consumer_id, ref, initiator)
         return ConsumerCrudV3.wrap_member(context, ref)
 
     @controller.protected()
@@ -89,7 +91,8 @@ class ConsumerCrudV3(controller.V3Controller):
         payload = {'user_id': user_token_ref.user_id,
                    'consumer_id': consumer_id}
         _emit_user_oauth_consumer_token_invalidate(payload)
-        self.oauth_api.delete_consumer(consumer_id)
+        initiator = notifications._get_request_audit_info(context)
+        self.oauth_api.delete_consumer(consumer_id, initiator)
 
     def _validate_consumer_ref(self, consumer):
         if 'secret' in consumer:
@@ -138,8 +141,9 @@ class AccessTokenCrudV3(controller.V3Controller):
         consumer_id = access_token['consumer_id']
         payload = {'user_id': user_id, 'consumer_id': consumer_id}
         _emit_user_oauth_consumer_token_invalidate(payload)
+        initiator = notifications._get_request_audit_info(context)
         return self.oauth_api.delete_access_token(
-            user_id, access_token_id)
+            user_id, access_token_id, initiator)
 
     @staticmethod
     def _get_user_id(entity):
@@ -204,7 +208,8 @@ class AccessTokenRolesV3(controller.V3Controller):
         return formatted_entity
 
 
-@dependency.requires('assignment_api', 'oauth_api', 'token_provider_api')
+@dependency.requires('assignment_api', 'oauth_api',
+                     'resource_api', 'token_provider_api')
 class OAuthControllerV3(controller.V3Controller):
     collection_name = 'not_used'
     member_name = 'not_used'
@@ -214,12 +219,17 @@ class OAuthControllerV3(controller.V3Controller):
         oauth_headers = oauth1.get_oauth_headers(headers)
         consumer_id = oauth_headers.get('oauth_consumer_key')
         requested_project_id = headers.get('Requested-Project-Id')
+
         if not consumer_id:
             raise exception.ValidationError(
                 attribute='oauth_consumer_key', target='request')
         if not requested_project_id:
             raise exception.ValidationError(
                 attribute='requested_project_id', target='request')
+
+        # NOTE(stevemar): Ensure consumer and requested project exist
+        self.resource_api.get_project(requested_project_id)
+        self.oauth_api.get_consumer(consumer_id)
 
         url = self.base_url(context, context['path'])
 
@@ -239,9 +249,11 @@ class OAuthControllerV3(controller.V3Controller):
             raise exception.Unauthorized(message=msg)
 
         request_token_duration = CONF.oauth1.request_token_duration
+        initiator = notifications._get_request_audit_info(context)
         token_ref = self.oauth_api.create_request_token(consumer_id,
                                                         requested_project_id,
-                                                        request_token_duration)
+                                                        request_token_duration,
+                                                        initiator)
 
         result = ('oauth_token=%(key)s&oauth_token_secret=%(secret)s'
                   % {'key': token_ref['id'],
@@ -318,8 +330,10 @@ class OAuthControllerV3(controller.V3Controller):
             raise exception.Unauthorized(message=msg)
 
         access_token_duration = CONF.oauth1.access_token_duration
+        initiator = notifications._get_request_audit_info(context)
         token_ref = self.oauth_api.create_access_token(request_token_id,
-                                                       access_token_duration)
+                                                       access_token_duration,
+                                                       initiator)
 
         result = ('oauth_token=%(key)s&oauth_token_secret=%(secret)s'
                   % {'key': token_ref['id'],

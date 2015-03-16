@@ -19,9 +19,13 @@
 """Utility methods for working with WSGI servers."""
 
 import copy
+import itertools
+import urllib
 
-from oslo import i18n
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+import oslo_i18n
+from oslo_log import log
+from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from oslo_utils import strutils
 import routes.middleware
@@ -29,7 +33,6 @@ import six
 import webob.dec
 import webob.exc
 
-from keystone.common import config
 from keystone.common import dependency
 from keystone.common import utils
 from keystone import exception
@@ -37,10 +40,9 @@ from keystone.i18n import _
 from keystone.i18n import _LI
 from keystone.i18n import _LW
 from keystone.models import token_model
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 # Environment variable used to pass the request context
@@ -114,7 +116,7 @@ def best_match_language(req):
     if not req.accept_language:
         return None
     return req.accept_language.best_match(
-        i18n.get_available_languages('keystone'))
+        oslo_i18n.get_available_languages('keystone'))
 
 
 class BaseApplication(object):
@@ -189,7 +191,6 @@ class Application(BaseApplication):
         arg_dict = req.environ['wsgiorg.routing_args'][1]
         action = arg_dict.pop('action')
         del arg_dict['controller']
-        LOG.debug('arg_dict: %s', arg_dict)
 
         # allow middleware up the stack to provide context, params and headers.
         context = req.environ.get(CONTEXT_ENV, {})
@@ -226,6 +227,10 @@ class Application(BaseApplication):
         # response code between GET and HEAD requests. The HTTP status should
         # be the same.
         req_method = req.environ['REQUEST_METHOD'].upper()
+        LOG.info('%(req_method)s %(path)s?%(params)s', {
+            'req_method': req_method,
+            'path': context['path'],
+            'params': urllib.urlencode(req.params)})
 
         params = self._normalize_dict(params)
 
@@ -239,16 +244,16 @@ class Application(BaseApplication):
             return render_exception(e, context=context,
                                     user_locale=best_match_language(req))
         except exception.Error as e:
-            LOG.warning(e)
+            LOG.warning(six.text_type(e))
             return render_exception(e, context=context,
                                     user_locale=best_match_language(req))
         except TypeError as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             return render_exception(exception.ValidationError(e),
                                     context=context,
                                     user_locale=best_match_language(req))
         except Exception as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             return render_exception(exception.UnexpectedError(exception=e),
                                     context=context,
                                     user_locale=best_match_language(req))
@@ -278,8 +283,7 @@ class Application(BaseApplication):
         return arg.replace(':', '_').replace('-', '_')
 
     def _normalize_dict(self, d):
-        return dict([(self._normalize_arg(k), v)
-                     for (k, v) in six.iteritems(d)])
+        return {self._normalize_arg(k): v for (k, v) in six.iteritems(d)}
 
     def assert_admin(self, context):
         if not context['is_admin']:
@@ -365,7 +369,11 @@ class Application(BaseApplication):
         url = CONF['%s_endpoint' % endpoint_type]
 
         if url:
-            url = url % CONF
+            substitutions = dict(
+                itertools.chain(six.iteritems(CONF),
+                                six.iteritems(CONF.eventlet_server)))
+
+            url = url % substitutions
         else:
             # NOTE(jamielennox): if url is not set via the config file we
             # should set it relative to the url that the user used to get here
@@ -443,16 +451,16 @@ class Middleware(Application):
             response = request.get_response(self.application)
             return self.process_response(request, response)
         except exception.Error as e:
-            LOG.warning(e)
+            LOG.warning(six.text_type(e))
             return render_exception(e, request=request,
                                     user_locale=best_match_language(request))
         except TypeError as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             return render_exception(exception.ValidationError(e),
                                     request=request,
                                     user_locale=best_match_language(request))
         except Exception as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             return render_exception(exception.UnexpectedError(exception=e),
                                     request=request,
                                     user_locale=best_match_language(request))
@@ -778,7 +786,7 @@ def render_exception(error, context=None, request=None, user_locale=None):
     """Forms a WSGI response based on the current error."""
 
     error_message = error.args[0]
-    message = i18n.translate(error_message, desired_locale=user_locale)
+    message = oslo_i18n.translate(error_message, desired_locale=user_locale)
     if message is error_message:
         # translate() didn't do anything because it wasn't a Message,
         # convert to a string.
@@ -800,9 +808,12 @@ def render_exception(error, context=None, request=None, user_locale=None):
             if context:
                 url = Application.base_url(context, 'public')
             else:
-                url = 'http://localhost:%d' % CONF.public_port
+                url = 'http://localhost:%d' % CONF.eventlet_server.public_port
         else:
-            url = url % CONF
+            substitutions = dict(
+                itertools.chain(six.iteritems(CONF),
+                                six.iteritems(CONF.eventlet_server)))
+            url = url % substitutions
 
         headers.append(('WWW-Authenticate', 'Keystone uri="%s"' % url))
     return render_response(status=(error.code, error.title),

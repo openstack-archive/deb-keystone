@@ -13,6 +13,8 @@
 import abc
 import datetime
 
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import timeutils
 import six
 
@@ -20,16 +22,14 @@ from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import extension
 from keystone.common import manager
-from keystone import config
 from keystone.contrib.revoke import model
 from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common import log
 from keystone.openstack.common import versionutils
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -202,7 +202,7 @@ class Manager(manager.Manager):
     @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
                         expiration_time=REVOCATION_CACHE_EXPIRATION_TIME)
     def _get_revoke_tree(self):
-        events = self.driver.get_events()
+        events = self.driver.list_events()
         revoke_tree = model.RevokeTree(revoke_events=events)
 
         return revoke_tree
@@ -230,7 +230,7 @@ class Driver(object):
     """Interface for recording and reporting revocation events."""
 
     @abc.abstractmethod
-    def get_events(self, last_fetch=None):
+    def list_events(self, last_fetch=None):
         """return the revocation events, as a list of objects
 
         :param last_fetch:   Time of last fetch.  Return all events newer.

@@ -19,11 +19,13 @@ import functools
 import os
 import uuid
 
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import importutils
 import six
 
 from keystone import clean
+from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
@@ -32,13 +34,17 @@ from keystone import exception
 from keystone.i18n import _, _LW
 from keystone.identity.mapping_backends import mapping
 from keystone import notifications
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 LOG = log.getLogger(__name__)
 
+SHOULD_CACHE = cache.should_cache_fn('identity')
+
+
+def get_expiration_time():
+    return CONF.identity.cache_time or CONF.cache_time
 
 DOMAIN_CONF_FHEAD = 'keystone.'
 DOMAIN_CONF_FTAIL = '.conf'
@@ -66,21 +72,21 @@ def filter_user(user_ref):
     return user_ref
 
 
+@dependency.requires('domain_config_api')
 class DomainConfigs(dict):
     """Discover, store and provide access to domain specific configs.
 
     The setup_domain_drivers() call will be made via the wrapper from
-    the first call to any driver function handled by this manager. This
-    setup call it will scan the domain config directory for files of the form
+    the first call to any driver function handled by this manager.
 
-    keystone.<domain_name>.conf
+    Domain specific configurations are only supported for the identity backend
+    and the individual configurations are either specified in the resource
+    database or in individual domain configuration files, depending on the
+    setting of the 'domain_configurations_from_database' config option.
 
-    For each file, the domain_name will be turned into a domain_id and then
-    this class will:
-
-    - Create a new config structure, adding in the specific additional options
-      defined in this config file
-    - Initialise a new instance of the required driver with this new config.
+    The result will be that for each domain with a specific configuration,
+    this class will hold a reference to a ConfigOpts and driver object that
+    the identity manager and driver can use.
 
     """
     configured = False
@@ -91,22 +97,27 @@ class DomainConfigs(dict):
         return importutils.import_object(
             domain_config['cfg'].identity.driver, domain_config['cfg'])
 
-    def _load_config(self, resource_api, file_list, domain_name):
+    def _assert_no_more_than_one_sql_driver(self, domain_id, new_config,
+                                            config_file=None):
+        """Ensure there is more than one sql driver.
 
-        def assert_no_more_than_one_sql_driver(new_config, config_file):
-            """Ensure there is more than one sql driver.
+        Check to see if the addition of the driver in this new config
+        would cause there to now be more than one sql driver.
 
-            Check to see if the addition of the driver in this new config
-            would cause there to now be more than one sql driver.
+        If we are loading from configuration files, the config_file will hold
+        the name of the file we have just loaded.
 
-            """
-            if (new_config['driver'].is_sql and
-                    (self.driver.is_sql or self._any_sql)):
-                # The addition of this driver would cause us to have more than
-                # one sql driver, so raise an exception.
-                raise exception.MultipleSQLDriversInConfig(
-                    config_file=config_file)
-            self._any_sql = new_config['driver'].is_sql
+        """
+        if (new_config['driver'].is_sql and
+                (self.driver.is_sql or self._any_sql)):
+            # The addition of this driver would cause us to have more than
+            # one sql driver, so raise an exception.
+            if not config_file:
+                config_file = _('Database at /domains/%s/config') % domain_id
+            raise exception.MultipleSQLDriversInConfig(source=config_file)
+        self._any_sql = new_config['driver'].is_sql
+
+    def _load_config_from_file(self, resource_api, file_list, domain_name):
 
         try:
             domain_ref = resource_api.get_domain_by_name(domain_name)
@@ -127,14 +138,27 @@ class DomainConfigs(dict):
         domain_config['cfg'](args=[], project='keystone',
                              default_config_files=file_list)
         domain_config['driver'] = self._load_driver(domain_config)
-        assert_no_more_than_one_sql_driver(domain_config, file_list)
+        self._assert_no_more_than_one_sql_driver(domain_ref['id'],
+                                                 domain_config,
+                                                 config_file=file_list)
         self[domain_ref['id']] = domain_config
 
-    def setup_domain_drivers(self, standard_driver, resource_api):
-        # This is called by the api call wrapper
-        self.configured = True
-        self.driver = standard_driver
+    def _setup_domain_drivers_from_files(self, standard_driver, resource_api):
+        """Read the domain specific configuration files and load the drivers.
 
+        Domain configuration files are stored in the domain config directory,
+        and must be named of the form:
+
+        keystone.<domain_name>.conf
+
+        For each file, call the load config method where the domain_name
+        will be turned into a domain_id and then:
+
+        - Create a new config structure, adding in the specific additional
+          options defined in this config file
+        - Initialise a new instance of the required driver with this new config
+
+        """
         conf_dir = CONF.identity.domain_config_dir
         if not os.path.exists(conf_dir):
             LOG.warning(_LW('Unable to locate domain config directory: %s'),
@@ -146,14 +170,64 @@ class DomainConfigs(dict):
                 if (fname.startswith(DOMAIN_CONF_FHEAD) and
                         fname.endswith(DOMAIN_CONF_FTAIL)):
                     if fname.count('.') >= 2:
-                        self._load_config(resource_api,
-                                          [os.path.join(r, fname)],
-                                          fname[len(DOMAIN_CONF_FHEAD):
-                                                -len(DOMAIN_CONF_FTAIL)])
+                        self._load_config_from_file(
+                            resource_api, [os.path.join(r, fname)],
+                            fname[len(DOMAIN_CONF_FHEAD):
+                                  -len(DOMAIN_CONF_FTAIL)])
                     else:
                         LOG.debug(('Ignoring file (%s) while scanning domain '
                                    'config directory'),
                                   fname)
+
+    def _load_config_from_database(self, domain_id, specific_config):
+        domain_config = {}
+        domain_config['cfg'] = cfg.ConfigOpts()
+        config.configure(conf=domain_config['cfg'])
+        domain_config['cfg'](args=[], project='keystone')
+
+        # Override any options that have been passed in as specified in the
+        # database.
+        for group in specific_config:
+            for option in specific_config[group]:
+                domain_config['cfg'].set_override(
+                    option, specific_config[group][option], group)
+
+        domain_config['driver'] = self._load_driver(domain_config)
+        self._assert_no_more_than_one_sql_driver(domain_id, domain_config)
+        self[domain_id] = domain_config
+
+    def _setup_domain_drivers_from_database(self, standard_driver,
+                                            resource_api):
+        """Read domain specific configuration from database and load drivers.
+
+        Domain configurations are stored in the domain-config backend,
+        so we go through each domain to find those that have a specific config
+        defined, and for those that do we:
+
+        - Create a new config structure, overriding any specific options
+          defined in the resource backend
+        - Initialise a new instance of the required driver with this new config
+
+        """
+        for domain in resource_api.list_domains():
+            domain_config_options = (
+                self.domain_config_api.
+                get_config_with_sensitive_info(domain['id']))
+            if domain_config_options:
+                self._load_config_from_database(domain['id'],
+                                                domain_config_options)
+
+    def setup_domain_drivers(self, standard_driver, resource_api):
+        # This is called by the api call wrapper
+        self.configured = True
+        self.driver = standard_driver
+
+        if CONF.identity.domain_configurations_from_database:
+            self._setup_domain_drivers_from_database(standard_driver,
+                                                     resource_api)
+        else:
+            self._setup_domain_drivers_from_files(standard_driver,
+                                                  resource_api)
 
     def get_domain_driver(self, domain_id):
         if domain_id in self:
@@ -162,12 +236,14 @@ class DomainConfigs(dict):
     def get_domain_conf(self, domain_id):
         if domain_id in self:
             return self[domain_id]['cfg']
+        else:
+            return CONF
 
     def reload_domain_driver(self, domain_id):
         # Only used to support unit tests that want to set
         # new config values.  This should only be called once
         # the domains have been configured, since it relies on
-        # the fact that the configuration files have already been
+        # the fact that the configuration files/database have already been
         # read.
         if self.configured:
             if domain_id in self:
@@ -220,9 +296,8 @@ def exception_translated(exception_type):
 
 
 @dependency.provider('identity_api')
-@dependency.optional('revoke_api')
 @dependency.requires('assignment_api', 'credential_api', 'id_mapping_api',
-                     'resource_api')
+                     'resource_api', 'revoke_api')
 class Manager(manager.Manager):
     """Default pivot point for the Identity backend.
 
@@ -262,13 +337,44 @@ class Manager(manager.Manager):
 
     """
     _USER = 'user'
-    _USER_PASSWORD = 'user_password'
-    _USER_REMOVED_FROM_GROUP = 'user_removed_from_group'
     _GROUP = 'group'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.identity.driver)
         self.domain_configs = DomainConfigs()
+
+        self.event_callbacks = {
+            notifications.ACTIONS.deleted: {
+                'domain': [self._domain_deleted],
+            },
+        }
+
+    def _domain_deleted(self, service, resource_type, operation,
+                        payload):
+        domain_id = payload['resource_info']
+
+        user_refs = self.list_users(domain_scope=domain_id)
+        group_refs = self.list_groups(domain_scope=domain_id)
+
+        for group in group_refs:
+            # Cleanup any existing groups.
+            try:
+                self.delete_group(group['id'])
+            except exception.GroupNotFound:
+                LOG.debug(('Group %(groupid)s not found when deleting domain '
+                           'contents for %(domainid)s, continuing with '
+                           'cleanup.'),
+                          {'groupid': group['id'], 'domainid': domain_id})
+
+        # And finally, delete the users themselves
+        for user in user_refs:
+            try:
+                self.delete_user(user['id'])
+            except exception.UserNotFound:
+                LOG.debug(('User %(userid)s not found when deleting domain '
+                           'contents for %(domainid)s, continuing with '
+                           'cleanup.'),
+                          {'userid': user['id'], 'domainid': domain_id})
 
     # Domain ID normalization methods
 
@@ -546,10 +652,9 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
 
-    @notifications.created(_USER, result_id_arg_attr='id')
     @domains_configured
     @exception_translated('user')
-    def create_user(self, user_ref):
+    def create_user(self, user_ref, initiator=None):
         user = user_ref.copy()
         user['name'] = clean.user_name(user['name'])
         user.setdefault('enabled', True)
@@ -566,11 +671,14 @@ class Manager(manager.Manager):
         # that particular driver type.
         user['id'] = uuid.uuid4().hex
         ref = driver.create_user(user['id'], user)
+        notifications.Audit.created(self._USER, user['id'], initiator)
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
 
     @domains_configured
     @exception_translated('user')
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=get_expiration_time)
     def get_user(self, user_id):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
@@ -591,6 +699,8 @@ class Manager(manager.Manager):
 
     @domains_configured
     @exception_translated('user')
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=get_expiration_time)
     def get_user_by_name(self, user_name, domain_id):
         driver = self._select_identity_driver(domain_id)
         ref = driver.get_user_by_name(user_name, domain_id)
@@ -615,10 +725,9 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref_list, domain_scope, driver, mapping.EntityType.USER)
 
-    @notifications.updated(_USER)
     @domains_configured
     @exception_translated('user')
-    def update_user(self, user_id, user_ref):
+    def update_user(self, user_id, user_ref, initiator=None):
         old_user_ref = self.get_user(user_id)
         user = user_ref.copy()
         if 'name' in user:
@@ -638,7 +747,13 @@ class Manager(manager.Manager):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
         user = self._clear_domain_id_if_domain_unaware(driver, user)
+        self.get_user.invalidate(self, old_user_ref['id'])
+        self.get_user_by_name.invalidate(self, old_user_ref['name'],
+                                         old_user_ref['domain_id'])
+
         ref = driver.update_user(entity_id, user)
+
+        notifications.Audit.updated(self._USER, user_id, initiator)
 
         enabled_change = ((user.get('enabled') is False) and
                           user['enabled'] != old_user_ref.get('enabled'))
@@ -648,21 +763,25 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
 
-    @notifications.deleted(_USER)
     @domains_configured
     @exception_translated('user')
-    def delete_user(self, user_id):
+    def delete_user(self, user_id, initiator=None):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
+        # Get user details to invalidate the cache.
+        user_old = self.get_user(user_id)
         driver.delete_user(entity_id)
         self.assignment_api.delete_user(user_id)
+        self.get_user.invalidate(self, user_id)
+        self.get_user_by_name.invalidate(self, user_old['name'],
+                                         user_old['domain_id'])
         self.credential_api.delete_credentials_for_user(user_id)
         self.id_mapping_api.delete_id_mapping(user_id)
+        notifications.Audit.deleted(self._USER, user_id, initiator)
 
-    @notifications.created(_GROUP, result_id_arg_attr='id')
     @domains_configured
     @exception_translated('group')
-    def create_group(self, group_ref):
+    def create_group(self, group_ref, initiator=None):
         group = group_ref.copy()
         group.setdefault('description', '')
         domain_id = group['domain_id']
@@ -677,11 +796,16 @@ class Manager(manager.Manager):
         # that particular driver type.
         group['id'] = uuid.uuid4().hex
         ref = driver.create_group(group['id'], group)
+
+        notifications.Audit.created(self._GROUP, group['id'], initiator)
+
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.GROUP)
 
     @domains_configured
     @exception_translated('group')
+    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
+                        expiration_time=get_expiration_time)
     def get_group(self, group_id):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
@@ -697,29 +821,33 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.GROUP)
 
-    @notifications.updated(_GROUP)
     @domains_configured
     @exception_translated('group')
-    def update_group(self, group_id, group):
+    def update_group(self, group_id, group, initiator=None):
         if 'domain_id' in group:
             self.resource_api.get_domain(group['domain_id'])
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
         group = self._clear_domain_id_if_domain_unaware(driver, group)
         ref = driver.update_group(entity_id, group)
+        self.get_group.invalidate(self, group_id)
+        notifications.Audit.updated(self._GROUP, group_id, initiator)
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.GROUP)
 
-    @notifications.deleted(_GROUP)
     @domains_configured
     @exception_translated('group')
-    def delete_group(self, group_id):
+    def delete_group(self, group_id, initiator=None):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
         user_ids = (u['id'] for u in self.list_users_in_group(group_id))
         driver.delete_group(entity_id)
+        self.get_group.invalidate(self, group_id)
         self.id_mapping_api.delete_id_mapping(group_id)
         self.assignment_api.delete_group(group_id)
+
+        notifications.Audit.deleted(self._GROUP, group_id, initiator)
+
         for uid in user_ids:
             self.emit_invalidate_user_token_persistence(uid)
 

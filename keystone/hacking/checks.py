@@ -335,7 +335,13 @@ class CheckForLoggingIssues(BaseASTChecker):
 
         # if first arg is a call to a i18n name
         if isinstance(msg, ast.Call):
-            func_name = msg.func.id
+            try:
+                func_name = msg.func.id
+            except AttributeError:
+                # in the case of logging only an exception, the msg function
+                # will not have an id associated with it, for instance:
+                # LOG.warning(six.text_type(e))
+                return
 
             # the function name is the correct translation helper
             # for the logging method
@@ -399,8 +405,7 @@ class CheckForLoggingIssues(BaseASTChecker):
 
 def check_oslo_namespace_imports(logical_line, blank_before, filename):
     oslo_namespace_imports = re.compile(
-        r"(((from)|(import))\s+oslo\.utils)|"
-        "(from\s+oslo\s+import\s+utils)")
+        r"(((from)|(import))\s+oslo\.)|(from\s+oslo\s+import\s+)")
 
     if re.match(oslo_namespace_imports, logical_line):
         msg = ("K333: '%s' must be used instead of '%s'.") % (
@@ -409,9 +414,33 @@ def check_oslo_namespace_imports(logical_line, blank_before, filename):
         yield(0, msg)
 
 
+def dict_constructor_with_sequence_copy(logical_line):
+    """Should use a dict comprehension instead of a dict constructor.
+
+    PEP-0274 introduced dict comprehension with performance enhancement
+    and it also makes code more readable.
+
+    Okay: lower_res = {k.lower(): v for k, v in six.iteritems(res[1])}
+    Okay: fool = dict(a='a', b='b')
+    K008: lower_res = dict((k.lower(), v) for k, v in six.iteritems(res[1]))
+    K008:     attrs = dict([(k, _from_json(v))
+    K008: dict([[i,i] for i in range(3)])
+
+    """
+    MESSAGE = ("K008 Must use a dict comprehension instead of a dict"
+               " constructor with a sequence of key-value pairs.")
+
+    dict_constructor_with_sequence_re = (
+        re.compile(r".*\bdict\((\[)?(\(|\[)(?!\{)"))
+
+    if dict_constructor_with_sequence_re.match(logical_line):
+        yield (0, MESSAGE)
+
+
 def factory(register):
     register(CheckForMutableDefaultArgs)
     register(block_comments_begin_with_a_space)
     register(CheckForAssertingNoneEquality)
     register(CheckForLoggingIssues)
     register(check_oslo_namespace_imports)
+    register(dict_constructor_with_sequence_copy)

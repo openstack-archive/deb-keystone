@@ -15,12 +15,13 @@
 import sys
 
 from keystoneclient.common import cms
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_log import log
+from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from oslo_utils import timeutils
 import six
 
-from keystone.assignment import controllers as assignment_controllers
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
@@ -28,12 +29,12 @@ from keystone import config
 from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _, _LI, _LW
-from keystone.openstack.common import log
+from keystone.resource import controllers as resource_controllers
 
 
 LOG = log.getLogger(__name__)
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 # registry of authentication methods
 AUTH_METHODS = {}
@@ -151,7 +152,7 @@ class AuthInfo(object):
                 project_id=project_ref['id'],
                 project=project_ref)
         except AssertionError as e:
-            LOG.warning(e)
+            LOG.warning(six.text_type(e))
             six.reraise(exception.Unauthorized, exception.Unauthorized(e),
                         sys.exc_info()[2])
 
@@ -161,7 +162,7 @@ class AuthInfo(object):
                 domain_id=domain_ref['id'],
                 domain=domain_ref)
         except AssertionError as e:
-            LOG.warning(e)
+            LOG.warning(six.text_type(e))
             six.reraise(exception.Unauthorized, exception.Unauthorized(e),
                         sys.exc_info()[2])
 
@@ -179,7 +180,7 @@ class AuthInfo(object):
             else:
                 domain_ref = self.resource_api.get_domain(domain_id)
         except exception.DomainNotFound as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             raise exception.Unauthorized(e)
         self._assert_domain_is_enabled(domain_ref)
         return domain_ref
@@ -206,7 +207,7 @@ class AuthInfo(object):
                 # disabled.
                 self._lookup_domain({'id': project_ref['domain_id']})
         except exception.ProjectNotFound as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             raise exception.Unauthorized(e)
         self._assert_project_is_enabled(project_ref)
         return project_ref
@@ -426,7 +427,7 @@ class Auth(controller.V3Controller):
         try:
             user_ref = self.identity_api.get_user(auth_context['user_id'])
         except exception.UserNotFound as e:
-            LOG.exception(e)
+            LOG.exception(six.text_type(e))
             raise exception.Unauthorized(e)
 
         default_project_id = user_ref.get('default_project_id')
@@ -546,7 +547,7 @@ class Auth(controller.V3Controller):
         for t in tokens:
             expires = t['expires']
             if not (expires and isinstance(expires, six.text_type)):
-                    t['expires'] = timeutils.isotime(expires)
+                t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
         json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,
@@ -559,7 +560,7 @@ class Auth(controller.V3Controller):
         # it's most likely that only one of these will be filled so avoid
         # the combination if possible.
         if a and b:
-            return dict((x['id'], x) for x in a + b).values()
+            return {x['id']: x for x in a + b}.values()
         else:
             return a or b
 
@@ -582,7 +583,7 @@ class Auth(controller.V3Controller):
             grp_refs = self.assignment_api.list_projects_for_groups(group_ids)
 
         refs = self._combine_lists_uniquely(user_refs, grp_refs)
-        return assignment_controllers.ProjectV3.wrap_collection(context, refs)
+        return resource_controllers.ProjectV3.wrap_collection(context, refs)
 
     @controller.protected()
     def get_auth_domains(self, context):
@@ -603,7 +604,7 @@ class Auth(controller.V3Controller):
             grp_refs = self.assignment_api.list_domains_for_groups(group_ids)
 
         refs = self._combine_lists_uniquely(user_refs, grp_refs)
-        return assignment_controllers.DomainV3.wrap_collection(context, refs)
+        return resource_controllers.DomainV3.wrap_collection(context, refs)
 
     @controller.protected()
     def get_auth_catalog(self, context):

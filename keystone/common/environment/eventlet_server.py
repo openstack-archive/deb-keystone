@@ -25,15 +25,23 @@ import sys
 import eventlet
 import eventlet.wsgi
 import greenlet
+from oslo_log import log
+from oslo_log import loggers
 
 from keystone.i18n import _LE, _LI
-from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
 
+# The size of a pool that is used to spawn a single green thread in which
+# a wsgi server is then started. The size of one is enough, because in case
+# of several workers the parent process forks and each child gets a copy
+# of a pool, which does not include any greenthread object as the spawn is
+# done after the fork.
+POOL_SIZE = 1
 
-class EventletFilteringLogger(log.WritableLogger):
+
+class EventletFilteringLogger(loggers.WritableLogger):
     # NOTE(morganfainberg): This logger is designed to filter out specific
     # Tracebacks to limit the amount of data that eventlet can log. In the
     # case of broken sockets (EPIPE and ECONNRESET), we are seeing a huge
@@ -57,12 +65,13 @@ class EventletFilteringLogger(log.WritableLogger):
 class Server(object):
     """Server class to manage multiple WSGI sockets and applications."""
 
-    def __init__(self, application, host=None, port=None, threads=1000,
-                 keepalive=False, keepidle=None):
+    def __init__(self, application, host=None, port=None, keepalive=False,
+                 keepidle=None):
         self.application = application
         self.host = host or '0.0.0.0'
         self.port = port or 0
-        self.pool = eventlet.GreenPool(threads)
+        # Pool for a green thread in which wsgi server will be running
+        self.pool = eventlet.GreenPool(POOL_SIZE)
         self.socket_info = {}
         self.greenthread = None
         self.do_ssl = False
@@ -174,7 +183,7 @@ class Server(object):
         """Start a WSGI server with a new green thread pool."""
         logger = log.getLogger('eventlet.wsgi.server')
         try:
-            eventlet.wsgi.server(socket, application, custom_pool=self.pool,
+            eventlet.wsgi.server(socket, application,
                                  log=EventletFilteringLogger(logger),
                                  debug=False)
         except greenlet.GreenletExit:

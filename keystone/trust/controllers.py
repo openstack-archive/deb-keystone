@@ -14,6 +14,8 @@
 
 import uuid
 
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import timeutils
 import six
 
@@ -21,15 +23,15 @@ from keystone import assignment
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import validation
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.models import token_model
-from keystone.openstack.common import log
+from keystone import notifications
+from keystone.openstack.common import versionutils
 from keystone.trust import schema
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 LOG = log.getLogger(__name__)
 
@@ -103,9 +105,9 @@ class TrustV3(controller.V3Controller):
             'next': None,
             'previous': None}
 
-    def _clean_role_list(self, context, trust, all_roles):
+    def _normalize_role_list(self, trust, all_roles):
         trust_roles = []
-        all_role_names = dict((r['name'], r) for r in all_roles)
+        all_role_names = {r['name']: r for r in all_roles}
         for role in trust.get('roles', []):
             if 'id' in role:
                 trust_roles.append({'id': role['id']})
@@ -154,13 +156,18 @@ class TrustV3(controller.V3Controller):
         self._require_user_is_trustor(context, trust)
         self._require_trustee_exists(trust['trustee_user_id'])
         all_roles = self.role_api.list_roles()
-        clean_roles = self._clean_role_list(context, trust, all_roles)
-        self._require_trustor_has_role_in_project(trust, clean_roles)
+        # Normalize roles
+        normalized_roles = self._normalize_role_list(trust, all_roles)
+        trust['roles'] = normalized_roles
+        self._require_trustor_has_role_in_project(trust)
         trust['expires_at'] = self._parse_expiration_date(
             trust.get('expires_at'))
         trust_id = uuid.uuid4().hex
-        new_trust = self.trust_api.create_trust(trust_id, trust, clean_roles,
-                                                redelegated_trust)
+        initiator = notifications._get_request_audit_info(context)
+        new_trust = self.trust_api.create_trust(trust_id, trust,
+                                                normalized_roles,
+                                                redelegated_trust,
+                                                initiator)
         self._fill_in_roles(context, new_trust, all_roles)
         return TrustV3.wrap_member(context, new_trust)
 
@@ -185,9 +192,9 @@ class TrustV3(controller.V3Controller):
         else:
             return []
 
-    def _require_trustor_has_role_in_project(self, trust, clean_roles):
+    def _require_trustor_has_role_in_project(self, trust):
         user_roles = self._get_user_role(trust)
-        for trust_role in clean_roles:
+        for trust_role in trust['roles']:
             matching_roles = [x for x in user_roles
                               if x == trust_role['id']]
             if not matching_roles:
@@ -202,6 +209,16 @@ class TrustV3(controller.V3Controller):
             return timeutils.parse_isotime(expiration_date)
         except ValueError:
             raise exception.ValidationTimeStampError()
+
+    def _check_role_for_trust(self, context, trust_id, role_id):
+        """Checks if a role has been assigned to a trust."""
+        trust = self.trust_api.get_trust(trust_id)
+        if not trust:
+            raise exception.TrustNotFound(trust_id=trust_id)
+        user_id = self._get_user_id(context)
+        _trustor_trustee_only(trust, user_id)
+        if not any(role['id'] == role_id for role in trust['roles']):
+            raise exception.RoleNotFound(role_id=role_id)
 
     @controller.protected()
     def list_trusts(self, context):
@@ -243,7 +260,8 @@ class TrustV3(controller.V3Controller):
 
         user_id = self._get_user_id(context)
         _admin_trustor_only(context, trust, user_id)
-        self.trust_api.delete_trust(trust_id)
+        initiator = notifications._get_request_audit_info(context)
+        self.trust_api.delete_trust(trust_id, initiator)
 
     @controller.protected()
     def list_roles_for_trust(self, context, trust_id):
@@ -255,20 +273,15 @@ class TrustV3(controller.V3Controller):
         return {'roles': trust['roles'],
                 'links': trust['roles_links']}
 
-    @controller.protected()
+    @versionutils.deprecated(
+        versionutils.deprecated.KILO,
+        remove_in=+2)
     def check_role_for_trust(self, context, trust_id, role_id):
-        """Checks if a role has been assigned to a trust."""
-        trust = self.trust_api.get_trust(trust_id)
-        if not trust:
-            raise exception.TrustNotFound(trust_id=trust_id)
-        user_id = self._get_user_id(context)
-        _trustor_trustee_only(trust, user_id)
-        if not any(role['id'] == role_id for role in trust['roles']):
-            raise exception.RoleNotFound(role_id=role_id)
+        return self._check_role_for_trust(self, context, trust_id, role_id)
 
     @controller.protected()
     def get_role_for_trust(self, context, trust_id, role_id):
         """Get a role that has been assigned to a trust."""
-        self.check_role_for_trust(context, trust_id, role_id)
+        self._check_role_for_trust(context, trust_id, role_id)
         role = self.role_api.get_role(role_id)
         return assignment.controllers.RoleV3.wrap_member(context, role)

@@ -21,12 +21,13 @@ CONF() because it sets up configuration options.
 import contextlib
 import functools
 
-from oslo.config import cfg
-from oslo.db import exception as db_exception
-from oslo.db import options as db_options
-from oslo.db.sqlalchemy import models
-from oslo.db.sqlalchemy import session as db_session
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_db import exception as db_exception
+from oslo_db import options as db_options
+from oslo_db.sqlalchemy import models
+from oslo_db.sqlalchemy import session as db_session
+from oslo_log import log
+from oslo_serialization import jsonutils
 import six
 import sqlalchemy as sql
 from sqlalchemy.ext import declarative
@@ -36,7 +37,6 @@ from sqlalchemy import types as sql_types
 from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _
-from keystone.openstack.common import log
 
 
 CONF = cfg.CONF
@@ -125,8 +125,8 @@ class DictBase(models.ModelBase):
     def from_dict(cls, d):
         new_d = d.copy()
 
-        new_d['extra'] = dict((k, new_d.pop(k)) for k in six.iterkeys(d)
-                              if k not in cls.attributes and k != 'extra')
+        new_d['extra'] = {k: new_d.pop(k) for k in six.iterkeys(d)
+                          if k not in cls.attributes and k != 'extra'}
 
         return cls(**new_d)
 
@@ -163,7 +163,7 @@ class ModelDictMixin(object):
     def to_dict(self):
         """Returns the model's attributes as a dictionary."""
         names = (column.name for column in self.__table__.columns)
-        return dict((name, getattr(self, name)) for name in names)
+        return {name: getattr(self, name) for name in names}
 
 
 _engine_facade = None
@@ -251,15 +251,16 @@ def _filter(model, query, hints):
     :returns query: query, updated with any filters satisfied
 
     """
-    def inexact_filter(model, query, filter_, hints):
+    def inexact_filter(model, query, filter_, satisfied_filters, hints):
         """Applies an inexact filter to a query.
 
         :param model: the table model in question
         :param query: query to apply filters to
         :param filter_: the dict that describes this filter
+        :param satisfied_filters: a cumulative list of satisfied filters, to
+                                  which filter_ will be added if it is
+                                  satisfied.
         :param hints: contains the list of filters yet to be satisfied.
-                      Any filters satisfied here will be removed so that
-                      the caller will know if any filters remain.
 
         :returns query: query updated to add any inexact filters we could
                         satisfy
@@ -287,19 +288,21 @@ def _filter(model, query, hints):
             # work out if they need to do something with it.
             return query
 
-        hints.filters.remove(filter_)
+        satisfied_filters.append(filter_)
         return query.filter(query_term)
 
-    def exact_filter(model, filter_, cumulative_filter_dict, hints):
+    def exact_filter(
+            model, filter_, satisfied_filters, cumulative_filter_dict, hints):
         """Applies an exact filter to a query.
 
         :param model: the table model in question
         :param filter_: the dict that describes this filter
+        :param satisfied_filters: a cumulative list of satisfied filters, to
+                                  which filter_ will be added if it is
+                                  satisfied.
         :param cumulative_filter_dict: a dict that describes the set of
                                       exact filters built up so far
         :param hints: contains the list of filters yet to be satisfied.
-                      Any filters satisfied here will be removed so that
-                      the caller will know if any filters remain.
 
         :returns: updated cumulative dict
 
@@ -311,22 +314,28 @@ def _filter(model, query, hints):
                 utils.attr_as_boolean(filter_['value']))
         else:
             cumulative_filter_dict[key] = filter_['value']
-        hints.filters.remove(filter_)
+        satisfied_filters.append(filter_)
         return cumulative_filter_dict
 
     filter_dict = {}
-
+    satisfied_filters = []
     for filter_ in hints.filters:
         if filter_['name'] not in model.attributes:
             continue
         if filter_['comparator'] == 'equals':
-            filter_dict = exact_filter(model, filter_, filter_dict, hints)
+            filter_dict = exact_filter(
+                model, filter_, satisfied_filters, filter_dict, hints)
         else:
-            query = inexact_filter(model, query, filter_, hints)
+            query = inexact_filter(
+                model, query, filter_, satisfied_filters, hints)
 
     # Apply any exact filters we built up
     if filter_dict:
         query = query.filter_by(**filter_dict)
+
+    # Remove satisfied filters, then the caller will know remaining filters
+    for filter_ in satisfied_filters:
+        hints.filters.remove(filter_)
 
     return query
 
@@ -401,7 +410,7 @@ def handle_conflicts(conflict_type='object'):
                                          details=_('Duplicate Entry'))
             except db_exception.DBError as e:
                 # TODO(blk-u): inspecting inner_exception breaks encapsulation;
-                # oslo.db should provide exception we need.
+                # oslo_db should provide exception we need.
                 if isinstance(e.inner_exception, IntegrityError):
                     # LOG the exception for debug purposes, do not send the
                     # exception details out with the raised Conflict exception

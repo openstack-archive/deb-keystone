@@ -13,18 +13,18 @@
 """Keystone Compressed PKI Token Provider"""
 
 from keystoneclient.common import cms
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_log import log
+from oslo_serialization import jsonutils
 
 from keystone.common import environment
 from keystone.common import utils
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
-from keystone.openstack.common import log
 from keystone.token.providers import common
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 LOG = log.getLogger(__name__)
 ERROR_MESSAGE = _('Unable to sign token.')
@@ -45,3 +45,7 @@ class Provider(common.BaseProvider):
         except environment.subprocess.CalledProcessError:
             LOG.exception(ERROR_MESSAGE)
             raise exception.UnexpectedError(ERROR_MESSAGE)
+
+    def needs_persistence(self):
+        """Should the token be written to a backend."""
+        return True

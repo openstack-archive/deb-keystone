@@ -14,6 +14,8 @@
 
 import abc
 
+from oslo_config import cfg
+from oslo_log import log
 import six
 
 from keystone import clean
@@ -21,14 +23,13 @@ from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
-from keystone import config
+from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _, _LE
 from keystone import notifications
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 SHOULD_CACHE = cache.should_cache_fn('resource')
 
@@ -46,8 +47,8 @@ def calc_default_domain():
 
 
 @dependency.provider('resource_api')
-@dependency.optional('revoke_api')
-@dependency.requires('assignment_api', 'credential_api', 'identity_api')
+@dependency.requires('assignment_api', 'credential_api', 'domain_config_api',
+                     'identity_api', 'revoke_api')
 class Manager(manager.Manager):
     """Default pivot point for the resource backend.
 
@@ -55,6 +56,7 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+    _DOMAIN = 'domain'
     _PROJECT = 'project'
 
     def __init__(self):
@@ -63,7 +65,8 @@ class Manager(manager.Manager):
         resource_driver = CONF.resource.driver
 
         if resource_driver is None:
-            assignment_driver = dependency.REGISTRY['assignment_api'].driver
+            assignment_driver = (
+                dependency.get_provider('assignment_api').driver)
             resource_driver = assignment_driver.default_resource_driver()
 
         super(Manager, self).__init__(resource_driver)
@@ -80,8 +83,7 @@ class Manager(manager.Manager):
                 action=_('max hierarchy depth reached for '
                          '%s branch.') % project_id)
 
-    @notifications.created(_PROJECT)
-    def create_project(self, tenant_id, tenant):
+    def create_project(self, tenant_id, tenant, initiator=None):
         tenant = tenant.copy()
         tenant.setdefault('enabled', True)
         tenant['enabled'] = clean.project_enabled(tenant['enabled'])
@@ -106,6 +108,7 @@ class Manager(manager.Manager):
                                              parents_list)
 
         ret = self.driver.create_project(tenant_id, tenant)
+        notifications.Audit.created(self._PROJECT, tenant_id, initiator)
         if SHOULD_CACHE(ret):
             self.get_project.set(ret, self, tenant_id)
             self.get_project_by_name.set(ret, self, ret['name'],
@@ -121,6 +124,28 @@ class Manager(manager.Manager):
             domain = self.get_domain(domain_id)
         if not domain.get('enabled', True):
             raise AssertionError(_('Domain is disabled: %s') % domain_id)
+
+    def assert_domain_not_federated(self, domain_id, domain):
+        """Assert the Domain's name and id do not match the reserved keyword.
+
+        Note that the reserved keyword is defined in the configuration file,
+        by default, it is 'Federated', it is also case insensitive.
+        If config's option is empty the default hardcoded value 'Federated'
+        will be used.
+
+        :raise AssertionError if domain named match the value in the config.
+
+        """
+        # NOTE(marek-denis): We cannot create this attribute in the __init__ as
+        # config values are always initialized to default value.
+        federated_domain = (CONF.federation.federated_domain_name or
+                            federation.FEDERATED_DOMAIN_KEYWORD).lower()
+        if (domain.get('name') and domain['name'].lower() == federated_domain):
+            raise AssertionError(_('Domain cannot be named %s')
+                                 % federated_domain)
+        if (domain_id.lower() == federated_domain):
+            raise AssertionError(_('Domain cannot have ID %s')
+                                 % federated_domain)
 
     def assert_project_enabled(self, project_id, project=None):
         """Assert the project is enabled and its associated domain is enabled.
@@ -163,8 +188,7 @@ class Manager(manager.Manager):
                              'its subtree contains enabled '
                              'projects') % project_id)
 
-    @notifications.updated(_PROJECT)
-    def update_project(self, tenant_id, tenant):
+    def update_project(self, tenant_id, tenant, initiator=None):
         original_tenant = self.driver.get_project(tenant_id)
         tenant = tenant.copy()
 
@@ -189,13 +213,13 @@ class Manager(manager.Manager):
             self._disable_project(tenant_id)
 
         ret = self.driver.update_project(tenant_id, tenant)
+        notifications.Audit.updated(self._PROJECT, tenant_id, initiator)
         self.get_project.invalidate(self, tenant_id)
         self.get_project_by_name.invalidate(self, original_tenant['name'],
                                             original_tenant['domain_id'])
         return ret
 
-    @notifications.deleted(_PROJECT)
-    def delete_project(self, tenant_id):
+    def delete_project(self, tenant_id, initiator=None):
         if not self.driver.is_leaf_project(tenant_id):
             raise exception.ForbiddenAction(
                 action=_('cannot delete the project %s since it is not '
@@ -213,6 +237,7 @@ class Manager(manager.Manager):
         self.get_project_by_name.invalidate(self, project['name'],
                                             project['domain_id'])
         self.credential_api.delete_credentials_for_project(tenant_id)
+        notifications.Audit.deleted(self._PROJECT, tenant_id, initiator)
         return ret
 
     def _filter_projects_list(self, projects_list, user_id):
@@ -350,14 +375,17 @@ class Manager(manager.Manager):
     def get_domain_by_name(self, domain_name):
         return self.driver.get_domain_by_name(domain_name)
 
-    @notifications.created('domain')
-    def create_domain(self, domain_id, domain):
+    def create_domain(self, domain_id, domain, initiator=None):
         if (not self.identity_api.multiple_domains_supported and
                 domain_id != CONF.identity.default_domain_id):
             raise exception.Forbidden(_('Multiple domains are not supported'))
+        self.assert_domain_not_federated(domain_id, domain)
         domain.setdefault('enabled', True)
         domain['enabled'] = clean.domain_enabled(domain['enabled'])
         ret = self.driver.create_domain(domain_id, domain)
+
+        notifications.Audit.created(self._DOMAIN, domain_id, initiator)
+
         if SHOULD_CACHE(ret):
             self.get_domain.set(ret, self, domain_id)
             self.get_domain_by_name.set(ret, self, ret['name'])
@@ -367,7 +395,7 @@ class Manager(manager.Manager):
     def list_domains(self, hints=None):
         return self.driver.list_domains(hints or driver_hints.Hints())
 
-    @notifications.disabled('domain', public=False)
+    @notifications.disabled(_DOMAIN, public=False)
     def _disable_domain(self, domain_id):
         """Emit a notification to the callback system domain is been disabled.
 
@@ -380,23 +408,25 @@ class Manager(manager.Manager):
         """
         pass
 
-    @notifications.updated('domain')
-    def update_domain(self, domain_id, domain):
+    def update_domain(self, domain_id, domain, initiator=None):
+        self.assert_domain_not_federated(domain_id, domain)
         original_domain = self.driver.get_domain(domain_id)
         if 'enabled' in domain:
             domain['enabled'] = clean.domain_enabled(domain['enabled'])
         ret = self.driver.update_domain(domain_id, domain)
+        notifications.Audit.updated(self._DOMAIN, domain_id, initiator)
         # disable owned users & projects when the API user specifically set
         #     enabled=False
         if (original_domain.get('enabled', True) and
                 not domain.get('enabled', True)):
-            self._disable_domain(domain_id)
+            notifications.Audit.disabled(self._DOMAIN, domain_id, initiator,
+                                         public=False)
+
         self.get_domain.invalidate(self, domain_id)
         self.get_domain_by_name.invalidate(self, original_domain['name'])
         return ret
 
-    @notifications.deleted('domain')
-    def delete_domain(self, domain_id):
+    def delete_domain(self, domain_id, initiator=None):
         # explicitly forbid deleting the default domain (this should be a
         # carefully orchestrated manual process involving configuration
         # changes, etc)
@@ -416,6 +446,9 @@ class Manager(manager.Manager):
                          'please disable it first.'))
 
         self._delete_domain_contents(domain_id)
+        # Delete any database stored domain config
+        self.domain_config_api.delete_config_options(domain_id)
+        self.domain_config_api.delete_config_options(domain_id, sensitive=True)
         # TODO(henry-nash): Although the controller will ensure deletion of
         # all users & groups within the domain (which will cause all
         # assignments for those users/groups to also be deleted), there
@@ -424,6 +457,7 @@ class Manager(manager.Manager):
         # to the backend to delete all assignments for this domain.
         # (see Bug #1277847)
         self.driver.delete_domain(domain_id)
+        notifications.Audit.deleted(self._DOMAIN, domain_id, initiator)
         self.get_domain.invalidate(self, domain_id)
         self.get_domain_by_name.invalidate(self, domain['name'])
 
@@ -431,19 +465,10 @@ class Manager(manager.Manager):
         """Delete the contents of a domain.
 
         Before we delete a domain, we need to remove all the entities
-        that are owned by it, i.e. Users, Groups & Projects. To do this we
-        call the respective delete functions for these entities, which are
+        that are owned by it, i.e. Projects. To do this we
+        call the delete function for these entities, which are
         themselves responsible for deleting any credentials and role grants
         associated with them as well as revoking any relevant tokens.
-
-        The order we delete entities is also important since some types
-        of backend may need to maintain referential integrity
-        throughout, and many of the entities have relationship with each
-        other. The following deletion order is therefore used:
-
-        Projects: Reference user and groups for grants
-        Groups: Reference users for membership and domains for grants
-        Users: Reference domains for grants
 
         """
 
@@ -469,38 +494,13 @@ class Manager(manager.Manager):
                           {'projectid': project['id'],
                            'domainid': domain_id})
 
-        user_refs = self.identity_api.list_users(domain_scope=domain_id)
         proj_refs = self.list_projects_in_domain(domain_id)
-        group_refs = self.identity_api.list_groups(domain_scope=domain_id)
 
         # Deleting projects recursively
         roots = [x for x in proj_refs if x.get('parent_id') is None]
         examined = set()
         for project in roots:
             _delete_projects(project, proj_refs, examined)
-
-        for group in group_refs:
-            # Cleanup any existing groups.
-            if group['domain_id'] == domain_id:
-                try:
-                    self.identity_api.delete_group(group['id'])
-                except exception.GroupNotFound:
-                    LOG.debug(('Group %(groupid)s not found when deleting '
-                               'domain contents for %(domainid)s, continuing '
-                               'with cleanup.'),
-                              {'groupid': group['id'], 'domainid': domain_id})
-
-        # And finally, delete the users themselves
-        for user in user_refs:
-            if user['domain_id'] == domain_id:
-                try:
-                    self.identity_api.delete_user(user['id'])
-                except exception.UserNotFound:
-                    LOG.debug(('User %(userid)s not found when '
-                               'deleting domain contents for %(domainid)s, '
-                               'continuing with cleanup.'),
-                              {'userid': user['id'],
-                               'domainid': domain_id})
 
     @manager.response_truncated
     def list_projects(self, hints=None):
@@ -785,3 +785,500 @@ class Driver(object):
         """
         if domain_id != CONF.identity.default_domain_id:
             raise exception.DomainNotFound(domain_id=domain_id)
+
+
+@dependency.provider('domain_config_api')
+class DomainConfigManager(manager.Manager):
+    """Default pivot point for the Domain Config backend."""
+
+    # NOTE(henry-nash): In order for a config option to be stored in the
+    # standard table, it must be explicitly whitelisted. Options marked as
+    # sensitive are stored in a separate table. Attempting to store options
+    # that are not listed as either whitelisted or sensitive will raise an
+    # exception.
+    #
+    # Only those options that affect the domain-specific driver support in
+    # the identity manager are supported.
+
+    whitelisted_options = {
+        'identity': ['driver'],
+        'ldap': [
+            'url', 'user', 'suffix', 'use_dumb_member', 'dumb_member',
+            'allow_subtree_delete', 'query_scope', 'page_size',
+            'alias_dereferencing', 'debug_level', 'chase_referrals',
+            'user_tree_dn', 'user_filter', 'user_objectclass',
+            'user_id_attribute', 'user_name_attribute', 'user_mail_attribute',
+            'user_pass_attribute', 'user_enabled_attribute',
+            'user_enabled_invert', 'user_enabled_mask', 'user_enabled_default',
+            'user_attribute_ignore', 'user_default_project_id_attribute',
+            'user_allow_create', 'user_allow_update', 'user_allow_delete',
+            'user_enabled_emulation', 'user_enabled_emulation_dn',
+            'user_additional_attribute_mapping', 'group_tree_dn',
+            'group_filter', 'group_objectclass', 'group_id_attribute',
+            'group_name_attribute', 'group_member_attribute',
+            'group_desc_attribute', 'group_attribute_ignore',
+            'group_allow_create', 'group_allow_update', 'group_allow_delete',
+            'group_additional_attribute_mapping', 'tls_cacertfile',
+            'tls_cacertdir', 'use_tls', 'tls_req_cert', 'use_pool',
+            'pool_size', 'pool_retry_max', 'pool_retry_delay',
+            'pool_connection_timeout', 'pool_connection_lifetime',
+            'use_auth_pool', 'auth_pool_size', 'auth_pool_connection_lifetime'
+        ]
+    }
+    sensitive_options = {
+        'identity': [],
+        'ldap': ['password']
+    }
+
+    def __init__(self):
+        super(DomainConfigManager, self).__init__(CONF.domain_config.driver)
+
+    def _assert_valid_config(self, config):
+        """Ensure the options in the config are valid.
+
+        This method is called to validate the request config in create and
+        update manager calls.
+
+        :param config: config structure being created or updated
+
+        """
+        # Something must be defined in the request
+        if not config:
+            raise exception.InvalidDomainConfig(
+                reason=_('No options specified'))
+
+        # Make sure the groups/options defined in config itself are valid
+        for group in config:
+            if (not config[group] or not
+                    isinstance(config[group], dict)):
+                msg = _('The value of group %(group)s specified in the '
+                        'config should be a dictionary of options') % {
+                            'group': group}
+                raise exception.InvalidDomainConfig(reason=msg)
+            for option in config[group]:
+                self._assert_valid_group_and_option(group, option)
+
+    def _assert_valid_group_and_option(self, group, option):
+        """Ensure the combination of group and option is valid.
+
+        :param group: optional group name, if specified it must be one
+                      we support
+        :param option: optional option name, if specified it must be one
+                       we support and a group must also be specified
+
+        """
+        if not group and not option:
+            # For all calls, it's OK for neither to be defined, it means you
+            # are operating on all config options for that domain.
+            return
+
+        if not group and option:
+            # Our API structure should prevent this from ever happening, so if
+            # it does, then this is coding error.
+            msg = _('Option %(option)s found with no group specified while '
+                    'checking domain configuration request') % {
+                        'option': option}
+            raise exception.UnexpectedError(exception=msg)
+
+        if (group and group not in self.whitelisted_options and
+                group not in self.sensitive_options):
+            msg = _('Group %(group)s is not supported '
+                    'for domain specific configurations') % {'group': group}
+            raise exception.InvalidDomainConfig(reason=msg)
+
+        if option:
+            if (option not in self.whitelisted_options[group] and option not in
+                    self.sensitive_options[group]):
+                msg = _('Option %(option)s in group %(group)s is not '
+                        'supported for domain specific configurations') % {
+                            'group': group, 'option': option}
+                raise exception.InvalidDomainConfig(reason=msg)
+
+    def _is_sensitive(self, group, option):
+        return option in self.sensitive_options[group]
+
+    def _config_to_list(self, config):
+        """Build whitelisted and sensitive lists for use by backend drivers."""
+
+        whitelisted = []
+        sensitive = []
+        for group in config:
+            for option in config[group]:
+                the_list = (sensitive if self._is_sensitive(group, option)
+                            else whitelisted)
+                the_list.append({
+                    'group': group, 'option': option,
+                    'value': config[group][option]})
+
+        return whitelisted, sensitive
+
+    def _list_to_config(self, whitelisted, sensitive=None, req_option=None):
+        """Build config dict from a list of option dicts.
+
+        :param whitelisted: list of dicts containing options and their groups,
+                            this has already been filtered to only contain
+                            those options to include in the output.
+        :param sensitive: list of dicts containing sensitive options and their
+                          groups, this has already been filtered to only
+                          contain those options to include in the output.
+        :param req_option: the individual option requested
+
+        :returns: a config dict, including sensitive if specified
+
+        """
+        the_list = whitelisted + (sensitive or [])
+        if not the_list:
+            return {}
+
+        if req_option:
+            # The request was specific to an individual option, so
+            # no need to include the group in the output. We first check that
+            # there is only one option in the answer (and that it's the right
+            # one) - if not, something has gone wrong and we raise an error
+            if len(the_list) > 1 or the_list[0]['option'] != req_option:
+                LOG.error(_LE('Unexpected results in response for domain '
+                              'config - %(count)s responses, first option is '
+                              '%(option)s, expected option %(expected)s'),
+                          {'count': len(the_list), 'option': list[0]['option'],
+                           'expected': req_option})
+                raise exception.UnexpectedError(
+                    _('An unexpected error occurred when retrieving domain '
+                      'configs'))
+            return {the_list[0]['option']: the_list[0]['value']}
+
+        config = {}
+        for option in the_list:
+            config.setdefault(option['group'], {})
+            config[option['group']][option['option']] = option['value']
+
+        return config
+
+    def create_config(self, domain_id, config):
+        """Create config for a domain
+
+        :param domain_id: the domain in question
+        :param config: the dict of config groups/options to assign to the
+                       domain
+
+        Creates a new config, overwriting any previous config (no Conflict
+        error will be generated).
+
+        :returns: a dict of group dicts containing the options, with any that
+                  are sensitive removed
+        :raises keystone.exception.InvalidDomainConfig: when the config
+                contains options we do not support
+
+        """
+        self._assert_valid_config(config)
+        whitelisted, sensitive = self._config_to_list(config)
+        # Delete any existing config
+        self.delete_config_options(domain_id)
+        self.delete_config_options(domain_id, sensitive=True)
+        # ...and create the new one
+        for option in whitelisted:
+            self.create_config_option(
+                domain_id, option['group'], option['option'], option['value'])
+        for option in sensitive:
+            self.create_config_option(
+                domain_id, option['group'], option['option'], option['value'],
+                sensitive=True)
+        return self._list_to_config(whitelisted)
+
+    def get_config(self, domain_id, group=None, option=None):
+        """Get config, or partial config, for a domain
+
+        :param domain_id: the domain in question
+        :param group: an optional specific group of options
+        :param option: an optional specific option within the group
+
+        :returns: a dict of group dicts containing the whitelisted options,
+                  filtered by group and option specified
+        :raises keystone.exception.DomainConfigNotFound: when no config found
+                that matches domain_id, group and option specified
+        :raises keystone.exception.InvalidDomainConfig: when the config
+                and group/option parameters specify an option we do not
+                support
+
+        An example response::
+
+            {
+                'ldap': {
+                    'url': 'myurl'
+                    'user_tree_dn': 'OU=myou'},
+                'identity': {
+                    'driver': 'keystone.identity.backends.ldap.Identity'}
+
+            }
+
+        """
+        self._assert_valid_group_and_option(group, option)
+        whitelisted = self.list_config_options(domain_id, group, option)
+        if whitelisted:
+            return self._list_to_config(whitelisted, req_option=option)
+
+        if option:
+            msg = _('option %(option)s in group %(group)s') % {
+                'group': group, 'option': option}
+        elif group:
+            msg = _('group %(group)s') % {'group': group}
+        else:
+            msg = _('any options')
+        raise exception.DomainConfigNotFound(
+            domain_id=domain_id, group_or_option=msg)
+
+    def update_config(self, domain_id, config, group=None, option=None):
+        """Update config, or partial config, for a domain
+
+        :param domain_id: the domain in question
+        :param config: the config dict containing and groups/options being
+                       updated
+        :param group: an optional specific group of options, which if specified
+                      must appear in config, with no other groups
+        :param option: an optional specific option within the group, which if
+                       specified must appear in config, with no other options
+
+        The contents of the supplied config will be merged with the existing
+        config for this domain, updating or creating new options if these did
+        not previously exist. If group or option is specified, then the update
+        will be limited to those specified items and the inclusion of other
+        options in the supplied config will raise an exception, as will the
+        situation when those options do not already exist in the current
+        config.
+
+        :returns: a dict of groups containing all whitelisted options
+        :raises keystone.exception.InvalidDomainConfig: when the config
+                and group/option parameters specify an option we do not
+                support or one that does not exist in the original config
+
+        """
+        def _assert_valid_update(domain_id, config, group=None, option=None):
+            """Ensure the combination of config, group and option is valid."""
+
+            self._assert_valid_config(config)
+            self._assert_valid_group_and_option(group, option)
+
+            # If a group has been specified, then the request is to
+            # explicitly only update the options in that group - so the config
+            # must not contain anything else. Further, that group must exist in
+            # the original config. Likewise, if an option has been specified,
+            # then the group in the config must only contain that option and it
+            # also must exist in the original config.
+            if group:
+                if len(config) != 1 or (option and len(config[group]) != 1):
+                    if option:
+                        msg = _('Trying to update option %(option)s in group '
+                                '%(group)s, so that, and only that, option '
+                                'must be specified  in the config') % {
+                                    'group': group, 'option': option}
+                    else:
+                        msg = _('Trying to update group %(group)s, so that, '
+                                'and only that, group must be specified in '
+                                'the config') % {'group': group}
+                    raise exception.InvalidDomainConfig(reason=msg)
+
+                # So we now know we have the right number of entries in the
+                # config that align with a group/option being specified, but we
+                # must also make sure they match.
+                if group not in config:
+                    msg = _('request to update group %(group)s, but config '
+                            'provided contains group %(group_other)s '
+                            'instead') % {
+                                'group': group,
+                                'group_other': config.keys()[0]}
+                    raise exception.InvalidDomainConfig(reason=msg)
+                if option and option not in config[group]:
+                    msg = _('Trying to update option %(option)s in group '
+                            '%(group)s, but config provided contains option '
+                            '%(option_other)s instead') % {
+                                'group': group, 'option': option,
+                                'option_other': config[group].keys()[0]}
+                    raise exception.InvalidDomainConfig(reason=msg)
+
+                # Finally, we need to check if the group/option specified
+                # already exists in the original config - since if not, to keep
+                # with the semantics of an update, we need to fail with
+                # a DomainConfigNotFound
+                if not self.get_config_with_sensitive_info(domain_id,
+                                                           group, option):
+                    if option:
+                        msg = _('option %(option)s in group %(group)s') % {
+                            'group': group, 'option': option}
+                        raise exception.DomainConfigNotFound(
+                            domain_id=domain_id, group_or_option=msg)
+                    else:
+                        msg = _('group %(group)s') % {'group': group}
+                        raise exception.DomainConfigNotFound(
+                            domain_id=domain_id, group_or_option=msg)
+
+        def _update_or_create(domain_id, option, sensitive):
+            """Update the option, if it doesn't exist then create it."""
+
+            try:
+                self.create_config_option(
+                    domain_id, option['group'], option['option'],
+                    option['value'], sensitive=sensitive)
+            except exception.Conflict:
+                self.update_config_option(
+                    domain_id, option['group'], option['option'],
+                    option['value'], sensitive=sensitive)
+
+        update_config = config
+        if group and option:
+            # The config will just be a dict containing the option and
+            # its value, so make it look like a single option under the
+            # group in question
+            update_config = {group: config}
+
+        _assert_valid_update(domain_id, update_config, group, option)
+
+        whitelisted, sensitive = self._config_to_list(update_config)
+
+        for new_option in whitelisted:
+            _update_or_create(domain_id, new_option, sensitive=False)
+        for new_option in sensitive:
+            _update_or_create(domain_id, new_option, sensitive=True)
+
+        return self.get_config(domain_id)
+
+    def delete_config(self, domain_id, group=None, option=None):
+        """Delete config, or partial config, for the domain.
+
+        :param domain_id: the domain in question
+        :param group: an optional specific group of options
+        :param option: an optional specific option within the group
+
+        If group and option are None, then the entire config for the domain
+        is deleted. If group is not None, then just that group of options will
+        be deleted. If group and option are both specified, then just that
+        option is deleted.
+
+        :raises keystone.exception.InvalidDomainConfig: when group/option
+                parameters specify an option we do not support or one that
+                does not exist in the original config.
+
+        """
+        self._assert_valid_group_and_option(group, option)
+        if group:
+            # As this is a partial delete, then make sure the items requested
+            # are valid and exist in the current config
+            current_config = self.get_config_with_sensitive_info(domain_id)
+            # Raise an exception if the group/options specified don't exist in
+            # the current config so that the delete method provides the
+            # correct error semantics.
+            current_group = current_config.get(group)
+            if not current_group:
+                msg = _('group %(group)s') % {'group': group}
+                raise exception.DomainConfigNotFound(
+                    domain_id=domain_id, group_or_option=msg)
+            if option and not current_group.get(option):
+                msg = _('option %(option)s in group %(group)s') % {
+                    'group': group, 'option': option}
+                raise exception.DomainConfigNotFound(
+                    domain_id=domain_id, group_or_option=msg)
+
+        self.delete_config_options(domain_id, group, option)
+        self.delete_config_options(domain_id, group, option, sensitive=True)
+
+    def get_config_with_sensitive_info(self, domain_id, group=None,
+                                       option=None):
+        """Get config for a domain with sensitive info included.
+
+        This method is not exposed via the public API, but is used by the
+        identity manager to initialize a domain with the fully formed config
+        options.
+
+        """
+        whitelisted = self.list_config_options(domain_id, group, option)
+        sensitive = self.list_config_options(domain_id, group, option,
+                                             sensitive=True)
+        return self._list_to_config(whitelisted, sensitive)
+
+
+@six.add_metaclass(abc.ABCMeta)
+class DomainConfigDriver(object):
+    """Interface description for a Domain Config driver."""
+
+    @abc.abstractmethod
+    def create_config_option(self, domain_id, group, option, value,
+                             sensitive=False):
+        """Creates a config option for a domain.
+
+        :param domain_id: the domain for this option
+        :param group: the group name
+        :param option: the option name
+        :param value: the value to assign to this option
+        :param sensitive: whether the option is sensitive
+
+        :returns: dict containing group, option and value
+        :raises: keystone.exception.Conflict
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def get_config_option(self, domain_id, group, option, sensitive=False):
+        """Gets the config option for a domain.
+
+        :param domain_id: the domain for this option
+        :param group: the group name
+        :param option: the option name
+        :param sensitive: whether the option is sensitive
+
+        :returns: dict containing group, option and value
+        :raises: keystone.exception.DomainConfigNotFound: the option doesn't
+                                                          exist.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_config_options(self, domain_id, group=None, option=False,
+                            sensitive=False):
+        """Gets a config options for a domain.
+
+        :param domain_id: the domain for this option
+        :param group: optional group option name
+        :param option: optional option name. If group is None, then this
+                       parameter is ignored
+        :param sensitive: whether the option is sensitive
+
+        :returns: list of dicts containing group, option and value
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def update_config_option(self, domain_id, group, option, value,
+                             sensitive=False):
+        """Updates a config option for a domain.
+
+        :param domain_id: the domain for this option
+        :param group: the group option name
+        :param option: the option name
+        :param value: the value to assign to this option
+        :param sensitive: whether the option is sensitive
+
+        :returns: dict containing updated group, option and value
+        :raises: keystone.exception.DomainConfigNotFound: the option doesn't
+                                                          exist.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def delete_config_options(self, domain_id, group=None, option=None,
+                              sensitive=False):
+        """Deletes config options for a domain.
+
+        Allows deletion of all options for a domain, all options in a group
+        or a specific option. The driver is silent if there are no options
+        to delete.
+
+        :param domain_id: the domain for this option
+        :param group: optional group option name
+        :param option: optional option name. If group is None, then this
+                       parameter is ignored
+        :param sensitive: whether the option is sensitive
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover

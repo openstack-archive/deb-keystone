@@ -15,18 +15,18 @@
 import copy
 import functools
 
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import timeutils
 
 from keystone.common import sql
-from keystone import config
 from keystone import exception
 from keystone.i18n import _LI
-from keystone.openstack.common import log
 from keystone import token
 from keystone.token import provider
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -60,7 +60,7 @@ def _expiry_range_batched(session, upper_bound_func, batch_size):
     # It's expected that the caller will then delete all rows with a timestamp
     # equal to or older than the one yielded.  This may delete slightly more
     # tokens than the batch_size, but that should be ok in almost all cases.
-    LOG.info(_LI('Token expiration batch size: %d') % batch_size)
+    LOG.debug('Token expiration batch size: %d', batch_size)
     query = session.query(TokenModel.expires)
     query = query.filter(TokenModel.expires < upper_bound_func())
     query = query.order_by(TokenModel.expires)
@@ -273,7 +273,7 @@ class Token(token.persistence.Driver):
                                         expiry_time)
             row_count = delete_query.delete(synchronize_session=False)
             total_removed += row_count
-            LOG.debug('Removed %d expired tokens', total_removed)
+            LOG.debug('Removed %d total expired tokens', total_removed)
 
         session.flush()
         LOG.info(_LI('Total expired tokens removed: %d'), total_removed)

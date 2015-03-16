@@ -22,12 +22,12 @@ import weakref
 
 import ldap.filter
 import ldappool
+from oslo_log import log
 import six
 
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LW
-from keystone.openstack.common import log
 
 LOG = log.getLogger(__name__)
 
@@ -124,16 +124,11 @@ def ldap2py(val):
     """Convert an LDAP formatted value to Python type used by OpenStack.
 
     Virtually all LDAP values are stored as UTF-8 encoded strings.
-    OpenStack prefers values which are Python types, e.g. unicode,
-    boolean, etc.
+    OpenStack prefers values which are unicode friendly.
 
     :param val: LDAP formatted value
     :returns: val converted to preferred Python type
     """
-    try:
-        return LDAP_VALUES[val]
-    except KeyError:
-        pass
     return utf8_decode(val)
 
 
@@ -1324,7 +1319,7 @@ class BaseLdap(object):
         # in a case-insensitive way.  We use the case specified in the
         # mapping for the model to ensure we have a predictable way of
         # retrieving values later.
-        lower_res = dict((k.lower(), v) for k, v in six.iteritems(res[1]))
+        lower_res = {k.lower(): v for k, v in six.iteritems(res[1])}
 
         id_attrs = lower_res.get(self.id_attr.lower())
         if not id_attrs:
@@ -1676,6 +1671,96 @@ class BaseLdap(object):
                      {'search_base': search_base,
                       'entries': not_deleted_nodes[:3],
                       'dots': '...' if len(not_deleted_nodes) > 3 else ''})
+
+    def filter_query(self, hints, query=None):
+        """Applies filtering to a query.
+
+        :param hints: contains the list of filters, which may be None,
+                      indicating that there are no filters to be applied.
+                      If it's not None, then any filters satisfied here will be
+                      removed so that the caller will know if any filters
+                      remain to be applied.
+        :param query: LDAP query into which to include filters
+
+        :returns query: LDAP query, updated with any filters satisfied
+
+        """
+        def build_filter(filter_, hints):
+            """Build a filter for the query.
+
+            :param filter_: the dict that describes this filter
+            :param hints: contains the list of filters yet to be satisfied.
+
+            :returns query: LDAP query term to be added
+
+            """
+            ldap_attr = self.attribute_mapping[filter_['name']]
+            val_esc = ldap.filter.escape_filter_chars(filter_['value'])
+
+            if filter_['case_sensitive']:
+                # NOTE(henry-nash): Although dependent on the schema being
+                # used, most LDAP attributes are configured with case
+                # insensitive matching rules, so we'll leave this to the
+                # controller to filter.
+                return
+
+            if filter_['name'] == 'enabled':
+                # NOTE(henry-nash): Due to the different options for storing
+                # the enabled attribute (e,g, emulated or not), for now we
+                # don't try and filter this at the driver level - we simply
+                # leave the filter to be handled by the controller. It seems
+                # unlikley that this will cause a signifcant performance
+                # issue.
+                return
+
+            # TODO(henry-nash): Currently there are no booleans (other than
+            # 'enabled' that is handled above) on which you can filter. If
+            # there were, we would need to add special handling here to
+            # convert the booleans values to 'TRUE' and 'FALSE'. To do that
+            # we would also need to know which filter keys were actually
+            # booleans (this is related to bug #1411478).
+
+            if filter_['comparator'] == 'equals':
+                query_term = (u'(%(attr)s=%(val)s)'
+                              % {'attr': ldap_attr, 'val': val_esc})
+            elif filter_['comparator'] == 'contains':
+                query_term = (u'(%(attr)s=*%(val)s*)'
+                              % {'attr': ldap_attr, 'val': val_esc})
+            elif filter_['comparator'] == 'startswith':
+                query_term = (u'(%(attr)s=%(val)s*)'
+                              % {'attr': ldap_attr, 'val': val_esc})
+            elif filter_['comparator'] == 'endswith':
+                query_term = (u'(%(attr)s=*%(val)s)'
+                              % {'attr': ldap_attr, 'val': val_esc})
+            else:
+                # It's a filter we don't understand, so let the caller
+                # work out if they need to do something with it.
+                return
+
+            return query_term
+
+        if hints is None:
+            return query
+
+        filter_list = []
+        satisfied_filters = []
+
+        for filter_ in hints.filters:
+            if filter_['name'] not in self.attribute_mapping:
+                continue
+            new_filter = build_filter(filter_, hints)
+            if new_filter is not None:
+                filter_list.append(new_filter)
+                satisfied_filters.append(filter_)
+
+        if filter_list:
+            query = u'(&%s%s)' % (query, ''.join(filter_list))
+
+        # Remove satisfied filters, then the caller will know remaining filters
+        for filter_ in satisfied_filters:
+            hints.filters.remove(filter_)
+
+        return query
 
 
 class EnabledEmuMixIn(BaseLdap):

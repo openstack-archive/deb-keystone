@@ -14,7 +14,6 @@ import functools
 
 from keystone.common import json_home
 from keystone.common import wsgi
-from keystone.contrib import federation
 from keystone.contrib.federation import controllers
 
 
@@ -77,19 +76,22 @@ class FederationExtension(wsgi.V3ExtensionRouter):
         POST /auth/OS-FEDERATION/saml2
         GET /OS-FEDERATION/saml2/metadata
 
+        GET /auth/OS-FEDERATION/websso/{protocol_id}
+            ?origin=https%3A//horizon.example.com
+
+        POST /auth/OS-FEDERATION/websso/{protocol_id}
+             ?origin=https%3A//horizon.example.com
+
     """
     def _construct_url(self, suffix):
         return "/OS-FEDERATION/%s" % suffix
 
     def add_routes(self, mapper):
-        # This is needed for dependency injection
-        # it loads the Federation driver which registers it as a dependency.
-        federation.Manager()
         auth_controller = controllers.Auth()
         idp_controller = controllers.IdentityProvider()
         protocol_controller = controllers.FederationProtocol()
         mapping_controller = controllers.MappingController()
-        project_controller = controllers.ProjectV3()
+        project_controller = controllers.ProjectAssignmentV3()
         domain_controller = controllers.DomainV3()
         saml_metadata_controller = controllers.SAMLMetadataV3()
         sp_controller = controllers.ServiceProvider()
@@ -207,6 +209,14 @@ class FederationExtension(wsgi.V3ExtensionRouter):
             path='/auth' + self._construct_url('saml2'),
             post_action='create_saml_assertion',
             rel=build_resource_relation(resource_name='saml2'))
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth' + self._construct_url('websso/{protocol_id}'),
+            get_post_action='federated_sso_auth',
+            rel=build_resource_relation(resource_name='websso'),
+            path_vars={
+                'protocol_id': PROTOCOL_ID_PARAMETER_RELATION,
+            })
 
         # Keystone-Identity-Provider metadata endpoint
         self._add_resource(

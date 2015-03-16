@@ -17,7 +17,7 @@ import base64
 from six import moves
 
 from keystone.common import pemutils
-from keystone import tests
+from keystone.tests import unit as tests
 
 
 # List of 2-tuples, (pem_type, pem_header)
@@ -66,7 +66,7 @@ class PEM(object):
         self.pem_text = make_pem(self.pem_header, self.data)
 
 
-class TestPEMParseResult(tests.TestCase):
+class TestPEMParseResult(tests.BaseTestCase):
 
     def test_pem_types(self):
         for pem_type in pemutils.pem_types:
@@ -91,7 +91,7 @@ class TestPEMParseResult(tests.TestCase):
                           pemutils.PEMParseResult, pem_header=pem_header)
 
 
-class TestPEMParse(tests.TestCase):
+class TestPEMParse(tests.BaseTestCase):
     def test_parse_none(self):
         text = ''
         text += 'bla bla\n'

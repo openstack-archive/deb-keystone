@@ -15,6 +15,7 @@ import uuid
 
 import ldap.dn
 import mock
+from oslo_config import cfg
 from testtools import matchers
 
 import os
@@ -23,12 +24,11 @@ import tempfile
 
 from keystone.common import ldap as ks_ldap
 from keystone.common.ldap import core as common_ldap_core
-from keystone import config
-from keystone import tests
-from keystone.tests import default_fixtures
-from keystone.tests import fakeldap
+from keystone.tests import unit as tests
+from keystone.tests.unit import default_fixtures
+from keystone.tests.unit import fakeldap
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 class DnCompareTest(tests.BaseTestCase):
@@ -484,3 +484,19 @@ class CommonLdapTestCase(tests.BaseTestCase):
         # flag should be 225, the 0 is dropped.
         self.assertEqual(expected_bitmask, py_result[0][1]['enabled'][0])
         self.assertEqual(user_id, py_result[0][1]['user_id'][0])
+
+    def test_user_id_and_user_name_with_boolean_string(self):
+        boolean_strings = ['TRUE', 'FALSE', 'true', 'false', 'True', 'False',
+                           'TrUe' 'FaLse']
+        for user_name in boolean_strings:
+            user_id = uuid.uuid4().hex
+            result = [(
+                'cn=dummy,dc=example,dc=com',
+                {
+                    'user_id': [user_id],
+                    'user_name': [user_name]
+                }
+            ), ]
+            py_result = ks_ldap.convert_ldap_result(result)
+            # The user name should still be a string value.
+            self.assertEqual(user_name, py_result[0][1]['user_name'][0])

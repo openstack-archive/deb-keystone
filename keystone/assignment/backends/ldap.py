@@ -15,23 +15,28 @@ from __future__ import absolute_import
 
 import ldap as ldap
 import ldap.filter
+from oslo_config import cfg
+from oslo_log import log
 
 from keystone import assignment
 from keystone.assignment.role_backends import ldap as ldap_role
 from keystone.common import ldap as common_ldap
 from keystone.common import models
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.identity.backends import ldap as ldap_identity
-from keystone.openstack.common import log
+from keystone.openstack.common import versionutils
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
 class Assignment(assignment.Driver):
+    @versionutils.deprecated(
+        versionutils.deprecated.KILO,
+        remove_in=+2,
+        what='keystone.assignment.backends.ldap.Assignment')
     def __init__(self):
         super(Assignment, self).__init__()
         self.LDAP_URL = CONF.ldap.url
@@ -39,9 +44,9 @@ class Assignment(assignment.Driver):
         self.LDAP_PASSWORD = CONF.ldap.password
         self.suffix = CONF.ldap.suffix
 
-        # These are the only deep dependency from assignment back
-        # to identity.  The assumption is that if you are using
-        # LDAP for assignments, you are using it for Id as well.
+        # This is the only deep dependency from assignment back to identity.
+        # This is safe to do since if you are using LDAP for assignment, it is
+        # required that you are using it for identity as well.
         self.user = ldap_identity.UserApi(CONF)
         self.group = ldap_identity.GroupApi(CONF)
 
@@ -228,7 +233,11 @@ class Assignment(assignment.Driver):
         role_ids = set(self._roles_from_role_dicts(
             metadata_ref.get('roles', []), inherited_to_projects))
         if role_id not in role_ids:
-            raise exception.RoleNotFound(role_id=role_id)
+            actor_id = user_id or group_id
+            target_id = domain_id or project_id
+            raise exception.RoleAssignmentNotFound(role_id=role_id,
+                                                   actor_id=actor_id,
+                                                   target_id=target_id)
 
     def delete_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
@@ -248,8 +257,12 @@ class Assignment(assignment.Driver):
             else:
                 metadata_ref['roles'] = self.remove_role_from_user_and_project(
                     user_id, project_id, role_id)
-        except KeyError:
-            raise exception.RoleNotFound(role_id=role_id)
+        except (exception.RoleNotFound, KeyError):
+            actor_id = user_id or group_id
+            target_id = domain_id or project_id
+            raise exception.RoleAssignmentNotFound(role_id=role_id,
+                                                   actor_id=actor_id,
+                                                   target_id=target_id)
 
     def list_grant_role_ids(self, user_id=None, group_id=None,
                             domain_id=None, project_id=None,

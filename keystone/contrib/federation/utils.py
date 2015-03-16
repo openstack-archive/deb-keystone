@@ -12,19 +12,21 @@
 
 """Utilities for Federation Extension."""
 
+import ast
 import re
 
 import jsonschema
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import timeutils
 import six
 
-from keystone.common import config
+from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _, _LW
-from keystone.openstack.common import log
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -51,7 +53,9 @@ MAPPING_SCHEMA = {
                             "oneOf": [
                                 {"$ref": "#/definitions/empty"},
                                 {"$ref": "#/definitions/any_one_of"},
-                                {"$ref": "#/definitions/not_any_of"}
+                                {"$ref": "#/definitions/not_any_of"},
+                                {"$ref": "#/definitions/blacklist"},
+                                {"$ref": "#/definitions/whitelist"}
                             ],
                         }
                     }
@@ -101,9 +105,61 @@ MAPPING_SCHEMA = {
                     "type": "boolean"
                 }
             }
+        },
+        "blacklist": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ['type', 'blacklist'],
+            "properties": {
+                "type": {
+                    "type": "string"
+                },
+                "blacklist": {
+                    "type": "array"
+                }
+            }
+        },
+        "whitelist": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ['type', 'whitelist'],
+            "properties": {
+                "type": {
+                    "type": "string"
+                },
+                "whitelist": {
+                    "type": "array"
+                }
+            }
         }
     }
 }
+
+
+class DirectMaps(object):
+    """An abstraction around the remote matches.
+
+    Each match is treated internally as a list.
+    """
+
+    def __init__(self):
+        self._matches = []
+
+    def add(self, values):
+        """Adds a matched value to the list of matches.
+
+        :param list value: the match to save
+
+        """
+        self._matches.append(values)
+
+    def __getitem__(self, idx):
+        """Used by Python when executing ``''.format(*DirectMaps())``."""
+        value = self._matches[idx]
+        if isinstance(value, list) and len(value) == 1:
+            return value[0]
+        else:
+            return value
 
 
 def validate_mapping_structure(ref):
@@ -155,7 +211,7 @@ def validate_idp(idp, assertion):
         raise exception.ValidationError(msg)
     if idp_remote_identifier != idp['remote_id']:
         msg = _('Incoming identity provider identifier not included '
-                'among the accepeted identifiers.')
+                'among the accepted identifiers.')
         raise exception.Forbidden(msg)
 
 
@@ -283,6 +339,12 @@ def get_assertion_params_from_env(context):
             yield (k, v)
 
 
+class UserType(object):
+    """User mapping type."""
+    EPHEMERAL = 'ephemeral'
+    LOCAL = 'local'
+
+
 class RuleProcessor(object):
     """A class to process assertions and mapping rules."""
 
@@ -290,6 +352,8 @@ class RuleProcessor(object):
         """Mapping rule evaluation types."""
         ANY_ONE_OF = 'any_one_of'
         NOT_ANY_OF = 'not_any_of'
+        BLACKLIST = 'blacklist'
+        WHITELIST = 'whitelist'
 
     def __init__(self, rules):
         """Initialize RuleProcessor.
@@ -360,8 +424,8 @@ class RuleProcessor(object):
         # This will create a new dictionary where the values are arrays, and
         # any multiple values are stored in the arrays.
         LOG.debug('assertion data: %s', assertion_data)
-        assertion = dict((n, v.split(';')) for n, v in assertion_data.items()
-                         if isinstance(v, six.string_types))
+        assertion = {n: v.split(';') for n, v in assertion_data.items()
+                     if isinstance(v, six.string_types)}
         LOG.debug('assertion: %s', assertion)
         identity_values = []
 
@@ -402,9 +466,23 @@ class RuleProcessor(object):
 
         Example identity_values::
 
-            [{'group': {'id': '0cd5e9'}, 'user': {'email': 'bob@example.com'}}]
+            [
+                {
+                    'group': {'id': '0cd5e9'},
+                    'user': {
+                        'email': 'bob@example.com'
+                    },
+                },
+                {
+                    'groups': ['member', 'admin', tester'],
+                    'domain': {
+                        'name': 'default_domain'
+                    }
+                }
+            ]
 
         :returns: dictionary with user name, group_ids and group_names.
+        :rtype: dict
 
         """
 
@@ -413,8 +491,27 @@ class RuleProcessor(object):
                 for group in {g['name']: g for g in groups}.values():
                     yield group
 
+        def normalize_user(user):
+            """Parse and validate user mapping."""
+
+            user_type = user.get('type')
+
+            if user_type and user_type not in (UserType.EPHEMERAL,
+                                               UserType.LOCAL):
+                msg = _("User type %s not supported") % user_type
+                raise exception.ValidationError(msg)
+
+            if user_type is None:
+                user_type = user['type'] = UserType.EPHEMERAL
+
+            if user_type == UserType.EPHEMERAL:
+                user['domain'] = {
+                    'id': (CONF.federation.federated_domain_name or
+                           federation.FEDERATED_DOMAIN_KEYWORD)
+                }
+
         # initialize the group_ids as a set to eliminate duplicates
-        user_name = None
+        user = {}
         group_ids = set()
         group_names = list()
         groups_by_domain = dict()
@@ -422,11 +519,10 @@ class RuleProcessor(object):
         for identity_value in identity_values:
             if 'user' in identity_value:
                 # if a mapping outputs more than one user name, log it
-                if user_name is not None:
-                    LOG.warning(_LW('Ignoring user name %s'),
-                                identity_value['user']['name'])
+                if user:
+                    LOG.warning(_LW('Ignoring user name'))
                 else:
-                    user_name = identity_value['user']['name']
+                    user = identity_value.get('user')
             if 'group' in identity_value:
                 group = identity_value['group']
                 if 'id' in group:
@@ -436,8 +532,30 @@ class RuleProcessor(object):
                               group['domain'].get('id'))
                     groups_by_domain.setdefault(domain, list()).append(group)
                 group_names.extend(extract_groups(groups_by_domain))
+            if 'groups' in identity_value:
+                if 'domain' not in identity_value:
+                    msg = _("Invalid rule: %(identity_value)s. Both 'groups' "
+                            "and 'domain' keywords must be specified.")
+                    msg = msg % {'identity_value': identity_value}
+                    raise exception.ValidationError(msg)
+                # In this case, identity_value['groups'] is a string
+                # representation of a list, and we want a real list.  This is
+                # due to the way we do direct mapping substitutions today (see
+                # function _update_local_mapping() )
+                try:
+                    group_names_list = ast.literal_eval(
+                        identity_value['groups'])
+                except ValueError:
+                    group_names_list = [identity_value['groups']]
+                domain = identity_value['domain']
+                group_dicts = [{'name': name, 'domain': domain} for name in
+                               group_names_list]
 
-        return {'name': user_name,
+                group_names.extend(group_dicts)
+
+        normalize_user(user)
+
+        return {'user': user,
                 'group_ids': list(group_ids),
                 'group_names': group_names}
 
@@ -446,8 +564,8 @@ class RuleProcessor(object):
 
         :param local: local mapping reference that needs to be updated
         :type local: dict
-        :param direct_maps: list of identity values, used to update local
-        :type direct_maps: list
+        :param direct_maps: identity values used to update local
+        :type direct_maps: keystone.contrib.federation.utils.DirectMaps
 
         Example local::
 
@@ -484,8 +602,9 @@ class RuleProcessor(object):
         doesn't apply.
         If an array of zero length is returned, then there are no direct
         mappings to be performed, but the rule is valid.
-        Otherwise, then it will return the values, in order, to be directly
-        mapped, again, the rule is valid.
+        Otherwise, then it will first attempt to filter the values according
+        to blacklist or whitelist rules and finally return the values in
+        order, to be directly mapped.
 
         :param requirements: list of remote requirements from rules
         :type requirements: list
@@ -501,6 +620,12 @@ class RuleProcessor(object):
                     "any_one_of": [
                         "Customer"
                     ]
+                },
+                {
+                    "type": "ADFS_GROUPS",
+                    "whitelist": [
+                        "g1", "g2", "g3", "g4"
+                    ]
                 }
             ]
 
@@ -514,14 +639,16 @@ class RuleProcessor(object):
                 'LastName': ['Account'],
                 'orgPersonType': ['Tester'],
                 'Email': ['testacct@example.com'],
-                'FirstName': ['Test']
+                'FirstName': ['Test'],
+                'ADFS_GROUPS': ['g1', 'g2']
             }
 
-        :returns: list of direct mappings or None.
+        :returns: identity values used to update local
+        :rtype: keystone.contrib.federation.utils.DirectMaps
 
         """
 
-        direct_maps = []
+        direct_maps = DirectMaps()
 
         for requirement in requirements:
             requirement_type = requirement['type']
@@ -550,13 +677,34 @@ class RuleProcessor(object):
                     return None
 
             # If 'any_one_of' or 'not_any_of' are not found, then values are
-            # within 'type'. Attempt to find that 'type' within the assertion.
+            # within 'type'. Attempt to find that 'type' within the assertion,
+            # and filter these values if 'whitelist' or 'blacklist' is set.
             direct_map_values = assertion.get(requirement_type)
             if direct_map_values:
+                blacklisted_values = requirement.get(self._EvalType.BLACKLIST)
+                whitelisted_values = requirement.get(self._EvalType.WHITELIST)
+
+                # If a blacklist or whitelist is used, we want to map to the
+                # whole list instead of just its values separately.
+                if blacklisted_values:
+                    direct_map_values = [v for v in direct_map_values
+                                         if v not in blacklisted_values]
+                elif whitelisted_values:
+                    direct_map_values = [v for v in direct_map_values
+                                         if v in whitelisted_values]
+
+                direct_maps.add(direct_map_values)
+
                 LOG.debug('updating a direct mapping: %s', direct_map_values)
-                direct_maps += direct_map_values
 
         return direct_maps
+
+    def _evaluate_values_by_regex(self, values, assertion_values):
+        for value in values:
+            for assertion_value in assertion_values:
+                if re.search(value, assertion_value):
+                    return True
+        return False
 
     def _evaluate_requirement(self, values, requirement_type,
                               eval_type, regex, assertion):
@@ -587,13 +735,10 @@ class RuleProcessor(object):
             return False
 
         if regex:
-            for value in values:
-                for assertion_value in assertion_values:
-                    if re.search(value, assertion_value):
-                        return True
-            return False
-
-        any_match = bool(set(values).intersection(set(assertion_values)))
+            any_match = self._evaluate_values_by_regex(values,
+                                                       assertion_values)
+        else:
+            any_match = bool(set(values).intersection(set(assertion_values)))
         if any_match and eval_type == self._EvalType.ANY_ONE_OF:
             return True
         if not any_match and eval_type == self._EvalType.NOT_ANY_OF:

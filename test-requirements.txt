@@ -19,10 +19,6 @@ pymongo>=2.5
 python-ldap>=2.4
 ldappool>=1.0 # MPL
 
-# Required for federation extension (although used only for federating multiple
-# Keystones)
-pysaml2
-
 # Testing
 # computes code coverage percentages
 coverage>=3.6
@@ -46,9 +42,11 @@ discover
 python-subunit>=0.0.18
 testrepository>=0.0.18
 testtools>=0.9.36,!=1.2.0
-testscenarios>=0.4
 
 # For documentation
 oslosphinx>=2.2.0  # Apache-2.0
 
 stevedore>=1.1.0  # Apache-2.0
+
+tempest-lib>=0.2.0
+

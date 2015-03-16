@@ -15,6 +15,8 @@
 import functools
 import uuid
 
+from oslo_config import cfg
+from oslo_log import log
 import six
 
 from keystone.common import authorization
@@ -22,15 +24,13 @@ from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import utils
 from keystone.common import wsgi
-from keystone import config
 from keystone import exception
 from keystone.i18n import _, _LW
 from keystone.models import token_model
-from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 def v2_deprecated(f):
@@ -287,6 +287,41 @@ class V2Controller(wsgi.Application):
         else:
             raise ValueError(_('Expected dict or list: %s') % type(ref))
 
+    def format_project_list(self, tenant_refs, **kwargs):
+        """Format a v2 style project list, including marker/limits."""
+        marker = kwargs.get('marker')
+        first_index = 0
+        if marker is not None:
+            for (marker_index, tenant) in enumerate(tenant_refs):
+                if tenant['id'] == marker:
+                    # we start pagination after the marker
+                    first_index = marker_index + 1
+                    break
+            else:
+                msg = _('Marker could not be found')
+                raise exception.ValidationError(message=msg)
+
+        limit = kwargs.get('limit')
+        last_index = None
+        if limit is not None:
+            try:
+                limit = int(limit)
+                if limit < 0:
+                    raise AssertionError()
+            except (ValueError, AssertionError):
+                msg = _('Invalid limit value')
+                raise exception.ValidationError(message=msg)
+            last_index = first_index + limit
+
+        tenant_refs = tenant_refs[first_index:last_index]
+
+        for x in tenant_refs:
+            if 'enabled' not in x:
+                x['enabled'] = True
+        o = {'tenants': tenant_refs,
+             'tenants_links': []}
+        return o
+
 
 @dependency.requires('policy_api', 'token_provider_api')
 class V3Controller(wsgi.Application):
@@ -318,7 +353,7 @@ class V3Controller(wsgi.Application):
 
         return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
 
-    def get_auth_context(cls, context):
+    def get_auth_context(self, context):
         # TODO(dolphm): this method of accessing the auth context is terrible,
         # but context needs to be refactored to always have reasonable values.
         env_context = context.get('environment', {})

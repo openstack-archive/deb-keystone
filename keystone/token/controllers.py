@@ -16,22 +16,22 @@ import datetime
 import sys
 
 from keystoneclient.common import cms
-from oslo.serialization import jsonutils
+from oslo_config import cfg
+from oslo_log import log
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import six
 
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import wsgi
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone.models import token_model
-from keystone.openstack.common import log
 from keystone.token import provider
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -150,6 +150,15 @@ class Auth(controller.V2Controller):
 
         return token_data
 
+    def _restrict_scope(self, token_model_ref):
+        # A trust token cannot be used to get another token
+        if token_model_ref.trust_scoped:
+            raise exception.Forbidden()
+        if not CONF.token.allow_rescope_scoped_token:
+            # Do not allow conversion from scoped tokens.
+            if token_model_ref.project_scoped or token_model_ref.domain_scoped:
+                raise exception.Forbidden(action=_("rescope a scoped token"))
+
     def _authenticate_token(self, context, auth):
         """Try to authenticate using an already existing token.
 
@@ -177,10 +186,7 @@ class Auth(controller.V2Controller):
 
         wsgi.validate_token_bind(context, token_model_ref)
 
-        # A trust token cannot be used to get another token
-        if token_model_ref.trust_scoped:
-            raise exception.Forbidden()
-
+        self._restrict_scope(token_model_ref)
         user_id = token_model_ref.user_id
         tenant_id = self._get_project_id_from_auth(auth)
 
@@ -227,7 +233,7 @@ class Auth(controller.V2Controller):
             trust_roles = []
             for role in trust_ref['roles']:
                 if 'roles' not in metadata_ref:
-                    raise exception.Forbidden()()
+                    raise exception.Forbidden()
                 if role['id'] in metadata_ref['roles']:
                     trust_roles.append(role['id'])
                 else:
@@ -454,7 +460,7 @@ class Auth(controller.V2Controller):
         for t in tokens:
             expires = t['expires']
             if expires and isinstance(expires, datetime.datetime):
-                    t['expires'] = timeutils.isotime(expires)
+                t['expires'] = timeutils.isotime(expires)
         data = {'revoked': tokens}
         json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,

@@ -12,21 +12,22 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import itertools
 import os.path
 
+from oslo_config import cfg
+from oslo_log import log
 import six
 
 from keystone.catalog.backends import kvs
 from keystone.catalog import core
-from keystone import config
 from keystone import exception
 from keystone.i18n import _LC
-from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
 
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 def parse_templates(template_lines):
@@ -106,7 +107,9 @@ class Catalog(kvs.Catalog):
             raise
 
     def get_catalog(self, user_id, tenant_id, metadata=None):
-        substitutions = dict(six.iteritems(CONF))
+        substitutions = dict(
+            itertools.chain(six.iteritems(CONF),
+                            six.iteritems(CONF.eventlet_server)))
         substitutions.update({'tenant_id': tenant_id, 'user_id': user_id})
 
         catalog = {}

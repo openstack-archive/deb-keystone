@@ -17,20 +17,19 @@
 import abc
 import copy
 
+from oslo_config import cfg
+from oslo_log import log
 from oslo_utils import timeutils
 import six
 
 from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import manager
-from keystone import config
 from keystone import exception
 from keystone.i18n import _LW
-from keystone.openstack.common import log
-from keystone.openstack.common import versionutils
 
 
-CONF = config.CONF
+CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 SHOULD_CACHE = cache.should_cache_fn('token')
 
@@ -51,13 +50,6 @@ class PersistenceManager(manager.Manager):
 
     def __init__(self):
         super(PersistenceManager, self).__init__(CONF.token.driver)
-
-    @versionutils.deprecated(as_of=versionutils.deprecated.JUNO,
-                             in_favor_of='token_provider_api.unique_id',
-                             remove_in=+1,
-                             what='token_api.unique_id')
-    def unique_id(self, token_id):
-        return self.token_provider_api.unique_id(token_id)
 
     def _assert_valid(self, token_id, token_ref):
         """Raise TokenNotFound if the token is expired."""

@@ -27,3 +27,7 @@ class Provider(common.BaseProvider):
 
     def _get_token_id(self, token_data):
         return uuid.uuid4().hex
+
+    def needs_persistence(self):
+        """Should the token be written to a backend."""
+        return True

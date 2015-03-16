@@ -12,19 +12,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo_config import cfg
+
 from keystone.common import sql
 from keystone.common import utils
-from keystone import config
 from keystone import exception
 from keystone.i18n import _
 from keystone import identity
 
-# Import resource sql to ensure that the models defined in there are
-# available for the reference from User and Group to Domain.id.
-from keystone.resource.backends import sql as resource_sql  # noqa
 
-
-CONF = config.CONF
+CONF = cfg.CONF
 
 
 class User(sql.ModelBase, sql.DictBase):
@@ -33,8 +30,7 @@ class User(sql.ModelBase, sql.DictBase):
                   'default_project_id']
     id = sql.Column(sql.String(64), primary_key=True)
     name = sql.Column(sql.String(255), nullable=False)
-    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
-                           nullable=False)
+    domain_id = sql.Column(sql.String(64), nullable=False)
     password = sql.Column(sql.String(128))
     enabled = sql.Column(sql.Boolean)
     extra = sql.Column(sql.JsonBlob())
@@ -55,8 +51,7 @@ class Group(sql.ModelBase, sql.DictBase):
     attributes = ['id', 'name', 'domain_id', 'description']
     id = sql.Column(sql.String(64), primary_key=True)
     name = sql.Column(sql.String(64), nullable=False)
-    domain_id = sql.Column(sql.String(64), sql.ForeignKey('domain.id'),
-                           nullable=False)
+    domain_id = sql.Column(sql.String(64), nullable=False)
     description = sql.Column(sql.Text())
     extra = sql.Column(sql.JsonBlob())
     # Unique constraint across two columns to create the separation

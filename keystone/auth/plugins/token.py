@@ -12,20 +12,25 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from oslo_config import cfg
+from oslo_log import log
+import six
+
 from keystone import auth
 from keystone.auth.plugins import mapped
 from keystone.common import dependency
 from keystone.common import wsgi
 from keystone import exception
+from keystone.i18n import _
 from keystone.models import token_model
-from keystone.openstack.common import log
 
 
 LOG = log.getLogger(__name__)
 
+CONF = cfg.CONF
 
-@dependency.optional('federation_api')
-@dependency.requires('identity_api', 'token_provider_api')
+
+@dependency.requires('federation_api', 'identity_api', 'token_provider_api')
 class Token(auth.AuthMethodHandler):
 
     method = 'token'
@@ -61,6 +66,11 @@ def token_authenticate(context, auth_payload, user_context, token_ref):
         if token_ref.oauth_scoped or token_ref.trust_scoped:
             raise exception.Forbidden()
 
+        if not CONF.token.allow_rescope_scoped_token:
+            # Do not allow conversion from scoped tokens.
+            if token_ref.project_scoped or token_ref.domain_scoped:
+                raise exception.Forbidden(action=_("rescope a scoped token"))
+
         wsgi.validate_token_bind(context, token_ref)
 
         # New tokens maintain the audit_id of the original token in the
@@ -85,5 +95,5 @@ def token_authenticate(context, auth_payload, user_context, token_ref):
         user_context['method_names'].extend(token_ref.methods)
 
     except AssertionError as e:
-        LOG.error(e)
+        LOG.error(six.text_type(e))
         raise exception.Unauthorized(e)

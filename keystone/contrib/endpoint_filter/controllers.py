@@ -14,12 +14,14 @@
 
 import six
 
-from keystone import assignment
 from keystone.catalog import controllers as catalog_controllers
 from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import validation
+from keystone.contrib.endpoint_filter import schema
 from keystone import exception
 from keystone import notifications
+from keystone import resource
 
 
 @dependency.requires('catalog_api', 'endpoint_filter_api', 'resource_api')
@@ -102,9 +104,9 @@ class EndpointFilterV3Controller(_ControllerBase):
         """List all endpoints currently associated with a given project."""
         self.resource_api.get_project(project_id)
         refs = self.endpoint_filter_api.list_endpoints_for_project(project_id)
-        filtered_endpoints = dict(
-            (ref['endpoint_id'], self.catalog_api.get_endpoint(
-                ref['endpoint_id'])) for ref in refs)
+        filtered_endpoints = {ref['endpoint_id']:
+                              self.catalog_api.get_endpoint(ref['endpoint_id'])
+                              for ref in refs}
 
         # need to recover endpoint_groups associated with project
         # then for each endpoint group return the endpoints.
@@ -135,8 +137,8 @@ class EndpointFilterV3Controller(_ControllerBase):
 
         projects = [self.resource_api.get_project(
             ref['project_id']) for ref in refs]
-        return assignment.controllers.ProjectV3.wrap_collection(context,
-                                                                projects)
+        return resource.controllers.ProjectV3.wrap_collection(context,
+                                                              projects)
 
 
 class EndpointGroupV3Controller(_ControllerBase):
@@ -157,6 +159,7 @@ class EndpointGroupV3Controller(_ControllerBase):
                                                               path=path)
 
     @controller.protected()
+    @validation.validated(schema.endpoint_group_create, 'endpoint_group')
     def create_endpoint_group(self, context, endpoint_group):
         """Creates an Endpoint Group with the associated filters."""
         ref = self._assign_unique_id(self._normalize_dict(endpoint_group))
@@ -184,6 +187,7 @@ class EndpointGroupV3Controller(_ControllerBase):
             context, ref)
 
     @controller.protected()
+    @validation.validated(schema.endpoint_group_update, 'endpoint_group')
     def update_endpoint_group(self, context, endpoint_group_id,
                               endpoint_group):
         """Update fixed values and/or extend the filters."""
@@ -226,8 +230,8 @@ class EndpointGroupV3Controller(_ControllerBase):
                 endpoint_group_ref['project_id'])
             if project:
                 projects.append(project)
-        return assignment.controllers.ProjectV3.wrap_collection(context,
-                                                                projects)
+        return resource.controllers.ProjectV3.wrap_collection(context,
+                                                              projects)
 
     @controller.protected()
     def list_endpoints_associated_with_endpoint_group(self,

@@ -17,13 +17,13 @@ import datetime
 
 from dogpile.cache import api
 from dogpile.cache import util as dp_util
+from oslo_log import log
 from oslo_utils import importutils
 from oslo_utils import timeutils
 import six
 
 from keystone import exception
 from keystone.i18n import _, _LW
-from keystone.openstack.common import log
 
 
 NO_VALUE = api.NO_VALUE
@@ -418,14 +418,13 @@ class MongoApi(object):
 
     def get_multi(self, keys):
         db_results = self._get_results_as_dict(keys)
-        return dict((doc['_id'], doc['value']) for doc in
-                    six.itervalues(db_results))
+        return {doc['_id']: doc['value'] for doc in six.itervalues(db_results)}
 
     def _get_results_as_dict(self, keys):
         critieria = {'_id': {'$in': keys}}
         db_results = self.get_cache_collection().find(spec=critieria,
                                                       **self.meth_kwargs)
-        return dict((doc['_id'], doc) for doc in db_results)
+        return {doc['_id']: doc for doc in db_results}
 
     def set(self, key, value):
         doc_date = self._get_doc_date()
