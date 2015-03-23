@@ -25,16 +25,13 @@ from keystone.common import driver_hints
 from keystone.common import manager
 from keystone.contrib import federation
 from keystone import exception
-from keystone.i18n import _, _LE
+from keystone.i18n import _, _LE, _LW
 from keystone import notifications
 
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
-SHOULD_CACHE = cache.should_cache_fn('resource')
-
-# NOTE(blk-u): The config options are not available at import time.
-EXPIRATION_TIME = lambda: CONF.resource.cache_time
+MEMOIZE = cache.get_memoization_decorator(section='resource')
 
 
 def calc_default_domain():
@@ -109,7 +106,7 @@ class Manager(manager.Manager):
 
         ret = self.driver.create_project(tenant_id, tenant)
         notifications.Audit.created(self._PROJECT, tenant_id, initiator)
-        if SHOULD_CACHE(ret):
+        if MEMOIZE.should_cache(ret):
             self.get_project.set(ret, self, tenant_id)
             self.get_project_by_name.set(ret, self, ret['name'],
                                          ret['domain_id'])
@@ -365,13 +362,11 @@ class Manager(manager.Manager):
             project_id, _projects_indexed_by_parent(subtree_list))
         return subtree_as_ids
 
-    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
-                        expiration_time=EXPIRATION_TIME)
+    @MEMOIZE
     def get_domain(self, domain_id):
         return self.driver.get_domain(domain_id)
 
-    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
-                        expiration_time=EXPIRATION_TIME)
+    @MEMOIZE
     def get_domain_by_name(self, domain_name):
         return self.driver.get_domain_by_name(domain_name)
 
@@ -386,7 +381,7 @@ class Manager(manager.Manager):
 
         notifications.Audit.created(self._DOMAIN, domain_id, initiator)
 
-        if SHOULD_CACHE(ret):
+        if MEMOIZE.should_cache(ret):
             self.get_domain.set(ret, self, domain_id)
             self.get_domain_by_name.set(ret, self, ret['name'])
         return ret
@@ -512,13 +507,11 @@ class Manager(manager.Manager):
     def list_projects_in_domain(self, domain_id):
         return self.driver.list_projects_in_domain(domain_id)
 
-    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
-                        expiration_time=EXPIRATION_TIME)
+    @MEMOIZE
     def get_project(self, project_id):
         return self.driver.get_project(project_id)
 
-    @cache.on_arguments(should_cache_fn=SHOULD_CACHE,
-                        expiration_time=EXPIRATION_TIME)
+    @MEMOIZE
     def get_project_by_name(self, tenant_name, domain_id):
         return self.driver.get_project_by_name(tenant_name, domain_id)
 
@@ -1191,6 +1184,53 @@ class DomainConfigManager(manager.Manager):
         whitelisted = self.list_config_options(domain_id, group, option)
         sensitive = self.list_config_options(domain_id, group, option,
                                              sensitive=True)
+
+        # Check if there are any sensitive substitutions needed. We first try
+        # and simply ensure any sensitive options that have valid substitution
+        # references in the whitelisted options are substituted. We then check
+        # the resulting whitelisted option and raise a warning if there
+        # appears to be an unmatched or incorrectly constructed substitution
+        # reference. To avoid the risk of logging any sensitive options that
+        # have already been substituted, we first take a copy of the
+        # whitelisted option.
+
+        # Build a dict of the sensitive options ready to try substitution
+        sensitive_dict = {s['option']: s['value'] for s in sensitive}
+
+        for each_whitelisted in whitelisted:
+            if not isinstance(each_whitelisted['value'], six.string_types):
+                # We only support substitutions into string types, if its an
+                # integer, list etc. then just continue onto the next one
+                continue
+
+            # Store away the original value in case we need to raise a warning
+            # after substitution.
+            original_value = each_whitelisted['value']
+            warning_msg = ''
+            try:
+                each_whitelisted['value'] = (
+                    each_whitelisted['value'] % sensitive_dict)
+            except KeyError:
+                warning_msg = _LW(
+                    'Found what looks like an unmatched config option '
+                    'substitution reference - domain: %(domain)s, group: '
+                    '%(group)s, option: %(option)s, value: %(value)s. Perhaps '
+                    'the config option to which it refers has yet to be '
+                    'added?')
+            except (ValueError, TypeError):
+                warning_msg = _LW(
+                    'Found what looks like an incorrectly constructed '
+                    'config option substitution reference - domain: '
+                    '%(domain)s, group: %(group)s, option: %(option)s, '
+                    'value: %(value)s.')
+
+            if warning_msg:
+                LOG.warn(warning_msg % {
+                    'domain': domain_id,
+                    'group': each_whitelisted['group'],
+                    'option': each_whitelisted['option'],
+                    'value': original_value})
+
         return self._list_to_config(whitelisted, sensitive)
 
 

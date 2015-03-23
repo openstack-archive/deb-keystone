@@ -21,66 +21,35 @@ Running Keystone in HTTPD
 
 .. WARNING::
 
-    Running Keystone under HTTPD in the recommended (and tested) configuration does not support
-    the use of ``Transfer-Encoding: chunked``. This is due to a limitation with the WSGI spec
-    and the implementation used by ``mod_wsgi``. It is recommended that all clients assume Keystone
-    will not support ``Transfer-Encoding: chunked``.
+    Running Keystone under HTTPD in the recommended (and tested) configuration
+    does not support the use of ``Transfer-Encoding: chunked``. This is due to
+    a limitation with the WSGI spec and the implementation used by
+    ``mod_wsgi``. It is recommended that all clients assume Keystone will not
+    support ``Transfer-Encoding: chunked``.
 
-
-SSL
-===
-
-To run Keystone in HTTPD, first enable SSL support.  This is optional,  but highly recommended.
-
-Install mod_nss according to your distribution, then apply the following patch and restart HTTPD::
-
-    --- /etc/httpd/conf.d/nss.conf.orig	2012-03-29 12:59:06.319470425 -0400
-    +++ /etc/httpd/conf.d/nss.conf	2012-03-29 12:19:38.862721465 -0400
-    @@ -17,7 +17,7 @@
-     # Note: Configurations that use IPv6 but not IPv4-mapped addresses need two
-     #       Listen directives: "Listen [::]:8443" and "Listen 0.0.0.0:443"
-     #
-    -Listen 8443
-    +Listen 443
-
-     ##
-     ##  SSL Global Context
-    @@ -81,7 +81,7 @@
-     ## SSL Virtual Host Context
-     ##
-
-    -<virtualhost _default_:8443="">
-    +<virtualhost _default_:443="">
-
-     #   General setup for the virtual host
-     #DocumentRoot "/etc/httpd/htdocs"
-    </virtualhost></virtualhost>
-
-Firewall
---------
-
-Add the following rule to IPTables in order to ensure the SSL traffic can pass your firewall::
-
-    -A INPUT -m state --state NEW -m tcp -p tcp --dport 443 -j ACCEPT
-
-it goes right before::
-
-    -A INPUT -j REJECT --reject-with icmp-host-prohibited
 
 Files
 -----
 
-Copy the file httpd/wsgi-keystone.conf to the appropriate location for your Apache server, most likely::
+Copy the file httpd/wsgi-keystone.conf to the appropriate location for your
+Apache server, most likely::
 
     /etc/httpd/conf.d/wsgi-keystone.conf
 
-Create the directory ``/var/www/cgi-bin/keystone/``. You can either hardlink or softlink the files ``main`` and ``admin`` to the file ``keystone.py`` in this directory.  For a distribution appropriate place, it should probably be copied to::
+Update this file to match your system configuration (for example, some
+distributions put httpd logs in the ``apache2`` directory and some in the
+``httpd`` directory; also, enable TLS).
+
+Create the directory ``/var/www/cgi-bin/keystone/``. You can either hardlink or
+softlink the files ``main`` and ``admin`` to the file ``keystone.py`` in this
+directory. For a distribution appropriate place, it should probably be copied
+to::
 
     /usr/share/openstack/keystone/httpd/keystone.py
 
-Keystone's primary configuration file (``etc/keystone.conf``) and the PasteDeploy
-configuration file (``etc/keystone-paste.ini``) must be readable to HTTPD in
-one of the default locations described in :doc:`configuration`.
+Keystone's primary configuration file (``etc/keystone.conf``) and the
+PasteDeploy configuration file (``etc/keystone-paste.ini``) must be readable to
+HTTPD in one of the default locations described in :doc:`configuration`.
 
 SELinux
 -------
@@ -98,17 +67,27 @@ Putting it somewhere else requires you set up your SELinux policy accordingly.
 Keystone Configuration
 ----------------------
 
-Make sure you use either the ``SQL`` or the ``memcached`` driver for ``tokens``, otherwise the tokens will not be shared between the processes of the Apache HTTPD server.
+Make sure that when using a token format that requires persistence, you use a
+token persistence driver that can be shared between processes. The SQL and
+memcached token persistence drivers provided with keystone can be shared
+between processes.
 
-For ``SQL,`` in ``/etc/keystone/keystone.conf`` make sure you have set::
+.. WARNING::
+
+    The KVS (``keystone.token.persistence.backends.kvs.Token``) token
+    persistence driver cannot be shared between processes so must not be used
+    when running keystone under HTTPD (the tokens will not be shared between
+    the processes of the server and validation will fail).
+
+For SQL, in ``/etc/keystone/keystone.conf`` set::
 
     [token]
-    driver = keystone.token.backends.sql.Token
+    driver = keystone.token.persistence.backends.sql.Token
 
-For ``memcache,`` in ``/etc/keystone/keystone.conf`` make sure you have set::
+For memcached, in ``/etc/keystone/keystone.conf`` set::
 
     [token]
-    driver = keystone.token.backends.memcache.Token
+    driver = keystone.token.persistence.backends.memcache.Token
 
-In both cases,  all servers that are storing tokens need a shared backend.  This means either that both point
-to the same database server, or both point to a common memcached instance.
+All servers that are storing tokens need a shared backend. This means that
+either all servers use the same database server or use a common memcached pool.

@@ -207,7 +207,6 @@ class AuthInfo(object):
                 # disabled.
                 self._lookup_domain({'id': project_ref['domain_id']})
         except exception.ProjectNotFound as e:
-            LOG.exception(six.text_type(e))
             raise exception.Unauthorized(e)
         self._assert_project_is_enabled(project_ref)
         return project_ref
@@ -487,11 +486,11 @@ class Auth(controller.V3Controller):
                 # In those cases, it is correct to not register an
                 # 'external' plugin;  if there is both an 'external' and a
                 # 'kerberos' plugin, it would run the check on identity twice.
-                pass
+                LOG.debug("No 'external' plugin is registered.")
             except exception.Unauthorized:
                 # If external fails then continue and attempt to determine
                 # user identity using remaining auth methods
-                pass
+                LOG.debug("Authorization failed for 'external' auth method.")
 
         # need to aggregate the results in case two or more methods
         # are specified

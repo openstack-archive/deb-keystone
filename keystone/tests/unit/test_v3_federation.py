@@ -37,9 +37,9 @@ from keystone import exception
 from keystone import notifications
 from keystone.tests.unit import core
 from keystone.tests.unit import federation_fixtures
+from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import mapping_fixtures
 from keystone.tests.unit import test_v3
-from keystone.tests.unit.token import test_fernet_provider as fernet
 from keystone.token.providers import common as token_common
 
 
@@ -1887,7 +1887,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         self.assertEqual(ref_groups, token_groups)
 
     def test_issue_unscoped_tokens_nonexisting_group(self):
-        self.assertRaises(exception.MappedGroupNotFound,
+        self.assertRaises(exception.MissingGroups,
                           self._issue_unscoped_token,
                           assertion='ANOTHER_TESTER_ASSERTION')
 
@@ -2249,6 +2249,66 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
 
         self.v3_authenticate_token(scoped_token, expected_status=500)
 
+    def test_lists_with_missing_group_in_backend(self):
+        """Test a mapping that points to a group that does not exist
+
+        For explicit mappings, we expect the group to exist in the backend,
+        but for lists, specifically blacklists, a missing group is expected
+        as many groups will be specified by the IdP that are not Keystone
+        groups.
+
+        The test scenario is as follows:
+         - Create group ``EXISTS``
+         - Set mapping rules for existing IdP with a blacklist
+           that passes through as REMOTE_USER_GROUPS
+         - Issue unscoped token with on group  ``EXISTS`` id in it
+
+        """
+        domain_id = self.domainA['id']
+        domain_name = self.domainA['name']
+        group = self.new_group_ref(domain_id=domain_id)
+        group['name'] = 'EXISTS'
+        group = self.identity_api.create_group(group)
+        rules = {
+            'rules': [
+                {
+                    "local": [
+                        {
+                            "user": {
+                                "name": "{0}",
+                                "id": "{0}"
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER"
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "groups": "{0}",
+                            "domain": {"name": domain_name}
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER_GROUPS",
+                            "blacklist": ["noblacklist"]
+                        }
+                    ]
+                }
+            ]
+        }
+        self.federation_api.update_mapping(self.mapping['id'], rules)
+
+        r = self._issue_unscoped_token(assertion='UNMATCHED_GROUP_ASSERTION')
+        assigned_group_ids = r.json['token']['user']['OS-FEDERATION']['groups']
+        self.assertEqual(1, len(assigned_group_ids))
+        self.assertEqual(group['id'], assigned_group_ids[0]['id'])
+
     def test_assertion_prefix_parameter(self):
         """Test parameters filtering based on the prefix.
 
@@ -2320,8 +2380,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
                           assertion='ANOTHER_LOCAL_USER_ASSERTION')
 
 
-class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin,
-                                fernet.KeyRepositoryTestMixin):
+class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
     AUTH_METHOD = 'token'
 
     def load_fixtures(self, fixtures):
@@ -2339,11 +2398,11 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin,
         self.config_fixture.config(
             group='token',
             provider='keystone.token.providers.fernet.Provider')
-        self.setUpKeyRepository()
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
 
     def test_federated_unscoped_token(self):
         resp = self._issue_unscoped_token()
-        self.assertEqual(184, len(resp.headers['X-Subject-Token']))
+        self.assertEqual(186, len(resp.headers['X-Subject-Token']))
 
     def test_federated_unscoped_token_with_multiple_groups(self):
         assertion = 'ANOTHER_CUSTOMER_ASSERTION'

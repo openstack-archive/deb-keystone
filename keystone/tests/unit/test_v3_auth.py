@@ -30,8 +30,8 @@ from keystone import auth
 from keystone import exception
 from keystone.policy.backends import rules
 from keystone.tests import unit as tests
+from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import test_v3
-from keystone.tests.unit.token import test_fernet_provider as fernet
 
 
 CONF = cfg.CONF
@@ -4050,11 +4050,10 @@ class TestAuthSpecificData(test_v3.RestfulTestCase):
         self.assertValidDomainListResponse(r)
 
 
-class TestFernetTokenProvider(test_v3.RestfulTestCase,
-                              fernet.KeyRepositoryTestMixin):
+class TestFernetTokenProvider(test_v3.RestfulTestCase):
     def setUp(self):
         super(TestFernetTokenProvider, self).setUp()
-        self.setUpKeyRepository()
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
 
     def _make_auth_request(self, auth_data):
         resp = self.post('/auth/tokens', body=auth_data, expected_status=201)
@@ -4405,3 +4404,65 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase,
         self.assertRaises(exception.TokenNotFound,
                           self.token_provider_api.validate_token,
                           trust_scoped_token)
+
+    def test_v2_validate_unscoped_token_returns_401(self):
+        """Test raised exception when validating unscoped token.
+
+        Test that validating an unscoped token in v2.0 of a v3 user of a
+        non-default domain returns unauthorized.
+        """
+        unscoped_token = self._get_unscoped_token()
+        self.assertRaises(exception.Unauthorized,
+                          self.token_provider_api.validate_v2_token,
+                          unscoped_token)
+
+    def test_v2_validate_domain_scoped_token_returns_401(self):
+        """Test raised exception when validating a domain scoped token.
+
+        Test that validating an domain scoped token in v2.0
+        returns unauthorized.
+        """
+
+        # Grant user access to domain
+        self.assignment_api.create_grant(self.role['id'],
+                                         user_id=self.user['id'],
+                                         domain_id=self.domain['id'])
+
+        scoped_token = self._get_domain_scoped_token()
+        self.assertRaises(exception.Unauthorized,
+                          self.token_provider_api.validate_v2_token,
+                          scoped_token)
+
+    def test_v2_validate_trust_scoped_token(self):
+        """Test raised exception when validating a trust scoped token.
+
+        Test that validating an trust scoped token in v2.0 returns
+        unauthorized.
+        """
+
+        trustee_user, trust = self._create_trust()
+        trust_scoped_token = self._get_trust_scoped_token(trustee_user, trust)
+        self.assertRaises(exception.Unauthorized,
+                          self.token_provider_api.validate_v2_token,
+                          trust_scoped_token)
+
+
+class TestAuthFernetTokenProvider(TestAuth):
+    def setUp(self):
+        super(TestAuthFernetTokenProvider, self).setUp()
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+
+    def config_overrides(self):
+        super(TestAuthFernetTokenProvider, self).config_overrides()
+        self.config_fixture.config(
+            group='token',
+            provider='keystone.token.providers.fernet.Provider')
+
+    def test_verify_with_bound_token(self):
+        self.skipTest('Bind not current supported by Fernet, see bug 1433311.')
+
+    def test_v2_v3_bind_token_intermix(self):
+        self.skipTest('Bind not current supported by Fernet, see bug 1433311.')
+
+    def test_auth_with_bind_token(self):
+        self.skipTest('Bind not current supported by Fernet, see bug 1433311.')
