@@ -1,4 +1,4 @@
-keystone (2015.1~b2+git20150316+06aa22a8ee-1) UNRELEASED; urgency=medium
+keystone (2015.1~b3-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Review (build-)depends.
