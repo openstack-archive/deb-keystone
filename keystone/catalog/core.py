@@ -37,11 +37,13 @@ LOG = log.getLogger(__name__)
 MEMOIZE = cache.get_memoization_decorator(section='catalog')
 
 
-def format_url(url, substitutions):
+def format_url(url, substitutions, silent_keyerror_failures=None):
     """Formats a user-defined URL with the given substitutions.
 
     :param string url: the URL to be formatted
     :param dict substitutions: the dictionary used for substitution
+    :param list silent_keyerror_failures: keys for which we should be silent
+        if there is a KeyError exception on substitution attempt
     :returns: a formatted URL
 
     """
@@ -54,6 +56,7 @@ def format_url(url, substitutions):
     substitutions = utils.WhiteListedItemFilter(
         WHITELISTED_PROPERTIES,
         substitutions)
+    allow_keyerror = silent_keyerror_failures or []
     try:
         result = url.replace('$(', '%(') % substitutions
     except AttributeError:
@@ -61,10 +64,14 @@ def format_url(url, substitutions):
                   {"url": url})
         raise exception.MalformedEndpoint(endpoint=url)
     except KeyError as e:
-        LOG.error(_LE("Malformed endpoint %(url)s - unknown key %(keyerror)s"),
-                  {"url": url,
-                   "keyerror": e})
-        raise exception.MalformedEndpoint(endpoint=url)
+        if not e.args or e.args[0] not in allow_keyerror:
+            LOG.error(_LE("Malformed endpoint %(url)s - unknown key "
+                          "%(keyerror)s"),
+                      {"url": url,
+                       "keyerror": e})
+            raise exception.MalformedEndpoint(endpoint=url)
+        else:
+            result = None
     except TypeError as e:
         LOG.error(_LE("Malformed endpoint '%(url)s'. The following type error "
                       "occurred during string substitution: %(typeerror)s"),
@@ -103,10 +110,12 @@ class Manager(manager.Manager):
             msg = _('Duplicate ID, %s.') % region_ref['id']
             raise exception.Conflict(type='region', details=msg)
 
-        # NOTE(lbragstad): The description column of the region database
-        # can not be null. So if the user doesn't pass in a description then
-        # set it to an empty string.
-        region_ref.setdefault('description', '')
+        # NOTE(lbragstad,dstanek): The description column of the region
+        # database cannot be null. So if the user doesn't pass in a
+        # description or passes in a null description then set it to an
+        # empty string.
+        if region_ref.get('description') is None:
+            region_ref['description'] = ''
         try:
             ret = self.driver.create_region(region_ref)
         except exception.NotFound:
@@ -124,6 +133,11 @@ class Manager(manager.Manager):
             raise exception.RegionNotFound(region_id=region_id)
 
     def update_region(self, region_id, region_ref, initiator=None):
+        # NOTE(lbragstad,dstanek): The description column of the region
+        # database cannot be null. So if the user passes in a null
+        # description set it to an empty string.
+        if 'description' in region_ref and region_ref['description'] is None:
+            region_ref['description'] = ''
         ref = self.driver.update_region(region_id, region_ref)
         notifications.Audit.updated(self._REGION, region_id, initiator)
         self.get_region.invalidate(self, region_id)
@@ -144,6 +158,7 @@ class Manager(manager.Manager):
 
     def create_service(self, service_id, service_ref, initiator=None):
         service_ref.setdefault('enabled', True)
+        service_ref.setdefault('name', '')
         ref = self.driver.create_service(service_id, service_ref)
         notifications.Audit.created(self._SERVICE, service_id, initiator)
         return ref
@@ -230,9 +245,9 @@ class Manager(manager.Manager):
     def list_endpoints(self, hints=None):
         return self.driver.list_endpoints(hints or driver_hints.Hints())
 
-    def get_catalog(self, user_id, tenant_id, metadata=None):
+    def get_catalog(self, user_id, tenant_id):
         try:
-            return self.driver.get_catalog(user_id, tenant_id, metadata)
+            return self.driver.get_catalog(user_id, tenant_id)
         except exception.NotFound:
             raise exception.NotFound('Catalog not found for user and tenant')
 
@@ -417,7 +432,7 @@ class Driver(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def get_catalog(self, user_id, tenant_id, metadata=None):
+    def get_catalog(self, user_id, tenant_id):
         """Retrieve and format the current service catalog.
 
         Example::
@@ -441,7 +456,7 @@ class Driver(object):
         """
         raise exception.NotImplemented()  # pragma: no cover
 
-    def get_v3_catalog(self, user_id, tenant_id, metadata=None):
+    def get_v3_catalog(self, user_id, tenant_id):
         """Retrieve and format the current V3 service catalog.
 
         The default implementation builds the V3 catalog from the V2 catalog.
@@ -471,7 +486,7 @@ class Driver(object):
         :raises: keystone.exception.NotFound
 
         """
-        v2_catalog = self.get_catalog(user_id, tenant_id, metadata=metadata)
+        v2_catalog = self.get_catalog(user_id, tenant_id)
         v3_catalog = []
 
         for region_name, region in six.iteritems(v2_catalog):

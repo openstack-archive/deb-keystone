@@ -13,6 +13,7 @@
 import os
 import random
 import subprocess
+from testtools import matchers
 import uuid
 
 from lxml import etree
@@ -68,7 +69,7 @@ class FederatedSetupMixin(object):
     USER = 'user@ORGANIZATION'
     ASSERTION_PREFIX = 'PREFIX_'
     IDP_WITH_REMOTE = 'ORG_IDP_REMOTE'
-    REMOTE_ID = 'entityID_IDP'
+    REMOTE_IDS = ['entityID_IDP1', 'entityID_IDP2']
     REMOTE_ID_ATTR = uuid.uuid4().hex
 
     UNSCOPED_V3_SAML2_REQ = {
@@ -639,7 +640,7 @@ class FederatedSetupMixin(object):
                                        self.idp)
         # Add IDP with remote
         self.idp_with_remote = self.idp_ref(id=self.IDP_WITH_REMOTE)
-        self.idp_with_remote['remote_id'] = self.REMOTE_ID
+        self.idp_with_remote['remote_ids'] = self.REMOTE_IDS
         self.federation_api.create_idp(self.idp_with_remote['id'],
                                        self.idp_with_remote)
         # Add a mapping
@@ -793,27 +794,136 @@ class FederatedIdentityProviderTests(FederationTests):
         return r
 
     def test_create_idp(self):
-        """Creates the IdentityProvider entity."""
+        """Creates the IdentityProvider entity associated to remote_ids."""
 
-        keys_to_check = self.idp_keys
-        body = self._http_idp_input()
+        keys_to_check = list(self.idp_keys)
+        body = self.default_body.copy()
+        body['description'] = uuid.uuid4().hex
         resp = self._create_default_idp(body=body)
         self.assertValidResponse(resp, 'identity_provider', dummy_validator,
                                  keys_to_check=keys_to_check,
                                  ref=body)
 
     def test_create_idp_remote(self):
-        """Creates the IdentityProvider entity associated to a remote_id."""
+        """Creates the IdentityProvider entity associated to remote_ids."""
 
         keys_to_check = list(self.idp_keys)
-        keys_to_check.append('remote_id')
+        keys_to_check.append('remote_ids')
         body = self.default_body.copy()
         body['description'] = uuid.uuid4().hex
-        body['remote_id'] = uuid.uuid4().hex
+        body['remote_ids'] = [uuid.uuid4().hex,
+                              uuid.uuid4().hex,
+                              uuid.uuid4().hex]
         resp = self._create_default_idp(body=body)
         self.assertValidResponse(resp, 'identity_provider', dummy_validator,
                                  keys_to_check=keys_to_check,
                                  ref=body)
+
+    def test_create_idp_remote_repeated(self):
+        """Creates two IdentityProvider entities with some remote_ids
+
+        A remote_id is the same for both so the second IdP is not
+        created because of the uniqueness of the remote_ids
+
+        Expect HTTP 409 code for the latter call.
+
+        """
+
+        body = self.default_body.copy()
+        repeated_remote_id = uuid.uuid4().hex
+        body['remote_ids'] = [uuid.uuid4().hex,
+                              uuid.uuid4().hex,
+                              uuid.uuid4().hex,
+                              repeated_remote_id]
+        self._create_default_idp(body=body)
+
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        body['remote_ids'] = [uuid.uuid4().hex,
+                              repeated_remote_id]
+        self.put(url, body={'identity_provider': body},
+                 expected_status=409)
+
+    def test_create_idp_remote_empty(self):
+        """Creates an IdP with empty remote_ids."""
+
+        keys_to_check = list(self.idp_keys)
+        keys_to_check.append('remote_ids')
+        body = self.default_body.copy()
+        body['description'] = uuid.uuid4().hex
+        body['remote_ids'] = []
+        resp = self._create_default_idp(body=body)
+        self.assertValidResponse(resp, 'identity_provider', dummy_validator,
+                                 keys_to_check=keys_to_check,
+                                 ref=body)
+
+    def test_create_idp_remote_none(self):
+        """Creates an IdP with a None remote_ids."""
+
+        keys_to_check = list(self.idp_keys)
+        keys_to_check.append('remote_ids')
+        body = self.default_body.copy()
+        body['description'] = uuid.uuid4().hex
+        body['remote_ids'] = None
+        resp = self._create_default_idp(body=body)
+        expected = body.copy()
+        expected['remote_ids'] = []
+        self.assertValidResponse(resp, 'identity_provider', dummy_validator,
+                                 keys_to_check=keys_to_check,
+                                 ref=expected)
+
+    def test_update_idp_remote_ids(self):
+        """Update IdP's remote_ids parameter."""
+        body = self.default_body.copy()
+        body['remote_ids'] = [uuid.uuid4().hex]
+        default_resp = self._create_default_idp(body=body)
+        default_idp = self._fetch_attribute_from_response(default_resp,
+                                                          'identity_provider')
+        idp_id = default_idp.get('id')
+        url = self.base_url(suffix=idp_id)
+        self.assertIsNotNone(idp_id)
+
+        body['remote_ids'] = [uuid.uuid4().hex, uuid.uuid4().hex]
+
+        body = {'identity_provider': body}
+        resp = self.patch(url, body=body)
+        updated_idp = self._fetch_attribute_from_response(resp,
+                                                          'identity_provider')
+        body = body['identity_provider']
+        self.assertEqual(sorted(body['remote_ids']),
+                         sorted(updated_idp.get('remote_ids')))
+
+        resp = self.get(url)
+        returned_idp = self._fetch_attribute_from_response(resp,
+                                                           'identity_provider')
+        self.assertEqual(sorted(body['remote_ids']),
+                         sorted(returned_idp.get('remote_ids')))
+
+    def test_update_idp_clean_remote_ids(self):
+        """Update IdP's remote_ids parameter with an empty list."""
+        body = self.default_body.copy()
+        body['remote_ids'] = [uuid.uuid4().hex]
+        default_resp = self._create_default_idp(body=body)
+        default_idp = self._fetch_attribute_from_response(default_resp,
+                                                          'identity_provider')
+        idp_id = default_idp.get('id')
+        url = self.base_url(suffix=idp_id)
+        self.assertIsNotNone(idp_id)
+
+        body['remote_ids'] = []
+
+        body = {'identity_provider': body}
+        resp = self.patch(url, body=body)
+        updated_idp = self._fetch_attribute_from_response(resp,
+                                                          'identity_provider')
+        body = body['identity_provider']
+        self.assertEqual(sorted(body['remote_ids']),
+                         sorted(updated_idp.get('remote_ids')))
+
+        resp = self.get(url)
+        returned_idp = self._fetch_attribute_from_response(resp,
+                                                           'identity_provider')
+        self.assertEqual(sorted(body['remote_ids']),
+                         sorted(returned_idp.get('remote_ids')))
 
     def test_list_idps(self, iterations=5):
         """Lists all available IdentityProviders.
@@ -918,7 +1028,7 @@ class FederatedIdentityProviderTests(FederationTests):
         self.assertIsNotNone(idp_id)
 
         _enabled = not default_idp.get('enabled')
-        body = {'remote_id': uuid.uuid4().hex,
+        body = {'remote_ids': [uuid.uuid4().hex, uuid.uuid4().hex],
                 'description': uuid.uuid4().hex,
                 'enabled': _enabled}
 
@@ -928,13 +1038,21 @@ class FederatedIdentityProviderTests(FederationTests):
                                                           'identity_provider')
         body = body['identity_provider']
         for key in body.keys():
-            self.assertEqual(body[key], updated_idp.get(key))
+            if isinstance(body[key], list):
+                self.assertEqual(sorted(body[key]),
+                                 sorted(updated_idp.get(key)))
+            else:
+                self.assertEqual(body[key], updated_idp.get(key))
 
         resp = self.get(url)
         updated_idp = self._fetch_attribute_from_response(resp,
                                                           'identity_provider')
         for key in body.keys():
-            self.assertEqual(body[key], updated_idp.get(key))
+            if isinstance(body[key], list):
+                self.assertEqual(sorted(body[key]),
+                                 sorted(updated_idp.get(key)))
+            else:
+                self.assertEqual(body[key], updated_idp.get(key))
 
     def test_update_idp_immutable_attributes(self):
         """Update IdP's immutable parameters.
@@ -1618,6 +1736,35 @@ class MappingRuleEngineTests(FederationTests):
         self.assertEqual('tbo', mapped_properties['user']['name'])
         self.assertEqual([], mapped_properties['group_ids'])
 
+    def test_rule_engine_blacklist_and_direct_groups_mapping_multiples(self):
+        """Tests matching multiple values before the blacklist.
+
+        Verifies that the local indexes are correct when matching multiple
+        remote values for a field when the field occurs before the blacklist
+        entry in the remote rules.
+
+        """
+
+        mapping = mapping_fixtures.MAPPING_GROUPS_BLACKLIST_MULTIPLES
+        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
+        rp = mapping_utils.RuleProcessor(mapping['rules'])
+        mapped_properties = rp.process(assertion)
+        self.assertIsNotNone(mapped_properties)
+
+        reference = {
+            mapping_fixtures.CONTRACTOR_GROUP_NAME:
+            {
+                "name": mapping_fixtures.CONTRACTOR_GROUP_NAME,
+                "domain": {
+                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
+                }
+            }
+        }
+        for rule in mapped_properties['group_names']:
+            self.assertDictEqual(reference.get(rule.get('name')), rule)
+        self.assertEqual('tbo', mapped_properties['user']['name'])
+        self.assertEqual([], mapped_properties['group_ids'])
+
     def test_rule_engine_whitelist_direct_group_mapping_missing_domain(self):
         """Test if the local rule is rejected upon missing domain value
 
@@ -1894,7 +2041,8 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
     def test_issue_unscoped_token_with_remote_no_attribute(self):
         r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
                                        environment={
-                                           self.REMOTE_ID_ATTR: self.REMOTE_ID
+                                           self.REMOTE_ID_ATTR:
+                                               self.REMOTE_IDS[0]
                                        })
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
@@ -1903,7 +2051,18 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
                                    remote_id_attribute=self.REMOTE_ID_ATTR)
         r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
                                        environment={
-                                           self.REMOTE_ID_ATTR: self.REMOTE_ID
+                                           self.REMOTE_ID_ATTR:
+                                               self.REMOTE_IDS[0]
+                                       })
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+
+    def test_issue_unscoped_token_with_saml2_remote(self):
+        self.config_fixture.config(group='saml2',
+                                   remote_id_attribute=self.REMOTE_ID_ATTR)
+        r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
+                                       environment={
+                                           self.REMOTE_ID_ATTR:
+                                               self.REMOTE_IDS[0]
                                        })
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
@@ -1916,6 +2075,25 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
                           environment={
                               self.REMOTE_ID_ATTR: uuid.uuid4().hex
                           })
+
+    def test_issue_unscoped_token_with_remote_default_overwritten(self):
+        """Test that protocol remote_id_attribute has higher priority.
+
+        Make sure the parameter stored under ``protocol`` section has higher
+        priority over parameter from default ``federation`` configuration
+        section.
+
+        """
+        self.config_fixture.config(group='saml2',
+                                   remote_id_attribute=self.REMOTE_ID_ATTR)
+        self.config_fixture.config(group='federation',
+                                   remote_id_attribute=uuid.uuid4().hex)
+        r = self._issue_unscoped_token(idp=self.IDP_WITH_REMOTE,
+                                       environment={
+                                           self.REMOTE_ID_ATTR:
+                                               self.REMOTE_IDS[0]
+                                       })
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_issue_unscoped_token_with_remote_unavailable(self):
         self.config_fixture.config(group='federation',
@@ -2127,6 +2305,44 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
                 self.assertEqual(projects_ref, projects,
                                  'match failed for url %s' % url)
 
+    # TODO(samueldmq): Create another test class for role inheritance tests.
+    # The advantage would be to reduce the complexity of this test class and
+    # have tests specific to this fuctionality grouped, easing readability and
+    # maintenability.
+    def test_list_projects_for_inherited_project_assignment(self):
+        # Enable os_inherit extension
+        self.config_fixture.config(group='os_inherit', enabled=True)
+
+        # Create a subproject
+        subproject_inherited = self.new_project_ref(
+            domain_id=self.domainD['id'],
+            parent_id=self.project_inherited['id'])
+        self.resource_api.create_project(subproject_inherited['id'],
+                                         subproject_inherited)
+
+        # Create an inherited role assignment
+        self.assignment_api.create_grant(
+            role_id=self.role_employee['id'],
+            group_id=self.group_employees['id'],
+            project_id=self.project_inherited['id'],
+            inherited_to_projects=True)
+
+        # Define expected projects from employee assertion, which contain
+        # the created subproject
+        expected_project_ids = [self.project_all['id'],
+                                self.proj_employees['id'],
+                                subproject_inherited['id']]
+
+        # Assert expected projects for both available URLs
+        for url in ('/OS-FEDERATION/projects', '/auth/projects'):
+            r = self.get(url, token=self.tokens['EMPLOYEE_ASSERTION'])
+            project_ids = [project['id'] for project in r.result['projects']]
+
+            self.assertEqual(len(expected_project_ids), len(project_ids))
+            for expected_project_id in expected_project_ids:
+                self.assertIn(expected_project_id, project_ids,
+                              'Projects match failed for url %s' % url)
+
     def test_list_domains(self):
         urls = ('/OS-FEDERATION/domains', '/auth/domains')
 
@@ -2296,7 +2512,6 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
                     "remote": [
                         {
                             "type": "REMOTE_USER_GROUPS",
-                            "blacklist": ["noblacklist"]
                         }
                     ]
                 }
@@ -2304,10 +2519,290 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         }
         self.federation_api.update_mapping(self.mapping['id'], rules)
 
+    def test_empty_blacklist_passess_all_values(self):
+        """Test a mapping with empty blacklist specified
+
+        Not adding a ``blacklist`` keyword to the mapping rules has the same
+        effect as adding an empty ``blacklist``.
+        In both cases, the mapping engine will not discard any groups that are
+        associated with apache environment variables.
+
+        This test checks scenario where an empty blacklist was specified.
+        Expected result is to allow any value.
+
+        The test scenario is as follows:
+         - Create group ``EXISTS``
+         - Create group ``NO_EXISTS``
+         - Set mapping rules for existing IdP with a blacklist
+           that passes through as REMOTE_USER_GROUPS
+         - Issue unscoped token with groups  ``EXISTS`` and ``NO_EXISTS``
+           assigned
+
+        """
+
+        domain_id = self.domainA['id']
+        domain_name = self.domainA['name']
+
+        # Add a group "EXISTS"
+        group_exists = self.new_group_ref(domain_id=domain_id)
+        group_exists['name'] = 'EXISTS'
+        group_exists = self.identity_api.create_group(group_exists)
+
+        # Add a group "NO_EXISTS"
+        group_no_exists = self.new_group_ref(domain_id=domain_id)
+        group_no_exists['name'] = 'NO_EXISTS'
+        group_no_exists = self.identity_api.create_group(group_no_exists)
+
+        group_ids = set([group_exists['id'], group_no_exists['id']])
+
+        rules = {
+            'rules': [
+                {
+                    "local": [
+                        {
+                            "user": {
+                                "name": "{0}",
+                                "id": "{0}"
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER"
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "groups": "{0}",
+                            "domain": {"name": domain_name}
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER_GROUPS",
+                            "blacklist": []
+                        }
+                    ]
+                }
+            ]
+        }
+        self.federation_api.update_mapping(self.mapping['id'], rules)
         r = self._issue_unscoped_token(assertion='UNMATCHED_GROUP_ASSERTION')
         assigned_group_ids = r.json['token']['user']['OS-FEDERATION']['groups']
-        self.assertEqual(1, len(assigned_group_ids))
-        self.assertEqual(group['id'], assigned_group_ids[0]['id'])
+        self.assertEqual(len(group_ids), len(assigned_group_ids))
+        for group in assigned_group_ids:
+            self.assertIn(group['id'], group_ids)
+
+    def test_not_adding_blacklist_passess_all_values(self):
+        """Test a mapping without blacklist specified.
+
+        Not adding a ``blacklist`` keyword to the mapping rules has the same
+        effect as adding an empty ``blacklist``. In both cases all values will
+        be accepted and passed.
+
+        This test checks scenario where an blacklist was not specified.
+        Expected result is to allow any value.
+
+        The test scenario is as follows:
+         - Create group ``EXISTS``
+         - Create group ``NO_EXISTS``
+         - Set mapping rules for existing IdP with a blacklist
+           that passes through as REMOTE_USER_GROUPS
+         - Issue unscoped token with on groups ``EXISTS`` and ``NO_EXISTS``
+           assigned
+
+        """
+
+        domain_id = self.domainA['id']
+        domain_name = self.domainA['name']
+
+        # Add a group "EXISTS"
+        group_exists = self.new_group_ref(domain_id=domain_id)
+        group_exists['name'] = 'EXISTS'
+        group_exists = self.identity_api.create_group(group_exists)
+
+        # Add a group "NO_EXISTS"
+        group_no_exists = self.new_group_ref(domain_id=domain_id)
+        group_no_exists['name'] = 'NO_EXISTS'
+        group_no_exists = self.identity_api.create_group(group_no_exists)
+
+        group_ids = set([group_exists['id'], group_no_exists['id']])
+
+        rules = {
+            'rules': [
+                {
+                    "local": [
+                        {
+                            "user": {
+                                "name": "{0}",
+                                "id": "{0}"
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER"
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "groups": "{0}",
+                            "domain": {"name": domain_name}
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER_GROUPS",
+                        }
+                    ]
+                }
+            ]
+        }
+        self.federation_api.update_mapping(self.mapping['id'], rules)
+        r = self._issue_unscoped_token(assertion='UNMATCHED_GROUP_ASSERTION')
+        assigned_group_ids = r.json['token']['user']['OS-FEDERATION']['groups']
+        self.assertEqual(len(group_ids), len(assigned_group_ids))
+        for group in assigned_group_ids:
+            self.assertIn(group['id'], group_ids)
+
+    def test_empty_whitelist_discards_all_values(self):
+        """Test that empty whitelist blocks all the values
+
+        Not adding a ``whitelist`` keyword to the mapping value is different
+        than adding empty whitelist.  The former case will simply pass all the
+        values, whereas the latter would discard all the values.
+
+        This test checks scenario where an empty whitelist was specified.
+        The expected result is that no groups are matched.
+
+        The test scenario is as follows:
+         - Create group ``EXISTS``
+         - Set mapping rules for existing IdP with an empty whitelist
+           that whould discard any values from the assertion
+         - Try issuing unscoped token, expect server to raise
+           ``exception.MissingGroups`` as no groups were matched and ephemeral
+           user does not have any group assigned.
+
+        """
+        domain_id = self.domainA['id']
+        domain_name = self.domainA['name']
+        group = self.new_group_ref(domain_id=domain_id)
+        group['name'] = 'EXISTS'
+        group = self.identity_api.create_group(group)
+        rules = {
+            'rules': [
+                {
+                    "local": [
+                        {
+                            "user": {
+                                "name": "{0}",
+                                "id": "{0}"
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER"
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "groups": "{0}",
+                            "domain": {"name": domain_name}
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER_GROUPS",
+                            "whitelist": []
+                        }
+                    ]
+                }
+            ]
+        }
+        self.federation_api.update_mapping(self.mapping['id'], rules)
+
+        self.assertRaises(exception.MissingGroups,
+                          self._issue_unscoped_token,
+                          assertion='UNMATCHED_GROUP_ASSERTION')
+
+    def test_not_setting_whitelist_accepts_all_values(self):
+        """Test that not setting whitelist passes
+
+        Not adding a ``whitelist`` keyword to the mapping value is different
+        than adding empty whitelist.  The former case will simply pass all the
+        values, whereas the latter would discard all the values.
+
+        This test checks a scenario where a ``whitelist`` was not specified.
+        Expected result is that no groups are ignored.
+
+        The test scenario is as follows:
+         - Create group ``EXISTS``
+         - Set mapping rules for existing IdP with an empty whitelist
+           that whould discard any values from the assertion
+         - Issue an unscoped token and make sure ephemeral user is a member of
+           two groups.
+
+        """
+        domain_id = self.domainA['id']
+        domain_name = self.domainA['name']
+
+        # Add a group "EXISTS"
+        group_exists = self.new_group_ref(domain_id=domain_id)
+        group_exists['name'] = 'EXISTS'
+        group_exists = self.identity_api.create_group(group_exists)
+
+        # Add a group "NO_EXISTS"
+        group_no_exists = self.new_group_ref(domain_id=domain_id)
+        group_no_exists['name'] = 'NO_EXISTS'
+        group_no_exists = self.identity_api.create_group(group_no_exists)
+
+        group_ids = set([group_exists['id'], group_no_exists['id']])
+
+        rules = {
+            'rules': [
+                {
+                    "local": [
+                        {
+                            "user": {
+                                "name": "{0}",
+                                "id": "{0}"
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER"
+                        }
+                    ]
+                },
+                {
+                    "local": [
+                        {
+                            "groups": "{0}",
+                            "domain": {"name": domain_name}
+                        }
+                    ],
+                    "remote": [
+                        {
+                            "type": "REMOTE_USER_GROUPS",
+                        }
+                    ]
+                }
+            ]
+        }
+        self.federation_api.update_mapping(self.mapping['id'], rules)
+        r = self._issue_unscoped_token(assertion='UNMATCHED_GROUP_ASSERTION')
+        assigned_group_ids = r.json['token']['user']['OS-FEDERATION']['groups']
+        self.assertEqual(len(group_ids), len(assigned_group_ids))
+        for group in assigned_group_ids:
+            self.assertIn(group['id'], group_ids)
 
     def test_assertion_prefix_parameter(self):
         """Test parameters filtering based on the prefix.
@@ -2497,6 +2992,7 @@ class SAMLGenerationTests(FederationTests):
     ROLES = ['admin', 'member']
     PROJECT = 'development'
     SAML_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2'
+    ECP_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2/ecp'
     ASSERTION_VERSION = "2.0"
     SERVICE_PROVDIER_ID = 'ACME'
 
@@ -2506,6 +3002,7 @@ class SAMLGenerationTests(FederationTests):
             'enabled': True,
             'description': uuid.uuid4().hex,
             'sp_url': self.RECIPIENT,
+            'relay_state_prefix': CONF.saml.relay_state_prefix,
 
         }
         return ref
@@ -2515,7 +3012,9 @@ class SAMLGenerationTests(FederationTests):
         self.signed_assertion = saml2.create_class_from_xml_string(
             saml.Assertion, _load_xml('signed_saml2_assertion.xml'))
         self.sp = self.sp_ref()
-        self.federation_api.create_sp(self.SERVICE_PROVDIER_ID, self.sp)
+        url = '/OS-FEDERATION/service_providers/' + self.SERVICE_PROVDIER_ID
+        self.put(url, body={'service_provider': self.sp},
+                 expected_status=201)
 
     def test_samlize_token_values(self):
         """Test the SAML generator produces a SAML object.
@@ -2810,6 +3309,52 @@ class SAMLGenerationTests(FederationTests):
                                                   self.SERVICE_PROVDIER_ID)
         self.post(self.SAML_GENERATION_ROUTE, body=body, expected_status=404)
 
+    def test_generate_ecp_route(self):
+        """Test that the ECP generation endpoint produces XML.
+
+        The ECP endpoint /v3/auth/OS-FEDERATION/saml2/ecp should take the same
+        input as the SAML generation endpoint (scoped token ID + Service
+        Provider ID).
+        The controller should return a SAML assertion that is wrapped in a
+        SOAP envelope.
+        """
+
+        self.config_fixture.config(group='saml', idp_entity_id=self.ISSUER)
+        token_id = self._fetch_valid_token()
+        body = self._create_generate_saml_request(token_id,
+                                                  self.SERVICE_PROVDIER_ID)
+
+        with mock.patch.object(keystone_idp, '_sign_assertion',
+                               return_value=self.signed_assertion):
+            http_response = self.post(self.ECP_GENERATION_ROUTE, body=body,
+                                      response_content_type='text/xml',
+                                      expected_status=200)
+
+        env_response = etree.fromstring(http_response.result)
+        header = env_response[0]
+
+        # Verify the relay state starts with 'ss:mem'
+        prefix = CONF.saml.relay_state_prefix
+        self.assertThat(header[0].text, matchers.StartsWith(prefix))
+
+        # Verify that the content in the body matches the expected assertion
+        body = env_response[1]
+        response = body[0]
+        issuer = response[0]
+        assertion = response[2]
+
+        self.assertEqual(self.RECIPIENT, response.get('Destination'))
+        self.assertEqual(self.ISSUER, issuer.text)
+
+        user_attribute = assertion[4][0]
+        self.assertIsInstance(user_attribute[0].text, str)
+
+        role_attribute = assertion[4][1]
+        self.assertIsInstance(role_attribute[0].text, str)
+
+        project_attribute = assertion[4][2]
+        self.assertIsInstance(project_attribute[0].text, str)
+
 
 class IdPMetadataGenerationTests(FederationTests):
     """A class for testing Identity Provider Metadata generation."""
@@ -2947,7 +3492,8 @@ class ServiceProviderTests(FederationTests):
     MEMBER_NAME = 'service_provider'
     COLLECTION_NAME = 'service_providers'
     SERVICE_PROVIDER_ID = 'ACME'
-    SP_KEYS = ['auth_url', 'id', 'enabled', 'description', 'sp_url']
+    SP_KEYS = ['auth_url', 'id', 'enabled', 'description',
+               'relay_state_prefix', 'sp_url']
 
     def setUp(self):
         super(FederationTests, self).setUp()
@@ -2964,6 +3510,7 @@ class ServiceProviderTests(FederationTests):
             'enabled': True,
             'description': uuid.uuid4().hex,
             'sp_url': 'https://' + uuid.uuid4().hex + '.com',
+            'relay_state_prefix': CONF.saml.relay_state_prefix
         }
         return ref
 
@@ -2989,6 +3536,29 @@ class ServiceProviderTests(FederationTests):
                         expected_status=201)
         self.assertValidEntity(resp.result['service_provider'],
                                keys_to_check=self.SP_KEYS)
+
+    def test_create_sp_relay_state_default(self):
+        """Create an SP without relay state, should default to `ss:mem`."""
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        del sp['relay_state_prefix']
+        resp = self.put(url, body={'service_provider': sp},
+                        expected_status=201)
+        sp_result = resp.result['service_provider']
+        self.assertEqual(CONF.saml.relay_state_prefix,
+                         sp_result['relay_state_prefix'])
+
+    def test_create_sp_relay_state_non_default(self):
+        """Create an SP with custom relay state."""
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        non_default_prefix = uuid.uuid4().hex
+        sp['relay_state_prefix'] = non_default_prefix
+        resp = self.put(url, body={'service_provider': sp},
+                        expected_status=201)
+        sp_result = resp.result['service_provider']
+        self.assertEqual(non_default_prefix,
+                         sp_result['relay_state_prefix'])
 
     def test_create_service_provider_fail(self):
         """Try adding SP object with unallowed attribute."""
@@ -3079,6 +3649,18 @@ class ServiceProviderTests(FederationTests):
         self.patch(url, body={'service_provider': new_sp_ref},
                    expected_status=404)
 
+    def test_update_sp_relay_state(self):
+        """Update an SP with custome relay state."""
+        new_sp_ref = self.sp_ref()
+        non_default_prefix = uuid.uuid4().hex
+        new_sp_ref['relay_state_prefix'] = non_default_prefix
+        url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
+        resp = self.patch(url, body={'service_provider': new_sp_ref},
+                          expected_status=200)
+        sp_result = resp.result['service_provider']
+        self.assertEqual(non_default_prefix,
+                         sp_result['relay_state_prefix'])
+
     def test_delete_service_provider(self):
         url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
         self.delete(url, expected_status=204)
@@ -3116,14 +3698,31 @@ class WebSSOTests(FederatedTokenTests):
         self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
 
     def test_federated_sso_auth(self):
-        environment = {self.REMOTE_ID_ATTR: self.IDP}
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
         context = {'environment': environment}
         query_string = {'origin': self.ORIGIN}
         self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
         resp = self.api.federated_sso_auth(context, self.PROTOCOL)
         self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
 
+    def test_federated_sso_auth_bad_remote_id(self):
+        environment = {self.REMOTE_ID_ATTR: self.IDP}
+        context = {'environment': environment}
+        query_string = {'origin': self.ORIGIN}
+        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        self.assertRaises(exception.IdentityProviderNotFound,
+                          self.api.federated_sso_auth,
+                          context, self.PROTOCOL)
+
     def test_federated_sso_missing_query(self):
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
+        context = {'environment': environment}
+        self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
+        self.assertRaises(exception.ValidationError,
+                          self.api.federated_sso_auth,
+                          context, self.PROTOCOL)
+
+    def test_federated_sso_missing_query_bad_remote_id(self):
         environment = {self.REMOTE_ID_ATTR: self.IDP}
         context = {'environment': environment}
         self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
@@ -3132,6 +3731,15 @@ class WebSSOTests(FederatedTokenTests):
                           context, self.PROTOCOL)
 
     def test_federated_sso_untrusted_dashboard(self):
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
+        context = {'environment': environment}
+        query_string = {'origin': uuid.uuid4().hex}
+        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        self.assertRaises(exception.Unauthorized,
+                          self.api.federated_sso_auth,
+                          context, self.PROTOCOL)
+
+    def test_federated_sso_untrusted_dashboard_bad_remote_id(self):
         environment = {self.REMOTE_ID_ATTR: self.IDP}
         context = {'environment': environment}
         query_string = {'origin': uuid.uuid4().hex}
@@ -3174,6 +3782,7 @@ class K2KServiceCatalogTests(FederationTests):
     def sp_response(self, id, ref):
         ref.pop('enabled')
         ref.pop('description')
+        ref.pop('relay_state_prefix')
         ref['id'] = id
         return ref
 
@@ -3183,6 +3792,7 @@ class K2KServiceCatalogTests(FederationTests):
             'enabled': True,
             'description': uuid.uuid4().hex,
             'sp_url': uuid.uuid4().hex,
+            'relay_state_prefix': CONF.saml.relay_state_prefix,
         }
         return ref
 

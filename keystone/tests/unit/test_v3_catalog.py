@@ -15,6 +15,8 @@
 import copy
 import uuid
 
+from testtools import matchers
+
 from keystone import catalog
 from keystone.tests import unit as tests
 from keystone.tests.unit.ksfixtures import database
@@ -154,7 +156,7 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         ref2 = self.new_region_ref()
 
         del ref1['description']
-        del ref2['description']
+        ref2['description'] = None
 
         resp1 = self.post(
             '/regions',
@@ -224,6 +226,39 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             body={'region': region})
         self.assertValidRegionResponse(r, region)
 
+    def test_update_region_without_description_keeps_original(self):
+        """Call ``PATCH /regions/{region_id}``."""
+        region_ref = self.new_region_ref()
+
+        resp = self.post('/regions', body={'region': region_ref},
+                         expected_status=201)
+
+        region_updates = {
+            # update with something that's not the description
+            'parent_region_id': self.region_id,
+        }
+        resp = self.patch('/regions/%s' % region_ref['id'],
+                          body={'region': region_updates},
+                          expected_status=200)
+
+        # NOTE(dstanek): Keystone should keep the original description.
+        self.assertEqual(region_ref['description'],
+                         resp.result['region']['description'])
+
+    def test_update_region_with_null_description(self):
+        """Call ``PATCH /regions/{region_id}``."""
+        region = self.new_region_ref()
+        del region['id']
+        region['description'] = None
+        r = self.patch('/regions/%(region_id)s' % {
+            'region_id': self.region_id},
+            body={'region': region})
+
+        # NOTE(dstanek): Keystone should turn the provided None value into
+        # an empty string before storing in the backend.
+        region['description'] = ''
+        self.assertValidRegionResponse(r, region)
+
     def test_delete_region(self):
         """Call ``DELETE /regions/{region_id}``."""
 
@@ -244,6 +279,16 @@ class CatalogTestCase(test_v3.RestfulTestCase):
         r = self.post(
             '/services',
             body={'service': ref})
+        self.assertValidServiceResponse(r, ref)
+
+    def test_create_service_no_name(self):
+        """Call ``POST /services``."""
+        ref = self.new_service_ref()
+        del ref['name']
+        r = self.post(
+            '/services',
+            body={'service': ref})
+        ref['name'] = ''
         self.assertValidServiceResponse(r, ref)
 
     def test_create_service_no_enabled(self):
@@ -632,6 +677,20 @@ class TestCatalogAPISQL(tests.TestCase):
         self.assertEqual(1, len(catalog[0]['endpoints']))
         # all three appear in the backend
         self.assertEqual(3, len(self.catalog_api.list_endpoints()))
+
+        # create another valid endpoint - tenant_id will be replaced
+        ref = self.new_endpoint_ref(self.service_id)
+        ref['url'] = 'http://keystone/%(tenant_id)s'
+        self.catalog_api.create_endpoint(ref['id'], ref)
+
+        # there are two valid endpoints, positive check
+        catalog = self.catalog_api.get_v3_catalog(user_id, tenant_id)
+        self.assertThat(catalog[0]['endpoints'], matchers.HasLength(2))
+
+        # If the URL has no 'tenant_id' to substitute, we will skip the
+        # endpoint which contains this kind of URL, negative check.
+        catalog = self.catalog_api.get_v3_catalog(user_id, tenant_id=None)
+        self.assertThat(catalog[0]['endpoints'], matchers.HasLength(1))
 
     def test_get_catalog_always_returns_service_name(self):
         user_id = uuid.uuid4().hex

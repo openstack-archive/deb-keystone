@@ -1,5 +1,3 @@
-# Copyright 2014 IBM Corp.
-#
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
@@ -12,15 +10,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import sqlalchemy as sql
-
-ASSIGNMENT_TABLE = 'assignment'
+import sqlalchemy
 
 
 def upgrade(migrate_engine):
-    meta = sql.MetaData()
-    meta.bind = migrate_engine
-
-    assignment = sql.Table(ASSIGNMENT_TABLE, meta, autoload=True)
-    idx = sql.Index('ix_actor_id', assignment.c.actor_id)
-    idx.create(migrate_engine)
+    # NOTE(viktors): Migration 062 removed FK from `assignment` table, but
+    # MySQL silently creates indexes on FK constraints, so we should remove
+    # this index manually.
+    if migrate_engine.name == 'mysql':
+        meta = sqlalchemy.MetaData(bind=migrate_engine)
+        table = sqlalchemy.Table('assignment', meta, autoload=True)
+        for index in table.indexes:
+            if [c.name for c in index.columns] == ['role_id']:
+                index.drop(migrate_engine)

@@ -607,7 +607,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         self.post('/projects', body={'project': {}}, expected_status=400)
 
     def _create_projects_hierarchy(self, hierarchy_size=1):
-        """Creates a project hierarchy with specified size.
+        """Creates a single-branched project hierarchy with the specified size.
 
         :param hierarchy_size: the desired hierarchy size, default is 1 -
                                a project with one child.
@@ -615,9 +615,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         :returns projects: a list of the projects in the created hierarchy.
 
         """
-        resp = self.get(
-            '/projects/%(project_id)s' % {
-                'project_id': self.project_id})
+        new_ref = self.new_project_ref(domain_id=self.domain_id)
+        resp = self.post('/projects', body={'project': new_ref})
 
         projects = [resp.result]
 
@@ -683,18 +682,66 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         # projects[0] has no parents, parents_as_ids must be None
         self.assertIsNone(parents_as_ids)
 
-    def test_get_project_with_parents_as_list(self):
-        """Call ``GET /projects/{project_id}?parents_as_list``."""
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
+    def test_get_project_with_parents_as_list_with_full_access(self):
+        """``GET /projects/{project_id}?parents_as_list`` with full access.
 
-        r = self.get(
-            '/projects/%(project_id)s?parents_as_list' % {
-                'project_id': projects[1]['project']['id']})
+        Test plan:
 
+        - Create 'parent', 'project' and 'subproject' projects;
+        - Assign a user a role on each one of those projects;
+        - Check that calling parents_as_list on 'subproject' returns both
+          'project' and 'parent'.
+
+        """
+
+        # Create the project hierarchy
+        parent, project, subproject = self._create_projects_hierarchy(2)
+
+        # Assign a role for the user on all the created projects
+        for proj in (parent, project, subproject):
+            self.put(_build_role_assignment_link(
+                role_id=self.role_id, user_id=self.user_id,
+                project_id=proj['project']['id']))
+
+        # Make the API call
+        r = self.get('/projects/%(project_id)s?parents_as_list' %
+                     {'project_id': subproject['project']['id']})
+        self.assertValidProjectResponse(r, subproject['project'])
+
+        # Assert only 'project' and 'parent' are in the parents list
+        self.assertIn(project, r.result['project']['parents'])
+        self.assertIn(parent, r.result['project']['parents'])
+        self.assertEqual(2, len(r.result['project']['parents']))
+
+    def test_get_project_with_parents_as_list_with_partial_access(self):
+        """``GET /projects/{project_id}?parents_as_list`` with partial access.
+
+        Test plan:
+
+        - Create 'parent', 'project' and 'subproject' projects;
+        - Assign a user a role on 'parent' and 'subproject';
+        - Check that calling parents_as_list on 'subproject' only returns
+          'parent'.
+
+        """
+
+        # Create the project hierarchy
+        parent, project, subproject = self._create_projects_hierarchy(2)
+
+        # Assign a role for the user on parent and subproject
+        for proj in (parent, subproject):
+            self.put(_build_role_assignment_link(
+                role_id=self.role_id, user_id=self.user_id,
+                project_id=proj['project']['id']))
+
+        # Make the API call
+        r = self.get('/projects/%(project_id)s?parents_as_list' %
+                     {'project_id': subproject['project']['id']})
+        self.assertValidProjectResponse(r, subproject['project'])
+
+        # Assert only 'parent' is in the parents list
+        self.assertIn(parent, r.result['project']['parents'])
         self.assertEqual(1, len(r.result['project']['parents']))
-        self.assertValidProjectResponse(r, projects[1]['project'])
-        self.assertIn(projects[0], r.result['project']['parents'])
-        self.assertNotIn(projects[2], r.result['project']['parents'])
 
     def test_get_project_with_parents_as_list_and_parents_as_ids(self):
         """Call ``GET /projects/{project_id}?parents_as_list&parents_as_ids``.
@@ -798,18 +845,65 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         # projects[3] has no subtree, subtree_as_ids must be None
         self.assertIsNone(subtree_as_ids)
 
-    def test_get_project_with_subtree_as_list(self):
-        """Call ``GET /projects/{project_id}?subtree_as_list``."""
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
+    def test_get_project_with_subtree_as_list_with_full_access(self):
+        """``GET /projects/{project_id}?subtree_as_list`` with full access.
 
-        r = self.get(
-            '/projects/%(project_id)s?subtree_as_list' % {
-                'project_id': projects[1]['project']['id']})
+        Test plan:
 
+        - Create 'parent', 'project' and 'subproject' projects;
+        - Assign a user a role on each one of those projects;
+        - Check that calling subtree_as_list on 'parent' returns both 'parent'
+          and 'subproject'.
+
+        """
+
+        # Create the project hierarchy
+        parent, project, subproject = self._create_projects_hierarchy(2)
+
+        # Assign a role for the user on all the created projects
+        for proj in (parent, project, subproject):
+            self.put(_build_role_assignment_link(
+                role_id=self.role_id, user_id=self.user_id,
+                project_id=proj['project']['id']))
+
+        # Make the API call
+        r = self.get('/projects/%(project_id)s?subtree_as_list' %
+                     {'project_id': parent['project']['id']})
+        self.assertValidProjectResponse(r, parent['project'])
+
+        # Assert only 'project' and 'subproject' are in the subtree
+        self.assertIn(project, r.result['project']['subtree'])
+        self.assertIn(subproject, r.result['project']['subtree'])
+        self.assertEqual(2, len(r.result['project']['subtree']))
+
+    def test_get_project_with_subtree_as_list_with_partial_access(self):
+        """``GET /projects/{project_id}?subtree_as_list`` with partial access.
+
+        Test plan:
+
+        - Create 'parent', 'project' and 'subproject' projects;
+        - Assign a user a role on 'parent' and 'subproject';
+        - Check that calling subtree_as_list on 'parent' returns 'subproject'.
+
+        """
+
+        # Create the project hierarchy
+        parent, project, subproject = self._create_projects_hierarchy(2)
+
+        # Assign a role for the user on parent and subproject
+        for proj in (parent, subproject):
+            self.put(_build_role_assignment_link(
+                role_id=self.role_id, user_id=self.user_id,
+                project_id=proj['project']['id']))
+
+        # Make the API call
+        r = self.get('/projects/%(project_id)s?subtree_as_list' %
+                     {'project_id': parent['project']['id']})
+        self.assertValidProjectResponse(r, parent['project'])
+
+        # Assert only 'subproject' is in the subtree
+        self.assertIn(subproject, r.result['project']['subtree'])
         self.assertEqual(1, len(r.result['project']['subtree']))
-        self.assertValidProjectResponse(r, projects[1]['project'])
-        self.assertNotIn(projects[0], r.result['project']['subtree'])
-        self.assertIn(projects[2], r.result['project']['subtree'])
 
     def test_get_project_with_subtree_as_list_and_subtree_as_ids(self):
         """Call ``GET /projects/{project_id}?subtree_as_list&subtree_as_ids``.
@@ -920,10 +1014,10 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
 
     def test_delete_not_leaf_project(self):
         """Call ``DELETE /projects/{project_id}``."""
-        self._create_projects_hierarchy()
+        projects = self._create_projects_hierarchy()
         self.delete(
             '/projects/%(project_id)s' % {
-                'project_id': self.project_id},
+                'project_id': projects[0]['project']['id']},
             expected_status=403)
 
     # Role CRUD tests
@@ -966,6 +1060,19 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         """Call ``DELETE /roles/{role_id}``."""
         self.delete('/roles/%(role_id)s' % {
             'role_id': self.role_id})
+
+    def test_create_member_role(self):
+        """Call ``POST /roles``."""
+        # specify only the name on creation
+        ref = self.new_role_ref()
+        ref['name'] = CONF.member_role_name
+        r = self.post(
+            '/roles',
+            body={'role': ref})
+        self.assertValidRoleResponse(r, ref)
+
+        # but the ID should be set as defined in CONF
+        self.assertEqual(CONF.member_role_id, r.json['role']['id'])
 
     # Role Grants tests
 
@@ -2898,6 +3005,27 @@ class AssignmentInheritanceDisabledTestCase(test_v3.RestfulTestCase):
 
 class AssignmentV3toV2MethodsTestCase(tests.TestCase):
     """Test domain V3 to V2 conversion methods."""
+    def _setup_initial_projects(self):
+        self.project_id = uuid.uuid4().hex
+        self.domain_id = uuid.uuid4().hex
+        self.parent_id = uuid.uuid4().hex
+        # Project with only domain_id in ref
+        self.project1 = {'id': self.project_id,
+                         'name': self.project_id,
+                         'domain_id': self.domain_id}
+        # Project with both domain_id and parent_id in ref
+        self.project2 = {'id': self.project_id,
+                         'name': self.project_id,
+                         'domain_id': self.domain_id,
+                         'parent_id': self.parent_id}
+        # Project with no domain_id and parent_id in ref
+        self.project3 = {'id': self.project_id,
+                         'name': self.project_id,
+                         'domain_id': self.domain_id,
+                         'parent_id': self.parent_id}
+        # Expected result with no domain_id and parent_id
+        self.expected_project = {'id': self.project_id,
+                                 'name': self.project_id}
 
     def test_v2controller_filter_domain_id(self):
         # V2.0 is not domain aware, ensure domain_id is popped off the ref.
@@ -2941,3 +3069,52 @@ class AssignmentV3toV2MethodsTestCase(tests.TestCase):
         self.assertRaises(exception.Unauthorized,
                           controller.V2Controller.filter_domain,
                           non_default_domain_ref)
+
+    def test_v2controller_filter_project_parent_id(self):
+        # V2.0 is not project hierarchy aware, ensure parent_id is popped off.
+        other_data = uuid.uuid4().hex
+        parent_id = uuid.uuid4().hex
+        ref = {'parent_id': parent_id,
+               'other_data': other_data}
+
+        ref_no_parent = {'other_data': other_data}
+        expected_ref = ref_no_parent.copy()
+
+        updated_ref = controller.V2Controller.filter_project_parent_id(ref)
+        self.assertIs(ref, updated_ref)
+        self.assertDictEqual(ref, expected_ref)
+        # Make sure we don't error/muck up data if parent_id isn't present
+        updated_ref = controller.V2Controller.filter_project_parent_id(
+            ref_no_parent)
+        self.assertIs(ref_no_parent, updated_ref)
+        self.assertDictEqual(ref_no_parent, expected_ref)
+
+    def test_v3_to_v2_project_method(self):
+        self._setup_initial_projects()
+        updated_project1 = controller.V2Controller.v3_to_v2_project(
+            self.project1)
+        self.assertIs(self.project1, updated_project1)
+        self.assertDictEqual(self.project1, self.expected_project)
+        updated_project2 = controller.V2Controller.v3_to_v2_project(
+            self.project2)
+        self.assertIs(self.project2, updated_project2)
+        self.assertDictEqual(self.project2, self.expected_project)
+        updated_project3 = controller.V2Controller.v3_to_v2_project(
+            self.project3)
+        self.assertIs(self.project3, updated_project3)
+        self.assertDictEqual(self.project3, self.expected_project)
+
+    def test_v3_to_v2_project_method_list(self):
+        self._setup_initial_projects()
+        project_list = [self.project1, self.project2, self.project3]
+        updated_list = controller.V2Controller.v3_to_v2_project(project_list)
+
+        self.assertEqual(len(updated_list), len(project_list))
+
+        for i, ref in enumerate(updated_list):
+            # Order should not change.
+            self.assertIs(ref, project_list[i])
+
+        self.assertDictEqual(self.project1, self.expected_project)
+        self.assertDictEqual(self.project2, self.expected_project)
+        self.assertDictEqual(self.project3, self.expected_project)

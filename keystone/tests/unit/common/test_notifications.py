@@ -759,13 +759,14 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
                 'action': action,
                 'initiator': initiator,
                 'event': event,
+                'event_type': event_type,
                 'send_notification_called': True}
             self._notifications.append(note)
 
         self.useFixture(mockpatch.PatchObject(
             notifications, '_send_audit_notification', fake_notify))
 
-    def _assert_last_note(self, action, user_id):
+    def _assert_last_note(self, action, user_id, event_type=None):
         self.assertTrue(self._notifications)
         note = self._notifications[-1]
         self.assertEqual(note['action'], action)
@@ -773,6 +774,8 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
         self.assertEqual(initiator.id, user_id)
         self.assertEqual(initiator.host.address, self.LOCAL_HOST)
         self.assertTrue(note['send_notification_called'])
+        if event_type:
+            self.assertEqual(note['event_type'], event_type)
 
     def _assert_event(self, role_id, project=None, domain=None,
                       user=None, group=None, inherit=False):
@@ -857,11 +860,15 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
                               user=None, group=None):
         self.put(url)
         action = "%s.%s" % (CREATED_OPERATION, self.ROLE_ASSIGNMENT)
-        self._assert_last_note(action, self.user_id)
+        event_type = '%s.%s.%s' % (notifications.SERVICE,
+                                   self.ROLE_ASSIGNMENT, CREATED_OPERATION)
+        self._assert_last_note(action, self.user_id, event_type)
         self._assert_event(role, project, domain, user, group)
         self.delete(url)
         action = "%s.%s" % (DELETED_OPERATION, self.ROLE_ASSIGNMENT)
-        self._assert_last_note(action, self.user_id)
+        event_type = '%s.%s.%s' % (notifications.SERVICE,
+                                   self.ROLE_ASSIGNMENT, DELETED_OPERATION)
+        self._assert_last_note(action, self.user_id, event_type)
         self._assert_event(role, project, domain, user, group)
 
     def test_user_project_grant(self):
@@ -879,6 +886,40 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
         self._test_role_assignment(url, self.role_id,
                                    domain=self.domain_id,
                                    group=group['id'])
+
+    def test_add_role_to_user_and_project(self):
+        # A notification is sent when add_role_to_user_and_project is called on
+        # the assignment manager.
+
+        project_ref = self.new_project_ref(self.domain_id)
+        project = self.resource_api.create_project(
+            project_ref['id'], project_ref)
+        tenant_id = project['id']
+
+        self.assignment_api.add_role_to_user_and_project(
+            self.user_id, tenant_id, self.role_id)
+
+        self.assertTrue(self._notifications)
+        note = self._notifications[-1]
+        self.assertEqual(note['action'], 'created.role_assignment')
+        self.assertTrue(note['send_notification_called'])
+
+        self._assert_event(self.role_id, project=tenant_id, user=self.user_id)
+
+    def test_remove_role_from_user_and_project(self):
+        # A notification is sent when remove_role_from_user_and_project is
+        # called on the assignment manager.
+
+        self.assignment_api.remove_role_from_user_and_project(
+            self.user_id, self.project_id, self.role_id)
+
+        self.assertTrue(self._notifications)
+        note = self._notifications[-1]
+        self.assertEqual(note['action'], 'deleted.role_assignment')
+        self.assertTrue(note['send_notification_called'])
+
+        self._assert_event(self.role_id, project=self.project_id,
+                           user=self.user_id)
 
 
 class TestCallbackRegistration(testtools.TestCase):

@@ -57,16 +57,30 @@ class Ec2ControllerCommon(object):
     def check_signature(self, creds_ref, credentials):
         signer = ec2_utils.Ec2Signer(creds_ref['secret'])
         signature = signer.generate(credentials)
-        if utils.auth_str_equal(credentials['signature'], signature):
-            return
-        # NOTE(vish): Some libraries don't use the port when signing
-        #             requests, so try again without port.
-        elif ':' in credentials['signature']:
-            hostname, _port = credentials['host'].split(':')
-            credentials['host'] = hostname
-            signature = signer.generate(credentials)
-            if not utils.auth_str_equal(credentials.signature, signature):
-                raise exception.Unauthorized(message='Invalid EC2 signature.')
+        # NOTE(davechen): credentials.get('signature') is not guaranteed to
+        # exist, we need check it explicitly.
+        if credentials.get('signature'):
+            if utils.auth_str_equal(credentials['signature'], signature):
+                return True
+            # NOTE(vish): Some client libraries don't use the port when signing
+            #             requests, so try again without port.
+            elif ':' in credentials['host']:
+                hostname, _port = credentials['host'].split(':')
+                credentials['host'] = hostname
+                # NOTE(davechen): we need reinitialize 'signer' to avoid
+                # contaminated status of signature, this is similar with
+                # other programming language libraries, JAVA for example.
+                signer = ec2_utils.Ec2Signer(creds_ref['secret'])
+                signature = signer.generate(credentials)
+                if utils.auth_str_equal(credentials['signature'],
+                                        signature):
+                    return True
+                raise exception.Unauthorized(
+                    message='Invalid EC2 signature.')
+            else:
+                raise exception.Unauthorized(
+                    message='EC2 signature not supplied.')
+        # Raise the exception when credentials.get('signature') is None
         else:
             raise exception.Unauthorized(message='EC2 signature not supplied.')
 
@@ -143,7 +157,7 @@ class Ec2ControllerCommon(object):
         roles_ref = [self.role_api.get_role(role_id) for role_id in roles]
 
         catalog_ref = self.catalog_api.get_catalog(
-            user_ref['id'], tenant_ref['id'], metadata_ref)
+            user_ref['id'], tenant_ref['id'])
 
         return user_ref, tenant_ref, metadata_ref, roles_ref, catalog_ref
 
@@ -349,11 +363,11 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
 @dependency.requires('policy_api', 'token_provider_api')
 class Ec2ControllerV3(Ec2ControllerCommon, controller.V3Controller):
 
-    member_name = 'project'
+    collection_name = 'credentials'
+    member_name = 'credential'
 
     def __init__(self):
         super(Ec2ControllerV3, self).__init__()
-        self.get_member_from_driver = self.credential_api.get_credential
 
     def _check_credential_owner_and_user_id_match(self, context, prep_info,
                                                   user_id, credential_id):
@@ -383,24 +397,36 @@ class Ec2ControllerV3(Ec2ControllerCommon, controller.V3Controller):
             metadata_ref=metadata_ref)
         return render_token_data_response(token_id, token_data)
 
-    @controller.protected()
+    @controller.protected(callback=_check_credential_owner_and_user_id_match)
     def ec2_get_credential(self, context, user_id, credential_id):
-        return super(Ec2ControllerV3, self).get_credential(user_id,
-                                                           credential_id)
+        ref = super(Ec2ControllerV3, self).get_credential(user_id,
+                                                          credential_id)
+        return Ec2ControllerV3.wrap_member(context, ref['credential'])
 
     @controller.protected()
     def ec2_list_credentials(self, context, user_id):
-        return super(Ec2ControllerV3, self).get_credentials(user_id)
+        refs = super(Ec2ControllerV3, self).get_credentials(user_id)
+        return Ec2ControllerV3.wrap_collection(context, refs['credentials'])
 
     @controller.protected()
     def ec2_create_credential(self, context, user_id, tenant_id):
-        return super(Ec2ControllerV3, self).create_credential(context, user_id,
-                                                              tenant_id)
+        ref = super(Ec2ControllerV3, self).create_credential(context, user_id,
+                                                             tenant_id)
+        return Ec2ControllerV3.wrap_member(context, ref['credential'])
 
     @controller.protected(callback=_check_credential_owner_and_user_id_match)
     def ec2_delete_credential(self, context, user_id, credential_id):
         return super(Ec2ControllerV3, self).delete_credential(user_id,
                                                               credential_id)
+
+    @classmethod
+    def _add_self_referential_link(cls, context, ref):
+        path = '/users/%(user_id)s/credentials/OS-EC2/%(credential_id)s'
+        url = cls.base_url(context, path) % {
+            'user_id': ref['user_id'],
+            'credential_id': ref['access']}
+        ref.setdefault('links', {})
+        ref['links']['self'] = url
 
 
 def render_token_data_response(token_id, token_data):

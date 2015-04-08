@@ -46,6 +46,11 @@ class Provider(common.BaseProvider):
         :returns: tuple containing the ID of the token and the token data
 
         """
+        # TODO(lbragstad): Currently, Fernet tokens don't support bind in the
+        # token format. Raise a 501 if we're dealing with bind.
+        if token_ref.get('bind'):
+            raise exception.NotImplemented()
+
         user_id = token_ref['user']['id']
         # Default to password since methods not provided by token_ref
         method_names = ['password']
@@ -149,7 +154,7 @@ class Provider(common.BaseProvider):
         :param metadata_ref: metadata reference
         :param include_catalog: return the catalog in the response if True,
                                 otherwise don't return the catalog
-        :param parent_audit_id: ID of the patent audit entity
+        :param parent_audit_id: ID of the parent audit entity
         :returns: tuple containing the id of the token and the token data
 
         """
