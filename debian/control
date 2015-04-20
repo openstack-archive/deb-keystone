@@ -84,6 +84,8 @@ Depends: python-crypto,
          python-jsonschema,
          python-keystoneclient (>= 1:1.1.0),
          python-keystonemiddleware (>= 1.5.0),
+         python-ldap,
+         python-ldappool,
          python-memcache,
          python-migrate (>= 0.9.5),
          python-msgpack,
@@ -115,7 +117,6 @@ Depends: python-crypto,
          python-webob,
          ${misc:Depends},
          ${python:Depends},
-Recommends: python-ldap
 Description: OpenStack identity service - library
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
