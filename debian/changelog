@@ -1,6 +1,7 @@
-keystone (2015.1~rc1-1) UNRELEASED; urgency=medium
+keystone (2015.1~rc2-1) unstable; urgency=medium
 
   * New upstream release.
+  * Uploading to unstable.
   * Review (build-)depends.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 22 Dec 2014 12:18:01 +0800
