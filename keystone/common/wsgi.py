@@ -20,7 +20,7 @@
 
 import copy
 import itertools
-import urllib
+import wsgiref.util
 
 from oslo_config import cfg
 import oslo_i18n
@@ -49,9 +49,11 @@ LOG = log.getLogger(__name__)
 # Environment variable used to pass the request context
 CONTEXT_ENV = 'openstack.context'
 
-
 # Environment variable used to pass the request params
 PARAMS_ENV = 'openstack.params'
+
+JSON_ENCODE_CONTENT_TYPES = set(['application/json',
+                                 'application/json-home'])
 
 
 def validate_token_bind(context, token_ref):
@@ -227,11 +229,10 @@ class Application(BaseApplication):
         # NOTE(morganfainberg): use the request method to normalize the
         # response code between GET and HEAD requests. The HTTP status should
         # be the same.
-        req_method = req.environ['REQUEST_METHOD'].upper()
-        LOG.info('%(req_method)s %(path)s?%(params)s', {
-            'req_method': req_method,
-            'path': context['path'],
-            'params': urllib.urlencode(req.params)})
+        LOG.info('%(req_method)s %(uri)s', {
+            'req_method': req.environ['REQUEST_METHOD'].upper(),
+            'uri': wsgiref.util.request_uri(req.environ),
+        })
 
         params = self._normalize_dict(params)
 
@@ -270,7 +271,7 @@ class Application(BaseApplication):
 
         response_code = self._get_response_code(req)
         return render_response(body=result, status=response_code,
-                               method=req_method)
+                               method=req.environ['REQUEST_METHOD'])
 
     def _get_response_code(self, req):
         req_method = req.environ['REQUEST_METHOD']
@@ -603,7 +604,7 @@ class ExtensionRouter(Router):
             mapper = routes.Mapper()
         self.application = application
         self.add_routes(mapper)
-        mapper.connect('{path_info:.*}', controller=self.application)
+        mapper.connect('/{path_info:.*}', controller=self.application)
         super(ExtensionRouter, self).__init__(mapper)
 
     def add_routes(self, mapper):
@@ -756,8 +757,6 @@ def render_response(body=None, status=None, headers=None, method=None):
         else:
             content_type = None
 
-        JSON_ENCODE_CONTENT_TYPES = ('application/json',
-                                     'application/json-home',)
         if content_type is None or content_type in JSON_ENCODE_CONTENT_TYPES:
             body = jsonutils.dumps(body, cls=utils.SmarterEncoder)
             if content_type is None:
@@ -768,7 +767,7 @@ def render_response(body=None, status=None, headers=None, method=None):
                           status='%s %s' % status,
                           headerlist=headers)
 
-    if method == 'HEAD':
+    if method and method.upper() == 'HEAD':
         # NOTE(morganfainberg): HEAD requests should return the same status
         # as a GET request and same headers (including content-type and
         # content-length). The webob.Response object automatically changes

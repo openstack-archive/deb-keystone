@@ -23,10 +23,12 @@ import mock
 from oslo_config import cfg
 from oslo_utils import timeutils
 import six
+from six.moves import range
 from testtools import matchers
 from testtools import testcase
 
 from keystone import auth
+from keystone.common import utils
 from keystone import exception
 from keystone.policy.backends import rules
 from keystone.tests import unit as tests
@@ -97,8 +99,8 @@ class TestAuthInfo(test_v3.AuthTestMixin, testcase.TestCase):
                                             'password', 'password']
         context = None
         auth_info = auth.controllers.AuthInfo.create(context, auth_data)
-        self.assertEqual(auth_info.get_method_names(),
-                         ['password', 'token'])
+        self.assertEqual(['password', 'token'],
+                         auth_info.get_method_names())
 
     def test_get_method_data_invalid_method(self):
         auth_data = self.build_authentication_request(
@@ -131,32 +133,6 @@ class TokenAPITests(object):
 
     def test_default_fixture_scope_token(self):
         self.assertIsNotNone(self.get_scoped_token())
-
-    def verify_token(self, *args, **kwargs):
-        return cms.verify_token(*args, **kwargs)
-
-    def test_v3_token_id(self):
-        auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'])
-        resp = self.v3_authenticate_token(auth_data)
-        token_data = resp.result
-        token_id = resp.headers.get('X-Subject-Token')
-        self.assertIn('expires_at', token_data['token'])
-
-        decoded_token = self.verify_token(token_id, CONF.signing.certfile,
-                                          CONF.signing.ca_certs)
-        decoded_token_dict = json.loads(decoded_token)
-
-        token_resp_dict = json.loads(resp.body)
-
-        self.assertEqual(decoded_token_dict, token_resp_dict)
-        # should be able to validate hash PKI token as well
-        hash_token_id = cms.cms_hash_token(token_id)
-        headers = {'X-Subject-Token': hash_token_id}
-        resp = self.get('/auth/tokens', headers=headers)
-        expected_token_data = resp.result
-        self.assertDictEqual(expected_token_data, token_data)
 
     def test_v3_v2_intermix_non_default_domain_failed(self):
         auth_data = self.build_authentication_request(
@@ -281,31 +257,6 @@ class TokenAPITests(object):
         token = resp.headers.get('X-Subject-Token')
 
         # now validate the v3 token with v2 API
-        path = '/v2.0/tokens/%s' % (token)
-        resp = self.admin_request(path=path,
-                                  token='ADMIN',
-                                  method='GET')
-        v2_token = resp.result
-        self.assertEqual(v2_token['access']['user']['id'],
-                         token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token['access']['token']['expires'][:-1],
-                      token_data['token']['expires_at'])
-        self.assertEqual(v2_token['access']['user']['roles'][0]['id'],
-                         token_data['token']['roles'][0]['id'])
-
-    def test_v3_v2_hashed_pki_token_intermix(self):
-        auth_data = self.build_authentication_request(
-            user_id=self.default_domain_user['id'],
-            password=self.default_domain_user['password'],
-            project_id=self.default_domain_project['id'])
-        resp = self.v3_authenticate_token(auth_data)
-        token_data = resp.result
-        token = resp.headers.get('X-Subject-Token')
-
-        # should be able to validate a hash PKI token in v2 too
-        token = cms.cms_hash_token(token)
         path = '/v2.0/tokens/%s' % (token)
         resp = self.admin_request(path=path,
                                   token='ADMIN',
@@ -485,37 +436,77 @@ class AllowRescopeScopedTokenDisabledTests(test_v3.RestfulTestCase):
 class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
     def config_overrides(self):
         super(TestPKITokenAPIs, self).config_overrides()
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.pki.Provider')
+        self.config_fixture.config(group='token', provider='pki')
 
     def setUp(self):
         super(TestPKITokenAPIs, self).setUp()
         self.doSetUp()
 
+    def verify_token(self, *args, **kwargs):
+        return cms.verify_token(*args, **kwargs)
 
-class TestPKIZTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
+    def test_v3_token_id(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'])
+        resp = self.v3_authenticate_token(auth_data)
+        token_data = resp.result
+        token_id = resp.headers.get('X-Subject-Token')
+        self.assertIn('expires_at', token_data['token'])
+
+        decoded_token = self.verify_token(token_id, CONF.signing.certfile,
+                                          CONF.signing.ca_certs)
+        decoded_token_dict = json.loads(decoded_token)
+
+        token_resp_dict = json.loads(resp.body)
+
+        self.assertEqual(decoded_token_dict, token_resp_dict)
+        # should be able to validate hash PKI token as well
+        hash_token_id = cms.cms_hash_token(token_id)
+        headers = {'X-Subject-Token': hash_token_id}
+        resp = self.get('/auth/tokens', headers=headers)
+        expected_token_data = resp.result
+        self.assertDictEqual(expected_token_data, token_data)
+
+    def test_v3_v2_hashed_pki_token_intermix(self):
+        auth_data = self.build_authentication_request(
+            user_id=self.default_domain_user['id'],
+            password=self.default_domain_user['password'],
+            project_id=self.default_domain_project['id'])
+        resp = self.v3_authenticate_token(auth_data)
+        token_data = resp.result
+        token = resp.headers.get('X-Subject-Token')
+
+        # should be able to validate a hash PKI token in v2 too
+        token = cms.cms_hash_token(token)
+        path = '/v2.0/tokens/%s' % (token)
+        resp = self.admin_request(path=path,
+                                  token='ADMIN',
+                                  method='GET')
+        v2_token = resp.result
+        self.assertEqual(v2_token['access']['user']['id'],
+                         token_data['token']['user']['id'])
+        # v2 token time has not fraction of second precision so
+        # just need to make sure the non fraction part agrees
+        self.assertIn(v2_token['access']['token']['expires'][:-1],
+                      token_data['token']['expires_at'])
+        self.assertEqual(v2_token['access']['user']['roles'][0]['id'],
+                         token_data['token']['roles'][0]['id'])
+
+
+class TestPKIZTokenAPIs(TestPKITokenAPIs):
+    def config_overrides(self):
+        super(TestPKIZTokenAPIs, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pkiz')
 
     def verify_token(self, *args, **kwargs):
         return cms.pkiz_verify(*args, **kwargs)
-
-    def config_overrides(self):
-        super(TestPKIZTokenAPIs, self).config_overrides()
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.pkiz.Provider')
-
-    def setUp(self):
-        super(TestPKIZTokenAPIs, self).setUp()
-        self.doSetUp()
 
 
 class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
     def config_overrides(self):
         super(TestUUIDTokenAPIs, self).config_overrides()
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.uuid.Provider')
+        self.config_fixture.config(group='token', provider='uuid')
 
     def setUp(self):
         super(TestUUIDTokenAPIs, self).setUp()
@@ -530,11 +521,6 @@ class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
         token_id = resp.headers.get('X-Subject-Token')
         self.assertIn('expires_at', token_data['token'])
         self.assertFalse(cms.is_asn1_token(token_id))
-
-    def test_v3_v2_hashed_pki_token_intermix(self):
-        # this test is only applicable for PKI tokens
-        # skipping it for UUID tokens
-        pass
 
 
 class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
@@ -675,12 +661,10 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
 
     def config_overrides(self):
         super(TestTokenRevokeById, self).config_overrides()
-        self.config_fixture.config(
-            group='revoke',
-            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='token',
-            provider='keystone.token.providers.pki.Provider',
+            provider='pki',
             revoke_by_id=False)
 
     def setUp(self):
@@ -1391,12 +1375,10 @@ class TestTokenRevokeApi(TestTokenRevokeById):
     """Test token revocation on the v3 Identity API."""
     def config_overrides(self):
         super(TestTokenRevokeApi, self).config_overrides()
-        self.config_fixture.config(
-            group='revoke',
-            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='token',
-            provider='keystone.token.providers.pki.Provider',
+            provider='pki',
             revoke_by_id=False)
 
     def assertValidDeletedProjectResponse(self, events_response, project_id):
@@ -1569,8 +1551,8 @@ class TestTokenRevokeApi(TestTokenRevokeById):
                           expected_status=200).json_body['events']
 
         self.assertEqual(2, len(events))
-        future = timeutils.isotime(timeutils.utcnow() +
-                                   datetime.timedelta(seconds=1000))
+        future = utils.isotime(timeutils.utcnow() +
+                               datetime.timedelta(seconds=1000))
 
         events = self.get('/OS-REVOKE/events?since=%s' % (future),
                           expected_status=200).json_body['events']
@@ -1596,90 +1578,6 @@ class TestAuthExternalDisabled(test_v3.RestfulTestCase):
                           auth_context)
 
 
-class TestAuthExternalLegacyDefaultDomain(test_v3.RestfulTestCase):
-    content_type = 'json'
-
-    def config_overrides(self):
-        super(TestAuthExternalLegacyDefaultDomain, self).config_overrides()
-        self.auth_plugin_config_override(
-            methods=['external', 'password', 'token'],
-            external='keystone.auth.plugins.external.LegacyDefaultDomain',
-            password='keystone.auth.plugins.password.Password',
-            token='keystone.auth.plugins.token.Token')
-
-    def test_remote_user_no_realm(self):
-        self.config_fixture.config(group='auth', methods='external')
-        api = auth.controllers.Auth()
-        context, auth_info, auth_context = self.build_external_auth_request(
-            self.default_domain_user['name'])
-        api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'],
-                         self.default_domain_user['id'])
-
-    def test_remote_user_no_domain(self):
-        api = auth.controllers.Auth()
-        context, auth_info, auth_context = self.build_external_auth_request(
-            self.user['name'])
-        self.assertRaises(exception.Unauthorized,
-                          api.authenticate,
-                          context,
-                          auth_info,
-                          auth_context)
-
-
-class TestAuthExternalLegacyDomain(test_v3.RestfulTestCase):
-    content_type = 'json'
-
-    def config_overrides(self):
-        super(TestAuthExternalLegacyDomain, self).config_overrides()
-        self.auth_plugin_config_override(
-            methods=['external', 'password', 'token'],
-            external='keystone.auth.plugins.external.LegacyDomain',
-            password='keystone.auth.plugins.password.Password',
-            token='keystone.auth.plugins.token.Token')
-
-    def test_remote_user_with_realm(self):
-        api = auth.controllers.Auth()
-        remote_user = '%s@%s' % (self.user['name'], self.domain['name'])
-        context, auth_info, auth_context = self.build_external_auth_request(
-            remote_user)
-
-        api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'], self.user['id'])
-
-        # Now test to make sure the user name can, itself, contain the
-        # '@' character.
-        user = {'name': 'myname@mydivision'}
-        self.identity_api.update_user(self.user['id'], user)
-        remote_user = '%s@%s' % (user['name'], self.domain['name'])
-        context, auth_info, auth_context = self.build_external_auth_request(
-            remote_user)
-
-        api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'], self.user['id'])
-
-    def test_project_id_scoped_with_remote_user(self):
-        self.config_fixture.config(group='token', bind=['kerberos'])
-        auth_data = self.build_authentication_request(
-            project_id=self.project['id'])
-        remote_user = '%s@%s' % (self.user['name'], self.domain['name'])
-        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
-                                             'AUTH_TYPE': 'Negotiate'})
-        r = self.v3_authenticate_token(auth_data)
-        token = self.assertValidProjectScopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'], self.user['name'])
-
-    def test_unscoped_bind_with_remote_user(self):
-        self.config_fixture.config(group='token', bind=['kerberos'])
-        auth_data = self.build_authentication_request()
-        remote_user = '%s@%s' % (self.user['name'], self.domain['name'])
-        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
-                                             'AUTH_TYPE': 'Negotiate'})
-        r = self.v3_authenticate_token(auth_data)
-        token = self.assertValidUnscopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'], self.user['name'])
-
-
 class TestAuthExternalDomain(test_v3.RestfulTestCase):
     content_type = 'json'
 
@@ -1687,10 +1585,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         super(TestAuthExternalDomain, self).config_overrides()
         self.kerberos = False
         self.auth_plugin_config_override(
-            methods=['external', 'password', 'token'],
-            external='keystone.auth.plugins.external.Domain',
-            password='keystone.auth.plugins.password.Password',
-            token='keystone.auth.plugins.token.Token')
+            external='keystone.auth.plugins.external.Domain')
 
     def test_remote_user_with_realm(self):
         api = auth.controllers.Auth()
@@ -1700,7 +1595,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
             remote_user, remote_domain=remote_domain, kerberos=self.kerberos)
 
         api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'], self.user['id'])
+        self.assertEqual(self.user['id'], auth_context['user_id'])
 
         # Now test to make sure the user name can, itself, contain the
         # '@' character.
@@ -1711,7 +1606,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
             remote_user, remote_domain=remote_domain, kerberos=self.kerberos)
 
         api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'], self.user['id'])
+        self.assertEqual(self.user['id'], auth_context['user_id'])
 
     def test_project_id_scoped_with_remote_user(self):
         self.config_fixture.config(group='token', bind=['kerberos'])
@@ -1725,7 +1620,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
                                              'AUTH_TYPE': 'Negotiate'})
         r = self.v3_authenticate_token(auth_data)
         token = self.assertValidProjectScopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'], self.user['name'])
+        self.assertEqual(self.user['name'], token['bind']['kerberos'])
 
     def test_unscoped_bind_with_remote_user(self):
         self.config_fixture.config(group='token', bind=['kerberos'])
@@ -1737,7 +1632,63 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
                                              'AUTH_TYPE': 'Negotiate'})
         r = self.v3_authenticate_token(auth_data)
         token = self.assertValidUnscopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'], self.user['name'])
+        self.assertEqual(self.user['name'], token['bind']['kerberos'])
+
+
+class TestAuthExternalDefaultDomain(test_v3.RestfulTestCase):
+    content_type = 'json'
+
+    def config_overrides(self):
+        super(TestAuthExternalDefaultDomain, self).config_overrides()
+        self.kerberos = False
+        self.auth_plugin_config_override(
+            external='keystone.auth.plugins.external.DefaultDomain')
+
+    def test_remote_user_with_default_domain(self):
+        api = auth.controllers.Auth()
+        remote_user = self.default_domain_user['name']
+        context, auth_info, auth_context = self.build_external_auth_request(
+            remote_user, kerberos=self.kerberos)
+
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(self.default_domain_user['id'],
+                         auth_context['user_id'])
+
+        # Now test to make sure the user name can, itself, contain the
+        # '@' character.
+        user = {'name': 'myname@mydivision'}
+        self.identity_api.update_user(self.default_domain_user['id'], user)
+        remote_user = user['name']
+        context, auth_info, auth_context = self.build_external_auth_request(
+            remote_user, kerberos=self.kerberos)
+
+        api.authenticate(context, auth_info, auth_context)
+        self.assertEqual(self.default_domain_user['id'],
+                         auth_context['user_id'])
+
+    def test_project_id_scoped_with_remote_user(self):
+        self.config_fixture.config(group='token', bind=['kerberos'])
+        auth_data = self.build_authentication_request(
+            project_id=self.default_domain_project['id'],
+            kerberos=self.kerberos)
+        remote_user = self.default_domain_user['name']
+        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
+                                             'AUTH_TYPE': 'Negotiate'})
+        r = self.v3_authenticate_token(auth_data)
+        token = self.assertValidProjectScopedTokenResponse(r)
+        self.assertEqual(self.default_domain_user['name'],
+                         token['bind']['kerberos'])
+
+    def test_unscoped_bind_with_remote_user(self):
+        self.config_fixture.config(group='token', bind=['kerberos'])
+        auth_data = self.build_authentication_request(kerberos=self.kerberos)
+        remote_user = self.default_domain_user['name']
+        self.admin_app.extra_environ.update({'REMOTE_USER': remote_user,
+                                             'AUTH_TYPE': 'Negotiate'})
+        r = self.v3_authenticate_token(auth_data)
+        token = self.assertValidUnscopedTokenResponse(r)
+        self.assertEqual(self.default_domain_user['name'],
+                         token['bind']['kerberos'])
 
 
 class TestAuthKerberos(TestAuthExternalDomain):
@@ -1747,9 +1698,7 @@ class TestAuthKerberos(TestAuthExternalDomain):
         self.kerberos = True
         self.auth_plugin_config_override(
             methods=['kerberos', 'password', 'token'],
-            kerberos='keystone.auth.plugins.external.KerberosDomain',
-            password='keystone.auth.plugins.password.Password',
-            token='keystone.auth.plugins.token.Token')
+            kerberos='keystone.auth.plugins.external.KerberosDomain')
 
 
 class TestAuth(test_v3.RestfulTestCase):
@@ -1815,7 +1764,7 @@ class TestAuth(test_v3.RestfulTestCase):
             password=self.user['password'])
         r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectScopedTokenResponse(r)
-        self.assertEqual(r.result['token']['project']['id'], project['id'])
+        self.assertEqual(project['id'], r.result['token']['project']['id'])
 
     def test_default_project_id_scoped_token_with_user_id_no_catalog(self):
         project = self._second_project_as_default()
@@ -1826,7 +1775,7 @@ class TestAuth(test_v3.RestfulTestCase):
             password=self.user['password'])
         r = self.post('/auth/tokens?nocatalog', body=auth_data, noauth=True)
         self.assertValidProjectScopedTokenResponse(r, require_catalog=False)
-        self.assertEqual(r.result['token']['project']['id'], project['id'])
+        self.assertEqual(project['id'], r.result['token']['project']['id'])
 
     def test_explicit_unscoped_token(self):
         self._second_project_as_default()
@@ -1850,8 +1799,8 @@ class TestAuth(test_v3.RestfulTestCase):
             project_id=self.project['id'])
         r = self.post('/auth/tokens?nocatalog', body=auth_data, noauth=True)
         self.assertValidProjectScopedTokenResponse(r, require_catalog=False)
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
 
     def test_auth_catalog_attributes(self):
         auth_data = self.build_authentication_request(
@@ -2345,13 +2294,12 @@ class TestAuth(test_v3.RestfulTestCase):
         self.v3_authenticate_token(auth_data, expected_status=401)
 
     def test_remote_user_no_realm(self):
-        CONF.auth.methods = 'external'
         api = auth.controllers.Auth()
         context, auth_info, auth_context = self.build_external_auth_request(
             self.default_domain_user['name'])
         api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'],
-                         self.default_domain_user['id'])
+        self.assertEqual(self.default_domain_user['id'],
+                         auth_context['user_id'])
         # Now test to make sure the user name can, itself, contain the
         # '@' character.
         user = {'name': 'myname@mydivision'}
@@ -2359,8 +2307,8 @@ class TestAuth(test_v3.RestfulTestCase):
         context, auth_info, auth_context = self.build_external_auth_request(
             user["name"])
         api.authenticate(context, auth_info, auth_context)
-        self.assertEqual(auth_context['user_id'],
-                         self.default_domain_user['id'])
+        self.assertEqual(self.default_domain_user['id'],
+                         auth_context['user_id'])
 
     def test_remote_user_no_domain(self):
         api = auth.controllers.Auth()
@@ -2441,8 +2389,8 @@ class TestAuth(test_v3.RestfulTestCase):
         headers = {'X-Subject-Token': token}
         r = self.get('/auth/tokens', headers=headers, token=token)
         token = self.assertValidProjectScopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'],
-                         self.default_domain_user['name'])
+        self.assertEqual(self.default_domain_user['name'],
+                         token['bind']['kerberos'])
 
     def test_auth_with_bind_token(self):
         self.config_fixture.config(group='token', bind=['kerberos'])
@@ -2455,7 +2403,7 @@ class TestAuth(test_v3.RestfulTestCase):
 
         # the unscoped token should have bind information in it
         token = self.assertValidUnscopedTokenResponse(r)
-        self.assertEqual(token['bind']['kerberos'], remote_user)
+        self.assertEqual(remote_user, token['bind']['kerberos'])
 
         token = r.headers.get('X-Subject-Token')
 
@@ -2466,7 +2414,7 @@ class TestAuth(test_v3.RestfulTestCase):
         token = self.assertValidProjectScopedTokenResponse(r)
 
         # the bind information should be carried over from the original token
-        self.assertEqual(token['bind']['kerberos'], remote_user)
+        self.assertEqual(remote_user, token['bind']['kerberos'])
 
     def test_v2_v3_bind_token_intermix(self):
         self.config_fixture.config(group='token', bind='kerberos')
@@ -2484,7 +2432,7 @@ class TestAuth(test_v3.RestfulTestCase):
         v2_token_data = resp.result
 
         bind = v2_token_data['access']['token']['bind']
-        self.assertEqual(bind['kerberos'], self.default_domain_user['name'])
+        self.assertEqual(self.default_domain_user['name'], bind['kerberos'])
 
         v2_token_id = v2_token_data['access']['token']['id']
         # NOTE(gyee): self.get() will try to obtain an auth token if one
@@ -2613,12 +2561,8 @@ class TestAuth(test_v3.RestfulTestCase):
 class TestAuthJSONExternal(test_v3.RestfulTestCase):
     content_type = 'json'
 
-    def config_overrides(self):
-        super(TestAuthJSONExternal, self).config_overrides()
-        self.config_fixture.config(group='auth', methods='')
-
     def auth_plugin_config_override(self, methods=None, **method_classes):
-        self.config_fixture.config(group='auth', methods='')
+        self.config_fixture.config(group='auth', methods=[])
 
     def test_remote_user_no_method(self):
         api = auth.controllers.Auth()
@@ -2895,7 +2839,7 @@ class TestTrustRedelegation(test_v3.RestfulTestCase):
         # Check that allow_redelegation == False caused redelegation_count
         # to be set to 0, while allow_redelegation is removed
         self.assertNotIn('allow_redelegation', trust)
-        self.assertEqual(trust['redelegation_count'], 0)
+        self.assertEqual(0, trust['redelegation_count'])
         trust_token = self._get_trust_token(trust)
 
         # Build third trust, same as second
@@ -2921,7 +2865,7 @@ class TestTrustChain(test_v3.RestfulTestCase):
         # Create trust chain
         self.user_chain = list()
         self.trust_chain = list()
-        for _ in xrange(3):
+        for _ in range(3):
             user_ref = self.new_user_ref(domain_id=self.domain_id)
             user = self.identity_api.create_user(user_ref)
             user['password'] = user_ref['password']
@@ -3067,12 +3011,10 @@ class TestTrustAuth(test_v3.RestfulTestCase):
 
     def config_overrides(self):
         super(TestTrustAuth, self).config_overrides()
-        self.config_fixture.config(
-            group='revoke',
-            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='token',
-            provider='keystone.token.providers.pki.Provider',
+            provider='pki',
             revoke_by_id=False)
         self.config_fixture.config(group='trust', enabled=True)
 
@@ -3139,7 +3081,7 @@ class TestTrustAuth(test_v3.RestfulTestCase):
             expected_status=200)
         trust = r.result.get('trust')
         self.assertIsNotNone(trust)
-        self.assertEqual(trust['remaining_uses'], 1)
+        self.assertEqual(1, trust['remaining_uses'])
 
     def test_create_one_time_use_trust(self):
         trust = self._initialize_test_consume_trust(1)
@@ -3320,26 +3262,6 @@ class TestTrustAuth(test_v3.RestfulTestCase):
             role_names=[uuid.uuid4().hex])
         self.post('/OS-TRUST/trusts', body={'trust': ref}, expected_status=404)
 
-    def test_create_expired_trust(self):
-        ref = self.new_trust_ref(
-            trustor_user_id=self.user_id,
-            trustee_user_id=self.trustee_user_id,
-            project_id=self.project_id,
-            expires=dict(seconds=-1),
-            role_ids=[self.role_id])
-        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
-        trust = self.assertValidTrustResponse(r, ref)
-
-        self.get('/OS-TRUST/trusts/%(trust_id)s' % {
-            'trust_id': trust['id']},
-            expected_status=404)
-
-        auth_data = self.build_authentication_request(
-            user_id=self.trustee_user['id'],
-            password=self.trustee_user['password'],
-            trust_id=trust['id'])
-        self.v3_authenticate_token(auth_data, expected_status=401)
-
     def test_v3_v2_intermix_trustor_not_in_default_domain_failed(self):
         ref = self.new_trust_ref(
             trustor_user_id=self.user_id,
@@ -3494,18 +3416,18 @@ class TestTrustAuth(test_v3.RestfulTestCase):
             trust_id=trust['id'])
         r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectTrustScopedTokenResponse(r, self.trustee_user)
-        self.assertEqual(r.result['token']['user']['id'],
-                         self.trustee_user['id'])
-        self.assertEqual(r.result['token']['user']['name'],
-                         self.trustee_user['name'])
-        self.assertEqual(r.result['token']['user']['domain']['id'],
-                         self.domain['id'])
-        self.assertEqual(r.result['token']['user']['domain']['name'],
-                         self.domain['name'])
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
-        self.assertEqual(r.result['token']['project']['name'],
-                         self.project['name'])
+        self.assertEqual(self.trustee_user['id'],
+                         r.result['token']['user']['id'])
+        self.assertEqual(self.trustee_user['name'],
+                         r.result['token']['user']['name'])
+        self.assertEqual(self.domain['id'],
+                         r.result['token']['user']['domain']['id'])
+        self.assertEqual(self.domain['name'],
+                         r.result['token']['user']['domain']['name'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
+        self.assertEqual(self.project['name'],
+                         r.result['token']['project']['name'])
 
     def test_exercise_trust_scoped_token_with_impersonation(self):
         ref = self.new_trust_ref(
@@ -3525,16 +3447,16 @@ class TestTrustAuth(test_v3.RestfulTestCase):
             trust_id=trust['id'])
         r = self.v3_authenticate_token(auth_data)
         self.assertValidProjectTrustScopedTokenResponse(r, self.user)
-        self.assertEqual(r.result['token']['user']['id'], self.user['id'])
-        self.assertEqual(r.result['token']['user']['name'], self.user['name'])
-        self.assertEqual(r.result['token']['user']['domain']['id'],
-                         self.domain['id'])
-        self.assertEqual(r.result['token']['user']['domain']['name'],
-                         self.domain['name'])
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
-        self.assertEqual(r.result['token']['project']['name'],
-                         self.project['name'])
+        self.assertEqual(self.user['id'], r.result['token']['user']['id'])
+        self.assertEqual(self.user['name'], r.result['token']['user']['name'])
+        self.assertEqual(self.domain['id'],
+                         r.result['token']['user']['domain']['id'])
+        self.assertEqual(self.domain['name'],
+                         r.result['token']['user']['domain']['name'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
+        self.assertEqual(self.project['name'],
+                         r.result['token']['project']['name'])
 
     def test_impersonation_token_cannot_create_new_trust(self):
         ref = self.new_trust_ref(
@@ -3950,9 +3872,9 @@ class TestAuthContext(tests.TestCase):
         self.auth_context = auth.controllers.AuthContext()
 
     def test_pick_lowest_expires_at(self):
-        expires_at_1 = timeutils.isotime(timeutils.utcnow())
-        expires_at_2 = timeutils.isotime(timeutils.utcnow() +
-                                         datetime.timedelta(seconds=10))
+        expires_at_1 = utils.isotime(timeutils.utcnow())
+        expires_at_2 = utils.isotime(timeutils.utcnow() +
+                                     datetime.timedelta(seconds=10))
         # make sure auth_context picks the lowest value
         self.auth_context['expires_at'] = expires_at_1
         self.auth_context['expires_at'] = expires_at_2
@@ -4123,9 +4045,7 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase):
 
     def config_overrides(self):
         super(TestFernetTokenProvider, self).config_overrides()
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.fernet.Provider')
+        self.config_fixture.config(group='token', provider='fernet')
 
     def test_validate_unscoped_token(self):
         unscoped_token = self._get_unscoped_token()
@@ -4454,9 +4374,7 @@ class TestAuthFernetTokenProvider(TestAuth):
 
     def config_overrides(self):
         super(TestAuthFernetTokenProvider, self).config_overrides()
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.fernet.Provider')
+        self.config_fixture.config(group='token', provider='fernet')
 
     def test_verify_with_bound_token(self):
         self.config_fixture.config(group='token', bind='kerberos')

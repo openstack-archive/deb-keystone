@@ -21,6 +21,7 @@ import socket
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 import oslo_messaging
 import pycadf
 from pycadf import cadftaxonomy as taxonomy
@@ -30,19 +31,18 @@ from pycadf import eventfactory
 from pycadf import resource
 
 from keystone.i18n import _, _LE
-from keystone.openstack.common import versionutils
 
 
 notifier_opts = [
     cfg.StrOpt('default_publisher_id',
                help='Default publisher_id for outgoing notifications'),
     cfg.StrOpt('notification_format', default='basic',
+               choices=['basic', 'cadf'],
                help='Define the notification format for Identity Service '
                     'events. A "basic" notification has information about '
                     'the resource being operated on. A "cadf" notification '
                     'has the same information, as well as information about '
-                    'the initiator of the event. Valid options are: basic '
-                    'and cadf'),
+                    'the initiator of the event.'),
 ]
 
 config_section = None
@@ -584,7 +584,7 @@ class CadfRoleAssignmentNotificationWrapper(object):
             audit_kwargs['inherited_to_projects'] = inherited
             audit_kwargs['role'] = role_id
 
-            # For backward compatability, send both old and new event_type.
+            # For backward compatibility, send both old and new event_type.
             # Deprecate old format and remove it in the next release.
             event_types = [self.deprecated_event_type, self.event_type]
             versionutils.deprecated(

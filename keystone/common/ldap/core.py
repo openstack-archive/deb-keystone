@@ -24,10 +24,12 @@ import ldap.filter
 import ldappool
 from oslo_log import log
 import six
+from six.moves import map, zip
 
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LW
+
 
 LOG = log.getLogger(__name__)
 
@@ -616,7 +618,7 @@ def _common_ldap_initialization(url, use_tls=False, tls_cacertfile=None,
                                 "or is not a directory") %
                               tls_cacertdir)
             ldap.set_option(ldap.OPT_X_TLS_CACERTDIR, tls_cacertdir)
-        if tls_req_cert in LDAP_TLS_CERTS.values():
+        if tls_req_cert in list(LDAP_TLS_CERTS.values()):
             ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, tls_req_cert)
         else:
             LOG.debug("LDAP TLS: invalid TLS_REQUIRE_CERT Option=%s",
@@ -938,7 +940,7 @@ class KeystoneLDAPHandler(LDAPHandler):
             if attrlist is None:
                 attrlist_utf8 = None
             else:
-                attrlist_utf8 = map(utf8_encode, attrlist)
+                attrlist_utf8 = list(map(utf8_encode, attrlist))
             ldap_result = self.conn.search_s(base_utf8, scope,
                                              filterstr_utf8,
                                              attrlist_utf8, attrsonly)
@@ -989,7 +991,7 @@ class KeystoneLDAPHandler(LDAPHandler):
             attrlist_utf8 = None
         else:
             attrlist = [attr for attr in attrlist if attr is not None]
-            attrlist_utf8 = map(utf8_encode, attrlist)
+            attrlist_utf8 = list(map(utf8_encode, attrlist))
         msgid = self.conn.search_ext(base_utf8,
                                      scope,
                                      filterstr_utf8,
@@ -1439,8 +1441,8 @@ class BaseLdap(object):
         with self.get_connection() as conn:
             try:
                 attrs = list(set(([self.id_attr] +
-                                  self.attribute_mapping.values() +
-                                  self.extra_attr_mapping.keys())))
+                                  list(self.attribute_mapping.values()) +
+                                  list(self.extra_attr_mapping.keys()))))
                 res = conn.search_s(self.tree_dn,
                                     self.LDAP_SCOPE,
                                     query,
@@ -1459,8 +1461,8 @@ class BaseLdap(object):
         with self.get_connection() as conn:
             try:
                 attrs = list(set(([self.id_attr] +
-                                  self.attribute_mapping.values() +
-                                  self.extra_attr_mapping.keys())))
+                                  list(self.attribute_mapping.values()) +
+                                  list(self.extra_attr_mapping.keys()))))
                 return conn.search_s(self.tree_dn,
                                      self.LDAP_SCOPE,
                                      query,
@@ -1671,7 +1673,7 @@ class BaseLdap(object):
                       'entries': not_deleted_nodes[:3],
                       'dots': '...' if len(not_deleted_nodes) > 3 else ''})
 
-    def filter_query(self, hints, query=None):
+    def filter_query(self, hints, query=''):
         """Applies filtering to a query.
 
         :param hints: contains the list of filters, which may be None,
@@ -1799,25 +1801,24 @@ class EnabledEmuMixIn(BaseLdap):
                            utf8_decode(naming_rdn[1]))
         self.enabled_emulation_naming_attr = naming_attr
 
-    def _get_enabled(self, object_id):
+    def _get_enabled(self, object_id, conn):
         dn = self._id_to_dn(object_id)
         query = '(member=%s)' % dn
-        with self.get_connection() as conn:
-            try:
-                enabled_value = conn.search_s(self.enabled_emulation_dn,
-                                              ldap.SCOPE_BASE,
-                                              query, ['cn'])
-            except ldap.NO_SUCH_OBJECT:
-                return False
-            else:
-                return bool(enabled_value)
+        try:
+            enabled_value = conn.search_s(self.enabled_emulation_dn,
+                                          ldap.SCOPE_BASE,
+                                          query, ['cn'])
+        except ldap.NO_SUCH_OBJECT:
+            return False
+        else:
+            return bool(enabled_value)
 
     def _add_enabled(self, object_id):
-        if not self._get_enabled(object_id):
-            modlist = [(ldap.MOD_ADD,
-                        'member',
-                        [self._id_to_dn(object_id)])]
-            with self.get_connection() as conn:
+        with self.get_connection() as conn:
+            if not self._get_enabled(object_id, conn):
+                modlist = [(ldap.MOD_ADD,
+                            'member',
+                            [self._id_to_dn(object_id)])]
                 try:
                     conn.modify_s(self.enabled_emulation_dn, modlist)
                 except ldap.NO_SUCH_OBJECT:
@@ -1851,10 +1852,12 @@ class EnabledEmuMixIn(BaseLdap):
             return super(EnabledEmuMixIn, self).create(values)
 
     def get(self, object_id, ldap_filter=None):
-        ref = super(EnabledEmuMixIn, self).get(object_id, ldap_filter)
-        if 'enabled' not in self.attribute_ignore and self.enabled_emulation:
-            ref['enabled'] = self._get_enabled(object_id)
-        return ref
+        with self.get_connection() as conn:
+            ref = super(EnabledEmuMixIn, self).get(object_id, ldap_filter)
+            if 'enabled' not in self.attribute_ignore and \
+               self.enabled_emulation:
+                ref['enabled'] = self._get_enabled(object_id, conn)
+            return ref
 
     def get_all(self, ldap_filter=None):
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:
@@ -1862,8 +1865,10 @@ class EnabledEmuMixIn(BaseLdap):
             tenant_list = [self._ldap_res_to_model(x)
                            for x in self._ldap_get_all(ldap_filter)
                            if x[0] != self.enabled_emulation_dn]
-            for tenant_ref in tenant_list:
-                tenant_ref['enabled'] = self._get_enabled(tenant_ref['id'])
+            with self.get_connection() as conn:
+                for tenant_ref in tenant_list:
+                    tenant_ref['enabled'] = self._get_enabled(
+                        tenant_ref['id'], conn)
             return tenant_list
         else:
             return super(EnabledEmuMixIn, self).get_all(ldap_filter)

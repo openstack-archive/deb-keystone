@@ -11,13 +11,6 @@
 # value)
 #admin_token = ADMIN
 
-# (Deprecated) The port which the OpenStack Compute service listens on. This
-# option was only used for string replacement in the templated catalog backend.
-# Templated catalogs should replace the "$(compute_port)s" substitution with
-# the static port of the compute service. As of Juno, this option is deprecated
-# and will be removed in the L release. (integer value)
-#compute_port = 8774
-
 # The base public endpoint URL for Keystone that is advertised to clients
 # (NOTE: this does NOT affect how Keystone listens for connections). Defaults
 # to the base host URL of the request. E.g. a request to
@@ -57,7 +50,7 @@
 
 # The value passed as the keyword "rounds" to passlib's encrypt method.
 # (integer value)
-#crypt_strength = 40000
+#crypt_strength = 10000
 
 # The maximum number of entities that will be returned in a collection, with no
 # limit set by default. This global limit may be then overridden for a specific
@@ -93,7 +86,8 @@
 # Define the notification format for Identity Service events. A "basic"
 # notification has information about the resource being operated on. A "cadf"
 # notification has the same information, as well as information about the
-# initiator of the event. Valid options are: basic and cadf (string value)
+# initiator of the event. (string value)
+# Allowed values: basic, cadf
 #notification_format = basic
 
 #
@@ -147,14 +141,16 @@
 #log_dir = <None>
 
 # Use syslog for logging. Existing syslog format is DEPRECATED during I, and
-# will change in J to honor RFC5424. (boolean value)
+# changed in J to honor RFC5424. (boolean value)
 #use_syslog = false
 
 # (Optional) Enables or disables syslog rfc5424 format for logging. If enabled,
 # prefixes the MSG part of the syslog message with APP-NAME (RFC5424). The
-# format without the APP-NAME is deprecated in I, and will be removed in J.
-# (boolean value)
-#use_syslog_rfc_format = false
+# format without the APP-NAME is deprecated in K, and will be removed in M,
+# along with this option. (boolean value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
+#use_syslog_rfc_format = true
 
 # Syslog facility to receive log lines. (string value)
 #syslog_log_facility = LOG_USER
@@ -172,7 +168,7 @@
 #logging_debug_format_suffix = %(funcName)s %(pathname)s:%(lineno)d
 
 # Prefix each line of exception output with this format. (string value)
-#logging_exception_prefix = %(asctime)s.%(msecs)03d %(process)d TRACE %(name)s %(instance)s
+#logging_exception_prefix = %(asctime)s.%(msecs)03d %(process)d ERROR %(name)s %(instance)s
 
 # List of logger=LEVEL pairs. (list value)
 #default_log_levels = amqp=WARN,amqplib=WARN,boto=WARN,qpid=WARN,sqlalchemy=WARN,suds=INFO,oslo.messaging=INFO,iso8601=WARN,requests.packages.urllib3.connectionpool=WARN,urllib3.connectionpool=WARN,websocket=WARN,requests.packages.urllib3.util.retry=WARN,urllib3.util.retry=WARN,keystonemiddleware=WARN,routes.middleware=WARN,stevedore=WARN
@@ -191,16 +187,23 @@
 # value)
 #instance_uuid_format = "[instance: %(uuid)s] "
 
+# Enables or disables fatal status of deprecations. (boolean value)
+#fatal_deprecations = false
+
 #
 # From oslo.messaging
 #
+
+# Size of RPC connection pool. (integer value)
+# Deprecated group/name - [DEFAULT]/rpc_conn_pool_size
+#rpc_conn_pool_size = 30
 
 # ZeroMQ bind address. Should be a wildcard (*), an ethernet interface, or IP.
 # The "host" option should point or resolve to this address. (string value)
 #rpc_zmq_bind_address = *
 
 # MatchMaker driver. (string value)
-#rpc_zmq_matchmaker = oslo_messaging._drivers.matchmaker.MatchMakerLocalhost
+#rpc_zmq_matchmaker = local
 
 # ZeroMQ receiver listening port. (integer value)
 #rpc_zmq_port = 9501
@@ -232,7 +235,8 @@
 # Size of RPC thread pool. (integer value)
 #rpc_thread_pool_size = 64
 
-# Driver or drivers to handle sending notifications. (multi valued)
+# The Drivers(s) to handle sending notifications. Possible values are
+# messaging, messagingv2, routing, log, test, noop (multi valued)
 #notification_driver =
 
 # AMQP topic used for OpenStack notifications. (list value)
@@ -367,7 +371,7 @@
 #template_file = default_catalog.templates
 
 # Catalog backend driver. (string value)
-#driver = keystone.catalog.backends.sql.Catalog
+#driver = sql
 
 # Toggle for catalog caching. This has no effect unless global caching is
 # enabled. (boolean value)
@@ -382,6 +386,62 @@
 #list_limit = <None>
 
 
+[cors]
+
+#
+# From oslo.middleware
+#
+
+# Indicate whether this resource may be shared with the domain received in the
+# requests "origin" header. (string value)
+#allowed_origin = <None>
+
+# Indicate that the actual request can include user credentials (boolean value)
+#allow_credentials = true
+
+# Indicate which headers are safe to expose to the API. Defaults to HTTP Simple
+# Headers. (list value)
+#expose_headers = Content-Type,Cache-Control,Content-Language,Expires,Last-Modified,Pragma
+
+# Maximum cache age of CORS preflight requests. (integer value)
+#max_age = 3600
+
+# Indicate which methods can be used during the actual request. (list value)
+#allow_methods = GET,POST,PUT,DELETE,OPTIONS
+
+# Indicate which header field names may be used during the actual request.
+# (list value)
+#allow_headers = Content-Type,Cache-Control,Content-Language,Expires,Last-Modified,Pragma
+
+
+[cors.subdomain]
+
+#
+# From oslo.middleware
+#
+
+# Indicate whether this resource may be shared with the domain received in the
+# requests "origin" header. (string value)
+#allowed_origin = <None>
+
+# Indicate that the actual request can include user credentials (boolean value)
+#allow_credentials = true
+
+# Indicate which headers are safe to expose to the API. Defaults to HTTP Simple
+# Headers. (list value)
+#expose_headers = Content-Type,Cache-Control,Content-Language,Expires,Last-Modified,Pragma
+
+# Maximum cache age of CORS preflight requests. (integer value)
+#max_age = 3600
+
+# Indicate which methods can be used during the actual request. (list value)
+#allow_methods = GET,POST,PUT,DELETE,OPTIONS
+
+# Indicate which header field names may be used during the actual request.
+# (list value)
+#allow_headers = Content-Type,Cache-Control,Content-Language,Expires,Last-Modified,Pragma
+
+
 [credential]
 
 #
@@ -389,7 +449,7 @@
 #
 
 # Credential backend driver. (string value)
-#driver = keystone.credential.backends.sql.Credential
+#driver = sql
 
 
 [database]
@@ -499,7 +559,7 @@
 #
 
 # Domain config backend driver. (string value)
-#driver = keystone.resource.config_backends.sql.DomainConfig
+#driver = sql
 
 # Toggle for domain config caching. This has no effect unless global caching is
 # enabled. (boolean value)
@@ -517,7 +577,7 @@
 #
 
 # Endpoint Filter backend driver (string value)
-#driver = keystone.contrib.endpoint_filter.backends.sql.EndpointFilter
+#driver = sql
 
 # Toggle to return all active endpoints if no filter exists. (boolean value)
 #return_all_endpoints_if_no_filter = true
@@ -529,8 +589,11 @@
 # From keystone
 #
 
+# Enable endpoint_policy functionality. (boolean value)
+#enabled = true
+
 # Endpoint policy backend driver (string value)
-#driver = keystone.contrib.endpoint_policy.backends.sql.EndpointPolicy
+#driver = sql
 
 
 [eventlet_server]
@@ -542,42 +605,67 @@
 # The number of worker processes to serve the public eventlet application.
 # Defaults to number of CPUs (minimum of 2). (integer value)
 # Deprecated group/name - [DEFAULT]/public_workers
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #public_workers = <None>
 
 # The number of worker processes to serve the admin eventlet application.
 # Defaults to number of CPUs (minimum of 2). (integer value)
 # Deprecated group/name - [DEFAULT]/admin_workers
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #admin_workers = <None>
 
 # The IP address of the network interface for the public service to listen on.
 # (string value)
 # Deprecated group/name - [DEFAULT]/bind_host
 # Deprecated group/name - [DEFAULT]/public_bind_host
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #public_bind_host = 0.0.0.0
 
 # The port number which the public service listens on. (integer value)
 # Deprecated group/name - [DEFAULT]/public_port
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #public_port = 5000
 
 # The IP address of the network interface for the admin service to listen on.
 # (string value)
 # Deprecated group/name - [DEFAULT]/bind_host
 # Deprecated group/name - [DEFAULT]/admin_bind_host
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #admin_bind_host = 0.0.0.0
 
 # The port number which the admin service listens on. (integer value)
 # Deprecated group/name - [DEFAULT]/admin_port
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #admin_port = 35357
+
+# If set to false, disables keepalives on the server; all connections will be
+# closed after serving one request. (boolean value)
+#wsgi_keep_alive = true
+
+# Timeout for socket operations on a client connection. If an incoming
+# connection is idle for this number of seconds it will be closed. A value of
+# '0' means wait forever. (integer value)
+#client_socket_timeout = 900
 
 # Set this to true if you want to enable TCP_KEEPALIVE on server sockets, i.e.
 # sockets used by the Keystone wsgi server for client connections. (boolean
 # value)
 # Deprecated group/name - [DEFAULT]/tcp_keepalive
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #tcp_keepalive = false
 
 # Sets the value of TCP_KEEPIDLE in seconds for each server socket. Only
 # applies if tcp_keepalive is true. (integer value)
 # Deprecated group/name - [DEFAULT]/tcp_keepidle
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #tcp_keepidle = 600
 
 
@@ -589,24 +677,34 @@
 
 # Toggle for SSL support on the Keystone eventlet servers. (boolean value)
 # Deprecated group/name - [ssl]/enable
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #enable = false
 
 # Path of the certfile for SSL. For non-production environments, you may be
 # interested in using `keystone-manage ssl_setup` to generate self-signed
 # certificates. (string value)
 # Deprecated group/name - [ssl]/certfile
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #certfile = /etc/keystone/ssl/certs/keystone.pem
 
 # Path of the keyfile for SSL. (string value)
 # Deprecated group/name - [ssl]/keyfile
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #keyfile = /etc/keystone/ssl/private/keystonekey.pem
 
 # Path of the CA cert file for SSL. (string value)
 # Deprecated group/name - [ssl]/ca_certs
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #ca_certs = /etc/keystone/ssl/certs/ca.pem
 
 # Require client certificate. (boolean value)
 # Deprecated group/name - [ssl]/cert_required
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #cert_required = false
 
 
@@ -617,7 +715,7 @@
 #
 
 # Federation backend driver. (string value)
-#driver = keystone.contrib.federation.backends.sql.Federation
+#driver = sql
 
 # Value to be used when filtering assertion parameters from the environment.
 # (string value)
@@ -699,7 +797,7 @@
 #domain_config_dir = /etc/keystone/domains
 
 # Identity backend driver. (string value)
-#driver = keystone.identity.backends.sql.Identity
+#driver = sql
 
 # Toggle for identity caching. This has no effect unless global caching is
 # enabled. (boolean value)
@@ -725,12 +823,12 @@
 #
 
 # Keystone Identity Mapping backend driver. (string value)
-#driver = keystone.identity.mapping_backends.sql.Mapping
+#driver = sql
 
 # Public ID generator for user and group entities. The Keystone identity mapper
 # only supports generators that produce no more than 64 characters. (string
 # value)
-#generator = keystone.identity.id_generators.sha256.Generator
+#generator = sha256
 
 # The format of user and group IDs changed in Juno for backends that do not
 # generate UUIDs (e.g. LDAP), with keystone providing a hash mapping to the
@@ -802,18 +900,18 @@
 # your LDAP server supports subtree deletion. (boolean value)
 #allow_subtree_delete = false
 
-# The LDAP scope for queries, this can be either "one" (onelevel/singleLevel)
-# or "sub" (subtree/wholeSubtree). (string value)
+# The LDAP scope for queries, "one" represents oneLevel/singleLevel and "sub"
+# represents subtree/wholeSubtree options. (string value)
+# Allowed values: one, sub
 #query_scope = one
 
 # Maximum results per page; a value of zero ("0") disables paging. (integer
 # value)
 #page_size = 0
 
-# The LDAP dereferencing option for queries. This can be either "never",
-# "searching", "always", "finding" or "default". The "default" option falls
-# back to using default dereferencing configured by your ldap.conf. (string
-# value)
+# The LDAP dereferencing option for queries. The "default" option falls back to
+# using default dereferencing configured by your ldap.conf. (string value)
+# Allowed values: never, searching, always, finding, default
 #alias_dereferencing = default
 
 # Sets the LDAP debugging level for LDAP calls. A value of 0 means that
@@ -1053,7 +1151,9 @@
 # Enable TLS for communicating with LDAP servers. (boolean value)
 #use_tls = false
 
-# Valid options for tls_req_cert are demand, never, and allow. (string value)
+# Specifies what checks to perform on client certificates in an incoming TLS
+# session. (string value)
+# Allowed values: demand, never, allow
 #tls_req_cert = demand
 
 # Enable LDAP connection pooling. (boolean value)
@@ -1156,8 +1256,8 @@
 # From keystone
 #
 
-# Credential backend driver. (string value)
-#driver = keystone.contrib.oauth1.backends.sql.OAuth1
+# OAuth backend driver. (string value)
+#driver = sql
 
 # Duration (in seconds) for the OAuth Request Token. (integer value)
 #request_token_duration = 28800
@@ -1207,7 +1307,7 @@
 # Deprecated group/name - [amqp1]/trace
 #trace = false
 
-# CA certificate PEM file for verifing server certificate (string value)
+# CA certificate PEM file to verify server certificate (string value)
 # Deprecated group/name - [amqp1]/ssl_ca_file
 #ssl_ca_file =
 
@@ -1235,6 +1335,7 @@
 #
 
 # Use durable queues in AMQP. (boolean value)
+# Deprecated group/name - [DEFAULT]/amqp_durable_queues
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
 #amqp_durable_queues = false
 
@@ -1242,9 +1343,15 @@
 # Deprecated group/name - [DEFAULT]/amqp_auto_delete
 #amqp_auto_delete = false
 
-# Size of RPC connection pool. (integer value)
-# Deprecated group/name - [DEFAULT]/rpc_conn_pool_size
-#rpc_conn_pool_size = 30
+# Send a single AMQP reply to call message. The current behaviour since oslo-
+# incubator is to send two AMQP replies - first one with the payload, a second
+# one to ensure the other have finish to send the payload. We are going to
+# remove it in the N release, but we must keep backward compatible at the same
+# time. This option provides such compatibility - it defaults to False in
+# Liberty and can be turned on for early adopters with a new installations or
+# for testing. Please note, that this option will be removed in M release.
+# (boolean value)
+#send_single_reply = false
 
 # Qpid broker hostname. (string value)
 # Deprecated group/name - [DEFAULT]/qpid_hostname
@@ -1301,6 +1408,7 @@
 #
 
 # Use durable queues in AMQP. (boolean value)
+# Deprecated group/name - [DEFAULT]/amqp_durable_queues
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
 #amqp_durable_queues = false
 
@@ -1308,9 +1416,15 @@
 # Deprecated group/name - [DEFAULT]/amqp_auto_delete
 #amqp_auto_delete = false
 
-# Size of RPC connection pool. (integer value)
-# Deprecated group/name - [DEFAULT]/rpc_conn_pool_size
-#rpc_conn_pool_size = 30
+# Send a single AMQP reply to call message. The current behaviour since oslo-
+# incubator is to send two AMQP replies - first one with the payload, a second
+# one to ensure the other have finish to send the payload. We are going to
+# remove it in the N release, but we must keep backward compatible at the same
+# time. This option provides such compatibility - it defaults to False in
+# Liberty and can be turned on for early adopters with a new installations or
+# for testing. Please note, that this option will be removed in M release.
+# (boolean value)
+#send_single_reply = false
 
 # SSL version to use (valid only if SSL enabled). Valid values are TLSv1 and
 # SSLv23. SSLv2, SSLv3, TLSv1_1, and TLSv1_2 may be available on some
@@ -1334,6 +1448,10 @@
 # notification. (floating point value)
 # Deprecated group/name - [DEFAULT]/kombu_reconnect_delay
 #kombu_reconnect_delay = 1.0
+
+# How long to wait before considering a reconnect attempt to have failed. This
+# value should not be longer than rpc_response_timeout. (integer value)
+#kombu_reconnect_timeout = 60
 
 # The RabbitMQ broker address where a single node is used. (string value)
 # Deprecated group/name - [DEFAULT]/rabbit_host
@@ -1386,8 +1504,9 @@
 #rabbit_ha_queues = false
 
 # Number of seconds after which the Rabbit broker is considered down if
-# heartbeat's keep-alive fails (0 disable the heartbeat). (integer value)
-#heartbeat_timeout_threshold = 60
+# heartbeat's keep-alive fails (0 disable the heartbeat). EXPERIMENTAL (integer
+# value)
+#heartbeat_timeout_threshold = 0
 
 # How often times during the heartbeat_timeout_threshold we check the
 # heartbeat. (integer value)
@@ -1430,6 +1549,8 @@
 # directories to be searched.  Missing or empty directories are ignored. (multi
 # valued)
 # Deprecated group/name - [DEFAULT]/policy_dirs
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #policy_dirs = policy.d
 
 
@@ -1451,7 +1572,7 @@
 #
 
 # Policy backend driver. (string value)
-#driver = keystone.policy.backends.sql.Policy
+#driver = sql
 
 # Maximum number of entities that will be returned in a policy collection.
 # (integer value)
@@ -1492,7 +1613,7 @@
 
 # An implementation of the backend for persisting revocation events. (string
 # value)
-#driver = keystone.contrib.revoke.backends.sql.Revoke
+#driver = sql
 
 # This value (calculated in seconds) is added to token expiration before a
 # revocation event may be removed from the backend. (integer value)
@@ -1593,8 +1714,9 @@
 # Telephone number of contact person. (string value)
 #idp_contact_telephone = <None>
 
-# Contact type. Allowed values are: technical, support, administrative billing,
-# and other (string value)
+# The contact type describing the main point of contact for the identity
+# provider. (string value)
+# Allowed values: technical, support, administrative, billing, other
 #idp_contact_type = other
 
 # Path to the Identity Provider Metadata file. This file should be generated
@@ -1679,12 +1801,11 @@
 #expiration = 3600
 
 # Controls the token construction, validation, and revocation operations. Core
-# providers are "keystone.token.providers.[fernet|pkiz|pki|uuid].Provider".
-# (string value)
-#provider = keystone.token.providers.uuid.Provider
+# providers are [fernet|pkiz|pki|uuid]. (string value)
+#provider = uuid
 
 # Token persistence backend driver. (string value)
-#driver = keystone.token.persistence.backends.sql.Token
+#driver = sql
 
 # Toggle for token system caching. This has no effect unless global caching is
 # enabled. (boolean value)
@@ -1730,4 +1851,4 @@
 #max_redelegation_count = 3
 
 # Trust backend driver. (string value)
-#driver = keystone.trust.backends.sql.Trust
+#driver = sql

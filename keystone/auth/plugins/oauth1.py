@@ -29,14 +29,8 @@ LOG = log.getLogger(__name__)
 
 @dependency.requires('oauth_api')
 class OAuth(auth.AuthMethodHandler):
-
-    method = 'oauth1'
-
     def authenticate(self, context, auth_info, auth_context):
         """Turn a signed request with an access key into a keystone token."""
-
-        if not self.oauth_api:
-            raise exception.Unauthorized(_('%s not supported') % self.method)
 
         headers = context['headers']
         oauth_headers = oauth.get_oauth_headers(headers)

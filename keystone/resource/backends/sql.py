@@ -27,7 +27,7 @@ LOG = log.getLogger(__name__)
 class Resource(keystone_resource.Driver):
 
     def default_assignment_driver(self):
-        return 'keystone.assignment.backends.sql.Assignment'
+        return 'sql'
 
     def _get_project(self, session, project_id):
         project_ref = session.query(Project).get(project_id)
@@ -91,10 +91,9 @@ class Resource(keystone_resource.Driver):
 
     def list_projects_in_subtree(self, project_id):
         with sql.transaction() as session:
-            project = self._get_project(session, project_id).to_dict()
-            children = self._get_children(session, [project['id']])
+            children = self._get_children(session, [project_id])
             subtree = []
-            examined = set(project['id'])
+            examined = set([project_id])
             while children:
                 children_ids = set()
                 for ref in children:
@@ -106,7 +105,7 @@ class Resource(keystone_resource.Driver):
                         return
                     children_ids.add(ref['id'])
 
-                examined.union(children_ids)
+                examined.update(children_ids)
                 subtree += children
                 children = self._get_children(session, children_ids)
             return subtree

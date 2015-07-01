@@ -15,6 +15,7 @@ import datetime
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 from oslo_utils import timeutils
 import six
 
@@ -26,7 +27,6 @@ from keystone.contrib.revoke import model
 from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
-from keystone.openstack.common import versionutils
 
 
 CONF = cfg.CONF
@@ -69,6 +69,8 @@ class Manager(manager.Manager):
     Performs common logic for recording revocations.
 
     """
+
+    driver_namespace = 'keystone.revoke'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.revoke.driver)

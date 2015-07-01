@@ -18,7 +18,9 @@ import uuid
 
 import mock
 from oslo_config import cfg
+import oslo_utils.fixture
 from oslo_utils import timeutils
+import six
 from testtools import matchers
 
 from keystone import assignment
@@ -74,6 +76,7 @@ class AuthTest(tests.TestCase):
     def setUp(self):
         self.useFixture(database.Database())
         super(AuthTest, self).setUp()
+        self.time_fixture = self.useFixture(oslo_utils.fixture.TimeFixture())
 
         self.load_backends()
         self.load_fixtures(default_fixtures)
@@ -265,12 +268,12 @@ class AuthWithToken(AuthTest):
             self.user_foo['id'],
             self.tenant_bar['id'],
             self.role_member['id'])
-        # Get an unscoped tenant
+        # Get an unscoped token
         body_dict = _build_user_auth(
             username='FOO',
             password='foo2')
         unscoped_token = self.controller.authenticate({}, body_dict)
-        # Get a token on BAR tenant using the unscoped tenant
+        # Get a token on BAR tenant using the unscoped token
         body_dict = _build_user_auth(
             token=unscoped_token["access"]["token"],
             tenant_name="BAR")
@@ -280,6 +283,50 @@ class AuthWithToken(AuthTest):
         roles = scoped_token["access"]["metadata"]["roles"]
         self.assertEqual(self.tenant_bar['id'], tenant["id"])
         self.assertThat(roles, matchers.Contains(self.role_member['id']))
+
+    def test_auth_scoped_token_bad_project_with_debug(self):
+        """Authenticating with an invalid project fails."""
+        # Bug 1379952 reports poor user feedback, even in debug mode,
+        # when the user accidentally passes a project name as an ID.
+        # This test intentionally does exactly that.
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_id=self.tenant_bar['name'])
+
+        # with debug enabled, this produces a friendly exception.
+        self.config_fixture.config(debug=True)
+        e = self.assertRaises(
+            exception.Unauthorized,
+            self.controller.authenticate,
+            {}, body_dict)
+        # explicitly verify that the error message shows that a *name* is
+        # found where an *ID* is expected
+        self.assertIn(
+            'Project ID not found: %s' % self.tenant_bar['name'],
+            six.text_type(e))
+
+    def test_auth_scoped_token_bad_project_without_debug(self):
+        """Authenticating with an invalid project fails."""
+        # Bug 1379952 reports poor user feedback, even in debug mode,
+        # when the user accidentally passes a project name as an ID.
+        # This test intentionally does exactly that.
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_id=self.tenant_bar['name'])
+
+        # with debug disabled, authentication failure details are suppressed.
+        self.config_fixture.config(debug=False)
+        e = self.assertRaises(
+            exception.Unauthorized,
+            self.controller.authenticate,
+            {}, body_dict)
+        # explicitly verify that the error message details above have been
+        # suppressed.
+        self.assertNotIn(
+            'Project ID not found: %s' % self.tenant_bar['name'],
+            six.text_type(e))
 
     def test_auth_token_project_group_role(self):
         """Verify getting a token in a tenant with group roles."""
@@ -448,10 +495,13 @@ class AuthWithToken(AuthTest):
         body_dict = _build_user_auth(username='FOO', password='foo2')
         unscoped_token = self.controller.authenticate(context, body_dict)
         token_id = unscoped_token['access']['token']['id']
+        self.time_fixture.advance_time_seconds(1)
+
         # get a second token
         body_dict = _build_user_auth(token=unscoped_token["access"]["token"])
         unscoped_token_2 = self.controller.authenticate(context, body_dict)
         token_2_id = unscoped_token_2['access']['token']['id']
+        self.time_fixture.advance_time_seconds(1)
 
         self.token_provider_api.revoke_token(token_id, revoke_chain=True)
 
@@ -470,10 +520,13 @@ class AuthWithToken(AuthTest):
         body_dict = _build_user_auth(username='FOO', password='foo2')
         unscoped_token = self.controller.authenticate(context, body_dict)
         token_id = unscoped_token['access']['token']['id']
+        self.time_fixture.advance_time_seconds(1)
+
         # get a second token
         body_dict = _build_user_auth(token=unscoped_token["access"]["token"])
         unscoped_token_2 = self.controller.authenticate(context, body_dict)
         token_2_id = unscoped_token_2['access']['token']['id']
+        self.time_fixture.advance_time_seconds(1)
 
         self.token_provider_api.revoke_token(token_2_id, revoke_chain=True)
 
@@ -500,13 +553,17 @@ class AuthWithToken(AuthTest):
             body_dict = _build_user_auth(username='FOO', password='foo2')
             unscoped_token = self.controller.authenticate(context, body_dict)
             token_id = unscoped_token['access']['token']['id']
+            self.time_fixture.advance_time_seconds(1)
+
             # get a second token
             body_dict = _build_user_auth(
                 token=unscoped_token['access']['token'])
             unscoped_token_2 = self.controller.authenticate(context, body_dict)
             token_2_id = unscoped_token_2['access']['token']['id']
+            self.time_fixture.advance_time_seconds(1)
 
             self.token_provider_api.revoke_token(token_id, revoke_chain=True)
+            self.time_fixture.advance_time_seconds(1)
 
             revoke_events = self.revoke_api.list_events()
             self.assertThat(revoke_events, matchers.HasLength(1))
@@ -526,15 +583,18 @@ class AuthWithToken(AuthTest):
             body_dict = _build_user_auth(username='FOO', password='foo2')
             unscoped_token = self.controller.authenticate(context, body_dict)
             token_id = unscoped_token['access']['token']['id']
+            self.time_fixture.advance_time_seconds(1)
             # get a second token
             body_dict = _build_user_auth(
                 token=unscoped_token['access']['token'])
             unscoped_token_2 = self.controller.authenticate(context, body_dict)
             token_2_id = unscoped_token_2['access']['token']['id']
+            self.time_fixture.advance_time_seconds(1)
 
             # Revoke by audit_id, no audit_info means both parent and child
             # token are revoked.
             self.token_provider_api.revoke_token(token_id)
+            self.time_fixture.advance_time_seconds(1)
 
             revoke_events = self.revoke_api.list_events()
             self.assertThat(revoke_events, matchers.HasLength(2))
@@ -848,6 +908,12 @@ class AuthWithTrust(AuthTest):
                           self.create_trust, self.sample_data,
                           self.trustor['name'], expires_at="Z")
 
+    def test_create_trust_expires_older_than_now(self):
+        self.assertRaises(exception.ValidationExpirationError,
+                          self.create_trust, self.sample_data,
+                          self.trustor['name'],
+                          expires_at="2010-06-04T08:44:31.999999Z")
+
     def test_create_trust_without_project_id(self):
         """Verify that trust can be created without project id and
         token can be generated with that trust.
@@ -1051,13 +1117,19 @@ class AuthWithTrust(AuthTest):
             self.controller.authenticate, {}, request_body)
 
     def test_expired_trust_get_token_fails(self):
-        expiry = "1999-02-18T10:10:00Z"
+        expires_at = timeutils.strtime(timeutils.utcnow() +
+                                       datetime.timedelta(minutes=5),
+                                       fmt=TIME_FORMAT)
+        time_expired = timeutils.utcnow() + datetime.timedelta(minutes=10)
         new_trust = self.create_trust(self.sample_data, self.trustor['name'],
-                                      expiry)
-        request_body = self.build_v2_token_request('TWO', 'two2', new_trust)
-        self.assertRaises(
-            exception.Forbidden,
-            self.controller.authenticate, {}, request_body)
+                                      expires_at)
+        with mock.patch.object(timeutils, 'utcnow') as mock_now:
+            mock_now.return_value = time_expired
+            request_body = self.build_v2_token_request('TWO', 'two2',
+                                                       new_trust)
+            self.assertRaises(
+                exception.Forbidden,
+                self.controller.authenticate, {}, request_body)
 
     def test_token_from_trust_with_wrong_role_fails(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'])
@@ -1196,9 +1268,7 @@ class TokenExpirationTest(AuthTest):
         self.assertEqual(original_expiration, r['access']['token']['expires'])
 
     def test_maintain_uuid_token_expiration(self):
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.uuid.Provider')
+        self.config_fixture.config(group='token', provider='uuid')
         self._maintain_token_expiration()
 
 

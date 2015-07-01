@@ -16,6 +16,7 @@ import time
 
 from oslo_log import log
 from oslo_utils import timeutils
+from six.moves import range
 
 from keystone.common import sql
 from keystone import exception
@@ -135,15 +136,15 @@ class Trust(trust.Driver):
             query = query.filter_by(deleted_at=None)
         ref = query.first()
         if ref is None:
-            return None
+            raise exception.TrustNotFound(trust_id=trust_id)
         if ref.expires_at is not None and not deleted:
             now = timeutils.utcnow()
             if now > ref.expires_at:
-                return None
+                raise exception.TrustNotFound(trust_id=trust_id)
         # Do not return trusts that can't be used anymore
         if ref.remaining_uses is not None and not deleted:
             if ref.remaining_uses <= 0:
-                return None
+                raise exception.TrustNotFound(trust_id=trust_id)
         trust_dict = ref.to_dict()
 
         self._add_roles(trust_id, session, trust_dict)

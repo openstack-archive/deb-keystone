@@ -53,6 +53,9 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+
+    driver_namespace = 'keystone.resource'
+
     _DOMAIN = 'domain'
     _PROJECT = 'project'
 
@@ -86,6 +89,7 @@ class Manager(manager.Manager):
         tenant.setdefault('description', '')
         tenant.setdefault('parent_id', None)
 
+        self.get_domain(tenant.get('domain_id'))
         if tenant.get('parent_id') is not None:
             parent_ref = self.get_project(tenant.get('parent_id'))
             parents_list = self.list_project_parents(parent_ref['id'])
@@ -176,7 +180,7 @@ class Manager(manager.Manager):
                              'disabled parents') % project_id)
 
     def _assert_whole_subtree_is_disabled(self, project_id):
-        subtree_list = self.driver.list_projects_in_subtree(project_id)
+        subtree_list = self.list_projects_in_subtree(project_id)
         for ref in subtree_list:
             if ref.get('enabled', True):
                 raise exception.ForbiddenAction(
@@ -243,7 +247,15 @@ class Manager(manager.Manager):
         return [proj for proj in projects_list
                 if proj['id'] in user_projects_ids]
 
+    def _assert_valid_project_id(self, project_id):
+        if project_id is None:
+            msg = _('Project field is required and cannot be empty.')
+            raise exception.ValidationError(message=msg)
+        # Check if project_id exists
+        self.get_project(project_id)
+
     def list_project_parents(self, project_id, user_id=None):
+        self._assert_valid_project_id(project_id)
         parents = self.driver.list_project_parents(project_id)
         # If a user_id was provided, the returned list should be filtered
         # against the projects this user has access to.
@@ -295,6 +307,7 @@ class Manager(manager.Manager):
         return parents_as_ids
 
     def list_projects_in_subtree(self, project_id, user_id=None):
+        self._assert_valid_project_id(project_id)
         subtree = self.driver.list_projects_in_subtree(project_id)
         # If a user_id was provided, the returned list should be filtered
         # against the projects this user has access to.
@@ -795,6 +808,8 @@ class DomainConfigManager(manager.Manager):
     # Only those options that affect the domain-specific driver support in
     # the identity manager are supported.
 
+    driver_namespace = 'keystone.resource.domain_config'
+
     whitelisted_options = {
         'identity': ['driver'],
         'ldap': [
@@ -1005,7 +1020,7 @@ class DomainConfigManager(manager.Manager):
                     'url': 'myurl'
                     'user_tree_dn': 'OU=myou'},
                 'identity': {
-                    'driver': 'keystone.identity.backends.ldap.Identity'}
+                    'driver': 'ldap'}
 
             }
 
@@ -1083,14 +1098,14 @@ class DomainConfigManager(manager.Manager):
                             'provided contains group %(group_other)s '
                             'instead') % {
                                 'group': group,
-                                'group_other': config.keys()[0]}
+                                'group_other': list(config.keys())[0]}
                     raise exception.InvalidDomainConfig(reason=msg)
                 if option and option not in config[group]:
                     msg = _('Trying to update option %(option)s in group '
                             '%(group)s, but config provided contains option '
                             '%(option_other)s instead') % {
                                 'group': group, 'option': option,
-                                'option_other': config[group].keys()[0]}
+                                'option_other': list(config[group].keys())[0]}
                     raise exception.InvalidDomainConfig(reason=msg)
 
                 # Finally, we need to check if the group/option specified

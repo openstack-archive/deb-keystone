@@ -21,7 +21,6 @@ import uuid
 
 from oslo_config import cfg
 from oslo_log import log
-from oslo_utils import importutils
 import six
 
 from keystone import clean
@@ -90,8 +89,9 @@ class DomainConfigs(dict):
     _any_sql = False
 
     def _load_driver(self, domain_config):
-        return importutils.import_object(
-            domain_config['cfg'].identity.driver, domain_config['cfg'])
+        return manager.load_driver(Manager.driver_namespace,
+                                   domain_config['cfg'].identity.driver,
+                                   domain_config['cfg'])
 
     def _assert_no_more_than_one_sql_driver(self, domain_id, new_config,
                                             config_file=None):
@@ -405,6 +405,9 @@ class Manager(manager.Manager):
     mapping by default is a more prudent way to introduce this functionality.
 
     """
+
+    driver_namespace = 'keystone.identity'
+
     _USER = 'user'
     _GROUP = 'group'
 
@@ -594,10 +597,10 @@ class Manager(manager.Manager):
         if (not driver.is_domain_aware() and driver == self.driver and
             domain_id != CONF.identity.default_domain_id and
                 domain_id is not None):
-                    LOG.warning('Found multiple domains being mapped to a '
-                                'driver that does not support that (e.g. '
-                                'LDAP) - Domain ID: %(domain)s, '
-                                'Default Driver: %(driver)s',
+                    LOG.warning(_LW('Found multiple domains being mapped to a '
+                                    'driver that does not support that (e.g. '
+                                    'LDAP) - Domain ID: %(domain)s, '
+                                    'Default Driver: %(driver)s'),
                                 {'domain': domain_id,
                                  'driver': (driver == self.driver)})
                     raise exception.DomainNotFound(domain_id=domain_id)
@@ -838,7 +841,7 @@ class Manager(manager.Manager):
         # Get user details to invalidate the cache.
         user_old = self.get_user(user_id)
         driver.delete_user(entity_id)
-        self.assignment_api.delete_user(user_id)
+        self.assignment_api.delete_user_assignments(user_id)
         self.get_user.invalidate(self, user_id)
         self.get_user_by_name.invalidate(self, user_old['name'],
                                          user_old['domain_id'])
@@ -910,7 +913,7 @@ class Manager(manager.Manager):
         driver.delete_group(entity_id)
         self.get_group.invalidate(self, group_id)
         self.id_mapping_api.delete_id_mapping(group_id)
-        self.assignment_api.delete_group(group_id)
+        self.assignment_api.delete_group_assignments(group_id)
 
         notifications.Audit.deleted(self._GROUP, group_id, initiator)
 
@@ -1265,6 +1268,8 @@ class Driver(object):
 @dependency.provider('id_mapping_api')
 class MappingManager(manager.Manager):
     """Default pivot point for the ID Mapping backend."""
+
+    driver_namespace = 'keystone.identity.id_mapping'
 
     def __init__(self):
         super(MappingManager, self).__init__(CONF.identity_mapping.driver)

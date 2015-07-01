@@ -28,9 +28,7 @@ class TestExtensionCase(test_v3.RestfulTestCase):
     def config_overrides(self):
         super(TestExtensionCase, self).config_overrides()
         self.config_fixture.config(
-            group='catalog',
-            driver='keystone.contrib.endpoint_filter.backends.catalog_sql.'
-                   'EndpointFilterCatalog')
+            group='catalog', driver='endpoint_filter.sql')
 
     def setUp(self):
         super(TestExtensionCase, self).setUp()
@@ -314,59 +312,8 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.assertEqual(r.result['token']['project']['id'],
                          self.project['id'])
 
-    def test_project_scoped_token_with_no_catalog_using_endpoint_filter(self):
-        """Verify endpoint filter when project scoped token returns no catalog.
-
-        Test that the project scoped token response is valid for a given
-        endpoint-project association when no service catalog is returned.
-
-        """
-        # create a project to work with
-        ref = self.new_project_ref(domain_id=self.domain_id)
-        r = self.post('/projects', body={'project': ref})
-        project = self.assertValidProjectResponse(r, ref)
-
-        # grant the user a role on the project
-        self.put(
-            '/projects/%(project_id)s/users/%(user_id)s/roles/%(role_id)s' % {
-                'user_id': self.user['id'],
-                'project_id': project['id'],
-                'role_id': self.role['id']})
-
-        # set the user's preferred project
-        body = {'user': {'default_project_id': project['id']}}
-        r = self.patch('/users/%(user_id)s' % {
-            'user_id': self.user['id']},
-            body=body)
-        self.assertValidUserResponse(r)
-
-        # add one endpoint to the project
-        self.put('/OS-EP-FILTER/projects/%(project_id)s'
-                 '/endpoints/%(endpoint_id)s' % {
-                     'project_id': project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
-
-        # attempt to authenticate without requesting a project
-        auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'])
-        r = self.post('/auth/tokens?nocatalog', body=auth_data)
-        self.assertValidProjectScopedTokenResponse(
-            r,
-            require_catalog=False,
-            endpoint_filter=True,
-            ep_filter_assoc=1)
-        self.assertEqual(r.result['token']['project']['id'], project['id'])
-
-    def test_default_scoped_token_with_no_catalog_using_endpoint_filter(self):
-        """Verify endpoint filter when default scoped token returns no catalog.
-
-        Test that the default project scoped token response is valid for a
-        given endpoint-project association when no service catalog is returned.
-
-        """
-        # add one endpoint to default project
+    def test_scoped_token_with_no_catalog_using_endpoint_filter(self):
+        """Verify endpoint filter does not affect no catalog."""
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
@@ -380,65 +327,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         r = self.post('/auth/tokens?nocatalog', body=auth_data)
         self.assertValidProjectScopedTokenResponse(
             r,
-            require_catalog=False,
-            endpoint_filter=True,
-            ep_filter_assoc=1)
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
-
-    def test_project_scoped_token_with_no_endpoint_project_association(self):
-        """Verify endpoint filter when no endpoint-project association.
-
-        Test that the project scoped token response is valid when there are
-        no endpoint-project associations defined.
-
-        """
-        # create a project to work with
-        ref = self.new_project_ref(domain_id=self.domain_id)
-        r = self.post('/projects', body={'project': ref})
-        project = self.assertValidProjectResponse(r, ref)
-
-        # grant the user a role on the project
-        self.put(
-            '/projects/%(project_id)s/users/%(user_id)s/roles/%(role_id)s' % {
-                'user_id': self.user['id'],
-                'project_id': project['id'],
-                'role_id': self.role['id']})
-
-        # set the user's preferred project
-        body = {'user': {'default_project_id': project['id']}}
-        r = self.patch('/users/%(user_id)s' % {
-            'user_id': self.user['id']},
-            body=body)
-        self.assertValidUserResponse(r)
-
-        # attempt to authenticate without requesting a project
-        auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'])
-        r = self.post('/auth/tokens?nocatalog', body=auth_data)
-        self.assertValidProjectScopedTokenResponse(
-            r,
-            require_catalog=False,
-            endpoint_filter=True)
-        self.assertEqual(r.result['token']['project']['id'], project['id'])
-
-    def test_default_scoped_token_with_no_endpoint_project_association(self):
-        """Verify endpoint filter when no endpoint-project association.
-
-        Test that the default project scoped token response is valid when
-        there are no endpoint-project associations defined.
-
-        """
-        auth_data = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'],
-            project_id=self.project['id'])
-        r = self.post('/auth/tokens?nocatalog', body=auth_data)
-        self.assertValidProjectScopedTokenResponse(
-            r,
-            require_catalog=False,
-            endpoint_filter=True,)
+            require_catalog=False)
         self.assertEqual(r.result['token']['project']['id'],
                          self.project['id'])
 
@@ -640,6 +529,16 @@ class JsonHomeTests(TestExtensionCase, test_v3.JsonHomeTestMixin):
                 'endpoint_group_id':
                 'http://docs.openstack.org/api/openstack-identity/3/'
                 'ext/OS-EP-FILTER/1.0/param/endpoint_group_id',
+            },
+        },
+        'http://docs.openstack.org/api/openstack-identity/3/ext/OS-EP-FILTER/'
+        '1.0/rel/project_endpoint_groups': {
+            'href-template': '/OS-EP-FILTER/projects/{project_id}/'
+            'endpoint_groups',
+            'href-vars': {
+                'project_id':
+                'http://docs.openstack.org/api/openstack-identity/3/param/'
+                'project_id',
             },
         },
     }
@@ -890,6 +789,40 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
             endpoint_group_id, project_id)
         self.get(url, expected_status=404)
 
+    def test_list_endpoint_groups_in_project(self):
+        """GET /OS-EP-FILTER/projects/{project_id}/endpoint_groups."""
+        # create an endpoint group to work with
+        endpoint_group_id = self._create_valid_endpoint_group(
+            self.DEFAULT_ENDPOINT_GROUP_URL, self.DEFAULT_ENDPOINT_GROUP_BODY)
+
+        # associate endpoint group with project
+        url = self._get_project_endpoint_group_url(
+            endpoint_group_id, self.project_id)
+        self.put(url)
+
+        url = ('/OS-EP-FILTER/projects/%(project_id)s/endpoint_groups' %
+               {'project_id': self.project_id})
+        response = self.get(url)
+
+        self.assertEqual(
+            endpoint_group_id,
+            response.result['endpoint_groups'][0]['id'])
+
+    def test_list_endpoint_groups_in_invalid_project(self):
+        """Test retrieving from invalid project."""
+        project_id = uuid.uuid4().hex
+        url = ('/OS-EP-FILTER/projects/%(project_id)s/endpoint_groups' %
+               {'project_id': project_id})
+        self.get(url, expected_status=404)
+
+    def test_empty_endpoint_groups_in_project(self):
+        """Test when no endpoint groups associated with the project."""
+        url = ('/OS-EP-FILTER/projects/%(project_id)s/endpoint_groups' %
+               {'project_id': self.project_id})
+        response = self.get(url)
+
+        self.assertEqual(0, len(response.result['endpoint_groups']))
+
     def test_check_endpoint_group_to_project(self):
         """Test HEAD with a valid endpoint group and project association."""
         endpoint_group_id = self._create_valid_endpoint_group(
@@ -1094,6 +1027,25 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
         # remove the endpoint group project
         self.delete(url)
         self.get(url, expected_status=404)
+
+    def test_remove_endpoint_group_with_project_association(self):
+        # create an endpoint group
+        endpoint_group_id = self._create_valid_endpoint_group(
+            self.DEFAULT_ENDPOINT_GROUP_URL, self.DEFAULT_ENDPOINT_GROUP_BODY)
+
+        # create an endpoint_group project
+        project_endpoint_group_url = self._get_project_endpoint_group_url(
+            endpoint_group_id, self.default_domain_project_id)
+        self.put(project_endpoint_group_url)
+
+        # remove endpoint group, the associated endpoint_group project will
+        # be removed as well.
+        endpoint_group_url = ('/OS-EP-FILTER/endpoint_groups/'
+                              '%(endpoint_group_id)s'
+                              % {'endpoint_group_id': endpoint_group_id})
+        self.delete(endpoint_group_url)
+        self.get(endpoint_group_url, expected_status=404)
+        self.get(project_endpoint_group_url, expected_status=404)
 
     def _create_valid_endpoint_group(self, url, body):
         r = self.post(url, body=body)

@@ -11,17 +11,21 @@
 # under the License.
 
 import datetime
+import os
 import uuid
 
 from oslo_utils import timeutils
+import six
 
 from keystone.common import config
+from keystone.common import utils
 from keystone import exception
 from keystone.tests import unit as tests
 from keystone.tests.unit import ksfixtures
 from keystone.token import provider
 from keystone.token.providers import fernet
 from keystone.token.providers.fernet import token_formatters
+from keystone.token.providers.fernet import utils as fernet_utils
 
 
 CONF = config.CONF
@@ -69,7 +73,7 @@ class TestPayloads(tests.TestCase):
     def test_time_string_to_int_conversions(self):
         payload_cls = token_formatters.BasePayload
 
-        expected_time_str = timeutils.isotime()
+        expected_time_str = utils.isotime()
         time_obj = timeutils.parse_isotime(expected_time_str)
         expected_time_int = (
             (timeutils.normalize_time(time_obj) -
@@ -86,7 +90,7 @@ class TestPayloads(tests.TestCase):
     def test_unscoped_payload(self):
         exp_user_id = uuid.uuid4().hex
         exp_methods = ['password']
-        exp_expires_at = timeutils.isotime(timeutils.utcnow())
+        exp_expires_at = utils.isotime(timeutils.utcnow())
         exp_audit_ids = [provider.random_urlsafe_str()]
 
         payload = token_formatters.UnscopedPayload.assemble(
@@ -104,7 +108,7 @@ class TestPayloads(tests.TestCase):
         exp_user_id = uuid.uuid4().hex
         exp_methods = ['password']
         exp_project_id = uuid.uuid4().hex
-        exp_expires_at = timeutils.isotime(timeutils.utcnow())
+        exp_expires_at = utils.isotime(timeutils.utcnow())
         exp_audit_ids = [provider.random_urlsafe_str()]
 
         payload = token_formatters.ProjectScopedPayload.assemble(
@@ -124,7 +128,7 @@ class TestPayloads(tests.TestCase):
         exp_user_id = uuid.uuid4().hex
         exp_methods = ['password']
         exp_domain_id = uuid.uuid4().hex
-        exp_expires_at = timeutils.isotime(timeutils.utcnow())
+        exp_expires_at = utils.isotime(timeutils.utcnow())
         exp_audit_ids = [provider.random_urlsafe_str()]
 
         payload = token_formatters.DomainScopedPayload.assemble(
@@ -144,7 +148,7 @@ class TestPayloads(tests.TestCase):
         exp_user_id = uuid.uuid4().hex
         exp_methods = ['password']
         exp_domain_id = CONF.identity.default_domain_id
-        exp_expires_at = timeutils.isotime(timeutils.utcnow())
+        exp_expires_at = utils.isotime(timeutils.utcnow())
         exp_audit_ids = [provider.random_urlsafe_str()]
 
         payload = token_formatters.DomainScopedPayload.assemble(
@@ -164,7 +168,7 @@ class TestPayloads(tests.TestCase):
         exp_user_id = uuid.uuid4().hex
         exp_methods = ['password']
         exp_project_id = uuid.uuid4().hex
-        exp_expires_at = timeutils.isotime(timeutils.utcnow())
+        exp_expires_at = utils.isotime(timeutils.utcnow())
         exp_audit_ids = [provider.random_urlsafe_str()]
         exp_trust_id = uuid.uuid4().hex
 
@@ -181,3 +185,186 @@ class TestPayloads(tests.TestCase):
         self.assertEqual(exp_expires_at, expires_at)
         self.assertEqual(exp_audit_ids, audit_ids)
         self.assertEqual(exp_trust_id, trust_id)
+
+    def test_unscoped_payload_with_non_uuid_user_id(self):
+        exp_user_id = 'someNonUuidUserId'
+        exp_methods = ['password']
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+
+        payload = token_formatters.UnscopedPayload.assemble(
+            exp_user_id, exp_methods, exp_expires_at, exp_audit_ids)
+
+        (user_id, methods, expires_at, audit_ids) = (
+            token_formatters.UnscopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+
+    def test_project_scoped_payload_with_non_uuid_user_id(self):
+        exp_user_id = 'someNonUuidUserId'
+        exp_methods = ['password']
+        exp_project_id = uuid.uuid4().hex
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+
+        payload = token_formatters.ProjectScopedPayload.assemble(
+            exp_user_id, exp_methods, exp_project_id, exp_expires_at,
+            exp_audit_ids)
+
+        (user_id, methods, project_id, expires_at, audit_ids) = (
+            token_formatters.ProjectScopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_project_id, project_id)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+
+    def test_project_scoped_payload_with_non_uuid_project_id(self):
+        exp_user_id = uuid.uuid4().hex
+        exp_methods = ['password']
+        exp_project_id = 'someNonUuidProjectId'
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+
+        payload = token_formatters.ProjectScopedPayload.assemble(
+            exp_user_id, exp_methods, exp_project_id, exp_expires_at,
+            exp_audit_ids)
+
+        (user_id, methods, project_id, expires_at, audit_ids) = (
+            token_formatters.ProjectScopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_project_id, project_id)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+
+    def test_domain_scoped_payload_with_non_uuid_user_id(self):
+        exp_user_id = 'someNonUuidUserId'
+        exp_methods = ['password']
+        exp_domain_id = uuid.uuid4().hex
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+
+        payload = token_formatters.DomainScopedPayload.assemble(
+            exp_user_id, exp_methods, exp_domain_id, exp_expires_at,
+            exp_audit_ids)
+
+        (user_id, methods, domain_id, expires_at, audit_ids) = (
+            token_formatters.DomainScopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_domain_id, domain_id)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+
+    def test_trust_scoped_payload_with_non_uuid_user_id(self):
+        exp_user_id = 'someNonUuidUserId'
+        exp_methods = ['password']
+        exp_project_id = uuid.uuid4().hex
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+        exp_trust_id = uuid.uuid4().hex
+
+        payload = token_formatters.TrustScopedPayload.assemble(
+            exp_user_id, exp_methods, exp_project_id, exp_expires_at,
+            exp_audit_ids, exp_trust_id)
+
+        (user_id, methods, project_id, expires_at, audit_ids, trust_id) = (
+            token_formatters.TrustScopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_project_id, project_id)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+        self.assertEqual(exp_trust_id, trust_id)
+
+    def test_trust_scoped_payload_with_non_uuid_project_id(self):
+        exp_user_id = uuid.uuid4().hex
+        exp_methods = ['password']
+        exp_project_id = 'someNonUuidProjectId'
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+        exp_trust_id = uuid.uuid4().hex
+
+        payload = token_formatters.TrustScopedPayload.assemble(
+            exp_user_id, exp_methods, exp_project_id, exp_expires_at,
+            exp_audit_ids, exp_trust_id)
+
+        (user_id, methods, project_id, expires_at, audit_ids, trust_id) = (
+            token_formatters.TrustScopedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_project_id, project_id)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+        self.assertEqual(exp_trust_id, trust_id)
+
+    def test_federated_payload_with_non_uuid_ids(self):
+        exp_user_id = 'someNonUuidUserId'
+        exp_methods = ['password']
+        exp_expires_at = utils.isotime(timeutils.utcnow())
+        exp_audit_ids = [provider.random_urlsafe_str()]
+        exp_federated_info = {'group_ids': [{'id': 'someNonUuidGroupId'}],
+                              'idp_id': uuid.uuid4().hex,
+                              'protocol_id': uuid.uuid4().hex}
+
+        payload = token_formatters.FederatedPayload.assemble(
+            exp_user_id, exp_methods, exp_expires_at, exp_audit_ids,
+            exp_federated_info)
+
+        (user_id, methods, expires_at, audit_ids, federated_info) = (
+            token_formatters.FederatedPayload.disassemble(payload))
+
+        self.assertEqual(exp_user_id, user_id)
+        self.assertEqual(exp_methods, methods)
+        self.assertEqual(exp_expires_at, expires_at)
+        self.assertEqual(exp_audit_ids, audit_ids)
+        self.assertEqual(exp_federated_info['group_ids'][0]['id'],
+                         federated_info['group_ids'][0]['id'])
+        self.assertEqual(exp_federated_info['idp_id'],
+                         federated_info['idp_id'])
+        self.assertEqual(exp_federated_info['protocol_id'],
+                         federated_info['protocol_id'])
+
+
+class TestFernetKeyRotation(tests.TestCase):
+    @property
+    def key_repository_size(self):
+        """The number of keys in the key repository."""
+        return len(os.listdir(CONF.fernet_tokens.key_repository))
+
+    def test_rotation(self):
+        # Initializing a key repository results in this many keys. We don't
+        # support max_active_keys being set any lower.
+        min_active_keys = 2
+
+        # Simulate every rotation strategy up to "rotating once a week while
+        # maintaining a year's worth of keys."
+        for max_active_keys in six.moves.range(min_active_keys, 52 + 1):
+            self.config_fixture.config(group='fernet_tokens',
+                                       max_active_keys=max_active_keys)
+
+            # Ensure that resetting the key repository always results in 2
+            # active keys.
+            self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+            self.assertEqual(min_active_keys, self.key_repository_size)
+
+            # Rotate the keys just enough times to fully populate the key
+            # repository.
+            for rotation in six.moves.range(max_active_keys - min_active_keys):
+                fernet_utils.rotate_keys()
+            self.assertEqual(max_active_keys, self.key_repository_size)
+
+            # Rotate an additional number of times to ensure that we maintain
+            # the desired number of active keys.
+            for rotation in six.moves.range(10):
+                fernet_utils.rotate_keys()
+                self.assertEqual(self.key_repository_size, max_active_keys)

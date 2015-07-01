@@ -22,6 +22,7 @@ import mock
 from oslo_config import cfg
 from oslo_utils import timeutils
 import six
+from six.moves import range
 from testtools import matchers
 
 from keystone.catalog import core
@@ -598,8 +599,7 @@ class IdentityTests(object):
 
         def get_member_assignments():
             assignments = self.assignment_api.list_role_assignments()
-            return filter(lambda x: x['role_id'] == MEMBER_ROLE_ID,
-                          assignments)
+            return [x for x in assignments if x['role_id'] == MEMBER_ROLE_ID]
 
         orig_member_assignments = get_member_assignments()
 
@@ -1976,6 +1976,16 @@ class IdentityTests(object):
                           project['id'],
                           project)
 
+    def test_create_project_invalid_domain_id(self):
+        project = {'id': uuid.uuid4().hex,
+                   'name': uuid.uuid4().hex,
+                   'domain_id': uuid.uuid4().hex,
+                   'enabled': True}
+        self.assertRaises(exception.DomainNotFound,
+                          self.resource_api.create_project,
+                          project['id'],
+                          project)
+
     def test_create_user_invalid_enabled_type_string(self):
         user = {'name': uuid.uuid4().hex,
                 'domain_id': DEFAULT_DOMAIN_ID,
@@ -2208,6 +2218,48 @@ class IdentityTests(object):
         subtree = self.resource_api.list_projects_in_subtree(project3['id'])
         self.assertEqual(0, len(subtree))
 
+    def test_list_projects_in_subtree_with_circular_reference(self):
+        project1_id = uuid.uuid4().hex
+        project2_id = uuid.uuid4().hex
+
+        project1 = {'id': project1_id,
+                    'description': '',
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'enabled': True,
+                    'name': uuid.uuid4().hex}
+        self.resource_api.create_project(project1['id'], project1)
+
+        project2 = {'id': project2_id,
+                    'description': '',
+                    'domain_id': DEFAULT_DOMAIN_ID,
+                    'enabled': True,
+                    'name': uuid.uuid4().hex,
+                    'parent_id': project1_id}
+        self.resource_api.create_project(project2['id'], project2)
+
+        project1['parent_id'] = project2_id  # Adds cyclic reference
+
+        # NOTE(dstanek): The manager does not allow parent_id to be updated.
+        # Instead will directly use the driver to create the cyclic
+        # reference.
+        self.resource_api.driver.update_project(project1_id, project1)
+
+        subtree = self.resource_api.list_projects_in_subtree(project1_id)
+
+        # NOTE(dstanek): If a cyclic refence is detected the code bails
+        # and returns None instead of falling into the infinite
+        # recursion trap.
+        self.assertIsNone(subtree)
+
+    def test_list_projects_in_subtree_invalid_project_id(self):
+        self.assertRaises(exception.ValidationError,
+                          self.resource_api.list_projects_in_subtree,
+                          None)
+
+        self.assertRaises(exception.ProjectNotFound,
+                          self.resource_api.list_projects_in_subtree,
+                          uuid.uuid4().hex)
+
     def test_list_project_parents(self):
         projects_hierarchy = self._create_projects_hierarchy(hierarchy_size=3)
         project1 = projects_hierarchy[0]
@@ -2231,6 +2283,15 @@ class IdentityTests(object):
 
         parents = self.resource_api.list_project_parents(project1['id'])
         self.assertEqual(0, len(parents))
+
+    def test_list_project_parents_invalid_project_id(self):
+        self.assertRaises(exception.ValidationError,
+                          self.resource_api.list_project_parents,
+                          None)
+
+        self.assertRaises(exception.ProjectNotFound,
+                          self.resource_api.list_project_parents,
+                          uuid.uuid4().hex)
 
     def test_delete_project_with_role_assignments(self):
         tenant = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
@@ -2818,7 +2879,8 @@ class IdentityTests(object):
                           project['id'],
                           project)
 
-    def test_create_leaf_project_with_invalid_domain(self):
+    @tests.skip_if_no_multiple_domains_support
+    def test_create_leaf_project_with_different_domain(self):
         root_project = {'id': uuid.uuid4().hex,
                         'name': uuid.uuid4().hex,
                         'description': '',
@@ -2827,10 +2889,13 @@ class IdentityTests(object):
                         'parent_id': None}
         self.resource_api.create_project(root_project['id'], root_project)
 
+        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
+                  'enabled': True}
+        self.resource_api.create_domain(domain['id'], domain)
         leaf_project = {'id': uuid.uuid4().hex,
                         'name': uuid.uuid4().hex,
                         'description': '',
-                        'domain_id': 'fake',
+                        'domain_id': domain['id'],
                         'enabled': True,
                         'parent_id': root_project['id']}
 
@@ -3427,8 +3492,7 @@ class IdentityTests(object):
 
         def get_member_assignments():
             assignments = self.assignment_api.list_role_assignments()
-            return filter(lambda x: x['role_id'] == MEMBER_ROLE_ID,
-                          assignments)
+            return [x for x in assignments if x['role_id'] == MEMBER_ROLE_ID]
 
         orig_member_assignments = get_member_assignments()
 
@@ -4291,7 +4355,9 @@ class TrustTests(object):
         trust_data = self.trust_api.get_trust(trust_id)
         self.assertEqual(new_id, trust_data['id'])
         self.trust_api.delete_trust(trust_id)
-        self.assertIsNone(self.trust_api.get_trust(trust_id))
+        self.assertRaises(exception.TrustNotFound,
+                          self.trust_api.get_trust,
+                          trust_id)
 
     def test_delete_trust_not_found(self):
         trust_id = uuid.uuid4().hex
@@ -4314,7 +4380,9 @@ class TrustTests(object):
         self.assertIsNotNone(trust_data)
         self.assertIsNone(trust_data['deleted_at'])
         self.trust_api.delete_trust(new_id)
-        self.assertIsNone(self.trust_api.get_trust(new_id))
+        self.assertRaises(exception.TrustNotFound,
+                          self.trust_api.get_trust,
+                          new_id)
         deleted_trust = self.trust_api.get_trust(trust_data['id'],
                                                  deleted=True)
         self.assertEqual(trust_data['id'], deleted_trust['id'])
@@ -4389,7 +4457,9 @@ class TrustTests(object):
         self.assertEqual(1, t['remaining_uses'])
         self.trust_api.consume_use(trust_data['id'])
         # This was the last use, the trust isn't available anymore
-        self.assertIsNone(self.trust_api.get_trust(trust_data['id']))
+        self.assertRaises(exception.TrustNotFound,
+                          self.trust_api.get_trust,
+                          trust_data['id'])
 
 
 class CatalogTests(object):
@@ -5157,6 +5227,77 @@ class PolicyTests(object):
 
 class InheritanceTests(object):
 
+    def _test_crud_inherited_and_direct_assignment(self, **kwargs):
+        """Tests inherited and direct assignments for the actor and target
+
+        Ensure it is possible to create both inherited and direct role
+        assignments for the same actor on the same target. The actor and the
+        target are specified in the kwargs as ('user_id' or 'group_id') and
+        ('project_id' or 'domain_id'), respectively.
+
+        """
+
+        # Create a new role to avoid assignments loaded from default fixtures
+        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = self.role_api.create_role(role['id'], role)
+
+        # Define the common assigment entity
+        assignment_entity = {'role_id': role['id']}
+        assignment_entity.update(kwargs)
+
+        # Define assignments under test
+        direct_assignment_entity = assignment_entity.copy()
+        inherited_assignment_entity = assignment_entity.copy()
+        inherited_assignment_entity['inherited_to_projects'] = 'projects'
+
+        # Create direct assignment and check grants
+        self.assignment_api.create_grant(inherited_to_projects=False,
+                                         **assignment_entity)
+
+        grants = self.assignment_api.list_role_assignments_for_role(role['id'])
+        self.assertThat(grants, matchers.HasLength(1))
+        self.assertIn(direct_assignment_entity, grants)
+
+        # Now add inherited assignment and check grants
+        self.assignment_api.create_grant(inherited_to_projects=True,
+                                         **assignment_entity)
+
+        grants = self.assignment_api.list_role_assignments_for_role(role['id'])
+        self.assertThat(grants, matchers.HasLength(2))
+        self.assertIn(direct_assignment_entity, grants)
+        self.assertIn(inherited_assignment_entity, grants)
+
+        # Delete both and check grants
+        self.assignment_api.delete_grant(inherited_to_projects=False,
+                                         **assignment_entity)
+        self.assignment_api.delete_grant(inherited_to_projects=True,
+                                         **assignment_entity)
+
+        grants = self.assignment_api.list_role_assignments_for_role(role['id'])
+        self.assertEqual([], grants)
+
+    def test_crud_inherited_and_direct_assignment_for_user_on_domain(self):
+        self._test_crud_inherited_and_direct_assignment(
+            user_id=self.user_foo['id'], domain_id=DEFAULT_DOMAIN_ID)
+
+    def test_crud_inherited_and_direct_assignment_for_group_on_domain(self):
+        group = {'name': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID}
+        group = self.identity_api.create_group(group)
+
+        self._test_crud_inherited_and_direct_assignment(
+            group_id=group['id'], domain_id=DEFAULT_DOMAIN_ID)
+
+    def test_crud_inherited_and_direct_assignment_for_user_on_project(self):
+        self._test_crud_inherited_and_direct_assignment(
+            user_id=self.user_foo['id'], project_id=self.tenant_baz['id'])
+
+    def test_crud_inherited_and_direct_assignment_for_group_on_project(self):
+        group = {'name': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID}
+        group = self.identity_api.create_group(group)
+
+        self._test_crud_inherited_and_direct_assignment(
+            group_id=group['id'], project_id=self.tenant_baz['id'])
+
     def test_inherited_role_grants_for_user(self):
         """Test inherited user roles.
 
@@ -5662,6 +5803,40 @@ class FilterTests(filtering.FilterTests):
         self.assertIn(group_list[6]['id'], [groups[0]['id'], groups[1]['id']])
         self._delete_test_data('user', user_list)
         self._delete_test_data('group', group_list)
+
+    def _get_user_name_field_size(self):
+        """Return the size of the user name field for the backend.
+
+        Subclasses can override this method to indicate that the user name
+        field is limited in length. The user name is the field used in the test
+        that validates that a filter value works even if it's longer than a
+        field.
+
+        If the backend doesn't limit the value length then return None.
+
+        """
+        return None
+
+    def test_filter_value_wider_than_field(self):
+        # If a filter value is given that's larger than the field in the
+        # backend then no values are returned.
+
+        user_name_field_size = self._get_user_name_field_size()
+
+        if user_name_field_size is None:
+            # The backend doesn't limit the size of the user name, so pass this
+            # test.
+            return
+
+        # Create some users just to make sure would return something if the
+        # filter was ignored.
+        self._create_test_data('user', 2)
+
+        hints = driver_hints.Hints()
+        value = 'A' * (user_name_field_size + 1)
+        hints.add_filter('name', value)
+        users = self.identity_api.list_users(hints=hints)
+        self.assertEqual([], users)
 
 
 class LimitTests(filtering.FilterTests):

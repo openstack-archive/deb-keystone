@@ -19,6 +19,7 @@ import abc
 from oslo_config import cfg
 from oslo_log import log
 import six
+from six.moves import zip
 
 from keystone.common import dependency
 from keystone.common import manager
@@ -41,6 +42,9 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+
+    driver_namespace = 'keystone.trust'
+
     _TRUST = "OS-TRUST:trust"
 
     def __init__(self):
@@ -179,9 +183,6 @@ class Manager(manager.Manager):
         Recursively remove given and redelegated trusts
         """
         trust = self.driver.get_trust(trust_id)
-        if not trust:
-            raise exception.TrustNotFound(trust_id)
-
         trusts = self.driver.list_trusts_for_trustor(
             trust['trustor_user_id'])
 

@@ -244,6 +244,13 @@ class BaseTestCase(oslotest.BaseTestCase):
         super(BaseTestCase, self).setUp()
         self.useFixture(mockpatch.PatchObject(sys, 'exit',
                                               side_effect=UnexpectedExit))
+        self.useFixture(mockpatch.PatchObject(logging.Handler, 'handleError',
+                                              side_effect=BadLog))
+
+        warnings.filterwarnings('error', category=DeprecationWarning,
+                                module='^keystone\\.')
+        warnings.simplefilter('error', exc.SAWarning)
+        self.addCleanup(warnings.resetwarnings)
 
     def cleanup_instance(self, *names):
         """Create a function suitable for use with self.addCleanup.
@@ -261,7 +268,6 @@ class BaseTestCase(oslotest.BaseTestCase):
         return cleanup
 
 
-@dependency.requires('revoke_api')
 class TestCase(BaseTestCase):
 
     def config_files(self):
@@ -281,30 +287,20 @@ class TestCase(BaseTestCase):
             proxies=['keystone.tests.unit.test_cache.CacheIsolatingProxy'])
         self.config_fixture.config(
             group='catalog',
-            driver='keystone.catalog.backends.templated.Catalog',
+            driver='templated',
             template_file=dirs.tests('default_catalog.templates'))
-        self.config_fixture.config(
-            group='identity',
-            driver='keystone.identity.backends.sql.Identity')
         self.config_fixture.config(
             group='kvs',
             backends=[
                 ('keystone.tests.unit.test_kvs.'
                  'KVSBackendForcedKeyMangleFixture'),
                 'keystone.tests.unit.test_kvs.KVSBackendFixture'])
-        self.config_fixture.config(
-            group='revoke',
-            driver='keystone.contrib.revoke.backends.kvs.Revoke')
+        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='signing', certfile=signing_certfile,
             keyfile=signing_keyfile,
             ca_certs='examples/pki/certs/cacert.pem')
-        self.config_fixture.config(
-            group='token',
-            driver='keystone.token.persistence.backends.kvs.Token')
-        self.config_fixture.config(
-            group='trust',
-            driver='keystone.trust.backends.sql.Trust')
+        self.config_fixture.config(group='token', driver='kvs')
         self.config_fixture.config(
             group='saml', certfile=signing_certfile, keyfile=signing_keyfile)
         self.config_fixture.config(
@@ -327,28 +323,19 @@ class TestCase(BaseTestCase):
         self.auth_plugin_config_override()
 
     def auth_plugin_config_override(self, methods=None, **method_classes):
-        if methods is None:
-            methods = ['external', 'password', 'token', ]
-            if not method_classes:
-                method_classes = dict(
-                    external='keystone.auth.plugins.external.DefaultDomain',
-                    password='keystone.auth.plugins.password.Password',
-                    token='keystone.auth.plugins.token.Token',
-                )
-        self.config_fixture.config(group='auth', methods=methods)
-        common_cfg.setup_authentication()
+        if methods is not None:
+            self.config_fixture.config(group='auth', methods=methods)
+            common_cfg.setup_authentication()
         if method_classes:
             self.config_fixture.config(group='auth', **method_classes)
 
     def setUp(self):
         super(TestCase, self).setUp()
-        self.addCleanup(self.cleanup_instance('config_fixture', 'logger'))
 
         self.addCleanup(CONF.reset)
 
-        self.useFixture(mockpatch.PatchObject(logging.Handler, 'handleError',
-                                              side_effect=BadLog))
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
+        self.addCleanup(delattr, self, 'config_fixture')
         self.config(self.config_files())
 
         # NOTE(morganfainberg): mock the auth plugin setup to use the config
@@ -356,13 +343,13 @@ class TestCase(BaseTestCase):
         # cleanup.
         def mocked_register_auth_plugin_opt(conf, opt):
             self.config_fixture.register_opt(opt, group='auth')
-        self.register_auth_plugin_opt_patch = self.useFixture(
-            mockpatch.PatchObject(common_cfg, '_register_auth_plugin_opt',
-                                  new=mocked_register_auth_plugin_opt))
+        self.useFixture(mockpatch.PatchObject(
+            common_cfg, '_register_auth_plugin_opt',
+            new=mocked_register_auth_plugin_opt))
 
         self.config_overrides()
 
-        self.logger = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
 
         # NOTE(morganfainberg): This code is a copy from the oslo-incubator
         # log module. This is not in a function or otherwise available to use
@@ -373,11 +360,6 @@ class TestCase(BaseTestCase):
             mod, _sep, level_name = pair.partition('=')
             logger = logging.getLogger(mod)
             logger.setLevel(level_name)
-
-        warnings.filterwarnings('error', category=DeprecationWarning,
-                                module='^keystone\\.')
-        warnings.simplefilter('error', exc.SAWarning)
-        self.addCleanup(warnings.resetwarnings)
 
         self.useFixture(ksfixtures.Cache())
 
@@ -419,7 +401,7 @@ class TestCase(BaseTestCase):
 
         for manager_name, manager in six.iteritems(drivers):
             setattr(self, manager_name, manager)
-        self.addCleanup(self.cleanup_instance(*drivers.keys()))
+        self.addCleanup(self.cleanup_instance(*list(drivers.keys())))
 
     def load_extra_backends(self):
         """Override to load managers that aren't loaded by default.
@@ -541,11 +523,6 @@ class TestCase(BaseTestCase):
     def assertNotEmpty(self, l):
         self.assertTrue(len(l))
 
-    def assertDictEqual(self, d1, d2, msg=None):
-        self.assertIsInstance(d1, dict)
-        self.assertIsInstance(d2, dict)
-        self.assertEqual(d1, d2, msg)
-
     def assertRaisesRegexp(self, expected_exception, expected_regexp,
                            callable_obj, *args, **kwargs):
         """Asserts that the message in a raised exception matches a regexp.
@@ -572,43 +549,6 @@ class TestCase(BaseTestCase):
             else:
                 excName = str(expected_exception)
             raise self.failureException("%s not raised" % excName)
-
-    def assertDictContainsSubset(self, expected, actual, msg=None):
-        """Checks whether actual is a superset of expected."""
-
-        def safe_repr(obj, short=False):
-            _MAX_LENGTH = 80
-            try:
-                result = repr(obj)
-            except Exception:
-                result = object.__repr__(obj)
-            if not short or len(result) < _MAX_LENGTH:
-                return result
-            return result[:_MAX_LENGTH] + ' [truncated]...'
-
-        missing = []
-        mismatched = []
-        for key, value in six.iteritems(expected):
-            if key not in actual:
-                missing.append(key)
-            elif value != actual[key]:
-                mismatched.append('%s, expected: %s, actual: %s' %
-                                  (safe_repr(key), safe_repr(value),
-                                   safe_repr(actual[key])))
-
-        if not (missing or mismatched):
-            return
-
-        standardMsg = ''
-        if missing:
-            standardMsg = 'Missing: %s' % ','.join(safe_repr(m) for m in
-                                                   missing)
-        if mismatched:
-            if standardMsg:
-                standardMsg += '; '
-            standardMsg += 'Mismatched values: %s' % ','.join(mismatched)
-
-        self.fail(self._formatMessage(msg, standardMsg))
 
     @property
     def ipv6_enabled(self):
@@ -640,21 +580,9 @@ class SQLDriverOverrides(object):
     def config_overrides(self):
         super(SQLDriverOverrides, self).config_overrides()
         # SQL specific driver overrides
-        self.config_fixture.config(
-            group='catalog',
-            driver='keystone.catalog.backends.sql.Catalog')
-        self.config_fixture.config(
-            group='identity',
-            driver='keystone.identity.backends.sql.Identity')
-        self.config_fixture.config(
-            group='policy',
-            driver='keystone.policy.backends.sql.Policy')
-        self.config_fixture.config(
-            group='revoke',
-            driver='keystone.contrib.revoke.backends.sql.Revoke')
-        self.config_fixture.config(
-            group='token',
-            driver='keystone.token.persistence.backends.sql.Token')
-        self.config_fixture.config(
-            group='trust',
-            driver='keystone.trust.backends.sql.Trust')
+        self.config_fixture.config(group='catalog', driver='sql')
+        self.config_fixture.config(group='identity', driver='sql')
+        self.config_fixture.config(group='policy', driver='sql')
+        self.config_fixture.config(group='revoke', driver='sql')
+        self.config_fixture.config(group='token', driver='sql')
+        self.config_fixture.config(group='trust', driver='sql')

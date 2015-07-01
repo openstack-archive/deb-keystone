@@ -28,9 +28,6 @@ DEMO_USER_ID = uuid.uuid4().hex
 
 
 class SimpleChallengeResponse(auth.AuthMethodHandler):
-
-    method = METHOD_NAME
-
     def authenticate(self, context, auth_payload, user_context):
         if 'response' in auth_payload:
             if auth_payload['response'] != EXPECTED_RESPONSE:
@@ -38,20 +35,6 @@ class SimpleChallengeResponse(auth.AuthMethodHandler):
             user_context['user_id'] = DEMO_USER_ID
         else:
             return {"challenge": "What's the name of your high school?"}
-
-
-class DuplicateAuthPlugin(SimpleChallengeResponse):
-    """Duplicate simple challenge response auth plugin."""
-
-
-class MismatchedAuthPlugin(SimpleChallengeResponse):
-    method = uuid.uuid4().hex
-
-
-class NoMethodAuthPlugin(auth.AuthMethodHandler):
-    """An auth plugin that does not supply a method attribute."""
-    def authenticate(self, context, auth_payload, auth_context):
-        pass
 
 
 class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
@@ -64,9 +47,6 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
     def config_overrides(self):
         super(TestAuthPlugin, self).config_overrides()
         method_opts = {
-            'external': 'keystone.auth.plugins.external.DefaultDomain',
-            'password': 'keystone.auth.plugins.password.Password',
-            'token': 'keystone.auth.plugins.token.Token',
             METHOD_NAME:
                 'keystone.tests.unit.test_auth_plugin.SimpleChallengeResponse',
         }
@@ -123,6 +103,14 @@ class TestAuthPlugin(tests.SQLDriverOverrides, tests.TestCase):
                           auth_info,
                           auth_context)
 
+    def test_duplicate_method(self):
+        # Having the same method twice doesn't cause load_auth_methods to fail.
+        self.auth_plugin_config_override(
+            methods=['external', 'external'])
+        self.clear_auth_plugin_registry()
+        auth.controllers.load_auth_methods()
+        self.assertIn('external', auth.controllers.AUTH_METHODS)
+
 
 class TestAuthPluginDynamicOptions(TestAuthPlugin):
     def config_overrides(self):
@@ -135,25 +123,6 @@ class TestAuthPluginDynamicOptions(TestAuthPlugin):
         config_files = super(TestAuthPluginDynamicOptions, self).config_files()
         config_files.append(tests.dirs.tests_conf('test_auth_plugin.conf'))
         return config_files
-
-
-class TestInvalidAuthMethodRegistration(tests.TestCase):
-    def test_duplicate_auth_method_registration(self):
-        self.config_fixture.config(
-            group='auth',
-            methods=[
-                'keystone.tests.unit.test_auth_plugin.SimpleChallengeResponse',
-                'keystone.tests.unit.test_auth_plugin.DuplicateAuthPlugin'])
-        self.clear_auth_plugin_registry()
-        self.assertRaises(ValueError, auth.controllers.load_auth_methods)
-
-    def test_no_method_attribute_auth_method_by_class_name_registration(self):
-        self.config_fixture.config(
-            group='auth',
-            methods=['keystone.tests.unit.test_auth_plugin.NoMethodAuthPlugin']
-        )
-        self.clear_auth_plugin_registry()
-        self.assertRaises(ValueError, auth.controllers.load_auth_methods)
 
 
 class TestMapped(tests.TestCase):

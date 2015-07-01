@@ -21,12 +21,15 @@ import mock
 from oslo_config import cfg
 from oslo_log import log
 from oslo_serialization import jsonutils
+from oslo_utils import importutils
 from oslotest import mockpatch
 import saml2
 from saml2 import saml
 from saml2 import sigver
-from six.moves import urllib
-import xmldsig
+from six.moves import range, urllib, zip
+xmldsig = importutils.try_import("saml2.xmldsig")
+if not xmldsig:
+    xmldsig = importutils.try_import("xmldsig")
 
 from keystone.auth import controllers as auth_controllers
 from keystone.auth.plugins import mapped
@@ -109,14 +112,14 @@ class FederatedSetupMixin(object):
         self.assertEqual(token_projects, projects_ref)
 
     def _check_scoped_token_attributes(self, token):
-        def xor_project_domain(iterable):
-            return sum(('project' in iterable, 'domain' in iterable)) % 2
+        def xor_project_domain(token_keys):
+            return sum(('project' in token_keys, 'domain' in token_keys)) % 2
 
         for obj in ('user', 'catalog', 'expires_at', 'issued_at',
                     'methods', 'roles'):
             self.assertIn(obj, token)
         # Check for either project or domain
-        if not xor_project_domain(token.keys()):
+        if not xor_project_domain(list(token.keys())):
             raise AssertionError("You must specify either"
                                  "project or domain.")
 
@@ -1008,6 +1011,33 @@ class FederatedIdentityProviderTests(FederationTests):
         url = self.base_url(suffix=idp_id)
         self.delete(url)
         self.get(url, expected_status=404)
+
+    def test_delete_idp_also_deletes_assigned_protocols(self):
+        """Deleting an IdP will delete its assigned protocol."""
+
+        # create default IdP
+        default_resp = self._create_default_idp()
+        default_idp = self._fetch_attribute_from_response(default_resp,
+                                                          'identity_provider')
+        idp_id = default_idp['id']
+        protocol_id = uuid.uuid4().hex
+
+        url = self.base_url(suffix='%(idp_id)s/protocols/%(protocol_id)s')
+        idp_url = self.base_url(suffix=idp_id)
+
+        # assign protocol to IdP
+        kwargs = {'expected_status': 201}
+        resp, idp_id, proto = self._assign_protocol_to_idp(
+            url=url,
+            idp_id=idp_id,
+            proto=protocol_id,
+            **kwargs)
+
+        # removing IdP will remove the assigned protocol as well
+        self.assertEqual(1, len(self.federation_api.list_protocols(idp_id)))
+        self.delete(idp_url)
+        self.get(idp_url, expected_status=404)
+        self.assertEqual(0, len(self.federation_api.list_protocols(idp_id)))
 
     def test_delete_nonexisting_idp(self):
         """Delete nonexisting IdP.
@@ -2128,7 +2158,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         context = {
             'environment': {
                 'malformed_object': object(),
-                'another_bad_idea': tuple(xrange(10)),
+                'another_bad_idea': tuple(range(10)),
                 'yet_another_bad_param': dict(zip(uuid.uuid4().hex,
                                                   range(32)))
             }
@@ -2882,18 +2912,17 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
         super(FernetFederatedTokenTests, self).load_fixtures(fixtures)
         self.load_federation_sample_data()
 
+    def config_overrides(self):
+        super(FernetFederatedTokenTests, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+
     def auth_plugin_config_override(self):
         methods = ['saml2', 'token', 'password']
         method_classes = dict(
-            password='keystone.auth.plugins.password.Password',
-            token='keystone.auth.plugins.token.Token',
             saml2='keystone.auth.plugins.saml2.Saml2')
         super(FernetFederatedTokenTests,
               self).auth_plugin_config_override(methods, **method_classes)
-        self.config_fixture.config(
-            group='token',
-            provider='keystone.token.providers.fernet.Provider')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
 
     def test_federated_unscoped_token(self):
         resp = self._issue_unscoped_token()
@@ -2948,7 +2977,6 @@ class FederatedTokenTestsMethodToken(FederatedTokenTests):
     def auth_plugin_config_override(self):
         methods = ['saml2', 'token']
         method_classes = dict(
-            token='keystone.auth.plugins.token.Token',
             saml2='keystone.auth.plugins.saml2.Saml2')
         super(FederatedTokenTests,
               self).auth_plugin_config_override(methods, **method_classes)
@@ -2986,11 +3014,18 @@ class SAMLGenerationTests(FederationTests):
 
     SP_AUTH_URL = ('http://beta.com:5000/v3/OS-FEDERATION/identity_providers'
                    '/BETA/protocols/saml2/auth')
+
+    ASSERTION_FILE = 'signed_saml2_assertion.xml'
+
+    # The values of the following variables match the attributes values found
+    # in ASSERTION_FILE
     ISSUER = 'https://acme.com/FIM/sps/openstack/saml20'
     RECIPIENT = 'http://beta.com/Shibboleth.sso/SAML2/POST'
     SUBJECT = 'test_user'
+    SUBJECT_DOMAIN = 'user_domain'
     ROLES = ['admin', 'member']
     PROJECT = 'development'
+    PROJECT_DOMAIN = 'project_domain'
     SAML_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2'
     ECP_GENERATION_ROUTE = '/auth/OS-FEDERATION/saml2/ecp'
     ASSERTION_VERSION = "2.0"
@@ -3010,7 +3045,7 @@ class SAMLGenerationTests(FederationTests):
     def setUp(self):
         super(SAMLGenerationTests, self).setUp()
         self.signed_assertion = saml2.create_class_from_xml_string(
-            saml.Assertion, _load_xml('signed_saml2_assertion.xml'))
+            saml.Assertion, _load_xml(self.ASSERTION_FILE))
         self.sp = self.sp_ref()
         url = '/OS-FEDERATION/service_providers/' + self.SERVICE_PROVDIER_ID
         self.put(url, body={'service_provider': self.sp},
@@ -3028,8 +3063,10 @@ class SAMLGenerationTests(FederationTests):
                                return_value=self.signed_assertion):
             generator = keystone_idp.SAMLGenerator()
             response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
-                                               self.SUBJECT, self.ROLES,
-                                               self.PROJECT)
+                                               self.SUBJECT,
+                                               self.SUBJECT_DOMAIN,
+                                               self.ROLES, self.PROJECT,
+                                               self.PROJECT_DOMAIN)
 
         assertion = response.assertion
         self.assertIsNotNone(assertion)
@@ -3041,13 +3078,23 @@ class SAMLGenerationTests(FederationTests):
         user_attribute = assertion.attribute_statement[0].attribute[0]
         self.assertEqual(self.SUBJECT, user_attribute.attribute_value[0].text)
 
-        role_attribute = assertion.attribute_statement[0].attribute[1]
+        user_domain_attribute = (
+            assertion.attribute_statement[0].attribute[1])
+        self.assertEqual(self.SUBJECT_DOMAIN,
+                         user_domain_attribute.attribute_value[0].text)
+
+        role_attribute = assertion.attribute_statement[0].attribute[2]
         for attribute_value in role_attribute.attribute_value:
             self.assertIn(attribute_value.text, self.ROLES)
 
-        project_attribute = assertion.attribute_statement[0].attribute[2]
+        project_attribute = assertion.attribute_statement[0].attribute[3]
         self.assertEqual(self.PROJECT,
                          project_attribute.attribute_value[0].text)
+
+        project_domain_attribute = (
+            assertion.attribute_statement[0].attribute[4])
+        self.assertEqual(self.PROJECT_DOMAIN,
+                         project_domain_attribute.attribute_value[0].text)
 
     def test_verify_assertion_object(self):
         """Test that the Assertion object is built properly.
@@ -3060,8 +3107,10 @@ class SAMLGenerationTests(FederationTests):
                                side_effect=lambda x: x):
             generator = keystone_idp.SAMLGenerator()
             response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
-                                               self.SUBJECT, self.ROLES,
-                                               self.PROJECT)
+                                               self.SUBJECT,
+                                               self.SUBJECT_DOMAIN,
+                                               self.ROLES, self.PROJECT,
+                                               self.PROJECT_DOMAIN)
         assertion = response.assertion
         self.assertEqual(self.ASSERTION_VERSION, assertion.version)
 
@@ -3077,8 +3126,10 @@ class SAMLGenerationTests(FederationTests):
                                return_value=self.signed_assertion):
             generator = keystone_idp.SAMLGenerator()
             response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
-                                               self.SUBJECT, self.ROLES,
-                                               self.PROJECT)
+                                               self.SUBJECT,
+                                               self.SUBJECT_DOMAIN,
+                                               self.ROLES, self.PROJECT,
+                                               self.PROJECT_DOMAIN)
 
         saml_str = response.to_string()
         response = etree.fromstring(saml_str)
@@ -3091,12 +3142,18 @@ class SAMLGenerationTests(FederationTests):
         user_attribute = assertion[4][0]
         self.assertEqual(self.SUBJECT, user_attribute[0].text)
 
-        role_attribute = assertion[4][1]
+        user_domain_attribute = assertion[4][1]
+        self.assertEqual(self.SUBJECT_DOMAIN, user_domain_attribute[0].text)
+
+        role_attribute = assertion[4][2]
         for attribute_value in role_attribute:
             self.assertIn(attribute_value.text, self.ROLES)
 
-        project_attribute = assertion[4][2]
+        project_attribute = assertion[4][3]
         self.assertEqual(self.PROJECT, project_attribute[0].text)
+
+        project_domain_attribute = assertion[4][4]
+        self.assertEqual(self.PROJECT_DOMAIN, project_domain_attribute[0].text)
 
     def test_assertion_using_explicit_namespace_prefixes(self):
         def mocked_subprocess_check_output(*popenargs, **kwargs):
@@ -3112,8 +3169,10 @@ class SAMLGenerationTests(FederationTests):
                         side_effect=mocked_subprocess_check_output):
             generator = keystone_idp.SAMLGenerator()
             response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
-                                               self.SUBJECT, self.ROLES,
-                                               self.PROJECT)
+                                               self.SUBJECT,
+                                               self.SUBJECT_DOMAIN,
+                                               self.ROLES, self.PROJECT,
+                                               self.PROJECT_DOMAIN)
             assertion_xml = response.assertion.to_string()
             # make sure we have the proper tag and prefix for the assertion
             # namespace
@@ -3136,8 +3195,9 @@ class SAMLGenerationTests(FederationTests):
 
         generator = keystone_idp.SAMLGenerator()
         response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
-                                           self.SUBJECT, self.ROLES,
-                                           self.PROJECT)
+                                           self.SUBJECT, self.SUBJECT_DOMAIN,
+                                           self.ROLES, self.PROJECT,
+                                           self.PROJECT_DOMAIN)
 
         signature = response.assertion.signature
         self.assertIsNotNone(signature)
@@ -3240,11 +3300,17 @@ class SAMLGenerationTests(FederationTests):
         user_attribute = assertion[4][0]
         self.assertIsInstance(user_attribute[0].text, str)
 
-        role_attribute = assertion[4][1]
+        user_domain_attribute = assertion[4][1]
+        self.assertIsInstance(user_domain_attribute[0].text, str)
+
+        role_attribute = assertion[4][2]
         self.assertIsInstance(role_attribute[0].text, str)
 
-        project_attribute = assertion[4][2]
+        project_attribute = assertion[4][3]
         self.assertIsInstance(project_attribute[0].text, str)
+
+        project_domain_attribute = assertion[4][4]
+        self.assertIsInstance(project_domain_attribute[0].text, str)
 
     def test_invalid_scope_body(self):
         """Test that missing the scope in request body raises an exception.
@@ -3349,11 +3415,17 @@ class SAMLGenerationTests(FederationTests):
         user_attribute = assertion[4][0]
         self.assertIsInstance(user_attribute[0].text, str)
 
-        role_attribute = assertion[4][1]
+        user_domain_attribute = assertion[4][1]
+        self.assertIsInstance(user_domain_attribute[0].text, str)
+
+        role_attribute = assertion[4][2]
         self.assertIsInstance(role_attribute[0].text, str)
 
-        project_attribute = assertion[4][2]
+        project_attribute = assertion[4][3]
         self.assertIsInstance(project_attribute[0].text, str)
+
+        project_domain_attribute = assertion[4][4]
+        self.assertIsInstance(project_domain_attribute[0].text, str)
 
 
 class IdPMetadataGenerationTests(FederationTests):

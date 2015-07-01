@@ -17,7 +17,6 @@ from oslo_config import cfg
 from keystone.common import cache
 from keystone.common import ldap as common_ldap
 from keystone.common.ldap import core as common_ldap_core
-from keystone.common import sql
 from keystone.tests import unit as tests
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit import fakeldap
@@ -67,9 +66,7 @@ class BaseBackendLdapCommon(object):
 
     def config_overrides(self):
         super(BaseBackendLdapCommon, self).config_overrides()
-        self.config_fixture.config(
-            group='identity',
-            driver='keystone.identity.backends.ldap.Identity')
+        self.config_fixture.config(group='identity', driver='ldap')
 
     def config_files(self):
         config_files = super(BaseBackendLdapCommon, self).config_files()
@@ -116,17 +113,13 @@ class BaseBackendLdapIdentitySqlEverythingElse(tests.SQLDriverOverrides):
         return config_files
 
     def setUp(self):
-        self.useFixture(database.Database())
+        sqldb = self.useFixture(database.Database())
         super(BaseBackendLdapIdentitySqlEverythingElse, self).setUp()
         self.clear_database()
         self.load_backends()
         cache.configure_cache_region(cache.REGION)
-        self.engine = sql.get_engine()
-        self.addCleanup(sql.cleanup)
 
-        sql.ModelBase.metadata.create_all(bind=self.engine)
-        self.addCleanup(sql.ModelBase.metadata.drop_all, bind=self.engine)
-
+        sqldb.recreate()
         self.load_fixtures(default_fixtures)
         # defaulted by the data load
         self.user_foo['enabled'] = True
@@ -134,15 +127,9 @@ class BaseBackendLdapIdentitySqlEverythingElse(tests.SQLDriverOverrides):
     def config_overrides(self):
         super(BaseBackendLdapIdentitySqlEverythingElse,
               self).config_overrides()
-        self.config_fixture.config(
-            group='identity',
-            driver='keystone.identity.backends.ldap.Identity')
-        self.config_fixture.config(
-            group='resource',
-            driver='keystone.resource.backends.sql.Resource')
-        self.config_fixture.config(
-            group='assignment',
-            driver='keystone.assignment.backends.sql.Assignment')
+        self.config_fixture.config(group='identity', driver='ldap')
+        self.config_fixture.config(group='resource', driver='sql')
+        self.config_fixture.config(group='assignment', driver='sql')
 
 
 class BaseBackendLdapIdentitySqlEverythingElseWithMapping(object):

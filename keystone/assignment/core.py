@@ -18,6 +18,7 @@ import abc
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 import six
 
 from keystone.common import cache
@@ -28,7 +29,6 @@ from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LI
 from keystone import notifications
-from keystone.openstack.common import versionutils
 
 
 CONF = cfg.CONF
@@ -80,6 +80,9 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+
+    driver_namespace = 'keystone.assignment'
+
     _PROJECT = 'project'
     _ROLE_REMOVED_FROM_USER = 'role_removed_from_user'
     _INVALIDATION_USER_PROJECT_TOKENS = 'invalidate_user_project_tokens'
@@ -474,8 +477,6 @@ class Manager(manager.Manager):
                 # for invalidating tokens below, so extract them here.
                 for user in self.identity_api.list_users_in_group(group_id):
                     if user['id'] != user_id:
-                        self._emit_invalidate_user_token_persistence(
-                            user['id'])
                         self.revoke_api.revoke_by_grant(
                             user_id=user['id'], role_id=role_id,
                             domain_id=domain_id, project_id=project_id)
@@ -904,12 +905,8 @@ class Driver(object):
 
         raise exception.NotImplemented()  # pragma: no cover
 
-    # TODO(henry-nash): Rename the following two methods to match the more
-    # meaningfully named ones above.
-
-# TODO(ayoung): determine what else these two functions raise
     @abc.abstractmethod
-    def delete_user(self, user_id):
+    def delete_user_assignments(self, user_id):
         """Deletes all assignments for a user.
 
         :raises: keystone.exception.RoleNotFound
@@ -918,7 +915,7 @@ class Driver(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def delete_group(self, group_id):
+    def delete_group_assignments(self, group_id):
         """Deletes all assignments for a group.
 
         :raises: keystone.exception.RoleNotFound
@@ -931,6 +928,8 @@ class Driver(object):
 @dependency.requires('assignment_api')
 class RoleManager(manager.Manager):
     """Default pivot point for the Role backend."""
+
+    driver_namespace = 'keystone.role'
 
     _ROLE = 'role'
 

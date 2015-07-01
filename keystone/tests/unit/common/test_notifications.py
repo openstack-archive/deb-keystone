@@ -23,10 +23,10 @@ from pycadf import cadftaxonomy
 from pycadf import cadftype
 from pycadf import eventfactory
 from pycadf import resource as cadfresource
-import testtools
 
 from keystone.common import dependency
 from keystone import notifications
+from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
 
@@ -53,7 +53,7 @@ def register_callback(operation, resource_type=EXP_RESOURCE_TYPE):
     return callback
 
 
-class AuditNotificationsTestCase(testtools.TestCase):
+class AuditNotificationsTestCase(unit.BaseTestCase):
     def setUp(self):
         super(AuditNotificationsTestCase, self).setUp()
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
@@ -96,7 +96,7 @@ class AuditNotificationsTestCase(testtools.TestCase):
                                           DISABLED_OPERATION)
 
 
-class NotificationsWrapperTestCase(testtools.TestCase):
+class NotificationsWrapperTestCase(unit.BaseTestCase):
     def create_fake_ref(self):
         resource_id = uuid.uuid4().hex
         return resource_id, {
@@ -174,14 +174,12 @@ class NotificationsWrapperTestCase(testtools.TestCase):
         self.assertFalse(callback.called)
 
 
-class NotificationsTestCase(testtools.TestCase):
+class NotificationsTestCase(unit.BaseTestCase):
     def setUp(self):
         super(NotificationsTestCase, self).setUp()
 
-        # these should use self.config_fixture.config(), but they haven't
-        # been registered yet
-        CONF.rpc_backend = 'fake'
-        CONF.notification_driver = ['fake']
+        fixture = self.useFixture(config_fixture.Config(CONF))
+        fixture.config(rpc_backend='fake', notification_driver=['fake'])
 
     def test_send_notification(self):
         """Test the private method _send_notification to ensure event_type,
@@ -922,7 +920,7 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
                            user=self.user_id)
 
 
-class TestCallbackRegistration(testtools.TestCase):
+class TestCallbackRegistration(unit.BaseTestCase):
     def setUp(self):
         super(TestCallbackRegistration, self).setUp()
         self.mock_log = mock.Mock()

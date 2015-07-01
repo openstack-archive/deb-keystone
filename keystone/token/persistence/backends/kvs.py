@@ -22,6 +22,7 @@ from oslo_utils import timeutils
 import six
 
 from keystone.common import kvs
+from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _, _LE, _LW
 from keystone import token
@@ -56,10 +57,8 @@ class Token(token.persistence.Driver):
             # is instantiated.
             LOG.warn(_LW('It is recommended to only use the base '
                          'key-value-store implementation for the token driver '
-                         'for testing purposes. Please use '
-                         'keystone.token.persistence.backends.memcache.Token '
-                         'or keystone.token.persistence.backends.sql.Token '
-                         'instead.'))
+                         "for testing purposes. Please use 'memcache' or "
+                         "'sql' instead."))
 
     def _prefix_token_id(self, token_id):
         return 'token-%s' % token_id.encode('utf-8')
@@ -108,7 +107,7 @@ class Token(token.persistence.Driver):
         # concern about the backend, always store the value(s) in the
         # index as the isotime (string) version so this is where the string is
         # built.
-        expires_str = timeutils.isotime(data_copy['expires'], subsecond=True)
+        expires_str = utils.isotime(data_copy['expires'], subsecond=True)
 
         self._set_key(ptk, data_copy)
         user_id = data['user']['id']
@@ -207,8 +206,8 @@ class Token(token.persistence.Driver):
                             'revocation list.'), data['id'])
             return
 
-        revoked_token_data['expires'] = timeutils.isotime(expires,
-                                                          subsecond=True)
+        revoked_token_data['expires'] = utils.isotime(expires,
+                                                      subsecond=True)
         revoked_token_data['id'] = data['id']
 
         token_list = self._get_key_or_default(self.revocation_key, default=[])

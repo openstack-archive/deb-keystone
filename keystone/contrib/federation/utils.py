@@ -356,7 +356,7 @@ def transform_to_group_ids(group_names, mapping_id,
 def get_assertion_params_from_env(context):
     LOG.debug('Environment variables: %s', context['environment'])
     prefix = CONF.federation.assertion_prefix
-    for k, v in context['environment'].items():
+    for k, v in list(context['environment'].items()):
         if k.startswith(prefix):
             yield (k, v)
 
@@ -509,8 +509,8 @@ class RuleProcessor(object):
         """
 
         def extract_groups(groups_by_domain):
-            for groups in groups_by_domain.values():
-                for group in {g['name']: g for g in groups}.values():
+            for groups in list(groups_by_domain.values()):
+                for group in list({g['name']: g for g in groups}.values()):
                     yield group
 
         def normalize_user(user):

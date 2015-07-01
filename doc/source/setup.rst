@@ -18,27 +18,23 @@
 Setting up a Keystone development environment
 =============================================
 
-This document describes getting the source from keystone's `GitHub repository`_
+This document describes getting the source from keystone's `Git repository`_
 for development purposes.
 
 To install Keystone from packaging, refer instead to Keystone's `User
 Documentation`_.
 
-.. _`GitHub Repository`: http://github.com/openstack/keystone
+.. _`Git Repository`: http://git.openstack.org/cgit/openstack/keystone
 .. _`User Documentation`: http://docs.openstack.org/
 
 Prerequisites
 =============
 
-This document assumes you are using:
-
-- Ubuntu, Fedora or openSUSE (SLE)
-- `Python 2.7`_
-
-.. _`Python 2.7`: http://www.python.org/
+This document assumes you are using Ubuntu, Fedora or openSUSE (SLE)
 
 And that you have the following tools available on your system:
 
+- Python_ 2.7 and 3.4
 - git_
 - setuptools_
 - pip_
@@ -48,17 +44,18 @@ And that you have the following tools available on your system:
 **Reminder**: If you're successfully using a different platform, or a
 different version of the above, please document your configuration here!
 
+.. _Python: http://www.python.org/
 .. _git: http://git-scm.com/
 .. _setuptools: http://pypi.python.org/pypi/setuptools
 
 Getting the latest code
 =======================
 
-Make a clone of the code from our `Github repository`:
+Make a clone of the code from our `Git repository`:
 
 .. code-block:: bash
 
-    $ git clone https://github.com/openstack/keystone.git
+    $ git clone https://git.openstack.org/openstack/keystone.git
 
 When that is complete, you can:
 
@@ -86,11 +83,12 @@ extension, PyPi) cannot satisfy. These dependencies should be installed
 prior to using `pip`, and the installation method may vary depending on
 your platform.
 
-Ubuntu 12.04:
+Ubuntu 14.04:
 
 .. code-block:: bash
 
-    $ sudo apt-get install python-dev libxml2-dev libxslt1-dev libsasl2-dev libsqlite3-dev libssl-dev libldap2-dev libffi-dev
+    $ sudo apt-get install python-dev python3-dev libxml2-dev libxslt1-dev \
+        libsasl2-dev libsqlite3-dev libssl-dev libldap2-dev libffi-dev
 
 
 Fedora 19+:
@@ -161,15 +159,12 @@ forget to activate it:
 .. code-block:: bash
 
     $ source .venv/bin/activate
-    $ python
 
-You should then be able to `import keystone` from your Python shell
-without issue:
+You should then be able to `import keystone` using Python without issue:
 
-.. code-block:: python
+.. code-block:: bash
 
-    >>> import keystone
-    >>>
+    $ python -c "import keystone"
 
-If you can import Keystone successfully, you should be ready to move on to
-:doc:`developing`.
+If you can import Keystone without a traceback, you should be ready to move on
+to :doc:`developing`.

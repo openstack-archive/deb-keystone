@@ -15,6 +15,7 @@
 import datetime
 import sys
 
+from keystone.common import utils
 from keystoneclient.common import cms
 from oslo_config import cfg
 from oslo_log import log
@@ -194,8 +195,9 @@ class Auth(controller.V2Controller):
         if not CONF.trust.enabled and 'trust_id' in auth:
             raise exception.Forbidden('Trusts are disabled.')
         elif CONF.trust.enabled and 'trust_id' in auth:
-            trust_ref = self.trust_api.get_trust(auth['trust_id'])
-            if trust_ref is None:
+            try:
+                trust_ref = self.trust_api.get_trust(auth['trust_id'])
+            except exception.TrustNotFound:
                 raise exception.Forbidden()
             if user_id != trust_ref['trustee_user_id']:
                 raise exception.Forbidden()
@@ -204,7 +206,7 @@ class Auth(controller.V2Controller):
                 raise exception.Forbidden()
             if ('expires' in trust_ref) and (trust_ref['expires']):
                 expiry = trust_ref['expires']
-                if expiry < timeutils.parse_isotime(timeutils.isotime()):
+                if expiry < timeutils.parse_isotime(utils.isotime()):
                     raise exception.Forbidden()
             user_id = trust_ref['trustor_user_id']
             trustor_user_ref = self.identity_api.get_user(
@@ -386,7 +388,8 @@ class Auth(controller.V2Controller):
                 role_list = self.assignment_api.get_roles_for_user_and_project(
                     user_id, tenant_id)
             except exception.ProjectNotFound:
-                pass
+                msg = _('Project ID not found: %(t_id)s') % {'t_id': tenant_id}
+                raise exception.Unauthorized(msg)
 
             if not role_list:
                 msg = _('User %(u_id)s is unauthorized for tenant %(t_id)s')
@@ -461,7 +464,7 @@ class Auth(controller.V2Controller):
         for t in tokens:
             expires = t['expires']
             if expires and isinstance(expires, datetime.datetime):
-                t['expires'] = timeutils.isotime(expires)
+                t['expires'] = utils.isotime(expires)
         data = {'revoked': tokens}
         json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,

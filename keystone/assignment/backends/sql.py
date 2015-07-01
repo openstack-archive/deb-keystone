@@ -53,10 +53,10 @@ class AssignmentType(object):
 class Assignment(keystone_assignment.Driver):
 
     def default_role_driver(self):
-        return "keystone.assignment.role_backends.sql.Role"
+        return 'sql'
 
     def default_resource_driver(self):
-        return 'keystone.resource.backends.sql.Resource'
+        return 'sql'
 
     def list_user_ids_for_project(self, tenant_id):
         with sql.transaction() as session:
@@ -377,13 +377,13 @@ class Assignment(keystone_assignment.Driver):
             q = q.filter_by(role_id=role_id)
             q.delete(False)
 
-    def delete_user(self, user_id):
+    def delete_user_assignments(self, user_id):
         with sql.transaction() as session:
             q = session.query(RoleAssignment)
             q = q.filter_by(actor_id=user_id)
             q.delete(False)
 
-    def delete_group(self, group_id):
+    def delete_group_assignments(self, group_id):
         with sql.transaction() as session:
             q = session.query(RoleAssignment)
             q = q.filter_by(actor_id=group_id)
@@ -399,12 +399,15 @@ class RoleAssignment(sql.ModelBase, sql.DictBase):
                  AssignmentType.USER_DOMAIN, AssignmentType.GROUP_DOMAIN,
                  name='type'),
         nullable=False)
-    actor_id = sql.Column(sql.String(64), nullable=False, index=True)
+    actor_id = sql.Column(sql.String(64), nullable=False)
     target_id = sql.Column(sql.String(64), nullable=False)
     role_id = sql.Column(sql.String(64), nullable=False)
     inherited = sql.Column(sql.Boolean, default=False, nullable=False)
-    __table_args__ = (sql.PrimaryKeyConstraint('type', 'actor_id', 'target_id',
-                                               'role_id'), {})
+    __table_args__ = (
+        sql.PrimaryKeyConstraint('type', 'actor_id', 'target_id', 'role_id',
+                                 'inherited'),
+        sql.Index('ix_actor_id', 'actor_id'),
+    )
 
     def to_dict(self):
         """Override parent to_dict() method with a simpler implementation.

@@ -17,6 +17,7 @@ import os
 
 from oslo_log import log
 
+
 LOG = log.getLogger(__name__)
 
 
@@ -93,7 +94,7 @@ def use_eventlet(monkeypatch_thread=None):
 def use_stdlib():
     global httplib, subprocess
 
-    import httplib as _httplib
+    import six.moves.http_client as _httplib
     import subprocess as _subprocess
 
     httplib = _httplib

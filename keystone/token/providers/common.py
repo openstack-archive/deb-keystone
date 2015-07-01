@@ -14,6 +14,7 @@
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import six
@@ -21,10 +22,10 @@ from six.moves.urllib import parse
 
 from keystone.common import controller as common_controller
 from keystone.common import dependency
+from keystone.common import utils
 from keystone.contrib import federation
 from keystone import exception
 from keystone.i18n import _, _LE
-from keystone.openstack.common import versionutils
 from keystone import token
 from keystone.token import provider
 
@@ -99,7 +100,7 @@ class V2TokenDataHelper(object):
         expires = token_ref.get('expires', provider.default_expire_time())
         if expires is not None:
             if not isinstance(expires, six.text_type):
-                expires = timeutils.isotime(expires)
+                expires = utils.isotime(expires)
 
         token_data = token_ref.get('token_data')
         if token_data:
@@ -195,7 +196,7 @@ class V2TokenDataHelper(object):
                 new_service_ref['endpoints'] = endpoints_ref
                 services[service] = new_service_ref
 
-        return services.values()
+        return list(services.values())
 
 
 @dependency.requires('assignment_api', 'catalog_api', 'federation_api',
@@ -393,10 +394,10 @@ class V3TokenDataHelper(object):
         if not expires:
             expires = provider.default_expire_time()
         if not isinstance(expires, six.string_types):
-            expires = timeutils.isotime(expires, subsecond=True)
+            expires = utils.isotime(expires, subsecond=True)
         token_data['expires_at'] = expires
         token_data['issued_at'] = (issued_at or
-                                   timeutils.isotime(subsecond=True))
+                                   utils.isotime(subsecond=True))
 
     def _populate_audit_info(self, token_data, audit_info=None):
         if audit_info is None or isinstance(audit_info, six.string_types):
@@ -420,7 +421,7 @@ class V3TokenDataHelper(object):
             versionutils.deprecated(
                 what='passing token data with "extras"',
                 as_of=versionutils.deprecated.KILO,
-                in_favor_of='well-defined APIs')
+                in_favor_of='well-defined APIs')(lambda: None)()
         token_data = {'methods': method_names,
                       'extras': extras}
 

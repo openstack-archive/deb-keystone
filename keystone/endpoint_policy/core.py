@@ -23,6 +23,7 @@ from keystone.common import manager
 from keystone import exception
 from keystone.i18n import _, _LE, _LW
 
+
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
@@ -36,6 +37,8 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+
+    driver_namespace = 'keystone.endpoint_policy'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.endpoint_policy.driver)

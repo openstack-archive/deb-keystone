@@ -32,14 +32,6 @@ FILE_OPTIONS = {
                         'AdminTokenAuthMiddleware from your paste '
                         'application pipelines (for example, in '
                         'keystone-paste.ini).'),
-        cfg.IntOpt('compute_port', default=8774,
-                   help='(Deprecated) The port which the OpenStack Compute '
-                        'service listens on. This option was only used for '
-                        'string replacement in the templated catalog backend. '
-                        'Templated catalogs should replace the '
-                        '"$(compute_port)s" substitution with the static port '
-                        'of the compute service. As of Juno, this option is '
-                        'deprecated and will be removed in the L release.'),
         cfg.StrOpt('public_endpoint',
                    help='The base public endpoint URL for Keystone that is '
                         'advertised to clients (NOTE: this does NOT affect '
@@ -81,7 +73,13 @@ FILE_OPTIONS = {
                    help='This is the role name used in combination with the '
                         'member_role_id option; see that option for more '
                         'detail.'),
-        cfg.IntOpt('crypt_strength', default=40000,
+        # NOTE(lbragstad/morganfainberg): This value of 10k was
+        # measured as having an approximate 30% clock-time savings
+        # over the old default of 40k.  The passlib default is not
+        # static and grows over time to constantly approximate ~300ms
+        # of CPU time to hash; this was considered too high.  This
+        # value still exceeds the glibc default of 5k.
+        cfg.IntOpt('crypt_strength', default=10000,
                    help='The value passed as the keyword "rounds" to '
                         'passlib\'s encrypt method.'),
         cfg.IntOpt('list_limit',
@@ -149,8 +147,7 @@ FILE_OPTIONS = {
                         'identity configuration files if '
                         'domain_specific_drivers_enabled is set to true.'),
         cfg.StrOpt('driver',
-                   default=('keystone.identity.backends'
-                            '.sql.Identity'),
+                   default='sql',
                    help='Identity backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for identity caching. This has no '
@@ -168,12 +165,10 @@ FILE_OPTIONS = {
     ],
     'identity_mapping': [
         cfg.StrOpt('driver',
-                   default=('keystone.identity.mapping_backends'
-                            '.sql.Mapping'),
+                   default='sql',
                    help='Keystone Identity Mapping backend driver.'),
         cfg.StrOpt('generator',
-                   default=('keystone.identity.id_generators'
-                            '.sha256.Generator'),
+                   default='sha256',
                    help='Public ID generator for user and group entities. '
                         'The Keystone identity mapper only supports '
                         'generators that produce no more than 64 characters.'),
@@ -209,7 +204,7 @@ FILE_OPTIONS = {
         cfg.IntOpt('max_redelegation_count', default=3,
                    help='Maximum depth of trust redelegation.'),
         cfg.StrOpt('driver',
-                   default='keystone.trust.backends.sql.Trust',
+                   default='sql',
                    help='Trust backend driver.')],
     'os_inherit': [
         cfg.BoolOpt('enabled', default=False,
@@ -245,13 +240,12 @@ FILE_OPTIONS = {
                    help='Amount of time a token should remain valid '
                         '(in seconds).'),
         cfg.StrOpt('provider',
-                   default='keystone.token.providers.uuid.Provider',
+                   default='uuid',
                    help='Controls the token construction, validation, and '
                         'revocation operations. Core providers are '
-                        '"keystone.token.providers.[fernet|pkiz|pki|uuid].'
-                        'Provider".'),
+                        '[fernet|pkiz|pki|uuid].'),
         cfg.StrOpt('driver',
-                   default='keystone.token.persistence.backends.sql.Token',
+                   default='sql',
                    help='Token persistence backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for token system caching. This has no '
@@ -282,7 +276,7 @@ FILE_OPTIONS = {
     ],
     'revoke': [
         cfg.StrOpt('driver',
-                   default='keystone.contrib.revoke.backends.sql.Revoke',
+                   default='sql',
                    help='An implementation of the backend for persisting '
                         'revocation events.'),
         cfg.IntOpt('expiration_buffer', default=1800,
@@ -448,8 +442,7 @@ FILE_OPTIONS = {
     ],
     'domain_config': [
         cfg.StrOpt('driver',
-                   default='keystone.resource.config_backends.sql.'
-                           'DomainConfig',
+                   default='sql',
                    help='Domain config backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for domain config caching. This has no '
@@ -477,14 +470,13 @@ FILE_OPTIONS = {
     ],
     'credential': [
         cfg.StrOpt('driver',
-                   default=('keystone.credential.backends'
-                            '.sql.Credential'),
+                   default='sql',
                    help='Credential backend driver.'),
     ],
     'oauth1': [
         cfg.StrOpt('driver',
-                   default='keystone.contrib.oauth1.backends.sql.OAuth1',
-                   help='Credential backend driver.'),
+                   default='sql',
+                   help='OAuth backend driver.'),
         cfg.IntOpt('request_token_duration', default=28800,
                    help='Duration (in seconds) for the OAuth Request Token.'),
         cfg.IntOpt('access_token_duration', default=86400,
@@ -492,8 +484,7 @@ FILE_OPTIONS = {
     ],
     'federation': [
         cfg.StrOpt('driver',
-                   default='keystone.contrib.federation.'
-                           'backends.sql.Federation',
+                   default='sql',
                    help='Federation backend driver.'),
         cfg.StrOpt('assertion_prefix', default='',
                    help='Value to be used when filtering assertion parameters '
@@ -526,7 +517,7 @@ FILE_OPTIONS = {
     ],
     'policy': [
         cfg.StrOpt('driver',
-                   default='keystone.policy.backends.sql.Policy',
+                   default='sql',
                    help='Policy backend driver.'),
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
@@ -534,17 +525,18 @@ FILE_OPTIONS = {
     ],
     'endpoint_filter': [
         cfg.StrOpt('driver',
-                   default='keystone.contrib.endpoint_filter.backends'
-                           '.sql.EndpointFilter',
+                   default='sql',
                    help='Endpoint Filter backend driver'),
         cfg.BoolOpt('return_all_endpoints_if_no_filter', default=True,
                     help='Toggle to return all active endpoints if no filter '
                          'exists.'),
     ],
     'endpoint_policy': [
+        cfg.BoolOpt('enabled',
+                    default=True,
+                    help='Enable endpoint_policy functionality.'),
         cfg.StrOpt('driver',
-                   default='keystone.contrib.endpoint_policy.backends'
-                           '.sql.EndpointPolicy',
+                   default='sql',
                    help='Endpoint policy backend driver'),
     ],
     'ldap': [
@@ -568,18 +560,19 @@ FILE_OPTIONS = {
                          'Only enable this option if your LDAP server '
                          'supports subtree deletion.'),
         cfg.StrOpt('query_scope', default='one',
-                   help='The LDAP scope for queries, this can be either '
-                        '"one" (onelevel/singleLevel) or "sub" '
-                        '(subtree/wholeSubtree).'),
+                   choices=['one', 'sub'],
+                   help='The LDAP scope for queries, "one" represents '
+                        'oneLevel/singleLevel and "sub" represents '
+                        'subtree/wholeSubtree options.'),
         cfg.IntOpt('page_size', default=0,
                    help='Maximum results per page; a value of zero ("0") '
                         'disables paging.'),
         cfg.StrOpt('alias_dereferencing', default='default',
-                   help='The LDAP dereferencing option for queries. This '
-                        'can be either "never", "searching", "always", '
-                        '"finding" or "default". The "default" option falls '
-                        'back to using default dereferencing configured by '
-                        'your ldap.conf.'),
+                   choices=['never', 'searching', 'always', 'finding',
+                            'default'],
+                   help='The LDAP dereferencing option for queries. The '
+                        '"default" option falls back to using default '
+                        'dereferencing configured by your ldap.conf.'),
         cfg.IntOpt('debug_level',
                    help='Sets the LDAP debugging level for LDAP calls. '
                         'A value of 0 means that debugging is not enabled. '
@@ -801,8 +794,9 @@ FILE_OPTIONS = {
         cfg.BoolOpt('use_tls', default=False,
                     help='Enable TLS for communicating with LDAP servers.'),
         cfg.StrOpt('tls_req_cert', default='demand',
-                   help='Valid options for tls_req_cert are demand, never, '
-                        'and allow.'),
+                   choices=['demand', 'never', 'allow'],
+                   help='Specifies what checks to perform on client '
+                        'certificates in an incoming TLS session.'),
         cfg.BoolOpt('use_pool', default=False,
                     help='Enable LDAP connection pooling.'),
         cfg.IntOpt('pool_size', default=10,
@@ -887,7 +881,7 @@ FILE_OPTIONS = {
                    help='Catalog template file name for use with the '
                         'template catalog backend.'),
         cfg.StrOpt('driver',
-                   default='keystone.catalog.backends.sql.Catalog',
+                   default='sql',
                    help='Catalog backend driver.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for catalog caching. This has no '
@@ -970,9 +964,10 @@ FILE_OPTIONS = {
         cfg.StrOpt('idp_contact_telephone',
                    help='Telephone number of contact person.'),
         cfg.StrOpt('idp_contact_type', default='other',
-                   help='Contact type. Allowed values are: '
-                        'technical, support, administrative '
-                        'billing, and other'),
+                   choices=['technical', 'support', 'administrative',
+                            'billing', 'other'],
+                   help='The contact type describing the main point of '
+                        'contact for the identity provider.'),
         cfg.StrOpt('idp_metadata_path',
                    default='/etc/keystone/saml2_idp_metadata.xml',
                    help='Path to the Identity Provider Metadata file. '
@@ -1027,6 +1022,15 @@ FILE_OPTIONS = {
                    deprecated_for_removal=True,
                    help='The port number which the admin service listens '
                         'on.'),
+        cfg.BoolOpt('wsgi_keep_alive', default=True,
+                    help="If set to false, disables keepalives on the server; "
+                         "all connections will be closed after serving one "
+                         "request."),
+        cfg.IntOpt('client_socket_timeout', default=900,
+                   help="Timeout for socket operations on a client "
+                        "connection. If an incoming connection is idle for "
+                        "this number of seconds it will be closed. A value "
+                        "of '0' means wait forever."),
         cfg.BoolOpt('tcp_keepalive', default=False,
                     deprecated_name='tcp_keepalive',
                     deprecated_group='DEFAULT',
@@ -1140,4 +1144,4 @@ def list_opts():
 
     :returns: a list of (group_name, opts) tuples
     """
-    return FILE_OPTIONS.items()
+    return list(FILE_OPTIONS.items())

@@ -23,12 +23,15 @@ from keystone.common import dependency
 from keystone.common import manager
 from keystone import exception
 
+
 CONF = cfg.CONF
 
 
 @dependency.provider('id_generator_api')
 class Manager(manager.Manager):
     """Default pivot point for the identifier generator backend."""
+
+    driver_namespace = 'keystone.identity.id_generator'
 
     def __init__(self):
         super(Manager, self).__init__(CONF.identity_mapping.generator)

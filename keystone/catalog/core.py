@@ -50,7 +50,7 @@ def format_url(url, substitutions, silent_keyerror_failures=None):
 
     WHITELISTED_PROPERTIES = [
         'tenant_id', 'user_id', 'public_bind_host', 'admin_bind_host',
-        'compute_host', 'compute_port', 'admin_port', 'public_port',
+        'compute_host', 'admin_port', 'public_port',
         'public_endpoint', 'admin_endpoint', ]
 
     substitutions = utils.WhiteListedItemFilter(
@@ -93,6 +93,9 @@ class Manager(manager.Manager):
     dynamically calls the backend.
 
     """
+
+    driver_namespace = 'keystone.catalog'
+
     _ENDPOINT = 'endpoint'
     _SERVICE = 'service'
     _REGION = 'region'

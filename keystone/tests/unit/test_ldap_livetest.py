@@ -18,6 +18,7 @@ import uuid
 import ldap
 import ldap.modlist
 from oslo_config import cfg
+from six.moves import range
 
 from keystone import exception
 from keystone.identity.backends import ldap as identity_ldap
@@ -80,12 +81,6 @@ class LiveLDAPIdentity(test_backend_ldap.LDAPIdentity):
         config_files = super(LiveLDAPIdentity, self).config_files()
         config_files.append(tests.dirs.tests_conf('backend_liveldap.conf'))
         return config_files
-
-    def config_overrides(self):
-        super(LiveLDAPIdentity, self).config_overrides()
-        self.config_fixture.config(
-            group='identity',
-            driver='keystone.identity.backends.ldap.Identity')
 
     def test_build_tree(self):
         """Regression test for building the tree names

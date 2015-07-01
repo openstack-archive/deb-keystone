@@ -867,7 +867,7 @@ To build your service catalog using this driver, see the built-in help:
     $ openstack help endpoint create
 
 You can also refer to `an example in Keystone (tools/sample_data.sh)
-<https://github.com/openstack/keystone/blob/master/tools/sample_data.sh>`_.
+<https://git.openstack.org/cgit/openstack/keystone/tree/tools/sample_data.sh>`_.
 
 File-based Service Catalog (``templated.Catalog``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -897,7 +897,7 @@ Keystone, however you should create your own to reflect your deployment.
 
 Another such example is `available in devstack
 (files/default_catalog.templates)
-<https://github.com/openstack-dev/devstack/blob/master/files/default_catalog.templates>`_.
+<https://git.openstack.org/cgit/openstack-dev/devstack/tree/files/default_catalog.templates>`_.
 
 Logging
 -------
@@ -1183,10 +1183,10 @@ The following attributes are available
   would ensure that the user object that is being deleted is in the same
   domain as the token provided.
 
-Every target object has an `id` and a `name` available as `target.<object>.id`
-and `target.<object>.name`. Other attributes are retrieved from the database
-and vary between object types. Moreover, some database fields are filtered out
-(e.g. user passwords).
+Every target object (except token) has an `id` and a `name` available as
+`target.<object>.id` and `target.<object>.name`. Other attributes are retrieved
+from the database and vary between object types. Moreover, some database fields
+are filtered out (e.g. user passwords).
 
 List of object attributes:
 
@@ -1219,6 +1219,10 @@ List of object attributes:
     * target.project.enabled
     * target.project.id
     * target.project.name
+
+* token
+    * target.token.user_id
+    * target.token.user.domain.id
 
 The default policy.json file supplied provides a somewhat basic example of API
 protection, and does not assume any particular use of domains. For multi-domain
@@ -1296,6 +1300,10 @@ through the normal REST API. At the moment, the following calls are supported:
 
 * ``db_sync``: Sync the database.
 * ``db_version``: Print the current migration version of the database.
+* ``domain_config_upload``: Upload domain configuration file.
+* ``fernet_rotate``: Rotate keys in the Fernet key repository.
+* ``fernet_setup``: Setup a Fernet key repository.
+* ``mapping_engine``: Test your federation mapping rules.
 * ``mapping_purge``: Purge the identity mapping table.
 * ``pki_setup``: Initialize the certificates used to sign tokens.
 * ``saml_idp_metadata``: Generate identity provider metadata.

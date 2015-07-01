@@ -17,13 +17,15 @@ import sys
 from keystoneclient.common import cms
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
-from oslo_utils import timeutils
 import six
+import stevedore
 
 from keystone.common import controller
 from keystone.common import dependency
+from keystone.common import utils
 from keystone.common import wsgi
 from keystone import config
 from keystone.contrib import federation
@@ -41,6 +43,27 @@ AUTH_METHODS = {}
 AUTH_PLUGINS_LOADED = False
 
 
+def load_auth_method(method):
+    plugin_name = CONF.auth[method]
+    try:
+        namespace = 'keystone.auth.%s' % method
+        driver_manager = stevedore.DriverManager(namespace, plugin_name,
+                                                 invoke_on_load=True)
+        return driver_manager.driver
+    except RuntimeError:
+        LOG.debug('Failed to load the %s driver (%s) using stevedore, will '
+                  'attempt to load using import_object instead.',
+                  method, plugin_name)
+
+    @versionutils.deprecated(as_of=versionutils.deprecated.LIBERTY,
+                             in_favor_of='entrypoints',
+                             what='direct import of driver')
+    def _load_using_import(plugin_name):
+        return importutils.import_object(plugin_name)
+
+    return _load_using_import(plugin_name)
+
+
 def load_auth_methods():
     global AUTH_PLUGINS_LOADED
 
@@ -50,28 +73,8 @@ def load_auth_methods():
     # config.setup_authentication should be idempotent, call it to ensure we
     # have setup all the appropriate configuration options we may need.
     config.setup_authentication()
-    for plugin in CONF.auth.methods:
-        if '.' in plugin:
-            # NOTE(morganfainberg): if '.' is in the plugin name, it should be
-            # imported rather than used as a plugin identifier.
-            plugin_class = plugin
-            driver = importutils.import_object(plugin)
-            if not hasattr(driver, 'method'):
-                raise ValueError(_('Cannot load an auth-plugin by class-name '
-                                   'without a "method" attribute defined: %s'),
-                                 plugin_class)
-
-            LOG.info(_LI('Loading auth-plugins by class-name is deprecated.'))
-            plugin_name = driver.method
-        else:
-            plugin_name = plugin
-            plugin_class = CONF.auth.get(plugin)
-            driver = importutils.import_object(plugin_class)
-        if plugin_name in AUTH_METHODS:
-            raise ValueError(_('Auth plugin %(plugin)s is requesting '
-                               'previously registered method %(method)s') %
-                             {'plugin': plugin_class, 'method': driver.method})
-        AUTH_METHODS[plugin_name] = driver
+    for plugin in set(CONF.auth.methods):
+        AUTH_METHODS[plugin] = load_auth_method(plugin)
     AUTH_PLUGINS_LOADED = True
 
 
@@ -121,11 +124,7 @@ class AuthContext(dict):
         return super(AuthContext, self).__setitem__(key, val)
 
 
-# TODO(blk-u): this class doesn't use identity_api directly, but makes it
-# available for consumers. Consumers should probably not be getting
-# identity_api from this since it's available in global registry, then
-# identity_api should be removed from this list.
-@dependency.requires('identity_api', 'resource_api', 'trust_api')
+@dependency.requires('resource_api', 'trust_api')
 class AuthInfo(object):
     """Encapsulation of "auth" request."""
 
@@ -217,8 +216,6 @@ class AuthInfo(object):
             raise exception.ValidationError(attribute='trust_id',
                                             target='trust')
         trust = self.trust_api.get_trust(trust_id)
-        if not trust:
-            raise exception.TrustNotFound(trust_id=trust_id)
         return trust
 
     def _validate_and_normalize_scope_data(self):
@@ -546,7 +543,7 @@ class Auth(controller.V3Controller):
         for t in tokens:
             expires = t['expires']
             if not (expires and isinstance(expires, six.text_type)):
-                t['expires'] = timeutils.isotime(expires)
+                t['expires'] = utils.isotime(expires)
         data = {'revoked': tokens}
         json_data = jsonutils.dumps(data)
         signed_text = cms.cms_sign_text(json_data,

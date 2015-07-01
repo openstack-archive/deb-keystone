@@ -72,8 +72,8 @@ Example response::
   "id": "ef303187fc8d41668f25199c298396a5"}], "type": "identity", "id":
   "bd73972c0e14fb69bae8ff76e112a90", "name": "keystone"}], "extras": {},
   "user": {"domain": {"id": "default", "name": "Default"}, "id":
-  "3ec3164f750146be97f21559ee4d9c51", "name": "admin"}, "issued_at":
-  "201406-10T20:55:16.806027Z"}}
+  "3ec3164f750146be97f21559ee4d9c51", "name": "admin"}, "audit_ids":
+  ["yRt0UrxJSs6-WYJgwEMMmg"], "issued_at": "201406-10T20:55:16.806027Z"}}
 
 
 Project-scoped
@@ -116,11 +116,11 @@ Example response::
   Content-Length: 960
   Date: Tue, 10 Jun 2014 20:40:14 GMT
 
-  {"token": {"methods": ["password"], "roles": [{"id":
-   "c703057be878458588961ce9a0ce686b", "name": "admin"}], "expires_at":
-   "2014-06-10T21:40:14.360795Z", "project": {"domain": {"id": "default",
-   "name": "Default"}, "id": "3d4c2c82bd5948f0bcab0cf3a7c9b48c", "name":
-   "demo"}, "catalog": [{"endpoints": [{"url":
+  {"token": {"audit_ids": ["ECwrVNWbSCqmEgPnu0YCRw"], "methods": ["password"],
+   "roles": [{"id": "c703057be878458588961ce9a0ce686b", "name": "admin"}],
+   "expires_at": "2014-06-10T21:40:14.360795Z", "project": {"domain": {"id":
+   "default", "name": "Default"}, "id": "3d4c2c82bd5948f0bcab0cf3a7c9b48c",
+   "name": "demo"}, "catalog": [{"endpoints": [{"url":
    "http://localhost:35357/v2.0", "region": "RegionOne", "interface": "admin",
    "id": "29beb2f1567642eb810b042b6719ea88"}, {"url":
    "http://localhost:5000/v2.0", "region": "RegionOne", "interface":
@@ -184,7 +184,8 @@ Example response::
   "id": "ef303187fc8d41668f25199c298396a5"}], "type": "identity", "id":
   "bd7397d2c0e14fb69bae8ff76e112a90", "name": "keystone"}], "extras": {},
   "user": {"domain": {"id": "default", "name": "Default"}, "id":
-  "3ec3164f750146be97f21559ee4d9c51", "name": "admin"}, "issued_at":
+  "3ec3164f750146be97f21559ee4d9c51", "name": "admin"},
+  "audit_ids": ["Xpa6Uyn-T9S6mTREudUH3w"], "issued_at":
   "2014-06-10T20:52:58.852194Z"}}
 
 
@@ -219,23 +220,11 @@ Example response::
   Content-Length: 1034
   Date: Tue, 10 Jun 2014 21:00:05 GMT
 
-  {"token": {"methods": ["token", "password"], "roles": [{"id":
-  "9fe2ff9ee4384b1894a90878d3e92bab", "name": "_member_"}, {"id":
-  "c703057be878458588961ce9a0ce686b", "name": "admin"}], "expires_at":
-  "2014-06-10T21:55:16.806001Z", "project": {"domain": {"id": "default",
-  "name": "Default"}, "id": "8538a3f13f9541b28c2620eb19065e45", "name":
-  "admin"}, "catalog": [{"endpoints": [{"url": "http://localhost:35357/v2.0",
-  "region": "RegionOne", "interface": "admin", "id":
-  "29beb2f1567642eb810b042b6719ea88"}, {"url": "http://localhost:5000/v2.0",
-  "region": "RegionOne", "interface": "internal", "id":
-  "87057e3735d4415c97ae231b4841eb1c"}, {"url": "http://localhost:5000/v2.0",
-  "region": "RegionOne", "interface": "public", "id":
-  "ef303187fc8d41668f25199c298396a5"}], "type": "identity", "id":
-  "bd7397d2c0e14fb69bae8ff76e112a90", "name": "keystone"}], "extras": {},
-  "user": {"domain": {"id": "default", "name": "Default"}, "id":
-  "3ec3164f750146be97f21559ee4d9c51", "name": "admin"}, "issued_at":
-  "2014-06-10T21:00:05.548559Z"}}
-
+  {"token": {"methods": ["token", "password"], "expires_at":
+  "2015-05-28T07:43:44.808209Z", "extras": {}, "user": {"domain": {"id":
+  "default", "name": "Default"}, "id": "753867c25c3340ffad1abc22d488c31a",
+  "name": "admin"}, "audit_ids": ["ZE0OPSuzTmCXHo0eIOYltw",
+  "xxIQCkHOQOywL0oY6CTppQ"], "issued_at": "2015-05-28T07:19:23.763532Z"}}
 
 .. note::
 
@@ -755,7 +744,53 @@ and supported media types:
 
     $ curl http://0.0.0.0:35357
 
-or:
+.. code-block:: javascript
+
+    {
+        "versions": {
+            "values": [
+                {
+                    "id": "v3.4",
+                    "links": [
+                        {
+                            "href": "http://127.0.0.1:35357/v3/",
+                            "rel": "self"
+                        }
+                    ],
+                    "media-types": [
+                        {
+                            "base": "application/json",
+                            "type": "application/vnd.openstack.identity-v3+json"
+                        }
+                    ],
+                    "status": "stable",
+                    "updated": "2015-03-30T00:00:00Z"
+                },
+                {
+                    "id": "v2.0",
+                    "links": [
+                        {
+                            "href": "http://127.0.0.1:35357/v2.0/",
+                            "rel": "self"
+                        },
+                        {
+                            "href": "http://docs.openstack.org/",
+                            "rel": "describedby",
+                            "type": "text/html"
+                        }
+                    ],
+                    "media-types": [
+                        {
+                            "base": "application/json",
+                            "type": "application/vnd.openstack.identity-v2.0+json"
+                        }
+                    ],
+                    "status": "stable",
+                    "updated": "2014-04-17T00:00:00Z"
+                }
+            ]
+        }
+    }
 
 .. code-block:: bash
 
@@ -766,27 +801,27 @@ Returns:
 .. code-block:: javascript
 
     {
-        "version":{
-            "id":"v2.0",
-            "status":"beta",
-            "updated":"2011-11-19T00:00:00Z",
-            "links":[
+        "version": {
+            "id": "v2.0",
+            "links": [
                 {
-                    "rel":"self",
-                    "href":"http://127.0.0.1:35357/v2.0/"
+                    "href": "http://127.0.0.1:35357/v2.0/",
+                    "rel": "self"
                 },
                 {
-                    "rel":"describedby",
-                    "type":"text/html",
-                    "href":"http://docs.openstack.org/"
-                },
-            ],
-            "media-types":[
-                {
-                    "base":"application/json",
-                    "type":"application/vnd.openstack.identity-v2.0+json"
+                    "href": "http://docs.openstack.org/",
+                    "rel": "describedby",
+                    "type": "text/html"
                 }
-            ]
+            ],
+            "media-types": [
+                {
+                    "base": "application/json",
+                    "type": "application/vnd.openstack.identity-v2.0+json"
+                }
+            ],
+            "status": "stable",
+            "updated": "2014-04-17T00:00:00Z"
         }
     }
 

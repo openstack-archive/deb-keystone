@@ -11,10 +11,11 @@
 # under the License.
 
 import random
-import six
 import uuid
 
 from oslo_config import cfg
+import six
+from six.moves import range
 
 from keystone.common import controller
 from keystone import exception
@@ -606,6 +607,11 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
         """Call ``POST /projects``."""
         self.post('/projects', body={'project': {}}, expected_status=400)
 
+    def test_create_project_invalid_domain_id(self):
+        """Call ``POST /projects``."""
+        self.new_project_ref(domain_id=uuid.uuid4().hex)
+        self.post('/projects', body={'project': {}}, expected_status=400)
+
     def _create_projects_hierarchy(self, hierarchy_size=1):
         """Creates a single-branched project hierarchy with the specified size.
 
@@ -632,6 +638,58 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
 
         return projects
 
+    def test_list_projects_filtering_by_parent_id(self):
+        """Call ``GET /projects?parent_id={project_id}``."""
+        projects = self._create_projects_hierarchy(hierarchy_size=2)
+
+        # Add another child to projects[1] - it will be projects[3]
+        new_ref = self.new_project_ref(
+            domain_id=self.domain_id,
+            parent_id=projects[1]['project']['id'])
+        resp = self.post('/projects',
+                         body={'project': new_ref})
+        self.assertValidProjectResponse(resp, new_ref)
+
+        projects.append(resp.result)
+
+        # Query for projects[0] immediate children - it will
+        # be only projects[1]
+        r = self.get(
+            '/projects?parent_id=%(project_id)s' % {
+                'project_id': projects[0]['project']['id']})
+        self.assertValidProjectListResponse(r)
+
+        projects_result = r.result['projects']
+        expected_list = [projects[1]['project']]
+
+        # projects[0] has projects[1] as child
+        self.assertEqual(expected_list, projects_result)
+
+        # Query for projects[1] immediate children - it will
+        # be projects[2] and projects[3]
+        r = self.get(
+            '/projects?parent_id=%(project_id)s' % {
+                'project_id': projects[1]['project']['id']})
+        self.assertValidProjectListResponse(r)
+
+        projects_result = r.result['projects']
+        expected_list = [projects[2]['project'], projects[3]['project']]
+
+        # projects[1] has projects[2] and projects[3] as children
+        self.assertEqual(expected_list, projects_result)
+
+        # Query for projects[2] immediate children - it will be an empty list
+        r = self.get(
+            '/projects?parent_id=%(project_id)s' % {
+                'project_id': projects[2]['project']['id']})
+        self.assertValidProjectListResponse(r)
+
+        projects_result = r.result['projects']
+        expected_list = []
+
+        # projects[2] has no child, projects_result must be an empty list
+        self.assertEqual(expected_list, projects_result)
+
     def test_create_hierarchical_project(self):
         """Call ``POST /projects``."""
         self._create_projects_hierarchy()
@@ -642,6 +700,22 @@ class AssignmentTestCase(test_v3.RestfulTestCase):
             '/projects/%(project_id)s' % {
                 'project_id': self.project_id})
         self.assertValidProjectResponse(r, self.project)
+
+    def test_get_project_with_parents_as_list_with_invalid_id(self):
+        """Call ``GET /projects/{project_id}?parents_as_list``."""
+        self.get('/projects/%(project_id)s?parents_as_list' % {
+                 'project_id': None}, expected_status=404)
+
+        self.get('/projects/%(project_id)s?parents_as_list' % {
+                 'project_id': uuid.uuid4().hex}, expected_status=404)
+
+    def test_get_project_with_subtree_as_list_with_invalid_id(self):
+        """Call ``GET /projects/{project_id}?subtree_as_list``."""
+        self.get('/projects/%(project_id)s?subtree_as_list' % {
+                 'project_id': None}, expected_status=404)
+
+        self.get('/projects/%(project_id)s?subtree_as_list' % {
+                 'project_id': uuid.uuid4().hex}, expected_status=404)
 
     def test_get_project_with_parents_as_ids(self):
         """Call ``GET /projects/{project_id}?parents_as_ids``."""
@@ -2261,6 +2335,48 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase):
 
         # Check the user cannot get a domain token anymore
         self.v3_authenticate_token(domain_auth_data, expected_status=401)
+
+    def _test_crud_inherited_and_direct_assignment_on_target(self, target_url):
+        # Create a new role to avoid assignments loaded from sample data
+        role = self.new_role_ref()
+        self.role_api.create_role(role['id'], role)
+
+        # Define URLs
+        direct_url = '%s/users/%s/roles/%s' % (
+            target_url, self.user_id, role['id'])
+        inherited_url = '/OS-INHERIT/%s/inherited_to_projects' % direct_url
+
+        # Create the direct assignment
+        self.put(direct_url)
+        # Check the direct assignment exists, but the inherited one does not
+        self.head(direct_url)
+        self.head(inherited_url, expected_status=404)
+
+        # Now add the inherited assignment
+        self.put(inherited_url)
+        # Check both the direct and inherited assignment exist
+        self.head(direct_url)
+        self.head(inherited_url)
+
+        # Delete indirect assignment
+        self.delete(inherited_url)
+        # Check the direct assignment exists, but the inherited one does not
+        self.head(direct_url)
+        self.head(inherited_url, expected_status=404)
+
+        # Now delete the inherited assignment
+        self.delete(direct_url)
+        # Check that none of them exist
+        self.head(direct_url, expected_status=404)
+        self.head(inherited_url, expected_status=404)
+
+    def test_crud_inherited_and_direct_assignment_on_domains(self):
+        self._test_crud_inherited_and_direct_assignment_on_target(
+            '/domains/%s' % self.domain_id)
+
+    def test_crud_inherited_and_direct_assignment_on_projects(self):
+        self._test_crud_inherited_and_direct_assignment_on_target(
+            '/projects/%s' % self.project_id)
 
     def test_crud_user_inherited_domain_role_grants(self):
         role_list = []
