@@ -12,8 +12,7 @@ Build-Depends: debhelper (>= 9),
                python-pbr (>= 0.11),
                python-setuptools,
                python-sphinx,
-Build-Depends-Indep: msgpack,
-                     python-bashate,
+Build-Depends-Indep: python-bashate,
                      python-coverage,
                      python-crypto,
                      python-cryptography (>= 0.8.2),
@@ -73,8 +72,7 @@ Package: python-keystone
 Architecture: all
 Section: python
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: msgpack,
-         python-crypto,
+Depends: python-crypto,
          python-cryptography (>= 0.8.2),
          python-dateutil,
          python-dogpile.cache,
