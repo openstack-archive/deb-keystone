@@ -26,12 +26,8 @@ Build-Depends-Indep: python-bashate,
                      python-keystonemiddleware (>= 2.0.0),
                      python-ldap,
                      python-ldappool,
-<<<<<<< HEAD
                      python-lxml,
-                     python-memcache,
-=======
                      python-memcache (>= 1.56),
->>>>>>> Fixed (build-)depends for this release.
                      python-migrate (>= 0.9.6),
                      python-mock (>= 1.3),
                      python-msgpack,
