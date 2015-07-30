@@ -148,7 +148,8 @@ FILE_OPTIONS = {
                         'domain_specific_drivers_enabled is set to true.'),
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Identity backend driver.'),
+                   help='Entrypoint for the identity backend driver in the '
+                        'keystone.identity namespace.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for identity caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -166,12 +167,15 @@ FILE_OPTIONS = {
     'identity_mapping': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Keystone Identity Mapping backend driver.'),
+                   help='Entrypoint for the identity mapping backend driver '
+                        'in the keystone.identity.id_mapping namespace.'),
         cfg.StrOpt('generator',
                    default='sha256',
-                   help='Public ID generator for user and group entities. '
-                        'The Keystone identity mapper only supports '
-                        'generators that produce no more than 64 characters.'),
+                   help='Entrypoint for the public ID generator for user and '
+                        'group entities in the keystone.identity.id_generator '
+                        'namespace. The Keystone identity mapper only '
+                        'supports generators that produce no more than 64 '
+                        'characters.'),
         cfg.BoolOpt('backward_compatible_ids',
                     default=True,
                     help='The format of user and group IDs changed '
@@ -205,7 +209,8 @@ FILE_OPTIONS = {
                    help='Maximum depth of trust redelegation.'),
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Trust backend driver.')],
+                   help='Entrypoint for the trust backend driver in the '
+                        'keystone.trust namespace.')],
     'os_inherit': [
         cfg.BoolOpt('enabled', default=False,
                     help='role-assignment inheritance to projects from '
@@ -242,11 +247,13 @@ FILE_OPTIONS = {
         cfg.StrOpt('provider',
                    default='uuid',
                    help='Controls the token construction, validation, and '
-                        'revocation operations. Core providers are '
-                        '[fernet|pkiz|pki|uuid].'),
+                        'revocation operations. Entrypoint in the '
+                        'keystone.token.provider namespace. Core providers '
+                        'are [fernet|pkiz|pki|uuid].'),
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Token persistence backend driver.'),
+                   help='Entrypoint for the token persistence backend driver '
+                        'in the keystone.token.persistence namespace.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for token system caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -277,8 +284,9 @@ FILE_OPTIONS = {
     'revoke': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='An implementation of the backend for persisting '
-                        'revocation events.'),
+                   help='Entrypoint for an implementation of the backend for '
+                        'persisting revocation events in the keystone.revoke '
+                        'namespace.'),
         cfg.IntOpt('expiration_buffer', default=1800,
                    help='This value (calculated in seconds) is added to token '
                         'expiration before a revocation event may be removed '
@@ -417,11 +425,13 @@ FILE_OPTIONS = {
         # If assignment driver is not specified, the identity driver chooses
         # the backend
         cfg.StrOpt('driver',
-                   help='Assignment backend driver.'),
+                   help='Entrypoint for the assignment backend driver in the '
+                        'keystone.assignment namespace.'),
     ],
     'resource': [
         cfg.StrOpt('driver',
-                   help='Resource backend driver. If a resource driver is '
+                   help='Entrypoint for the resource backend driver in the '
+                        'keystone.resource namespace. If a resource driver is '
                         'not specified, the assignment driver will choose '
                         'the resource driver.'),
         cfg.BoolOpt('caching', default=True,
@@ -443,7 +453,8 @@ FILE_OPTIONS = {
     'domain_config': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Domain config backend driver.'),
+                   help='Entrypoint for the domain config backend driver in '
+                        'the keystone.resource.domain_config namespace.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for domain config caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -457,7 +468,8 @@ FILE_OPTIONS = {
         # If role driver is not specified, the assignment driver chooses
         # the backend
         cfg.StrOpt('driver',
-                   help='Role backend driver.'),
+                   help='Entrypoint for the role backend driver in the '
+                        'keystone.role namespace.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for role caching. This has no effect '
                          'unless global caching is enabled.'),
@@ -471,12 +483,14 @@ FILE_OPTIONS = {
     'credential': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Credential backend driver.'),
+                   help='Entrypoint for the credential backend driver in the '
+                        'keystone.credential namespace.'),
     ],
     'oauth1': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='OAuth backend driver.'),
+                   help='Entrypoint for hte OAuth backend driver in the '
+                        'keystone.oauth1 namespace.'),
         cfg.IntOpt('request_token_duration', default=28800,
                    help='Duration (in seconds) for the OAuth Request Token.'),
         cfg.IntOpt('access_token_duration', default=86400,
@@ -485,7 +499,8 @@ FILE_OPTIONS = {
     'federation': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Federation backend driver.'),
+                   help='Entrypoint for the federation backend driver in the '
+                        'keystone.federation namespace.'),
         cfg.StrOpt('assertion_prefix', default='',
                    help='Value to be used when filtering assertion parameters '
                         'from the environment.'),
@@ -518,7 +533,8 @@ FILE_OPTIONS = {
     'policy': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Policy backend driver.'),
+                   help='Entrypoint for the policy backend driver in the '
+                        'keystone.policy namespace.'),
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a policy collection.'),
@@ -526,7 +542,8 @@ FILE_OPTIONS = {
     'endpoint_filter': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Endpoint Filter backend driver'),
+                   help='Entrypoint for the endpoint filter backend driver in '
+                        'the keystone.endpoint_filter namespace.'),
         cfg.BoolOpt('return_all_endpoints_if_no_filter', default=True,
                     help='Toggle to return all active endpoints if no filter '
                          'exists.'),
@@ -537,7 +554,8 @@ FILE_OPTIONS = {
                     help='Enable endpoint_policy functionality.'),
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Endpoint policy backend driver'),
+                   help='Entrypoint for the endpoint policy backend driver in '
+                        'the keystone.endpoint_policy namespace.'),
     ],
     'ldap': [
         cfg.StrOpt('url', default='ldap://localhost',
@@ -653,61 +671,75 @@ FILE_OPTIONS = {
         cfg.StrOpt('project_tree_dn',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_tree_dn', group='ldap')],
+                   deprecated_for_removal=True,
                    help='Search base for projects'),
         cfg.StrOpt('project_filter',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_filter', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP search filter for projects.'),
         cfg.StrOpt('project_objectclass', default='groupOfNames',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_objectclass', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP objectclass for projects.'),
         cfg.StrOpt('project_id_attribute', default='cn',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_id_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to project id.'),
         cfg.StrOpt('project_member_attribute', default='member',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_member_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to project membership for '
                         'user.'),
         cfg.StrOpt('project_name_attribute', default='ou',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_name_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to project name.'),
         cfg.StrOpt('project_desc_attribute', default='description',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_desc_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to project description.'),
         cfg.StrOpt('project_enabled_attribute', default='enabled',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_enabled_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to project enabled.'),
         cfg.StrOpt('project_domain_id_attribute',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_domain_id_attribute', group='ldap')],
+                   deprecated_for_removal=True,
                    default='businessCategory',
                    help='LDAP attribute mapped to project domain_id.'),
         cfg.ListOpt('project_attribute_ignore', default=[],
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_attribute_ignore', group='ldap')],
+                    deprecated_for_removal=True,
                     help='List of attributes stripped off the project on '
                          'update.'),
         cfg.BoolOpt('project_allow_create', default=True,
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_allow_create', group='ldap')],
+                    deprecated_for_removal=True,
                     help='Allow project creation in LDAP backend.'),
         cfg.BoolOpt('project_allow_update', default=True,
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_allow_update', group='ldap')],
+                    deprecated_for_removal=True,
                     help='Allow project update in LDAP backend.'),
         cfg.BoolOpt('project_allow_delete', default=True,
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_allow_delete', group='ldap')],
+                    deprecated_for_removal=True,
                     help='Allow project deletion in LDAP backend.'),
         cfg.BoolOpt('project_enabled_emulation', default=False,
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_enabled_emulation', group='ldap')],
+                    deprecated_for_removal=True,
                     help='If true, Keystone uses an alternative method to '
                          'determine if a project is enabled or not by '
                          'checking if they are a member of the '
@@ -715,11 +747,13 @@ FILE_OPTIONS = {
         cfg.StrOpt('project_enabled_emulation_dn',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_enabled_emulation_dn', group='ldap')],
+                   deprecated_for_removal=True,
                    help='DN of the group entry to hold enabled projects when '
                         'using enabled emulation.'),
         cfg.ListOpt('project_additional_attribute_mapping',
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_additional_attribute_mapping', group='ldap')],
+                    deprecated_for_removal=True,
                     default=[],
                     help='Additional attribute mappings for projects. '
                          'Attribute mapping format is '
@@ -728,27 +762,38 @@ FILE_OPTIONS = {
                          'Identity API attribute.'),
 
         cfg.StrOpt('role_tree_dn',
+                   deprecated_for_removal=True,
                    help='Search base for roles.'),
         cfg.StrOpt('role_filter',
+                   deprecated_for_removal=True,
                    help='LDAP search filter for roles.'),
         cfg.StrOpt('role_objectclass', default='organizationalRole',
+                   deprecated_for_removal=True,
                    help='LDAP objectclass for roles.'),
         cfg.StrOpt('role_id_attribute', default='cn',
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to role id.'),
         cfg.StrOpt('role_name_attribute', default='ou',
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to role name.'),
         cfg.StrOpt('role_member_attribute', default='roleOccupant',
+                   deprecated_for_removal=True,
                    help='LDAP attribute mapped to role membership.'),
         cfg.ListOpt('role_attribute_ignore', default=[],
+                    deprecated_for_removal=True,
                     help='List of attributes stripped off the role on '
                          'update.'),
         cfg.BoolOpt('role_allow_create', default=True,
+                    deprecated_for_removal=True,
                     help='Allow role creation in LDAP backend.'),
         cfg.BoolOpt('role_allow_update', default=True,
+                    deprecated_for_removal=True,
                     help='Allow role update in LDAP backend.'),
         cfg.BoolOpt('role_allow_delete', default=True,
+                    deprecated_for_removal=True,
                     help='Allow role deletion in LDAP backend.'),
         cfg.ListOpt('role_additional_attribute_mapping',
+                    deprecated_for_removal=True,
                     default=[],
                     help='Additional attribute mappings for roles. Attribute '
                          'mapping format is <ldap_attr>:<user_attr>, where '
@@ -822,20 +867,21 @@ FILE_OPTIONS = {
     ],
     'auth': [
         cfg.ListOpt('methods', default=_DEFAULT_AUTH_METHODS,
-                    help='Default auth methods.'),
+                    help='Allowed authentication methods.'),
         cfg.StrOpt('password',
-                   default='keystone.auth.plugins.password.Password',
-                   help='The password auth plugin module.'),
+                   help='Entrypoint for the password auth plugin module in '
+                        'the keystone.auth.password namespace.'),
         cfg.StrOpt('token',
-                   default='keystone.auth.plugins.token.Token',
-                   help='The token auth plugin module.'),
+                   help='Entrypoint for the token auth plugin module in the '
+                        'keystone.auth.token namespace.'),
         # deals with REMOTE_USER authentication
         cfg.StrOpt('external',
-                   default='keystone.auth.plugins.external.DefaultDomain',
-                   help='The external (REMOTE_USER) auth plugin module.'),
+                   help='Entrypoint for the external (REMOTE_USER) auth '
+                        'plugin module in the keystone.auth.external '
+                        'namespace.'),
         cfg.StrOpt('oauth1',
-                   default='keystone.auth.plugins.oauth1.OAuth',
-                   help='The oAuth1.0 auth plugin module.'),
+                   help='Entrypoint for the oAuth1.0 auth plugin module in '
+                        'the keystone.auth.oauth1 namespace.'),
     ],
     'paste_deploy': [
         cfg.StrOpt('config_file', default='keystone-paste.ini',
@@ -882,7 +928,8 @@ FILE_OPTIONS = {
                         'template catalog backend.'),
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Catalog backend driver.'),
+                   help='Entrypoint for the catalog backend driver in the '
+                        'keystone.catalog namespace.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for catalog caching. This has no '
                          'effect unless global caching is enabled.'),

@@ -34,7 +34,7 @@ from keystone.policy.backends import rules
 from keystone.tests import unit as tests
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import test_v3
-
+from keystone.tests.unit import utils as test_utils
 
 CONF = cfg.CONF
 
@@ -143,7 +143,7 @@ class TokenAPITests(object):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(path=path,
-                           token='ADMIN',
+                           token=CONF.admin_token,
                            method='GET',
                            expected_status=401)
 
@@ -189,7 +189,7 @@ class TokenAPITests(object):
 
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(path=path,
-                           token='ADMIN',
+                           token=CONF.admin_token,
                            method='GET')
 
     def test_v3_v2_intermix_domain_scoped_token_failed(self):
@@ -206,7 +206,7 @@ class TokenAPITests(object):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(path=path,
-                           token='ADMIN',
+                           token=CONF.admin_token,
                            method='GET',
                            expected_status=401)
 
@@ -220,7 +220,7 @@ class TokenAPITests(object):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(path=path,
-                           token='ADMIN',
+                           token=CONF.admin_token,
                            method='GET',
                            expected_status=401)
 
@@ -235,7 +235,7 @@ class TokenAPITests(object):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         resp = self.admin_request(path=path,
-                                  token='ADMIN',
+                                  token=CONF.admin_token,
                                   method='GET')
         v2_token = resp.result
         self.assertEqual(v2_token['access']['user']['id'],
@@ -259,7 +259,7 @@ class TokenAPITests(object):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         resp = self.admin_request(path=path,
-                                  token='ADMIN',
+                                  token=CONF.admin_token,
                                   method='GET')
         v2_token = resp.result
         self.assertEqual(v2_token['access']['user']['id'],
@@ -481,7 +481,7 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
         token = cms.cms_hash_token(token)
         path = '/v2.0/tokens/%s' % (token)
         resp = self.admin_request(path=path,
-                                  token='ADMIN',
+                                  token=CONF.admin_token,
                                   method='GET')
         v2_token = resp.result
         self.assertEqual(v2_token['access']['user']['id'],
@@ -521,6 +521,38 @@ class TestUUIDTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
         token_id = resp.headers.get('X-Subject-Token')
         self.assertIn('expires_at', token_data['token'])
         self.assertFalse(cms.is_asn1_token(token_id))
+
+
+class TestFernetTokenAPIs(test_v3.RestfulTestCase, TokenAPITests):
+    def config_overrides(self):
+        super(TestFernetTokenAPIs, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+
+    def setUp(self):
+        super(TestFernetTokenAPIs, self).setUp()
+        self.doSetUp()
+
+    @test_utils.wip('Failing due to bug 1459790.')
+    def test_v3_v2_token_intermix(self):
+        super(TestFernetTokenAPIs, self).test_v3_v2_token_intermix()
+
+    @test_utils.wip('Failing due to bug 1459790.')
+    def test_v3_v2_unscoped_token_intermix(self):
+        super(TestFernetTokenAPIs, self).test_v3_v2_unscoped_token_intermix()
+
+    @test_utils.wip('Failing due to bug 1459790.')
+    def test_v2_v3_token_intermix(self):
+        super(TestFernetTokenAPIs, self).test_v2_v3_token_intermix()
+
+    @test_utils.wip('Failing due to bug 1459790.')
+    def test_rescoping_token(self):
+        super(TestFernetTokenAPIs, self).test_rescoping_token()
+
+    @test_utils.wip('Failing due to bug 1475762.')
+    def test_v3_v2_intermix_non_default_project_failed(self):
+        super(TestFernetTokenAPIs,
+              self).test_v3_v2_intermix_non_default_project_failed()
 
 
 class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
@@ -1053,7 +1085,7 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         - Delete the grant group1 has on ProjectA
         - Check tokens for user1 & user2 are no longer valid,
           since user1 and user2 are members of group1
-        - Check token for user3 is still valid
+        - Check token for user3 is invalid too
 
         """
         auth_data = self.build_authentication_request(
@@ -1096,10 +1128,11 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token2},
                   expected_status=404)
-        # But user3's token should still be valid
+        # But user3's token should be invalid too as revocation is done for
+        # scope role & project
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': token3},
-                  expected_status=200)
+                  expected_status=404)
 
     def test_domain_group_role_assignment_maintains_token(self):
         """Test domain-group role assignment maintains existing token.
@@ -1186,6 +1219,14 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
 
     def test_removing_role_assignment_does_not_affect_other_users(self):
         """Revoking a role from one user should not affect other users."""
+
+        # This group grant is not needed for the test
+        self.delete(
+            '/projects/%(project_id)s/groups/%(group_id)s/roles/%(role_id)s' %
+            {'project_id': self.projectA['id'],
+             'group_id': self.group1['id'],
+             'role_id': self.role1['id']})
+
         user1_token = self.get_requested_token(
             self.build_authentication_request(
                 user_id=self.user1['id'],
@@ -1204,12 +1245,6 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
                 'project_id': self.projectA['id'],
                 'user_id': self.user1['id'],
                 'role_id': self.role1['id']})
-        self.delete(
-            '/projects/%(project_id)s/groups/%(group_id)s/roles/%(role_id)s' %
-            {'project_id': self.projectA['id'],
-             'group_id': self.group1['id'],
-             'role_id': self.role1['id']})
-
         # authorization for the first user should now fail
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': user1_token},
@@ -1366,6 +1401,58 @@ class TestTokenRevokeById(test_v3.RestfulTestCase):
         self.head('/auth/tokens',
                   headers={'X-Subject-Token': unscoped_token},
                   expected_status=200)
+
+
+class TestTokenRevokeByAssignment(TestTokenRevokeById):
+
+    def config_overrides(self):
+        super(TestTokenRevokeById, self).config_overrides()
+        self.config_fixture.config(
+            group='revoke',
+            driver='kvs')
+        self.config_fixture.config(
+            group='token',
+            provider='uuid',
+            revoke_by_id=True)
+
+    def test_removing_role_assignment_keeps_other_project_token_groups(self):
+        """Test assignment isolation.
+
+        Revoking a group role from one project should not invalidate all group
+        users' tokens
+        """
+        self.assignment_api.create_grant(self.role1['id'],
+                                         group_id=self.group1['id'],
+                                         project_id=self.projectB['id'])
+
+        project_token = self.get_requested_token(
+            self.build_authentication_request(
+                user_id=self.user1['id'],
+                password=self.user1['password'],
+                project_id=self.projectB['id']))
+
+        other_project_token = self.get_requested_token(
+            self.build_authentication_request(
+                user_id=self.user1['id'],
+                password=self.user1['password'],
+                project_id=self.projectA['id']))
+
+        self.assignment_api.delete_grant(self.role1['id'],
+                                         group_id=self.group1['id'],
+                                         project_id=self.projectB['id'])
+
+        # authorization for the projectA should still succeed
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': other_project_token},
+                  expected_status=200)
+        # while token for the projectB should not
+        self.head('/auth/tokens',
+                  headers={'X-Subject-Token': project_token},
+                  expected_status=404)
+        revoked_tokens = [
+            t['id'] for t in self.token_provider_api.list_revoked_tokens()]
+        # token is in token revocation list
+        self.assertIn(project_token, revoked_tokens)
 
 
 class TestTokenRevokeApi(TestTokenRevokeById):
@@ -1584,8 +1671,7 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
     def config_overrides(self):
         super(TestAuthExternalDomain, self).config_overrides()
         self.kerberos = False
-        self.auth_plugin_config_override(
-            external='keystone.auth.plugins.external.Domain')
+        self.auth_plugin_config_override(external='Domain')
 
     def test_remote_user_with_realm(self):
         api = auth.controllers.Auth()
@@ -1697,8 +1783,7 @@ class TestAuthKerberos(TestAuthExternalDomain):
         super(TestAuthKerberos, self).config_overrides()
         self.kerberos = True
         self.auth_plugin_config_override(
-            methods=['kerberos', 'password', 'token'],
-            kerberos='keystone.auth.plugins.external.KerberosDomain')
+            methods=['kerberos', 'password', 'token'])
 
 
 class TestAuth(test_v3.RestfulTestCase):
@@ -2731,7 +2816,7 @@ class TestTrustRedelegation(test_v3.RestfulTestCase):
         self.post('/OS-TRUST/trusts',
                   body={'trust': self.chained_trust_ref},
                   token=trust_token,
-                  expected_status=403)
+                  expected_status=400)
 
     def test_roles_subset(self):
         # Build second role
@@ -3287,7 +3372,8 @@ class TestTrustAuth(test_v3.RestfulTestCase):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token='ADMIN', method='GET', expected_status=401)
+            path=path, token=CONF.admin_token,
+            method='GET', expected_status=401)
 
     def test_v3_v2_intermix_trustor_not_in_default_domaini_failed(self):
         ref = self.new_trust_ref(
@@ -3319,7 +3405,8 @@ class TestTrustAuth(test_v3.RestfulTestCase):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token='ADMIN', method='GET', expected_status=401)
+            path=path, token=CONF.admin_token,
+            method='GET', expected_status=401)
 
     def test_v3_v2_intermix_project_not_in_default_domaini_failed(self):
         # create a trustee in default domain to delegate stuff to
@@ -3358,7 +3445,8 @@ class TestTrustAuth(test_v3.RestfulTestCase):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token='ADMIN', method='GET', expected_status=401)
+            path=path, token=CONF.admin_token,
+            method='GET', expected_status=401)
 
     def test_v3_v2_intermix(self):
         # create a trustee in default domain to delegate stuff to
@@ -3396,7 +3484,8 @@ class TestTrustAuth(test_v3.RestfulTestCase):
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token='ADMIN', method='GET', expected_status=200)
+            path=path, token=CONF.admin_token,
+            method='GET', expected_status=200)
 
     def test_exercise_trust_scoped_token_without_impersonation(self):
         ref = self.new_trust_ref(
@@ -4035,7 +4124,7 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase):
             trustor_user_id=self.user_id,
             trustee_user_id=trustee_user['id'],
             project_id=self.project_id,
-            impersonation=True,
+            impersonation=False,
             role_ids=[self.role_id])
 
         # Create a trust
@@ -4055,7 +4144,7 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase):
         unscoped_token = self._get_unscoped_token()
         tampered_token = (unscoped_token[:50] + uuid.uuid4().hex +
                           unscoped_token[50 + 32:])
-        self._validate_token(tampered_token, expected_status=401)
+        self._validate_token(tampered_token, expected_status=404)
 
     def test_revoke_unscoped_token(self):
         unscoped_token = self._get_unscoped_token()
@@ -4135,7 +4224,7 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase):
         project_scoped_token = self._get_project_scoped_token()
         tampered_token = (project_scoped_token[:50] + uuid.uuid4().hex +
                           project_scoped_token[50 + 32:])
-        self._validate_token(tampered_token, expected_status=401)
+        self._validate_token(tampered_token, expected_status=404)
 
     def test_revoke_project_scoped_token(self):
         project_scoped_token = self._get_project_scoped_token()
@@ -4243,7 +4332,7 @@ class TestFernetTokenProvider(test_v3.RestfulTestCase):
         # Get a trust scoped token
         tampered_token = (trust_scoped_token[:50] + uuid.uuid4().hex +
                           trust_scoped_token[50 + 32:])
-        self._validate_token(tampered_token, expected_status=401)
+        self._validate_token(tampered_token, expected_status=404)
 
     def test_revoke_trust_scoped_token(self):
         trustee_user, trust = self._create_trust()

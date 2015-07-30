@@ -91,18 +91,6 @@
 #notification_format = basic
 
 #
-# From keystone.openstack.common.eventlet_backdoor
-#
-
-# Enable eventlet backdoor.  Acceptable values are 0, <port>, and
-# <start>:<end>, where 0 results in listening on a random tcp port number;
-# <port> results in listening on the specified port number (and not enabling
-# backdoor if that port is in use); and <start>:<end> results in listening on
-# the smallest unused port number within the specified range of port numbers.
-# The chosen port is displayed in the service's log file. (string value)
-#backdoor_port = <None>
-
-#
 # From oslo.log
 #
 
@@ -140,8 +128,8 @@
 # Deprecated group/name - [DEFAULT]/logdir
 #log_dir = <None>
 
-# Use syslog for logging. Existing syslog format is DEPRECATED during I, and
-# changed in J to honor RFC5424. (boolean value)
+# Use syslog for logging. Existing syslog format is DEPRECATED and will be
+# changed later to honor RFC5424. (boolean value)
 #use_syslog = false
 
 # (Optional) Enables or disables syslog rfc5424 format for logging. If enabled,
@@ -171,13 +159,10 @@
 #logging_exception_prefix = %(asctime)s.%(msecs)03d %(process)d ERROR %(name)s %(instance)s
 
 # List of logger=LEVEL pairs. (list value)
-#default_log_levels = amqp=WARN,amqplib=WARN,boto=WARN,qpid=WARN,sqlalchemy=WARN,suds=INFO,oslo.messaging=INFO,iso8601=WARN,requests.packages.urllib3.connectionpool=WARN,urllib3.connectionpool=WARN,websocket=WARN,requests.packages.urllib3.util.retry=WARN,urllib3.util.retry=WARN,keystonemiddleware=WARN,routes.middleware=WARN,stevedore=WARN
+#default_log_levels = amqp=WARN,amqplib=WARN,boto=WARN,qpid=WARN,sqlalchemy=WARN,suds=INFO,oslo.messaging=INFO,iso8601=WARN,requests.packages.urllib3.connectionpool=WARN,urllib3.connectionpool=WARN,websocket=WARN,requests.packages.urllib3.util.retry=WARN,urllib3.util.retry=WARN,keystonemiddleware=WARN,routes.middleware=WARN,stevedore=WARN,taskflow=WARN
 
 # Enables or disables publication of error events. (boolean value)
 #publish_errors = false
-
-# Enables or disables fatal status of deprecations. (boolean value)
-#fatal_deprecations = false
 
 # The format for an instance that is passed with the log message. (string
 # value)
@@ -232,8 +217,9 @@
 # Heartbeat time-to-live. (integer value)
 #matchmaker_heartbeat_ttl = 600
 
-# Size of RPC thread pool. (integer value)
-#rpc_thread_pool_size = 64
+# Size of executor thread pool. (integer value)
+# Deprecated group/name - [DEFAULT]/rpc_thread_pool_size
+#executor_thread_pool_size = 64
 
 # The Drivers(s) to handle sending notifications. Possible values are
 # messaging, messagingv2, routing, log, test, noop (multi valued)
@@ -259,6 +245,22 @@
 # exchange name specified in the transport_url option. (string value)
 #control_exchange = keystone
 
+#
+# From oslo.service.service
+#
+
+# Enable eventlet backdoor.  Acceptable values are 0, <port>, and
+# <start>:<end>, where 0 results in listening on a random tcp port number;
+# <port> results in listening on the specified port number (and not enabling
+# backdoor if that port is in use); and <start>:<end> results in listening on
+# the smallest unused port number within the specified range of port numbers.
+# The chosen port is displayed in the service's log file. (string value)
+#backdoor_port = <None>
+
+# Enables or disables logging values of all registered options when starting a
+# service (at DEBUG level). (boolean value)
+#log_options = true
+
 
 [assignment]
 
@@ -266,7 +268,8 @@
 # From keystone
 #
 
-# Assignment backend driver. (string value)
+# Entrypoint for the assignment backend driver in the keystone.assignment
+# namespace. (string value)
 #driver = <None>
 
 
@@ -276,20 +279,24 @@
 # From keystone
 #
 
-# Default auth methods. (list value)
+# Allowed authentication methods. (list value)
 #methods = external,password,token,oauth1
 
-# The password auth plugin module. (string value)
-#password = keystone.auth.plugins.password.Password
+# Entrypoint for the password auth plugin module in the keystone.auth.password
+# namespace. (string value)
+#password = <None>
 
-# The token auth plugin module. (string value)
-#token = keystone.auth.plugins.token.Token
+# Entrypoint for the token auth plugin module in the keystone.auth.token
+# namespace. (string value)
+#token = <None>
 
-# The external (REMOTE_USER) auth plugin module. (string value)
-#external = keystone.auth.plugins.external.DefaultDomain
+# Entrypoint for the external (REMOTE_USER) auth plugin module in the
+# keystone.auth.external namespace. (string value)
+#external = <None>
 
-# The oAuth1.0 auth plugin module. (string value)
-#oauth1 = keystone.auth.plugins.oauth1.OAuth
+# Entrypoint for the oAuth1.0 auth plugin module in the keystone.auth.oauth1
+# namespace. (string value)
+#oauth1 = <None>
 
 
 [cache]
@@ -370,7 +377,8 @@
 # value)
 #template_file = default_catalog.templates
 
-# Catalog backend driver. (string value)
+# Entrypoint for the catalog backend driver in the keystone.catalog namespace.
+# (string value)
 #driver = sql
 
 # Toggle for catalog caching. This has no effect unless global caching is
@@ -448,7 +456,8 @@
 # From keystone
 #
 
-# Credential backend driver. (string value)
+# Entrypoint for the credential backend driver in the keystone.credential
+# namespace. (string value)
 #driver = sql
 
 
@@ -558,7 +567,8 @@
 # From keystone
 #
 
-# Domain config backend driver. (string value)
+# Entrypoint for the domain config backend driver in the
+# keystone.resource.domain_config namespace. (string value)
 #driver = sql
 
 # Toggle for domain config caching. This has no effect unless global caching is
@@ -576,7 +586,8 @@
 # From keystone
 #
 
-# Endpoint Filter backend driver (string value)
+# Entrypoint for the endpoint filter backend driver in the
+# keystone.endpoint_filter namespace. (string value)
 #driver = sql
 
 # Toggle to return all active endpoints if no filter exists. (boolean value)
@@ -592,7 +603,8 @@
 # Enable endpoint_policy functionality. (boolean value)
 #enabled = true
 
-# Endpoint policy backend driver (string value)
+# Entrypoint for the endpoint policy backend driver in the
+# keystone.endpoint_policy namespace. (string value)
 #driver = sql
 
 
@@ -714,7 +726,8 @@
 # From keystone
 #
 
-# Federation backend driver. (string value)
+# Entrypoint for the federation backend driver in the keystone.federation
+# namespace. (string value)
 #driver = sql
 
 # Value to be used when filtering assertion parameters from the environment.
@@ -796,7 +809,8 @@
 # if domain_specific_drivers_enabled is set to true. (string value)
 #domain_config_dir = /etc/keystone/domains
 
-# Identity backend driver. (string value)
+# Entrypoint for the identity backend driver in the keystone.identity
+# namespace. (string value)
 #driver = sql
 
 # Toggle for identity caching. This has no effect unless global caching is
@@ -822,12 +836,13 @@
 # From keystone
 #
 
-# Keystone Identity Mapping backend driver. (string value)
+# Entrypoint for the identity mapping backend driver in the
+# keystone.identity.id_mapping namespace. (string value)
 #driver = sql
 
-# Public ID generator for user and group entities. The Keystone identity mapper
-# only supports generators that produce no more than 64 characters. (string
-# value)
+# Entrypoint for the public ID generator for user and group entities in the
+# keystone.identity.id_generator namespace. The Keystone identity mapper only
+# supports generators that produce no more than 64 characters. (string value)
 #generator = sha256
 
 # The format of user and group IDs changed in Juno for backends that do not
@@ -1001,106 +1016,160 @@
 
 # Search base for projects (string value)
 # Deprecated group/name - [ldap]/tenant_tree_dn
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_tree_dn = <None>
 
 # LDAP search filter for projects. (string value)
 # Deprecated group/name - [ldap]/tenant_filter
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_filter = <None>
 
 # LDAP objectclass for projects. (string value)
 # Deprecated group/name - [ldap]/tenant_objectclass
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_objectclass = groupOfNames
 
 # LDAP attribute mapped to project id. (string value)
 # Deprecated group/name - [ldap]/tenant_id_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_id_attribute = cn
 
 # LDAP attribute mapped to project membership for user. (string value)
 # Deprecated group/name - [ldap]/tenant_member_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_member_attribute = member
 
 # LDAP attribute mapped to project name. (string value)
 # Deprecated group/name - [ldap]/tenant_name_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_name_attribute = ou
 
 # LDAP attribute mapped to project description. (string value)
 # Deprecated group/name - [ldap]/tenant_desc_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_desc_attribute = description
 
 # LDAP attribute mapped to project enabled. (string value)
 # Deprecated group/name - [ldap]/tenant_enabled_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_enabled_attribute = enabled
 
 # LDAP attribute mapped to project domain_id. (string value)
 # Deprecated group/name - [ldap]/tenant_domain_id_attribute
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_domain_id_attribute = businessCategory
 
 # List of attributes stripped off the project on update. (list value)
 # Deprecated group/name - [ldap]/tenant_attribute_ignore
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_attribute_ignore =
 
 # Allow project creation in LDAP backend. (boolean value)
 # Deprecated group/name - [ldap]/tenant_allow_create
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_allow_create = true
 
 # Allow project update in LDAP backend. (boolean value)
 # Deprecated group/name - [ldap]/tenant_allow_update
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_allow_update = true
 
 # Allow project deletion in LDAP backend. (boolean value)
 # Deprecated group/name - [ldap]/tenant_allow_delete
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_allow_delete = true
 
 # If true, Keystone uses an alternative method to determine if a project is
 # enabled or not by checking if they are a member of the
 # "project_enabled_emulation_dn" group. (boolean value)
 # Deprecated group/name - [ldap]/tenant_enabled_emulation
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_enabled_emulation = false
 
 # DN of the group entry to hold enabled projects when using enabled emulation.
 # (string value)
 # Deprecated group/name - [ldap]/tenant_enabled_emulation_dn
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_enabled_emulation_dn = <None>
 
 # Additional attribute mappings for projects. Attribute mapping format is
 # <ldap_attr>:<user_attr>, where ldap_attr is the attribute in the LDAP entry
 # and user_attr is the Identity API attribute. (list value)
 # Deprecated group/name - [ldap]/tenant_additional_attribute_mapping
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #project_additional_attribute_mapping =
 
 # Search base for roles. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_tree_dn = <None>
 
 # LDAP search filter for roles. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_filter = <None>
 
 # LDAP objectclass for roles. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_objectclass = organizationalRole
 
 # LDAP attribute mapped to role id. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_id_attribute = cn
 
 # LDAP attribute mapped to role name. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_name_attribute = ou
 
 # LDAP attribute mapped to role membership. (string value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_member_attribute = roleOccupant
 
 # List of attributes stripped off the role on update. (list value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_attribute_ignore =
 
 # Allow role creation in LDAP backend. (boolean value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_allow_create = true
 
 # Allow role update in LDAP backend. (boolean value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_allow_update = true
 
 # Allow role deletion in LDAP backend. (boolean value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_allow_delete = true
 
 # Additional attribute mappings for roles. Attribute mapping format is
 # <ldap_attr>:<user_attr>, where ldap_attr is the attribute in the LDAP entry
 # and user_attr is the Identity API attribute. (list value)
+# This option is deprecated for removal.
+# Its value may be silently ignored in the future.
 #role_additional_attribute_mapping =
 
 # Search base for groups. (string value)
@@ -1256,7 +1325,8 @@
 # From keystone
 #
 
-# OAuth backend driver. (string value)
+# Entrypoint for hte OAuth backend driver in the keystone.oauth1 namespace.
+# (string value)
 #driver = sql
 
 # Duration (in seconds) for the OAuth Request Token. (integer value)
@@ -1506,7 +1576,7 @@
 # Number of seconds after which the Rabbit broker is considered down if
 # heartbeat's keep-alive fails (0 disable the heartbeat). EXPERIMENTAL (integer
 # value)
-#heartbeat_timeout_threshold = 0
+#heartbeat_timeout_threshold = 60
 
 # How often times during the heartbeat_timeout_threshold we check the
 # heartbeat. (integer value)
@@ -1527,6 +1597,11 @@
 # Deprecated group/name - [DEFAULT]/osapi_max_request_body_size
 # Deprecated group/name - [DEFAULT]/max_request_body_size
 #max_request_body_size = 114688
+
+# The HTTP Header that will be used to determine what the original request
+# protocol scheme was, even if it was hidden by an SSL termination proxy.
+# (string value)
+#secure_proxy_ssl_header = X-Forwarded-Proto
 
 
 [oslo_policy]
@@ -1571,7 +1646,8 @@
 # From keystone
 #
 
-# Policy backend driver. (string value)
+# Entrypoint for the policy backend driver in the keystone.policy namespace.
+# (string value)
 #driver = sql
 
 # Maximum number of entities that will be returned in a policy collection.
@@ -1585,8 +1661,9 @@
 # From keystone
 #
 
-# Resource backend driver. If a resource driver is not specified, the
-# assignment driver will choose the resource driver. (string value)
+# Entrypoint for the resource backend driver in the keystone.resource
+# namespace. If a resource driver is not specified, the assignment driver will
+# choose the resource driver. (string value)
 #driver = <None>
 
 # Toggle for resource caching. This has no effect unless global caching is
@@ -1611,8 +1688,8 @@
 # From keystone
 #
 
-# An implementation of the backend for persisting revocation events. (string
-# value)
+# Entrypoint for an implementation of the backend for persisting revocation
+# events in the keystone.revoke namespace. (string value)
 #driver = sql
 
 # This value (calculated in seconds) is added to token expiration before a
@@ -1636,7 +1713,8 @@
 # From keystone
 #
 
-# Role backend driver. (string value)
+# Entrypoint for the role backend driver in the keystone.role namespace.
+# (string value)
 #driver = <None>
 
 # Toggle for role caching. This has no effect unless global caching is enabled.
@@ -1800,11 +1878,13 @@
 # Amount of time a token should remain valid (in seconds). (integer value)
 #expiration = 3600
 
-# Controls the token construction, validation, and revocation operations. Core
-# providers are [fernet|pkiz|pki|uuid]. (string value)
+# Controls the token construction, validation, and revocation operations.
+# Entrypoint in the keystone.token.provider namespace. Core providers are
+# [fernet|pkiz|pki|uuid]. (string value)
 #provider = uuid
 
-# Token persistence backend driver. (string value)
+# Entrypoint for the token persistence backend driver in the
+# keystone.token.persistence namespace. (string value)
 #driver = sql
 
 # Toggle for token system caching. This has no effect unless global caching is
@@ -1850,5 +1930,6 @@
 # Maximum depth of trust redelegation. (integer value)
 #max_redelegation_count = 3
 
-# Trust backend driver. (string value)
+# Entrypoint for the trust backend driver in the keystone.trust namespace.
+# (string value)
 #driver = sql

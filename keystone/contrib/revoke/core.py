@@ -10,6 +10,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+"""Main entry point into the Revoke service."""
+
 import abc
 import datetime
 
@@ -64,9 +66,12 @@ def revoked_before_cutoff_time():
 
 @dependency.provider('revoke_api')
 class Manager(manager.Manager):
-    """Revoke API Manager.
+    """Default pivot point for the Revoke backend.
 
     Performs common logic for recording revocations.
+
+    See :mod:`keystone.common.manager.Manager` for more details on
+    how this dynamically calls the backend.
 
     """
 
@@ -111,11 +116,12 @@ class Manager(manager.Manager):
         self.revoke(
             model.RevokeEvent(access_token_id=payload['resource_info']))
 
-    def _group_callback(self, service, resource_type, operation, payload):
-        user_ids = (u['id'] for u in self.identity_api.list_users_in_group(
-            payload['resource_info']))
-        for uid in user_ids:
-            self.revoke(model.RevokeEvent(user_id=uid))
+    def _role_assignment_callback(self, service, resource_type, operation,
+                                  payload):
+        info = payload['resource_info']
+        self.revoke_by_grant(role_id=info['role_id'], user_id=info['user_id'],
+                             domain_id=info.get('domain_id'),
+                             project_id=info.get('project_id'))
 
     def _register_listeners(self):
         callbacks = {
@@ -126,6 +132,7 @@ class Manager(manager.Manager):
                 ['role', self._role_callback],
                 ['user', self._user_callback],
                 ['project', self._project_callback],
+                ['role_assignment', self._role_assignment_callback]
             ],
             notifications.ACTIONS.disabled: [
                 ['user', self._user_callback],

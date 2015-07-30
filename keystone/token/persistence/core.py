@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""Main entry point into the Token persistence service."""
+"""Main entry point into the Token Persistence service."""
 
 import abc
 import copy
@@ -40,7 +40,7 @@ REVOCATION_MEMOIZE = cache.get_memoization_decorator(
 @dependency.requires('assignment_api', 'identity_api', 'resource_api',
                      'token_provider_api', 'trust_api')
 class PersistenceManager(manager.Manager):
-    """Default pivot point for the Token backend.
+    """Default pivot point for the Token Persistence backend.
 
     See :mod:`keystone.common.manager.Manager` for more details on how this
     dynamically calls the backend.
@@ -198,11 +198,6 @@ class PersistenceManager(manager.Manager):
         self.token_provider_api.invalidate_individual_token_cache(token_id)
 
 
-# NOTE(morganfainberg): @dependency.optional() is required here to ensure the
-# class-level optional dependency control attribute is populated as empty
-# this is because of the override of .__getattr__ and ensures that if the
-# optional dependency injector changes attributes, this class doesn't break.
-@dependency.optional()
 @dependency.requires('token_provider_api')
 @dependency.provider('token_api')
 class Manager(object):

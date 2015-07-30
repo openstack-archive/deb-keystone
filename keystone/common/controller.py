@@ -17,6 +17,7 @@ import uuid
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_utils import strutils
 import six
 
 from keystone.common import authorization
@@ -52,9 +53,12 @@ def v2_deprecated(f):
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
+    kwargs_str = ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])
+    kwargs_str = strutils.mask_password(kwargs_str)
+
     LOG.debug('RBAC: Authorizing %(action)s(%(kwargs)s)', {
         'action': action,
-        'kwargs': ', '.join(['%s=%s' % (k, kwargs[k]) for k in kwargs])})
+        'kwargs': kwargs_str})
 
     # see if auth context has already been created. If so use it.
     if ('environment' in context and
@@ -690,19 +694,7 @@ class V3Controller(wsgi.Application):
         if context['query_string'].get('domain_id') is not None:
             return context['query_string'].get('domain_id')
 
-        try:
-            token_ref = token_model.KeystoneToken(
-                token_id=context['token_id'],
-                token_data=self.token_provider_api.validate_token(
-                    context['token_id']))
-        except KeyError:
-            raise exception.ValidationError(
-                _('domain_id is required as part of entity'))
-        except (exception.TokenNotFound,
-                exception.UnsupportedTokenVersionException):
-            LOG.warning(_LW('Invalid token found while getting domain ID '
-                            'for list request'))
-            raise exception.Unauthorized()
+        token_ref = utils.get_token_ref(context)
 
         if token_ref.domain_scoped:
             return token_ref.domain_id
@@ -719,25 +711,7 @@ class V3Controller(wsgi.Application):
         being used.
 
         """
-        # We could make this more efficient by loading the domain_id
-        # into the context in the wrapper function above (since
-        # this version of normalize_domain will only be called inside
-        # a v3 protected call).  However, this optimization is probably not
-        # worth the duplication of state
-        try:
-            token_ref = token_model.KeystoneToken(
-                token_id=context['token_id'],
-                token_data=self.token_provider_api.validate_token(
-                    context['token_id']))
-        except KeyError:
-            # This might happen if we use the Admin token, for instance
-            raise exception.ValidationError(
-                _('A domain-scoped token must be used'))
-        except (exception.TokenNotFound,
-                exception.UnsupportedTokenVersionException):
-            LOG.warning(_LW('Invalid token found while getting domain ID '
-                            'for list request'))
-            raise exception.Unauthorized()
+        token_ref = utils.get_token_ref(context)
 
         if token_ref.domain_scoped:
             return token_ref.domain_id

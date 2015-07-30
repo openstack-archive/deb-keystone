@@ -23,8 +23,8 @@ from oslo_config import cfg
 from oslo_log import log
 import six
 
-from keystone import clean
 from keystone.common import cache
+from keystone.common import clean
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
@@ -364,6 +364,7 @@ def exception_translated(exception_type):
     return _exception_translated
 
 
+@notifications.listener
 @dependency.provider('identity_api')
 @dependency.requires('assignment_api', 'credential_api', 'id_mapping_api',
                      'resource_api', 'revoke_api')
@@ -968,6 +969,19 @@ class Manager(manager.Manager):
 
         :param user_id: user identifier
         :type user_id: string
+        """
+        pass
+
+    @notifications.internal(
+        notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE)
+    def emit_invalidate_grant_token_persistence(self, user_project):
+        """Emit a notification to the callback system to revoke grant tokens.
+
+        This method and associated callback listener removes the need for
+        making a direct call to another manager to delete and revoke tokens.
+
+        :param user_project: {'user_id': user_id, 'project_id': project_id}
+        :type user_project: dict
         """
         pass
 

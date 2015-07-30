@@ -48,7 +48,7 @@ To run the Keystone Admin and API server instances, use:
 
 .. code-block:: bash
 
-    $ tools/with_venv.sh bin/keystone-all
+    $ tools/with_venv.sh keystone-all
 
 This runs Keystone with the configuration the etc/ directory of the project.
 See :doc:`configuration` for details on how Keystone is configured. By default,
@@ -469,6 +469,10 @@ require that these messages are descriptive and accurate.
     def test():
         pass
 
+.. NOTE::
+   Another strategy is to not use the wip decorator and instead show how the
+   code currently incorrectly works. Which strategy is chosen is up to the
+   developer.
 
 Generating Updated Sample Config File
 -------------------------------------
@@ -477,9 +481,13 @@ Keystone's sample configuration file ``etc/keystone.conf.sample`` is automatical
 generated based upon all of the options available within Keystone. These options
 are sourced from the many files around Keystone as well as some external libraries.
 
-If new options are added, primarily located in ``keystone.common.config``, a new
-sample configuration file needs to be generated. To generate a new sample configuration
-to be included in a commit run:
+The sample configuration file is now kept up to date by an infra job that
+generates the config file and if there are any changes will propose a review
+as the OpenStack Proposal Bot. Developers should *NOT* generate the config file
+and propose it as part of their patches since the proposal bot will do this for
+you.
+
+To generate a new sample configuration to see what it looks like, run:
 
 .. code-block:: bash
 

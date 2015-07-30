@@ -10,7 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""Main entry point into the resource service."""
+"""Main entry point into the Resource service."""
 
 import abc
 
@@ -18,12 +18,12 @@ from oslo_config import cfg
 from oslo_log import log
 import six
 
-from keystone import clean
 from keystone.common import cache
+from keystone.common import clean
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
-from keystone.contrib import federation
+from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
 from keystone.i18n import _, _LE, _LW
 from keystone import notifications
@@ -47,7 +47,7 @@ def calc_default_domain():
 @dependency.requires('assignment_api', 'credential_api', 'domain_config_api',
                      'identity_api', 'revoke_api')
 class Manager(manager.Manager):
-    """Default pivot point for the resource backend.
+    """Default pivot point for the Resource backend.
 
     See :mod:`keystone.common.manager.Manager` for more details on how this
     dynamically calls the backend.
@@ -96,14 +96,14 @@ class Manager(manager.Manager):
             parents_list.append(parent_ref)
             for ref in parents_list:
                 if ref.get('domain_id') != tenant.get('domain_id'):
-                    raise exception.ForbiddenAction(
-                        action=_('cannot create a project within a different '
-                                 'domain than its parents.'))
+                    raise exception.ValidationError(
+                        message=_('cannot create a project within a different '
+                                  'domain than its parents.'))
                 if not ref.get('enabled', True):
-                    raise exception.ForbiddenAction(
-                        action=_('cannot create a project in a '
-                                 'branch containing a disabled '
-                                 'project: %s') % ref['id'])
+                    raise exception.ValidationError(
+                        message=_('cannot create a project in a '
+                                  'branch containing a disabled '
+                                  'project: %s') % ref['id'])
             self._assert_max_hierarchy_depth(tenant.get('parent_id'),
                                              parents_list)
 
@@ -138,8 +138,9 @@ class Manager(manager.Manager):
         """
         # NOTE(marek-denis): We cannot create this attribute in the __init__ as
         # config values are always initialized to default value.
-        federated_domain = (CONF.federation.federated_domain_name or
-                            federation.FEDERATED_DOMAIN_KEYWORD).lower()
+        federated_domain = (
+            CONF.federation.federated_domain_name or
+            federation_constants.FEDERATED_DOMAIN_KEYWORD).lower()
         if (domain.get('name') and domain['name'].lower() == federated_domain):
             raise AssertionError(_('Domain cannot be named %s')
                                  % federated_domain)

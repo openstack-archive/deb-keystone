@@ -879,9 +879,8 @@ class AuthWithTrust(AuthTest):
                           context, trust=self.sample_data)
 
     def test_create_trust(self):
-        expires_at = timeutils.strtime(timeutils.utcnow() +
-                                       datetime.timedelta(minutes=10),
-                                       fmt=TIME_FORMAT)
+        expires_at = (timeutils.utcnow() +
+                      datetime.timedelta(minutes=10)).strftime(TIME_FORMAT)
         new_trust = self.create_trust(self.sample_data, self.trustor['name'],
                                       expires_at=expires_at)
         self.assertEqual(self.trustor['id'], new_trust['trustor_user_id'])
@@ -934,8 +933,8 @@ class AuthWithTrust(AuthTest):
 
     def test_get_trust(self):
         unscoped_token = self.get_unscoped_token(self.trustor['name'])
-        context = {'token_id': unscoped_token['access']['token']['id'],
-                   'host_url': HOST_URL}
+        context = self._create_auth_context(
+            unscoped_token['access']['token']['id'])
         new_trust = self.trust_controller.create_trust(
             context, trust=self.sample_data)['trust']
         trust = self.trust_controller.get_trust(context,
@@ -945,6 +944,21 @@ class AuthWithTrust(AuthTest):
         role_ids = [self.role_browser['id'], self.role_member['id']]
         for role in new_trust['roles']:
             self.assertIn(role['id'], role_ids)
+
+    def test_get_trust_without_auth_context(self):
+        """Verify that a trust cannot be retrieved when the auth context is
+        missing.
+        """
+        unscoped_token = self.get_unscoped_token(self.trustor['name'])
+        context = self._create_auth_context(
+            unscoped_token['access']['token']['id'])
+        new_trust = self.trust_controller.create_trust(
+            context, trust=self.sample_data)['trust']
+        # Delete the auth context before calling get_trust().
+        del context['environment'][authorization.AUTH_CONTEXT_ENV]
+        self.assertRaises(exception.Forbidden,
+                          self.trust_controller.get_trust, context,
+                          new_trust['id'])
 
     def test_create_trust_no_impersonation(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'],
@@ -1117,9 +1131,8 @@ class AuthWithTrust(AuthTest):
             self.controller.authenticate, {}, request_body)
 
     def test_expired_trust_get_token_fails(self):
-        expires_at = timeutils.strtime(timeutils.utcnow() +
-                                       datetime.timedelta(minutes=5),
-                                       fmt=TIME_FORMAT)
+        expires_at = (timeutils.utcnow() +
+                      datetime.timedelta(minutes=5)).strftime(TIME_FORMAT)
         time_expired = timeutils.utcnow() + datetime.timedelta(minutes=10)
         new_trust = self.create_trust(self.sample_data, self.trustor['name'],
                                       expires_at)

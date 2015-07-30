@@ -288,14 +288,18 @@ class Application(BaseApplication):
         return {self._normalize_arg(k): v for (k, v) in six.iteritems(d)}
 
     def assert_admin(self, context):
+        """Ensure the user is an admin.
+
+        :raises keystone.exception.Unauthorized: if a token could not be
+            found/authorized, a user is invalid, or a tenant is
+            invalid/not scoped.
+        :raises keystone.exception.Forbidden: if the user is not an admin and
+            does not have the admin role
+
+        """
+
         if not context['is_admin']:
-            try:
-                user_token_ref = token_model.KeystoneToken(
-                    token_id=context['token_id'],
-                    token_data=self.token_provider_api.validate_token(
-                        context['token_id']))
-            except exception.TokenNotFound as e:
-                raise exception.Unauthorized(e)
+            user_token_ref = utils.get_token_ref(context)
 
             validate_token_bind(context, user_token_ref)
             creds = copy.deepcopy(user_token_ref.metadata)
@@ -354,16 +358,7 @@ class Application(BaseApplication):
             LOG.debug(('will not lookup trust as the request auth token is '
                        'either absent or it is the system admin token'))
             return None
-
-        try:
-            token_data = self.token_provider_api.validate_token(
-                context['token_id'])
-        except exception.TokenNotFound:
-            LOG.warning(_LW('Invalid token in _get_trust_id_for_request'))
-            raise exception.Unauthorized()
-
-        token_ref = token_model.KeystoneToken(token_id=context['token_id'],
-                                              token_data=token_data)
+        token_ref = utils.get_token_ref(context)
         return token_ref.trust_id
 
     @classmethod

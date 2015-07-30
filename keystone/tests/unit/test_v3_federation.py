@@ -20,7 +20,6 @@ from lxml import etree
 import mock
 from oslo_config import cfg
 from oslo_log import log
-from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from oslotest import mockpatch
 import saml2
@@ -33,7 +32,7 @@ if not xmldsig:
 
 from keystone.auth import controllers as auth_controllers
 from keystone.auth.plugins import mapped
-from keystone.contrib import federation
+from keystone.contrib.federation import constants as federation_constants
 from keystone.contrib.federation import controllers as federation_controllers
 from keystone.contrib.federation import idp as keystone_idp
 from keystone.contrib.federation import utils as mapping_utils
@@ -127,6 +126,8 @@ class FederatedSetupMixin(object):
         os_federation = token['user']['OS-FEDERATION']
         self.assertEqual(self.IDP, os_federation['identity_provider']['id'])
         self.assertEqual(self.PROTOCOL, os_federation['protocol']['id'])
+        self.assertListEqual(sorted(['identity_provider', 'protocol']),
+                             sorted(os_federation.keys()))
 
     def _issue_unscoped_token(self,
                               idp=None,
@@ -1274,7 +1275,7 @@ class MappingCRUDTests(FederationTests):
         self.assertIsNotNone(entity.get('id'))
         self.assertIsNotNone(entity.get('rules'))
         if ref:
-            self.assertEqual(jsonutils.loads(entity['rules']), ref['rules'])
+            self.assertEqual(entity['rules'], ref['rules'])
         return entity
 
     def _create_default_mapping_entry(self):
@@ -1430,7 +1431,7 @@ class MappingRuleEngineTests(FederationTests):
         self.assertIn('domain', user)
         domain = user['domain']
         domain_name_or_id = domain.get('id') or domain.get('name')
-        domain_ref = domain_id or federation.FEDERATED_DOMAIN_KEYWORD
+        domain_ref = domain_id or federation_constants.FEDERATED_DOMAIN_KEYWORD
         self.assertEqual(domain_ref, domain_name_or_id)
 
     def test_rule_engine_any_one_of_and_direct_mapping(self):
@@ -1995,9 +1996,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
 
     def auth_plugin_config_override(self):
         methods = ['saml2']
-        method_classes = {'saml2': 'keystone.auth.plugins.saml2.Saml2'}
-        super(FederatedTokenTests, self).auth_plugin_config_override(
-            methods, **method_classes)
+        super(FederatedTokenTests, self).auth_plugin_config_override(methods)
 
     def setUp(self):
         super(FederatedTokenTests, self).setUp()
@@ -2919,10 +2918,8 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
 
     def auth_plugin_config_override(self):
         methods = ['saml2', 'token', 'password']
-        method_classes = dict(
-            saml2='keystone.auth.plugins.saml2.Saml2')
         super(FernetFederatedTokenTests,
-              self).auth_plugin_config_override(methods, **method_classes)
+              self).auth_plugin_config_override(methods)
 
     def test_federated_unscoped_token(self):
         resp = self._issue_unscoped_token()
@@ -2976,10 +2973,8 @@ class FederatedTokenTestsMethodToken(FederatedTokenTests):
 
     def auth_plugin_config_override(self):
         methods = ['saml2', 'token']
-        method_classes = dict(
-            saml2='keystone.auth.plugins.saml2.Saml2')
         super(FederatedTokenTests,
-              self).auth_plugin_config_override(methods, **method_classes)
+              self).auth_plugin_config_override(methods)
 
 
 class JsonHomeTests(FederationTests, test_v3.JsonHomeTestMixin):

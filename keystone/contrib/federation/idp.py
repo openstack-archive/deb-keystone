@@ -17,6 +17,7 @@ import uuid
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_utils import fileutils
 from oslo_utils import importutils
 from oslo_utils import timeutils
 import saml2
@@ -34,7 +35,6 @@ if not xmldsig:
 from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _, _LE
-from keystone.openstack.common import fileutils
 
 
 LOG = log.getLogger(__name__)
@@ -422,10 +422,13 @@ def _sign_assertion(assertion):
             nspair={'saml': saml2.NAMESPACE,
                     'xmldsig': xmldsig.NAMESPACE}))
         command_list.append(file_path)
-        stdout = subprocess.check_output(command_list)
+        stdout = subprocess.check_output(command_list,
+                                         stderr=subprocess.STDOUT)
     except Exception as e:
         msg = _LE('Error when signing assertion, reason: %(reason)s')
         msg = msg % {'reason': e}
+        if hasattr(e, 'output'):
+            msg += ' output: %(output)s' % {'output': e.output}
         LOG.error(msg)
         raise exception.SAMLSigningError(reason=e)
     finally:
