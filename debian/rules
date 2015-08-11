@@ -58,6 +58,9 @@ override_dh_install:
 	install -D -m 0644 httpd/keystone.py $(CURDIR)/debian/python-keystone/usr/share/keystone/wsgi.py
 	dh_python2 /usr/share/keystone
 
+	install -D -m 0644 debian/keystone.apparmor $(CURDIR)/debian/keystone/etc/apparmor.d/usr.bin.keystone-all
+	dh_apparmor --profile-name=usr.bin.keystone-all
+
 override_dh_clean:
 	rm -rf $(CURDIR)/build $(CURDIR)/keystone.egg-info $(CURDIR)/.cache
 	rm -rf $(CURDIR)/keystone/test/keystone.sql.log $(CURDIR)/keystone/test/keystone.ldap.log

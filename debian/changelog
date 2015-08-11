@@ -1,6 +1,7 @@
 keystone (1:8.0.0~b2-2) experimental; urgency=medium
 
   * Now setting-up /v3 endpoint, not /v2.0.
+  * Added AppArmor confinement for keystone-all.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 11 Aug 2015 14:36:02 +0200
 

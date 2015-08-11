@@ -1,0 +1,11 @@
+# Last Modified: Tue Aug 11 21:00:14 2015
+#include <tunables/global>
+
+/usr/bin/keystone-all flags=(complain) {
+  #include <abstractions/base>
+  #include <abstractions/python>
+
+  /usr/bin/keystone-all r,
+  /usr/bin/python2.7 ix,
+
+}

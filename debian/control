@@ -4,6 +4,7 @@ Priority: extra
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
 Uploaders: Thomas Goirand <zigo@debian.org>
 Build-Depends: debhelper (>= 9),
+               dh-apparmor,
                dh-python,
                dh-systemd,
                openstack-pkg-tools (>= 23~),
@@ -137,6 +138,7 @@ Depends: adduser,
          ${misc:Depends},
          ${ostack-lsb-base},
          ${python:Depends}
+Suggests: apparmor
 Description: OpenStack identity service
  This is the identity service used by OpenStack for authentication (authN)
  and high-level authorization (authZ). It currently supports token-based
