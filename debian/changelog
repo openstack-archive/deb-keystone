@@ -1,6 +1,6 @@
 keystone (2015.1.0-3) unstable; urgency=medium
 
-  * Now setting-up /v3.0 endpoint, not /v2.0
+  * Now setting-up /v3 endpoint, not /v2.0
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 11 Aug 2015 14:34:04 +0200
 
