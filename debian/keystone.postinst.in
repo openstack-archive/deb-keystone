@@ -46,9 +46,9 @@ keystone_create_endpoint_postinst () {
 					--name=keystone --type=identity --description="Keystone Identity Service")
 				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
 					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
-					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v3.0 \
-					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v3.0 \
-					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v3.0)
+					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v3 \
+					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v3 \
+					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v3)
 			fi
 		fi
 	fi
