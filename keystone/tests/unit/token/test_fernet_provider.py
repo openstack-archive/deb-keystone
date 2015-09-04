@@ -402,12 +402,6 @@ class TestFernetKeyRotation(tests.TestCase):
             int(x) for x in os.listdir(CONF.fernet_tokens.key_repository))
 
     @property
-    def keys(self):
-        """Key files converted to numbers."""
-        return sorted(
-            int(x) for x in os.listdir(CONF.fernet_tokens.key_repository))
-
-    @property
     def key_repository_size(self):
         """The number of keys in the key repository."""
         return len(self.keys)

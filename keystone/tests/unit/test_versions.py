@@ -986,7 +986,6 @@ class VersionSingleAppTestCase(tests.TestCase):
     def test_public(self):
         self._test_version('main')
 
-    @utils.wip('waiting on bug #1381961')
     def test_admin(self):
         self._test_version('admin')
 

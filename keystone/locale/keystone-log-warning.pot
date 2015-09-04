@@ -72,10 +72,6 @@ msgstr ""
 msgid "No domain information specified as part of list request"
 msgstr ""
 
-#: keystone/common/controller.py:742
-msgid "Invalid token found while getting domain ID for create request"
-msgstr ""
-
 #: keystone/common/openssl.py:73
 msgid "Failed to invoke ``openssl version``, assuming is v1.0 or newer"
 msgstr ""
