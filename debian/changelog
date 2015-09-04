@@ -3,6 +3,7 @@ keystone (1:8.0.0~b3-1) experimental; urgency=medium
   * New upstream release.
   * Now setting-up /v3 endpoint, not /v2.0.
   * Added AppArmor confinement for keystone-all.
+  * Upstream removed run_tests.sh, now using testr directly.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 11 Aug 2015 14:36:02 +0200
 
