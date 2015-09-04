@@ -311,17 +311,18 @@ def listener(cls):
         @listener
         class Something(object):
 
-            event_callbacks = {
-                notifications.ACTIONS.created: {
-                    'user': self._user_created_callback,
-                },
-                notifications.ACTIONS.deleted: {
-                    'project': [
-                        self._project_deleted_callback,
-                        self._do_cleanup,
-                    ]
-                },
-            }
+            def __init__(self):
+                self.event_callbacks = {
+                    notifications.ACTIONS.created: {
+                        'user': self._user_created_callback,
+                    },
+                    notifications.ACTIONS.deleted: {
+                        'project': [
+                            self._project_deleted_callback,
+                            self._do_cleanup,
+                        ]
+                    },
+                }
 
     """
 
@@ -329,31 +330,12 @@ def listener(cls):
         @functools.wraps(init)
         def __new_init__(self, *args, **kwargs):
             init(self, *args, **kwargs)
-            if not hasattr(self, 'event_callbacks'):
-                msg = _("%r object has no attribute 'event_callbacks'")
-                raise AttributeError(msg % self.__class__.__name)
             _register_event_callbacks(self)
         return __new_init__
 
     def _register_event_callbacks(self):
-        if not isinstance(self.event_callbacks, dict):
-            msg = _('event_callbacks must be a dict')
-            raise ValueError(msg)
-
-        for event in self.event_callbacks:
-            if not isinstance(self.event_callbacks[event], dict):
-                msg = _('event_callbacks[%s] must be a dict') % event
-                raise ValueError(msg)
-            for resource_type in self.event_callbacks[event]:
-                # Make sure we register the provider for each event it
-                # cares to call back.
-                callbacks = self.event_callbacks[event][resource_type]
-                if not callbacks:
-                    continue
-                if not hasattr(callbacks, '__iter__'):
-                    # ensure the callback information is a list
-                    # allowing multiple callbacks to exist
-                    callbacks = [callbacks]
+        for event, resource_types in self.event_callbacks.items():
+            for resource_type, callbacks in resource_types.items():
                 register_event_callback(event, resource_type, callbacks)
 
     cls.__init__ = init_wrapper(cls.__init__)

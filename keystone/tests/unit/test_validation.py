@@ -13,6 +13,9 @@
 
 import uuid
 
+import six
+import testtools
+
 from keystone.assignment import schema as assignment_schema
 from keystone.catalog import schema as catalog_schema
 from keystone.common import validation
@@ -94,6 +97,83 @@ _VALID_FILTERS = [{'interface': 'admin'},
                    'interface': 'internal'}]
 
 _INVALID_FILTERS = ['some string', 1, 0, True, False]
+
+
+class ValidatedDecoratorTests(unit.BaseTestCase):
+
+    entity_schema = {
+        'type': 'object',
+        'properties': {
+            'name': parameter_types.name,
+        },
+        'required': ['name'],
+    }
+
+    valid_entity = {
+        'name': uuid.uuid4().hex,
+    }
+
+    invalid_entity = {}
+
+    @validation.validated(entity_schema, 'entity')
+    def do_something(self, entity):
+        pass
+
+    @validation.validated(entity_create, 'entity')
+    def create_entity(self, entity):
+        pass
+
+    @validation.validated(entity_update, 'entity')
+    def update_entity(self, entity_id, entity):
+        pass
+
+    def _assert_call_entity_method_fails(self, method, *args, **kwargs):
+        e = self.assertRaises(exception.ValidationError, method,
+                              *args, **kwargs)
+
+        self.assertIn('Expecting to find entity in request body',
+                      six.text_type(e))
+
+    def test_calling_with_valid_entity_kwarg_succeeds(self):
+        self.do_something(entity=self.valid_entity)
+
+    def test_calling_with_invalid_entity_kwarg_fails(self):
+        self.assertRaises(exception.ValidationError,
+                          self.do_something,
+                          entity=self.invalid_entity)
+
+    def test_calling_with_valid_entity_arg_succeeds(self):
+        self.do_something(self.valid_entity)
+
+    def test_calling_with_invalid_entity_arg_fails(self):
+        self.assertRaises(exception.ValidationError,
+                          self.do_something,
+                          self.invalid_entity)
+
+    def test_using_the_wrong_name_with_the_decorator_fails(self):
+        with testtools.ExpectedException(TypeError):
+            @validation.validated(self.entity_schema, 'entity_')
+            def function(entity):
+                pass
+
+    def test_create_entity_no_request_body_with_decorator(self):
+        """Test the case when request body is not provided."""
+        self._assert_call_entity_method_fails(self.create_entity)
+
+    def test_create_entity_empty_request_body_with_decorator(self):
+        """Test the case when client passing in an empty entity reference."""
+        self._assert_call_entity_method_fails(self.create_entity, entity={})
+
+    def test_update_entity_no_request_body_with_decorator(self):
+        """Test the case when request body is not provided."""
+        self._assert_call_entity_method_fails(self.update_entity,
+                                              uuid.uuid4().hex)
+
+    def test_update_entity_empty_request_body_with_decorator(self):
+        """Test the case when client passing in an empty entity reference."""
+        self._assert_call_entity_method_fails(self.update_entity,
+                                              uuid.uuid4().hex,
+                                              entity={})
 
 
 class EntityValidationTestCase(unit.BaseTestCase):
@@ -804,6 +884,14 @@ class RegionValidationTestCase(unit.BaseTestCase):
                                'parent_region_id': uuid.uuid4().hex}
         self.create_region_validator.validate(request_to_validate)
 
+    def test_validate_region_create_fails_with_invalid_region_id(self):
+        """Exception raised when passing invalid `id` in request."""
+        request_to_validate = {'id': 1234,
+                               'description': 'US East Region'}
+        self.assertRaises(exception.SchemaValidationError,
+                          self.create_region_validator.validate,
+                          request_to_validate)
+
     def test_validate_region_create_succeeds_with_extra_parameters(self):
         """Validate create region request with extra values."""
         request_to_validate = {'other_attr': uuid.uuid4().hex}
@@ -1096,6 +1184,26 @@ class EndpointValidationTestCase(unit.BaseTestCase):
                           self.create_endpoint_validator.validate,
                           request_to_validate)
 
+    def test_validate_endpoint_create_fails_with_invalid_region_id(self):
+        """Exception raised when passing invalid `region(_id)` in request."""
+        request_to_validate = {'interface': 'admin',
+                               'region_id': 1234,
+                               'service_id': uuid.uuid4().hex,
+                               'url': 'https://service.example.com:5000/'}
+
+        self.assertRaises(exception.SchemaValidationError,
+                          self.create_endpoint_validator.validate,
+                          request_to_validate)
+
+        request_to_validate = {'interface': 'admin',
+                               'region': 1234,
+                               'service_id': uuid.uuid4().hex,
+                               'url': 'https://service.example.com:5000/'}
+
+        self.assertRaises(exception.SchemaValidationError,
+                          self.create_endpoint_validator.validate,
+                          request_to_validate)
+
     def test_validate_endpoint_update_fails_with_invalid_enabled(self):
         """Exception raised when `enabled` is boolean-like value."""
         for invalid_enabled in _INVALID_ENABLED_FORMATS:
@@ -1162,6 +1270,26 @@ class EndpointValidationTestCase(unit.BaseTestCase):
             self.assertRaises(exception.SchemaValidationError,
                               self.update_endpoint_validator.validate,
                               request_to_validate)
+
+    def test_validate_endpoint_update_fails_with_invalid_region_id(self):
+        """Exception raised when passing invalid `region(_id)` in request."""
+        request_to_validate = {'interface': 'admin',
+                               'region_id': 1234,
+                               'service_id': uuid.uuid4().hex,
+                               'url': 'https://service.example.com:5000/'}
+
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_endpoint_validator.validate,
+                          request_to_validate)
+
+        request_to_validate = {'interface': 'admin',
+                               'region': 1234,
+                               'service_id': uuid.uuid4().hex,
+                               'url': 'https://service.example.com:5000/'}
+
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_endpoint_validator.validate,
+                          request_to_validate)
 
 
 class EndpointGroupValidationTestCase(unit.BaseTestCase):

@@ -161,7 +161,7 @@ def convert_ldap_result(ldap_result):
             at_least_one_referral = True
             continue
 
-        for kind, values in six.iteritems(attrs):
+        for kind, values in attrs.items():
             try:
                 val2py = enabled2py if kind == 'enabled' else ldap2py
                 ldap_attrs[kind] = [val2py(x) for x in values]
@@ -329,7 +329,7 @@ def dn_startswith(descendant_dn, dn):
 
 @six.add_metaclass(abc.ABCMeta)
 class LDAPHandler(object):
-    '''Abstract class which defines methods for a LDAP API provider.
+    """Abstract class which defines methods for a LDAP API provider.
 
     Native Keystone values cannot be passed directly into and from the
     python-ldap API. Type conversion must occur at the LDAP API
@@ -417,7 +417,8 @@ class LDAPHandler(object):
     method to any derivations of the abstract class the code will fail
     to load and run making it impossible to forget updating all the
     derived classes.
-    '''
+
+    """
     @abc.abstractmethod
     def __init__(self, conn=None):
         self.conn = conn
@@ -483,13 +484,13 @@ class LDAPHandler(object):
 
 
 class PythonLDAPHandler(LDAPHandler):
-    '''Implementation of the LDAPHandler interface which calls the
-    python-ldap API.
+    """LDAPHandler implementation which calls the python-ldap API.
 
-    Note, the python-ldap API requires all string values to be UTF-8
-    encoded. The KeystoneLDAPHandler enforces this prior to invoking
-    the methods in this class.
-    '''
+    Note, the python-ldap API requires all string values to be UTF-8 encoded.
+    The KeystoneLDAPHandler enforces this prior to invoking the methods in this
+    class.
+
+    """
 
     def __init__(self, conn=None):
         super(PythonLDAPHandler, self).__init__(conn=conn)
@@ -571,10 +572,7 @@ class PythonLDAPHandler(LDAPHandler):
 def _common_ldap_initialization(url, use_tls=False, tls_cacertfile=None,
                                 tls_cacertdir=None, tls_req_cert=None,
                                 debug_level=None):
-    '''Method for common ldap initialization between PythonLDAPHandler and
-    PooledLDAPHandler.
-    '''
-
+    """LDAP initialization for PythonLDAPHandler and PooledLDAPHandler."""
     LOG.debug("LDAP init: url=%s", url)
     LOG.debug('LDAP init: use_tls=%s tls_cacertfile=%s tls_cacertdir=%s '
               'tls_req_cert=%s tls_avail=%s',
@@ -626,15 +624,16 @@ def _common_ldap_initialization(url, use_tls=False, tls_cacertfile=None,
 
 
 class MsgId(list):
-    '''Wrapper class to hold connection and msgid.'''
+    """Wrapper class to hold connection and msgid."""
     pass
 
 
 def use_conn_pool(func):
-    '''Use this only for connection pool specific ldap API.
+    """Use this only for connection pool specific ldap API.
 
     This adds connection object to decorated API as next argument after self.
-    '''
+
+    """
     def wrapper(self, *args, **kwargs):
         # assert isinstance(self, PooledLDAPHandler)
         with self._get_pool_connection() as conn:
@@ -644,8 +643,7 @@ def use_conn_pool(func):
 
 
 class PooledLDAPHandler(LDAPHandler):
-    '''Implementation of the LDAPHandler interface which uses pooled
-    connection manager.
+    """LDAPHandler implementation which uses pooled connection manager.
 
     Pool specific configuration is defined in [ldap] section.
     All other LDAP configuration is still used from [ldap] section
@@ -665,8 +663,8 @@ class PooledLDAPHandler(LDAPHandler):
     Note, the python-ldap API requires all string values to be UTF-8
     encoded. The KeystoneLDAPHandler enforces this prior to invoking
     the methods in this class.
-    '''
 
+    """
     # Added here to allow override for testing
     Connector = ldappool.StateConnector
     auth_pool_prefix = 'auth_pool_'
@@ -739,7 +737,7 @@ class PooledLDAPHandler(LDAPHandler):
         # if connection has a lifetime, then it already has options specified
         if conn.get_lifetime() > 30:
             return
-        for option, invalue in six.iteritems(self.conn_options):
+        for option, invalue in self.conn_options.items():
             conn.set_option(option, invalue)
 
     def _get_pool_connection(self):
@@ -747,9 +745,8 @@ class PooledLDAPHandler(LDAPHandler):
 
     def simple_bind_s(self, who='', cred='',
                       serverctrls=None, clientctrls=None):
-        '''Not using use_conn_pool decorator here as this API takes cred as
-        input.
-        '''
+        # Not using use_conn_pool decorator here as this API takes cred as
+        # input.
         self.who = who
         self.cred = cred
         with self._get_pool_connection() as conn:
@@ -775,16 +772,17 @@ class PooledLDAPHandler(LDAPHandler):
                    filterstr='(objectClass=*)', attrlist=None, attrsonly=0,
                    serverctrls=None, clientctrls=None,
                    timeout=-1, sizelimit=0):
-        '''This API is asynchoronus API which returns MsgId instance to be used
-        in result3 call.
+        """Asynchronous API to return a ``MsgId`` instance.
 
-        To work with result3 API in predicatable manner, same LDAP connection
-        is needed which provided msgid. So wrapping used connection and msgid
-        in MsgId class. The connection associated with search_ext is released
-        once last hard reference to MsgId object is freed. This will happen
-        when the method is done with returned MsgId usage.
-        '''
+        The ``MsgId`` instance can be safely used in a call to ``result3()``.
 
+        To work with ``result3()`` API in predictable manner, the same LDAP
+        connection is needed which originally provided the ``msgid``. So, this
+        method wraps the existing connection and ``msgid`` in a new ``MsgId``
+        instance. The connection associated with ``search_ext`` is released
+        once last hard reference to the ``MsgId`` instance is freed.
+
+        """
         conn_ctxt = self._get_pool_connection()
         conn = conn_ctxt.__enter__()
         try:
@@ -802,11 +800,12 @@ class PooledLDAPHandler(LDAPHandler):
 
     def result3(self, msgid, all=1, timeout=None,
                 resp_ctrl_classes=None):
-        '''This method is used to wait for and return the result of an
-        operation previously initiated by one of the LDAP asynchronous
-        operation routines (eg search_ext()) It returned an invocation
-        identifier (a message id) upon successful initiation of their
-        operation.
+        """This method is used to wait for and return result.
+
+        This method returns the result of an operation previously initiated by
+        one of the LDAP asynchronous operation routines (eg search_ext()). It
+        returned an invocation identifier (a message id) upon successful
+        initiation of their operation.
 
         Input msgid is expected to be instance of class MsgId which has LDAP
         session/connection used to execute search_ext and message idenfier.
@@ -814,7 +813,8 @@ class PooledLDAPHandler(LDAPHandler):
         The connection associated with search_ext is released once last hard
         reference to MsgId object is freed. This will happen when function
         which requested msgId and used it in result3 exits.
-        '''
+
+        """
 
         conn, msg_id = msgid
         return conn.result3(msg_id, all, timeout)
@@ -833,7 +833,7 @@ class PooledLDAPHandler(LDAPHandler):
 
 
 class KeystoneLDAPHandler(LDAPHandler):
-    '''Convert data types and perform logging.
+    """Convert data types and perform logging.
 
     This LDAP inteface wraps the python-ldap based interfaces. The
     python-ldap interfaces require string values encoded in UTF-8. The
@@ -856,7 +856,8 @@ class KeystoneLDAPHandler(LDAPHandler):
     Data returned from the LDAP call is converted back from UTF-8
     encoded strings into the Python data type used internally in
     OpenStack.
-    '''
+
+    """
 
     def __init__(self, conn=None):
         super(KeystoneLDAPHandler, self).__init__(conn=conn)
@@ -1085,7 +1086,7 @@ def register_handler(prefix, handler):
 
 
 def _get_connection(conn_url, use_pool=False, use_auth_pool=False):
-    for prefix, handler in six.iteritems(_HANDLERS):
+    for prefix, handler in _HANDLERS.items():
         if conn_url.startswith(prefix):
             return handler()
 
@@ -1111,7 +1112,6 @@ def filter_entity(entity_ref):
 
 
 class BaseLdap(object):
-    DEFAULT_SUFFIX = "dc=example,dc=com"
     DEFAULT_OU = None
     DEFAULT_STRUCTURAL_CLASSES = None
     DEFAULT_ID_ATTR = 'cn'
@@ -1158,8 +1158,6 @@ class BaseLdap(object):
 
         if self.options_name is not None:
             self.suffix = conf.ldap.suffix
-            if self.suffix is None:
-                self.suffix = self.DEFAULT_SUFFIX
             dn = '%s_tree_dn' % self.options_name
             self.tree_dn = (getattr(conf.ldap, dn)
                             or '%s,%s' % (self.DEFAULT_OU, self.suffix))
@@ -1171,7 +1169,7 @@ class BaseLdap(object):
             self.object_class = (getattr(conf.ldap, objclass)
                                  or self.DEFAULT_OBJECTCLASS)
 
-            for k, v in six.iteritems(self.attribute_options_names):
+            for k, v in self.attribute_options_names.items():
                 v = '%s_%s_attribute' % (self.options_name, v)
                 self.attribute_mapping[k] = getattr(conf.ldap, v)
 
@@ -1320,7 +1318,7 @@ class BaseLdap(object):
         # in a case-insensitive way.  We use the case specified in the
         # mapping for the model to ensure we have a predictable way of
         # retrieving values later.
-        lower_res = {k.lower(): v for k, v in six.iteritems(res[1])}
+        lower_res = {k.lower(): v for k, v in res[1].items()}
 
         id_attrs = lower_res.get(self.id_attr.lower())
         if not id_attrs:
@@ -1406,7 +1404,7 @@ class BaseLdap(object):
         self.affirm_unique(values)
         object_classes = self.structural_classes + [self.object_class]
         attrs = [('objectClass', object_classes)]
-        for k, v in six.iteritems(values):
+        for k, v in values.items():
             if k in self.attribute_ignore:
                 continue
             if k == 'id':
@@ -1418,7 +1416,7 @@ class BaseLdap(object):
                 if attr_type is not None:
                     attrs.append((attr_type, [v]))
                 extra_attrs = [attr for attr, name
-                               in six.iteritems(self.extra_attr_mapping)
+                               in self.extra_attr_mapping.items()
                                if name == k]
                 for attr in extra_attrs:
                     attrs.append((attr, [v]))
@@ -1455,9 +1453,10 @@ class BaseLdap(object):
             return None
 
     def _ldap_get_all(self, ldap_filter=None):
-        query = u'(&%s(objectClass=%s))' % (ldap_filter or
-                                            self.ldap_filter or
-                                            '', self.object_class)
+        query = u'(&%s(objectClass=%s)(%s=*))' % (
+            ldap_filter or self.ldap_filter or '',
+            self.object_class,
+            self.id_attr)
         with self.get_connection() as conn:
             try:
                 attrs = list(set(([self.id_attr] +
@@ -1481,7 +1480,7 @@ class BaseLdap(object):
 
             query = (u'(&%s%s)' %
                      (query, ''.join([calc_filter(k, v) for k, v in
-                                      six.iteritems(query_params)])))
+                                      query_params.items()])))
         with self.get_connection() as conn:
             return conn.search_s(search_base, scope, query, attrlist)
 
@@ -1511,7 +1510,7 @@ class BaseLdap(object):
             old_obj = self.get(object_id)
 
         modlist = []
-        for k, v in six.iteritems(values):
+        for k, v in values.items():
             if k == 'id':
                 # id can't be modified.
                 continue
@@ -1650,7 +1649,7 @@ class BaseLdap(object):
                      (query, ''.join(['(%s=%s)'
                                       % (k, ldap.filter.escape_filter_chars(v))
                                       for k, v in
-                                      six.iteritems(query_params)])))
+                                      query_params.items()])))
         not_deleted_nodes = []
         with self.get_connection() as conn:
             try:
@@ -1812,7 +1811,7 @@ class EnabledEmuMixIn(BaseLdap):
         try:
             enabled_value = conn.search_s(self.enabled_emulation_dn,
                                           ldap.SCOPE_BASE,
-                                          query, ['cn'])
+                                          query, attrlist=DN_ONLY)
         except ldap.NO_SUCH_OBJECT:
             return False
         else:
@@ -1859,8 +1858,8 @@ class EnabledEmuMixIn(BaseLdap):
     def get(self, object_id, ldap_filter=None):
         with self.get_connection() as conn:
             ref = super(EnabledEmuMixIn, self).get(object_id, ldap_filter)
-            if 'enabled' not in self.attribute_ignore and \
-               self.enabled_emulation:
+            if ('enabled' not in self.attribute_ignore and
+                    self.enabled_emulation):
                 ref['enabled'] = self._get_enabled(object_id, conn)
             return ref
 

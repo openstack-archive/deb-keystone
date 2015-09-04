@@ -32,8 +32,8 @@ LOG = log.getLogger(__name__)
 METHOD_NAME = 'mapped'
 
 
-@dependency.requires('assignment_api', 'federation_api', 'identity_api',
-                     'token_provider_api')
+@dependency.requires('federation_api', 'identity_api',
+                     'resource_api', 'token_provider_api')
 class Mapped(auth.AuthMethodHandler):
 
     def _get_token_ref(self, auth_payload):
@@ -43,7 +43,7 @@ class Mapped(auth.AuthMethodHandler):
                                          token_data=response)
 
     def authenticate(self, context, auth_payload, auth_context):
-        """Authenticate mapped user and return an authentication context.
+        """Authenticate mapped user and set an authentication context.
 
         :param context: keystone's request context
         :param auth_payload: the content of the authentication for a
@@ -65,7 +65,7 @@ class Mapped(auth.AuthMethodHandler):
                                 self.token_provider_api)
         else:
             handle_unscoped_token(context, auth_payload, auth_context,
-                                  self.assignment_api, self.federation_api,
+                                  self.resource_api, self.federation_api,
                                   self.identity_api)
 
 
@@ -105,7 +105,7 @@ def handle_scoped_token(context, auth_payload, auth_context, token_ref,
 
 
 def handle_unscoped_token(context, auth_payload, auth_context,
-                          assignment_api, federation_api, identity_api):
+                          resource_api, federation_api, identity_api):
 
     def is_ephemeral_user(mapped_properties):
         return mapped_properties['user']['type'] == utils.UserType.EPHEMERAL
@@ -140,7 +140,7 @@ def handle_unscoped_token(context, auth_payload, auth_context,
 
     try:
         mapped_properties, mapping_id = apply_mapping_filter(
-            identity_provider, protocol, assertion, assignment_api,
+            identity_provider, protocol, assertion, resource_api,
             federation_api, identity_api)
 
         if is_ephemeral_user(mapped_properties):
@@ -180,7 +180,7 @@ def extract_assertion_data(context):
 
 
 def apply_mapping_filter(identity_provider, protocol, assertion,
-                         assignment_api, federation_api, identity_api):
+                         resource_api, federation_api, identity_api):
     idp = federation_api.get_idp(identity_provider)
     utils.validate_idp(idp, protocol, assertion)
 
@@ -191,7 +191,7 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
     # groups identified by name/domain twice.
     # NOTE(marek-denis): Groups are translated from name/domain to their
     # corresponding ids in the auth plugin, as we need information what
-    # ``mapping_id`` was used as well as idenity_api and assignment_api
+    # ``mapping_id`` was used as well as idenity_api and resource_api
     # objects.
     group_ids = mapped_properties['group_ids']
     utils.validate_groups_in_backend(group_ids,
@@ -200,7 +200,7 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
     group_ids.extend(
         utils.transform_to_group_ids(
             mapped_properties['group_names'], mapping_id,
-            identity_api, assignment_api))
+            identity_api, resource_api))
     mapped_properties['group_ids'] = list(set(group_ids))
     return mapped_properties, mapping_id
 
@@ -236,12 +236,17 @@ def setup_username(context, mapped_properties):
     user_name = user.get('name') or context['environment'].get('REMOTE_USER')
 
     if not any([user_id, user_name]):
-        raise exception.Unauthorized(_("Could not map user"))
+        msg = _("Could not map user while setting ephemeral user identity. "
+                "Either mapping rules must specify user id/name or "
+                "REMOTE_USER environment variable must be set.")
+        raise exception.Unauthorized(msg)
 
     elif not user_name:
         user['name'] = user_id
 
     elif not user_id:
-        user['id'] = parse.quote(user_name)
+        user_id = user_name
+
+    user['id'] = parse.quote(user_id)
 
     return user

@@ -14,6 +14,7 @@
 
 from __future__ import absolute_import
 import atexit
+import datetime
 import functools
 import logging
 import os
@@ -21,14 +22,17 @@ import re
 import shutil
 import socket
 import sys
+import uuid
 import warnings
 
 import fixtures
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 from oslo_log import log
+from oslo_utils import timeutils
 import oslotest.base as oslotest
 from oslotest import mockpatch
+from paste.deploy import loadwsgi
 import six
 from sqlalchemy import exc
 from testtools import testcase
@@ -45,6 +49,7 @@ from keystone.common import config as common_cfg
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
+from keystone.common import sql
 from keystone import config
 from keystone import controllers
 from keystone import exception
@@ -81,6 +86,8 @@ rules.init()
 
 IN_MEM_DB_CONN_STRING = 'sqlite://'
 
+TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 os.makedirs(TMPDIR)
 atexit.register(shutil.rmtree, TMPDIR)
@@ -110,6 +117,26 @@ class dirs(object):
 
 # keystone.common.sql.initialize() for testing.
 DEFAULT_TEST_DB_FILE = dirs.tmp('test.db')
+
+
+class EggLoader(loadwsgi.EggLoader):
+    _basket = {}
+
+    def find_egg_entry_point(self, object_type, name=None):
+        egg_key = '%s:%s' % (object_type, name)
+        egg_ep = self._basket.get(egg_key)
+        if not egg_ep:
+            egg_ep = super(EggLoader, self).find_egg_entry_point(
+                object_type, name=name)
+            self._basket[egg_key] = egg_ep
+        return egg_ep
+
+
+# NOTE(dstanek): class paths were remove from the keystone-paste.ini in
+# favor of using entry points. This caused tests to slow to a crawl
+# since we reload the application object for test RESTful test. This
+# monkey-patching adds caching to paste deploy's egg lookup.
+loadwsgi.EggLoader = EggLoader
 
 
 @atexit.register
@@ -145,8 +172,9 @@ def remove_generated_paste_config(extension_name):
 
 
 def skip_if_cache_disabled(*sections):
-    """This decorator is used to skip a test if caching is disabled either
-    globally or for the specific section.
+    """This decorator is used to skip a test if caching is disabled.
+
+    Caching can be disabled either globally or for a specific section.
 
     In the code fragment::
 
@@ -163,6 +191,7 @@ def skip_if_cache_disabled(*sections):
     If a specified configuration section does not define the `caching` option,
     this decorator makes the same assumption as the `should_cache_fn` in
     keystone.common.cache that caching should be enabled.
+
     """
     def wrapper(f):
         @functools.wraps(f)
@@ -180,9 +209,7 @@ def skip_if_cache_disabled(*sections):
 
 
 def skip_if_no_multiple_domains_support(f):
-    """This decorator is used to skip a test if an identity driver
-    does not support multiple domains.
-    """
+    """Decorator to skip tests for identity drivers limited to one domain."""
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         test_obj = args[0]
@@ -215,7 +242,7 @@ class TestClient(object):
 
         req = webob.Request.blank(path)
         req.method = method
-        for k, v in six.iteritems(headers):
+        for k, v in headers.items():
             req.headers[k] = v
         if body:
             req.body = body
@@ -229,6 +256,137 @@ class TestClient(object):
 
     def put(self, path, headers=None, body=None):
         return self.request('PUT', path=path, headers=headers, body=body)
+
+
+def new_ref():
+    """Populates a ref with attributes common to some API entities."""
+    return {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'enabled': True}
+
+
+def new_region_ref():
+    ref = new_ref()
+    # Region doesn't have name or enabled.
+    del ref['name']
+    del ref['enabled']
+    ref['parent_region_id'] = None
+    return ref
+
+
+def new_service_ref():
+    ref = new_ref()
+    ref['type'] = uuid.uuid4().hex
+    return ref
+
+
+def new_endpoint_ref(service_id, interface='public', default_region_id=None,
+                     **kwargs):
+    ref = new_ref()
+    del ref['enabled']  # enabled is optional
+    ref['interface'] = interface
+    ref['service_id'] = service_id
+    ref['url'] = 'https://' + uuid.uuid4().hex + '.com'
+    ref['region_id'] = default_region_id
+    ref.update(kwargs)
+    return ref
+
+
+def new_domain_ref():
+    ref = new_ref()
+    return ref
+
+
+def new_project_ref(domain_id=None, parent_id=None, is_domain=False):
+    ref = new_ref()
+    ref['domain_id'] = domain_id
+    ref['parent_id'] = parent_id
+    ref['is_domain'] = is_domain
+    return ref
+
+
+def new_user_ref(domain_id, project_id=None):
+    ref = new_ref()
+    ref['domain_id'] = domain_id
+    ref['email'] = uuid.uuid4().hex
+    ref['password'] = uuid.uuid4().hex
+    if project_id:
+        ref['default_project_id'] = project_id
+    return ref
+
+
+def new_group_ref(domain_id):
+    ref = new_ref()
+    ref['domain_id'] = domain_id
+    return ref
+
+
+def new_credential_ref(user_id, project_id=None, cred_type=None):
+    ref = dict()
+    ref['id'] = uuid.uuid4().hex
+    ref['user_id'] = user_id
+    if cred_type == 'ec2':
+        ref['type'] = 'ec2'
+        ref['blob'] = {'blah': 'test'}
+    else:
+        ref['type'] = 'cert'
+        ref['blob'] = uuid.uuid4().hex
+    if project_id:
+        ref['project_id'] = project_id
+    return ref
+
+
+def new_role_ref():
+    ref = new_ref()
+    # Roles don't have a description or the enabled flag
+    del ref['description']
+    del ref['enabled']
+    return ref
+
+
+def new_policy_ref():
+    ref = new_ref()
+    ref['blob'] = uuid.uuid4().hex
+    ref['type'] = uuid.uuid4().hex
+    return ref
+
+
+def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
+                  impersonation=None, expires=None, role_ids=None,
+                  role_names=None, remaining_uses=None,
+                  allow_redelegation=False):
+    ref = dict()
+    ref['id'] = uuid.uuid4().hex
+    ref['trustor_user_id'] = trustor_user_id
+    ref['trustee_user_id'] = trustee_user_id
+    ref['impersonation'] = impersonation or False
+    ref['project_id'] = project_id
+    ref['remaining_uses'] = remaining_uses
+    ref['allow_redelegation'] = allow_redelegation
+
+    if isinstance(expires, six.string_types):
+        ref['expires_at'] = expires
+    elif isinstance(expires, dict):
+        ref['expires_at'] = (
+            timeutils.utcnow() + datetime.timedelta(**expires)
+        ).strftime(TIME_FORMAT)
+    elif expires is None:
+        pass
+    else:
+        raise NotImplementedError('Unexpected value for "expires"')
+
+    role_ids = role_ids or []
+    role_names = role_names or []
+    if role_ids or role_names:
+        ref['roles'] = []
+        for role_id in role_ids:
+            ref['roles'].append({'id': role_id})
+        for role_name in role_names:
+            ref['roles'].append({'name': role_name})
+
+    return ref
 
 
 class BaseTestCase(oslotest.BaseTestCase):
@@ -274,6 +432,11 @@ class TestCase(BaseTestCase):
         return []
 
     def config_overrides(self):
+        # NOTE(morganfainberg): enforce config_overrides can only ever be
+        # called a single time.
+        assert self.__config_overrides_called is False
+        self.__config_overrides_called = True
+
         signing_certfile = 'examples/pki/certs/signing_cert.pem'
         signing_keyfile = 'examples/pki/private/signing_key.pem'
         self.config_fixture.config(group='oslo_policy',
@@ -329,11 +492,13 @@ class TestCase(BaseTestCase):
         if method_classes:
             self.config_fixture.config(group='auth', **method_classes)
 
+    def _assert_config_overrides_called(self):
+        assert self.__config_overrides_called is True
+
     def setUp(self):
         super(TestCase, self).setUp()
-
+        self.__config_overrides_called = False
         self.addCleanup(CONF.reset)
-
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.addCleanup(delattr, self, 'config_fixture')
         self.config(self.config_files())
@@ -348,6 +513,8 @@ class TestCase(BaseTestCase):
             new=mocked_register_auth_plugin_opt))
 
         self.config_overrides()
+        # NOTE(morganfainberg): ensure config_overrides has been called.
+        self.addCleanup(self._assert_config_overrides_called)
 
         self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
 
@@ -379,6 +546,7 @@ class TestCase(BaseTestCase):
         self.addCleanup(setattr, controllers, '_VERSIONS', [])
 
     def config(self, config_files):
+        sql.initialize()
         CONF(args=[], project='keystone', default_config_files=config_files)
 
     def load_backends(self):
@@ -399,7 +567,7 @@ class TestCase(BaseTestCase):
         drivers, _unused = common.setup_backends(
             load_extra_backends_fn=self.load_extra_backends)
 
-        for manager_name, manager in six.iteritems(drivers):
+        for manager_name, manager in drivers.items():
             setattr(self, manager_name, manager)
         self.addCleanup(self.cleanup_instance(*list(drivers.keys())))
 
@@ -525,8 +693,7 @@ class TestCase(BaseTestCase):
 
     def assertRaisesRegexp(self, expected_exception, expected_regexp,
                            callable_obj, *args, **kwargs):
-        """Asserts that the message in a raised exception matches a regexp.
-        """
+        """Asserts that the message in a raised exception matches a regexp."""
         try:
             callable_obj(*args, **kwargs)
         except expected_exception as exc_value:

@@ -50,9 +50,11 @@ Getting Started
     setup
     installing
     configuration
+    policy_mapping
     configure_federation
     mapping_combinations
     mapping_schema
+    configure_tokenless_x509
     configuringservices
     extensions
     key_terms
@@ -73,6 +75,7 @@ Developers Documentation
    :maxdepth: 1
 
    developing
+   developing_drivers
    architecture
    middlewarearchitecture
    http-api

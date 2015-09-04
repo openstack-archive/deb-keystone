@@ -145,7 +145,7 @@ class Manager(manager.Manager):
             ]
         }
 
-        for event, cb_info in six.iteritems(callbacks):
+        for event, cb_info in callbacks.items():
             for resource_type, callback_fns in cb_info:
                 notifications.register_event_callback(event, resource_type,
                                                       callback_fns)
@@ -232,7 +232,7 @@ class Manager(manager.Manager):
 
 
 @six.add_metaclass(abc.ABCMeta)
-class Driver(object):
+class RevokeDriverV8(object):
     """Interface for recording and reporting revocation events."""
 
     @abc.abstractmethod
@@ -257,3 +257,6 @@ class Driver(object):
 
         """
         raise exception.NotImplemented()  # pragma: no cover
+
+
+Driver = manager.create_legacy_driver(RevokeDriverV8)

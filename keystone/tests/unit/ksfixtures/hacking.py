@@ -118,8 +118,8 @@ class HackingCode(fixtures.Fixture):
             import logging as stlib_logging
             from keystone.i18n import _
             from keystone.i18n import _ as oslo_i18n
-            from keystone.openstack.common import log
-            from keystone.openstack.common import log as oslo_logging
+            from oslo_log import log
+            from oslo_log import log as oslo_logging
 
             # stdlib logging
             L0 = logging.getLogger()
@@ -138,7 +138,7 @@ class HackingCode(fixtures.Fixture):
                     )
 
             # oslo logging and specifying a logger
-            L2 = log.getLogger(__name__)
+            L2 = logging.getLogger(__name__)
             L2.debug(oslo_i18n('text'))
 
             # oslo logging w/ alias
@@ -179,84 +179,6 @@ class HackingCode(fixtures.Fixture):
         ]
     }
 
-    oslo_namespace_imports = {
-        'code': """
-            import oslo.utils
-            import oslo_utils
-            import oslo.utils.encodeutils
-            import oslo_utils.encodeutils
-            from oslo import utils
-            from oslo.utils import encodeutils
-            from oslo_utils import encodeutils
-
-            import oslo.serialization
-            import oslo_serialization
-            import oslo.serialization.jsonutils
-            import oslo_serialization.jsonutils
-            from oslo import serialization
-            from oslo.serialization import jsonutils
-            from oslo_serialization import jsonutils
-
-            import oslo.messaging
-            import oslo_messaging
-            import oslo.messaging.conffixture
-            import oslo_messaging.conffixture
-            from oslo import messaging
-            from oslo.messaging import conffixture
-            from oslo_messaging import conffixture
-
-            import oslo.db
-            import oslo_db
-            import oslo.db.api
-            import oslo_db.api
-            from oslo import db
-            from oslo.db import api
-            from oslo_db import api
-
-            import oslo.config
-            import oslo_config
-            import oslo.config.cfg
-            import oslo_config.cfg
-            from oslo import config
-            from oslo.config import cfg
-            from oslo_config import cfg
-
-            import oslo.i18n
-            import oslo_i18n
-            import oslo.i18n.log
-            import oslo_i18n.log
-            from oslo import i18n
-            from oslo.i18n import log
-            from oslo_i18n import log
-        """,
-        'expected_errors': [
-            (1, 0, 'K333'),
-            (3, 0, 'K333'),
-            (5, 0, 'K333'),
-            (6, 0, 'K333'),
-            (9, 0, 'K333'),
-            (11, 0, 'K333'),
-            (13, 0, 'K333'),
-            (14, 0, 'K333'),
-            (17, 0, 'K333'),
-            (19, 0, 'K333'),
-            (21, 0, 'K333'),
-            (22, 0, 'K333'),
-            (25, 0, 'K333'),
-            (27, 0, 'K333'),
-            (29, 0, 'K333'),
-            (30, 0, 'K333'),
-            (33, 0, 'K333'),
-            (35, 0, 'K333'),
-            (37, 0, 'K333'),
-            (38, 0, 'K333'),
-            (41, 0, 'K333'),
-            (43, 0, 'K333'),
-            (45, 0, 'K333'),
-            (46, 0, 'K333'),
-        ],
-    }
-
     dict_constructor = {
         'code': """
             lower_res = {k.lower(): v for k, v in six.iteritems(res[1])}
@@ -285,8 +207,8 @@ class HackingLogging(fixtures.Fixture):
                 from keystone.i18n import _LE as error_hint
                 from keystone.i18n import _LI
                 from keystone.i18n import _LW
-                from keystone.openstack.common import log
-                from keystone.openstack.common import log as oslo_logging
+                from oslo_log import log
+                from oslo_log import log as oslo_logging
     """
 
     examples = [

@@ -14,6 +14,7 @@
 
 from oslo_config import cfg
 import oslo_messaging
+import passlib.utils
 
 
 _DEFAULT_AUTH_METHODS = ['external', 'password', 'token', 'oauth1']
@@ -79,7 +80,7 @@ FILE_OPTIONS = {
         # static and grows over time to constantly approximate ~300ms
         # of CPU time to hash; this was considered too high.  This
         # value still exceeds the glibc default of 5k.
-        cfg.IntOpt('crypt_strength', default=10000,
+        cfg.IntOpt('crypt_strength', default=10000, min=1000, max=100000,
                    help='The value passed as the keyword "rounds" to '
                         'passlib\'s encrypt method.'),
         cfg.IntOpt('list_limit',
@@ -149,7 +150,8 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='sql',
                    help='Entrypoint for the identity backend driver in the '
-                        'keystone.identity namespace.'),
+                        'keystone.identity namespace. Supplied drivers are '
+                        'ldap and sql.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for identity caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -158,6 +160,7 @@ FILE_OPTIONS = {
                         'no effect unless global and identity caching are '
                         'enabled.'),
         cfg.IntOpt('max_password_length', default=4096,
+                   max=passlib.utils.MAX_PASSWORD_SIZE,
                    help='Maximum supported length for user passwords; '
                         'decrease to improve performance.'),
         cfg.IntOpt('list_limit',
@@ -253,7 +256,9 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='sql',
                    help='Entrypoint for the token persistence backend driver '
-                        'in the keystone.token.persistence namespace.'),
+                        'in the keystone.token.persistence namespace. '
+                        'Supplied drivers are kvs, memcache, memcache_pool, '
+                        'and sql.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for token system caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -286,7 +291,7 @@ FILE_OPTIONS = {
                    default='sql',
                    help='Entrypoint for an implementation of the backend for '
                         'persisting revocation events in the keystone.revoke '
-                        'namespace.'),
+                        'namespace. Supplied drivers are kvs and sql.'),
         cfg.IntOpt('expiration_buffer', default=1800,
                    help='This value (calculated in seconds) is added to token '
                         'expiration before a revocation event may be removed '
@@ -381,7 +386,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('ca_key',
                    default='/etc/keystone/ssl/private/cakey.pem',
                    help='Path of the CA key file for SSL.'),
-        cfg.IntOpt('key_size', default=1024,
+        cfg.IntOpt('key_size', default=1024, min=1024,
                    help='SSL key length (in bits) (auto generated '
                         'certificate).'),
         cfg.IntOpt('valid_days', default=3650,
@@ -408,7 +413,7 @@ FILE_OPTIONS = {
         cfg.StrOpt('ca_key',
                    default='/etc/keystone/ssl/private/cakey.pem',
                    help='Path of the CA key for token signing.'),
-        cfg.IntOpt('key_size', default=2048,
+        cfg.IntOpt('key_size', default=2048, min=1024,
                    help='Key size (in bits) for token signing cert '
                         '(auto generated certificate).'),
         cfg.IntOpt('valid_days', default=3650,
@@ -421,19 +426,20 @@ FILE_OPTIONS = {
                         'token signing.'),
     ],
     'assignment': [
-        # assignment has no default for backward compatibility reasons.
-        # If assignment driver is not specified, the identity driver chooses
-        # the backend
         cfg.StrOpt('driver',
                    help='Entrypoint for the assignment backend driver in the '
-                        'keystone.assignment namespace.'),
+                        'keystone.assignment namespace. Supplied drivers are '
+                        'ldap and sql. If an assignment driver is not '
+                        'specified, the identity driver will choose the '
+                        'assignment driver.'),
     ],
     'resource': [
         cfg.StrOpt('driver',
                    help='Entrypoint for the resource backend driver in the '
-                        'keystone.resource namespace. If a resource driver is '
-                        'not specified, the assignment driver will choose '
-                        'the resource driver.'),
+                        'keystone.resource namespace. Supplied drivers are '
+                        'ldap and sql. If a resource driver is not specified, '
+                        'the assignment driver will choose the resource '
+                        'driver.'),
         cfg.BoolOpt('caching', default=True,
                     deprecated_opts=[cfg.DeprecatedOpt('caching',
                                                        group='assignment')],
@@ -469,7 +475,8 @@ FILE_OPTIONS = {
         # the backend
         cfg.StrOpt('driver',
                    help='Entrypoint for the role backend driver in the '
-                        'keystone.role namespace.'),
+                        'keystone.role namespace. Supplied drivers are ldap '
+                        'and sql.'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for role caching. This has no effect '
                          'unless global caching is enabled.'),
@@ -515,9 +522,7 @@ FILE_OPTIONS = {
                         'an admin will not be able to create a domain with '
                         'this name or update an existing domain to this '
                         'name. You are not advised to change this value '
-                        'unless you really have to. Changing this option '
-                        'to empty string or None will not have any impact and '
-                        'default name will be used.'),
+                        'unless you really have to.'),
         cfg.MultiStrOpt('trusted_dashboard', default=[],
                         help='A list of trusted dashboard hosts. Before '
                              'accepting a Single Sign-On request to return a '
@@ -534,7 +539,8 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='sql',
                    help='Entrypoint for the policy backend driver in the '
-                        'keystone.policy namespace.'),
+                        'keystone.policy namespace. Supplied drivers are '
+                        'rules and sql.'),
         cfg.IntOpt('list_limit',
                    help='Maximum number of entities that will be returned '
                         'in a policy collection.'),
@@ -600,7 +606,8 @@ FILE_OPTIONS = {
                     help='Override the system\'s default referral chasing '
                          'behavior for queries.'),
         cfg.StrOpt('user_tree_dn',
-                   help='Search base for users.'),
+                   help='Search base for users. '
+                        'Defaults to the suffix value.'),
         cfg.StrOpt('user_filter',
                    help='LDAP search filter for users.'),
         cfg.StrOpt('user_objectclass', default='inetOrgPerson',
@@ -640,7 +647,7 @@ FILE_OPTIONS = {
                         'the typical value is "512". This is typically used '
                         'when "user_enabled_attribute = userAccountControl".'),
         cfg.ListOpt('user_attribute_ignore',
-                    default=['default_project_id', 'tenants'],
+                    default=['default_project_id'],
                     help='List of attributes stripped off the user on '
                          'update.'),
         cfg.StrOpt('user_default_project_id_attribute',
@@ -672,7 +679,8 @@ FILE_OPTIONS = {
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_tree_dn', group='ldap')],
                    deprecated_for_removal=True,
-                   help='Search base for projects'),
+                   help='Search base for projects. '
+                        'Defaults to the suffix value.'),
         cfg.StrOpt('project_filter',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'tenant_filter', group='ldap')],
@@ -763,7 +771,8 @@ FILE_OPTIONS = {
 
         cfg.StrOpt('role_tree_dn',
                    deprecated_for_removal=True,
-                   help='Search base for roles.'),
+                   help='Search base for roles. '
+                        'Defaults to the suffix value.'),
         cfg.StrOpt('role_filter',
                    deprecated_for_removal=True,
                    help='LDAP search filter for roles.'),
@@ -801,7 +810,8 @@ FILE_OPTIONS = {
                          'user_attr is the Identity API attribute.'),
 
         cfg.StrOpt('group_tree_dn',
-                   help='Search base for groups.'),
+                   help='Search base for groups. '
+                        'Defaults to the suffix value.'),
         cfg.StrOpt('group_filter',
                    help='LDAP search filter for groups.'),
         cfg.StrOpt('group_objectclass', default='groupOfNames',
@@ -878,10 +888,37 @@ FILE_OPTIONS = {
         cfg.StrOpt('external',
                    help='Entrypoint for the external (REMOTE_USER) auth '
                         'plugin module in the keystone.auth.external '
-                        'namespace.'),
+                        'namespace. Supplied drivers are DefaultDomain and '
+                        'Domain. The default driver is DefaultDomain.'),
         cfg.StrOpt('oauth1',
                    help='Entrypoint for the oAuth1.0 auth plugin module in '
                         'the keystone.auth.oauth1 namespace.'),
+    ],
+    'tokenless_auth': [
+        cfg.MultiStrOpt('trusted_issuer', default=[],
+                        help='The list of trusted issuers to further filter '
+                             'the certificates that are allowed to '
+                             'participate in the X.509 tokenless '
+                             'authorization. If the option is absent then '
+                             'no certificates will be allowed. '
+                             'The naming format for the attributes of a '
+                             'Distinguished Name(DN) must be separated by a '
+                             'comma and contain no spaces. This configuration '
+                             'option may be repeated for multiple values. '
+                             'For example: '
+                             'trusted_issuer=CN=john,OU=keystone,O=openstack '
+                             'trusted_issuer=CN=mary,OU=eng,O=abc'),
+        cfg.StrOpt('protocol', default='x509',
+                   help='The protocol name for the X.509 tokenless '
+                        'authorization along with the option issuer_attribute '
+                        'below can look up its corresponding mapping.'),
+        cfg.StrOpt('issuer_attribute', default='SSL_CLIENT_I_DN',
+                   help='The issuer attribute that is served as an IdP ID '
+                        'for the X.509 tokenless authorization along with '
+                        'the protocol to look up its corresponding mapping. '
+                        'It is the environment variable in the WSGI '
+                        'environment that references to the issuer of the '
+                        'client certificate.'),
     ],
     'paste_deploy': [
         cfg.StrOpt('config_file', default='keystone-paste.ini',
@@ -929,7 +966,8 @@ FILE_OPTIONS = {
         cfg.StrOpt('driver',
                    default='sql',
                    help='Entrypoint for the catalog backend driver in the '
-                        'keystone.catalog namespace.'),
+                        'keystone.catalog namespace. Supplied drivers are '
+                        'kvs, sql, templated, and endpoint_filter.sql'),
         cfg.BoolOpt('caching', default=True,
                     help='Toggle for catalog caching. This has no '
                          'effect unless global caching is enabled.'),
@@ -1050,7 +1088,8 @@ FILE_OPTIONS = {
                    deprecated_for_removal=True,
                    help='The IP address of the network interface for the '
                         'public service to listen on.'),
-        cfg.IntOpt('public_port', default=5000, deprecated_name='public_port',
+        cfg.IntOpt('public_port', default=5000, min=1, max=65535,
+                   deprecated_name='public_port',
                    deprecated_group='DEFAULT',
                    deprecated_for_removal=True,
                    help='The port number which the public service listens '
@@ -1064,7 +1103,8 @@ FILE_OPTIONS = {
                    deprecated_for_removal=True,
                    help='The IP address of the network interface for the '
                         'admin service to listen on.'),
-        cfg.IntOpt('admin_port', default=35357, deprecated_name='admin_port',
+        cfg.IntOpt('admin_port', default=35357, min=1, max=65535,
+                   deprecated_name='admin_port',
                    deprecated_group='DEFAULT',
                    deprecated_for_removal=True,
                    help='The port number which the admin service listens '
@@ -1156,7 +1196,7 @@ def configure(conf=None):
         cfg.StrOpt('pydev-debug-host',
                    help='Host to connect to for remote debugger.'))
     conf.register_cli_opt(
-        cfg.IntOpt('pydev-debug-port',
+        cfg.IntOpt('pydev-debug-port', min=1, max=65535,
                    help='Port to connect to for remote debugger.'))
 
     for section in FILE_OPTIONS:

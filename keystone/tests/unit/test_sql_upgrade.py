@@ -38,7 +38,6 @@ from oslo_config import cfg
 from oslo_db import exception as db_exception
 from oslo_db.sqlalchemy import migration
 from oslo_db.sqlalchemy import session as db_session
-import six
 from sqlalchemy.engine import reflection
 import sqlalchemy.exc
 from sqlalchemy import schema
@@ -158,6 +157,7 @@ class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
         # create and share a single sqlalchemy engine for testing
         self.engine = sql.get_engine()
         self.Session = db_session.get_maker(self.engine, autocommit=False)
+        self.addCleanup(sqlalchemy.orm.session.Session.close_all)
 
         self.initialize_sql()
         self.repo_path = migration_helpers.find_migrate_repo(
@@ -169,8 +169,12 @@ class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
         # auto-detect the highest available schema version in the migrate_repo
         self.max_version = self.schema.repository.version().version
 
-    def tearDown(self):
-        sqlalchemy.orm.session.Session.close_all()
+        self.addCleanup(sql.cleanup)
+
+        # drop tables and FKs.
+        self.addCleanup(self._cleanupDB)
+
+    def _cleanupDB(self):
         meta = sqlalchemy.MetaData()
         meta.bind = self.engine
         meta.reflect(self.engine)
@@ -198,9 +202,6 @@ class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
 
             for table in tbs:
                 conn.execute(schema.DropTable(table))
-
-        sql.cleanup()
-        super(SqlMigrateBase, self).tearDown()
 
     def select_table(self, name):
         table = sqlalchemy.Table(name,
@@ -628,6 +629,13 @@ class SqlUpgradeTests(SqlMigrateBase):
             self.assertFalse(self._does_index_exist('assignment',
                                                     'assignment_role_id_fkey'))
 
+    def test_project_is_domain_upgrade(self):
+        self.upgrade(74)
+        self.assertTableColumns('project',
+                                ['id', 'name', 'extra', 'description',
+                                 'enabled', 'domain_id', 'parent_id',
+                                 'is_domain'])
+
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):
         # Populate the appropriate fields in the user
@@ -780,7 +788,7 @@ class VersionTests(SqlMigrateBase):
 
     def test_extension_initial(self):
         """When get the initial version of an extension, it's 0."""
-        for name, extension in six.iteritems(EXTENSIONS):
+        for name, extension in EXTENSIONS.items():
             abs_path = migration_helpers.find_migrate_repo(extension)
             migration.db_version_control(sql.get_engine(), abs_path)
             version = migration_helpers.get_db_version(extension=name)
@@ -789,7 +797,7 @@ class VersionTests(SqlMigrateBase):
 
     def test_extension_migrated(self):
         """When get the version after migrating an extension, it's not 0."""
-        for name, extension in six.iteritems(EXTENSIONS):
+        for name, extension in EXTENSIONS.items():
             abs_path = migration_helpers.find_migrate_repo(extension)
             migration.db_version_control(sql.get_engine(), abs_path)
             migration.db_sync(sql.get_engine(), abs_path)

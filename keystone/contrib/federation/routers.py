@@ -72,6 +72,9 @@ class FederationExtension(wsgi.V3ExtensionRouter):
             protocols/{protocol}/auth
         POST /OS-FEDERATION/identity_providers/{identity_provider}/
             protocols/{protocol}/auth
+        GET /auth/OS-FEDERATION/identity_providers/
+            {idp_id}/protocols/{protocol_id}/websso
+            ?origin=https%3A//horizon.example.com
 
         POST /auth/OS-FEDERATION/saml2
         POST /auth/OS-FEDERATION/saml2/ecp
@@ -185,11 +188,13 @@ class FederationExtension(wsgi.V3ExtensionRouter):
         self._add_resource(
             mapper, domain_controller,
             path=self._construct_url('domains'),
+            new_path='/auth/domains',
             get_action='list_domains_for_groups',
             rel=build_resource_relation(resource_name='domains'))
         self._add_resource(
             mapper, project_controller,
             path=self._construct_url('projects'),
+            new_path='/auth/projects',
             get_action='list_projects_for_groups',
             rel=build_resource_relation(resource_name='projects'))
 
@@ -221,6 +226,16 @@ class FederationExtension(wsgi.V3ExtensionRouter):
             get_post_action='federated_sso_auth',
             rel=build_resource_relation(resource_name='websso'),
             path_vars={
+                'protocol_id': PROTOCOL_ID_PARAMETER_RELATION,
+            })
+        self._add_resource(
+            mapper, auth_controller,
+            path='/auth' + self._construct_url(
+                 'identity_providers/{idp_id}/protocols/{protocol_id}/websso'),
+            get_post_action='federated_idp_specific_sso_auth',
+            rel=build_resource_relation(resource_name='identity_providers'),
+            path_vars={
+                'idp_id': IDP_ID_PARAMETER_RELATION,
                 'protocol_id': PROTOCOL_ID_PARAMETER_RELATION,
             })
 

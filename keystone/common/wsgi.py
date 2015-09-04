@@ -86,7 +86,7 @@ def validate_token_bind(context, token_ref):
         LOG.info(_LI("Named bind mode %s not in bind information"), name)
         raise exception.Unauthorized()
 
-    for bind_type, identifier in six.iteritems(bind):
+    for bind_type, identifier in bind.items():
         if bind_type == 'kerberos':
             if not (context['environment'].get('AUTH_TYPE', '').lower()
                     == 'negotiate'):
@@ -197,8 +197,16 @@ class Application(BaseApplication):
 
         # allow middleware up the stack to provide context, params and headers.
         context = req.environ.get(CONTEXT_ENV, {})
-        context['query_string'] = dict(six.iteritems(req.params))
-        context['headers'] = dict(six.iteritems(req.headers))
+
+        try:
+            context['query_string'] = dict(req.params.items())
+        except UnicodeDecodeError as e:
+            # The webob package throws UnicodeError when a request cannot be
+            # decoded. Raise ValidationError instead to avoid an UnknownError.
+            msg = _('Query string is not UTF-8 encoded')
+            raise exception.ValidationError(msg)
+
+        context['headers'] = dict(req.headers.items())
         context['path'] = req.environ['PATH_INFO']
         scheme = (None if not CONF.secure_proxy_ssl_header
                   else req.environ.get(CONF.secure_proxy_ssl_header))
@@ -213,8 +221,8 @@ class Application(BaseApplication):
         context['host_url'] = req.host_url
         params = req.environ.get(PARAMS_ENV, {})
         # authentication and authorization attributes are set as environment
-        # values by the container and processed by the pipeline.  the complete
-        # set is not yet know.
+        # values by the container and processed by the pipeline. The complete
+        # set is not yet known.
         context['environment'] = req.environ
         context['accept_header'] = req.accept
         req.environ = None
@@ -285,7 +293,7 @@ class Application(BaseApplication):
         return arg.replace(':', '_').replace('-', '_')
 
     def _normalize_dict(self, d):
-        return {self._normalize_arg(k): v for (k, v) in six.iteritems(d)}
+        return {self._normalize_arg(k): v for (k, v) in d.items()}
 
     def assert_admin(self, context):
         """Ensure the user is an admin.
@@ -367,8 +375,7 @@ class Application(BaseApplication):
 
         if url:
             substitutions = dict(
-                itertools.chain(six.iteritems(CONF),
-                                six.iteritems(CONF.eventlet_server)))
+                itertools.chain(CONF.items(), CONF.eventlet_server.items()))
 
             url = url % substitutions
         else:
@@ -487,7 +494,7 @@ class Debug(Middleware):
         resp = req.get_response(self.application)
         if not hasattr(LOG, 'isEnabledFor') or LOG.isEnabledFor(LOG.debug):
             LOG.debug('%s %s %s', ('*' * 20), 'RESPONSE HEADERS', ('*' * 20))
-            for (key, value) in six.iteritems(resp.headers):
+            for (key, value) in resp.headers.items():
                 LOG.debug('%s = %s', key, value)
             LOG.debug('')
 
@@ -653,7 +660,8 @@ class RoutersBase(object):
                       get_action=None, head_action=None, get_head_action=None,
                       put_action=None, post_action=None, patch_action=None,
                       delete_action=None, get_post_action=None,
-                      path_vars=None, status=json_home.Status.STABLE):
+                      path_vars=None, status=json_home.Status.STABLE,
+                      new_path=None):
         if get_head_action:
             getattr(controller, get_head_action)  # ensure the attribute exists
             mapper.connect(path, controller=controller, action=get_head_action,
@@ -690,10 +698,10 @@ class RoutersBase(object):
         resource_data = dict()
 
         if path_vars:
-            resource_data['href-template'] = path
+            resource_data['href-template'] = new_path or path
             resource_data['href-vars'] = path_vars
         else:
-            resource_data['href'] = path
+            resource_data['href'] = new_path or path
 
         json_home.Status.update_resource_data(resource_data, status)
 
@@ -773,7 +781,7 @@ def render_response(body=None, status=None, headers=None, method=None):
         # both py2x and py3x.
         stored_headers = resp.headers.copy()
         resp.body = b''
-        for header, value in six.iteritems(stored_headers):
+        for header, value in stored_headers.items():
             resp.headers[header] = value
 
     return resp
@@ -808,8 +816,7 @@ def render_exception(error, context=None, request=None, user_locale=None):
                 url = 'http://localhost:%d' % CONF.eventlet_server.public_port
         else:
             substitutions = dict(
-                itertools.chain(six.iteritems(CONF),
-                                six.iteritems(CONF.eventlet_server)))
+                itertools.chain(CONF.items(), CONF.eventlet_server.items()))
             url = url % substitutions
 
         headers.append(('WWW-Authenticate', 'Keystone uri="%s"' % url))

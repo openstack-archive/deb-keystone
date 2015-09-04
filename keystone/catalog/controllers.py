@@ -15,8 +15,7 @@
 
 import uuid
 
-import six
-
+from keystone.catalog import core
 from keystone.catalog import schema
 from keystone.common import controller
 from keystone.common import dependency
@@ -100,6 +99,14 @@ class Endpoint(controller.V2Controller):
         # service_id is necessary
         self._require_attribute(endpoint, 'service_id')
 
+        # we should check publicurl, adminurl, internalurl
+        # if invalid, we should raise an exception to reject
+        # the request
+        for interface in INTERFACES:
+            interface_url = endpoint.get(interface + 'url')
+            if interface_url:
+                core.check_endpoint_url(interface_url)
+
         initiator = notifications._get_request_audit_info(context)
 
         if endpoint.get('region') is not None:
@@ -124,7 +131,7 @@ class Endpoint(controller.V2Controller):
                 legacy_endpoint_ref.pop(url)
 
         legacy_endpoint_id = uuid.uuid4().hex
-        for interface, url in six.iteritems(urls):
+        for interface, url in urls.items():
             endpoint_ref = endpoint.copy()
             endpoint_ref['id'] = uuid.uuid4().hex
             endpoint_ref['legacy_endpoint_id'] = legacy_endpoint_id
@@ -301,13 +308,14 @@ class EndpointV3(controller.V3Controller):
     @controller.protected()
     @validation.validated(schema.endpoint_create, 'endpoint')
     def create_endpoint(self, context, endpoint):
+        core.check_endpoint_url(endpoint['url'])
         ref = self._assign_unique_id(self._normalize_dict(endpoint))
         ref = self._validate_endpoint_region(ref, context)
         initiator = notifications._get_request_audit_info(context)
         ref = self.catalog_api.create_endpoint(ref['id'], ref, initiator)
         return EndpointV3.wrap_member(context, ref)
 
-    @controller.filterprotected('interface', 'service_id')
+    @controller.filterprotected('interface', 'service_id', 'region_id')
     def list_endpoints(self, context, filters):
         hints = EndpointV3.build_driver_hints(context, filters)
         refs = self.catalog_api.list_endpoints(hints=hints)

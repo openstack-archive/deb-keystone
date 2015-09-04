@@ -16,6 +16,7 @@
 """Main entry point into the Catalog service."""
 
 import abc
+import itertools
 
 from oslo_config import cfg
 from oslo_log import log
@@ -35,6 +36,10 @@ from keystone import notifications
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 MEMOIZE = cache.get_memoization_decorator(section='catalog')
+WHITELISTED_PROPERTIES = [
+    'tenant_id', 'user_id', 'public_bind_host', 'admin_bind_host',
+    'compute_host', 'admin_port', 'public_port',
+    'public_endpoint', 'admin_endpoint', ]
 
 
 def format_url(url, substitutions, silent_keyerror_failures=None):
@@ -47,11 +52,6 @@ def format_url(url, substitutions, silent_keyerror_failures=None):
     :returns: a formatted URL
 
     """
-
-    WHITELISTED_PROPERTIES = [
-        'tenant_id', 'user_id', 'public_bind_host', 'admin_bind_host',
-        'compute_host', 'admin_port', 'public_port',
-        'public_endpoint', 'admin_endpoint', ]
 
     substitutions = utils.WhiteListedItemFilter(
         WHITELISTED_PROPERTIES,
@@ -83,6 +83,28 @@ def format_url(url, substitutions, silent_keyerror_failures=None):
                       "(are you missing a type notifier ?)"), url)
         raise exception.MalformedEndpoint(endpoint=url)
     return result
+
+
+def check_endpoint_url(url):
+    """Check substitution of url.
+
+    The invalid urls are as follows:
+    urls with substitutions that is not in the whitelist
+
+    Check the substitutions in the URL to make sure they are valid
+    and on the whitelist.
+
+    :param str url: the URL to validate
+    :rtype: None
+    :raises keystone.exception.URLValidationError: if the URL is invalid
+    """
+    # check whether the property in the path is exactly the same
+    # with that in the whitelist below
+    substitutions = dict(zip(WHITELISTED_PROPERTIES, itertools.repeat('')))
+    try:
+        url.replace('$(', '%(') % substitutions
+    except (KeyError, TypeError, ValueError):
+        raise exception.URLValidationError(url)
 
 
 @dependency.provider('catalog_api')
@@ -256,8 +278,8 @@ class Manager(manager.Manager):
 
 
 @six.add_metaclass(abc.ABCMeta)
-class Driver(object):
-    """Interface description for an Catalog driver."""
+class CatalogDriverV8(object):
+    """Interface description for the Catalog driver."""
 
     def _get_list_limit(self):
         return CONF.catalog.list_limit or CONF.list_limit
@@ -492,14 +514,14 @@ class Driver(object):
         v2_catalog = self.get_catalog(user_id, tenant_id)
         v3_catalog = []
 
-        for region_name, region in six.iteritems(v2_catalog):
-            for service_type, service in six.iteritems(region):
+        for region_name, region in v2_catalog.items():
+            for service_type, service in region.items():
                 service_v3 = {
                     'type': service_type,
                     'endpoints': []
                 }
 
-                for attr, value in six.iteritems(service):
+                for attr, value in service.items():
                     # Attributes that end in URL are interfaces. In the V2
                     # catalog, these are internalURL, publicURL, and adminURL.
                     # For example, <region_name>.publicURL=<URL> in the V2
@@ -521,3 +543,6 @@ class Driver(object):
                 v3_catalog.append(service_v3)
 
         return v3_catalog
+
+
+Driver = manager.create_legacy_driver(CatalogDriverV8)

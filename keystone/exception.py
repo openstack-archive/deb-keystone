@@ -15,7 +15,6 @@
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import encodeutils
-import six
 
 from keystone.i18n import _, _LW
 
@@ -63,7 +62,7 @@ class Error(Exception):
             except UnicodeDecodeError:
                 try:
                     kwargs = {k: encodeutils.safe_decode(v)
-                              for k, v in six.iteritems(kwargs)}
+                              for k, v in kwargs.items()}
                 except UnicodeDecodeError:
                     # NOTE(jamielennox): This is the complete failure case
                     # at least by showing the template we have some idea
@@ -82,6 +81,11 @@ class ValidationError(Error):
                        " incorrect. The client is assumed to be in error.")
     code = 400
     title = 'Bad Request'
+
+
+class URLValidationError(ValidationError):
+    message_format = _("Cannot create an endpoint with an invalid URL:"
+                       " %(url)s")
 
 
 class SchemaValidationError(ValidationError):
@@ -457,9 +461,9 @@ class MigrationNotProvided(Exception):
         ) % {'mod_name': mod_name, 'path': path})
 
 
-class UnsupportedTokenVersionException(Exception):
-    """Token version is unrecognizable or unsupported."""
-    pass
+class UnsupportedTokenVersionException(UnexpectedError):
+    message_format = _('Token version is unrecognizable or '
+                       'unsupported.')
 
 
 class SAMLSigningError(UnexpectedError):
@@ -476,3 +480,9 @@ class OAuthHeadersMissingError(UnexpectedError):
                              'HTTPd or Apache, ensure WSGIPassAuthorization '
                              'is set to On.')
     title = 'Error retrieving OAuth headers'
+
+
+class TokenlessAuthConfigError(ValidationError):
+    message_format = _('Could not determine Identity Provider ID. The '
+                       'configuration option %(issuer_attribute)s '
+                       'was not found in the request environment.')

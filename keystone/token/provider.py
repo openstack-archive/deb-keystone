@@ -147,7 +147,7 @@ class Manager(manager.Manager):
             ]
         }
 
-        for event, cb_info in six.iteritems(callbacks):
+        for event, cb_info in callbacks.items():
             for resource_type, callback_fns in cb_info:
                 notifications.register_event_callback(event, resource_type,
                                                       callback_fns)
@@ -209,6 +209,7 @@ class Manager(manager.Manager):
         else:
             token_ref = token_id
         token = self._validate_v2_token(token_ref)
+        token['access']['token']['id'] = token_id
         self._token_belongs_to(token, belongs_to)
         self._is_valid_token(token)
         return token

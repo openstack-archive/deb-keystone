@@ -21,7 +21,6 @@ from oslo_log import log
 from oslo_utils import timeutils
 import six
 
-from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
 from keystone.i18n import _, _LW
 
@@ -287,7 +286,7 @@ def validate_groups(group_ids, mapping_id, identity_api):
 # TODO(marek-denis): Optimize this function, so the number of calls to the
 # backend are minimized.
 def transform_to_group_ids(group_names, mapping_id,
-                           identity_api, assignment_api):
+                           identity_api, resource_api):
     """Transform groups identitified by name/domain to their ids
 
     Function accepts list of groups identified by a name and domain giving
@@ -318,7 +317,7 @@ def transform_to_group_ids(group_names, mapping_id,
     :type mapping_id: str
 
     :param identity_api: identity_api object
-    :param assignment_api: assignment_api object
+    :param resource_api: resource manager object
 
     :returns: generator object with group ids
 
@@ -339,7 +338,7 @@ def transform_to_group_ids(group_names, mapping_id,
 
         """
         domain_id = (domain.get('id') or
-                     assignment_api.get_domain_by_name(
+                     resource_api.get_domain_by_name(
                      domain.get('name')).get('id'))
         return domain_id
 
@@ -528,8 +527,7 @@ class RuleProcessor(object):
 
             if user_type == UserType.EPHEMERAL:
                 user['domain'] = {
-                    'id': (CONF.federation.federated_domain_name or
-                           federation_constants.FEDERATED_DOMAIN_KEYWORD)
+                    'id': CONF.federation.federated_domain_name
                 }
 
         # initialize the group_ids as a set to eliminate duplicates
@@ -608,7 +606,7 @@ class RuleProcessor(object):
         LOG.debug('direct_maps: %s', direct_maps)
         LOG.debug('local: %s', local)
         new = {}
-        for k, v in six.iteritems(local):
+        for k, v in local.items():
             if isinstance(v, dict):
                 new_value = self._update_local_mapping(v, direct_maps)
             else:
@@ -666,7 +664,7 @@ class RuleProcessor(object):
             }
 
         :returns: identity values used to update local
-        :rtype: keystone.contrib.federation.utils.DirectMaps
+        :rtype: keystone.contrib.federation.utils.DirectMaps or None
 
         """
 

@@ -20,6 +20,7 @@ from keystone.common import controller
 from keystone import exception
 from keystone.tests import unit as tests
 from keystone.tests.unit import test_v3
+from keystone.tests.unit import utils
 
 
 CONF = cfg.CONF
@@ -120,8 +121,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assignment_api.add_user_to_project(self.project2['id'],
                                                 self.user2['id'])
 
-        # First check a user in that domain can authenticate, via
-        # Both v2 and v3
+        # First check a user in that domain can authenticate. The v2 user
+        # cannot authenticate because they exist outside the default domain.
         body = {
             'auth': {
                 'passwordCredentials': {
@@ -131,7 +132,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                 'tenantId': self.project2['id']
             }
         }
-        self.admin_request(path='/v2.0/tokens', method='POST', body=body)
+        self.admin_request(
+            path='/v2.0/tokens', method='POST', body=body, expected_status=401)
 
         auth_data = self.build_authentication_request(
             user_id=self.user2['id'],
@@ -422,26 +424,26 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
         for domain in create_domains():
             self.assertRaises(
-                AssertionError, self.assignment_api.create_domain,
+                AssertionError, self.resource_api.create_domain,
                 domain['id'], domain)
             self.assertRaises(
-                AssertionError, self.assignment_api.update_domain,
+                AssertionError, self.resource_api.update_domain,
                 domain['id'], domain)
             self.assertRaises(
-                exception.DomainNotFound, self.assignment_api.delete_domain,
+                exception.DomainNotFound, self.resource_api.delete_domain,
                 domain['id'])
 
             # swap 'name' with 'id' and try again, expecting the request to
             # gracefully fail
             domain['id'], domain['name'] = domain['name'], domain['id']
             self.assertRaises(
-                AssertionError, self.assignment_api.create_domain,
+                AssertionError, self.resource_api.create_domain,
                 domain['id'], domain)
             self.assertRaises(
-                AssertionError, self.assignment_api.update_domain,
+                AssertionError, self.resource_api.update_domain,
                 domain['id'], domain)
             self.assertRaises(
-                exception.DomainNotFound, self.assignment_api.delete_domain,
+                exception.DomainNotFound, self.resource_api.delete_domain,
                 domain['id'])
 
     def test_forbid_operations_on_defined_federated_domain(self):
@@ -457,47 +459,13 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         domain = self.new_domain_ref()
         domain['name'] = non_default_name
         self.assertRaises(AssertionError,
-                          self.assignment_api.create_domain,
+                          self.resource_api.create_domain,
                           domain['id'], domain)
         self.assertRaises(exception.DomainNotFound,
-                          self.assignment_api.delete_domain,
+                          self.resource_api.delete_domain,
                           domain['id'])
         self.assertRaises(AssertionError,
-                          self.assignment_api.update_domain,
-                          domain['id'], domain)
-
-    def test_set_federated_domain_when_config_empty(self):
-        """Make sure we are operable even if config value is not properly
-        set.
-
-        This includes operations like create, update, delete.
-
-        """
-        federated_name = 'Federated'
-        self.config_fixture.config(group='federation',
-                                   federated_domain_name='')
-        domain = self.new_domain_ref()
-        domain['id'] = federated_name
-        self.assertRaises(AssertionError,
-                          self.assignment_api.create_domain,
-                          domain['id'], domain)
-        self.assertRaises(exception.DomainNotFound,
-                          self.assignment_api.delete_domain,
-                          domain['id'])
-        self.assertRaises(AssertionError,
-                          self.assignment_api.update_domain,
-                          domain['id'], domain)
-
-        # swap id with name
-        domain['id'], domain['name'] = domain['name'], domain['id']
-        self.assertRaises(AssertionError,
-                          self.assignment_api.create_domain,
-                          domain['id'], domain)
-        self.assertRaises(exception.DomainNotFound,
-                          self.assignment_api.delete_domain,
-                          domain['id'])
-        self.assertRaises(AssertionError,
-                          self.assignment_api.update_domain,
+                          self.resource_api.update_domain,
                           domain['id'], domain)
 
     # Project CRUD tests
@@ -525,6 +493,64 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         """Call ``POST /projects``."""
         ref = self.new_project_ref(domain_id=uuid.uuid4().hex)
         self.post('/projects', body={'project': ref}, expected_status=400)
+
+    def test_create_project_is_domain_not_allowed(self):
+        """Call ``POST /projects``.
+
+        Setting is_domain=True is not supported yet and should raise
+        NotImplemented.
+
+        """
+        ref = self.new_project_ref(domain_id=self.domain_id, is_domain=True)
+        self.post('/projects',
+                  body={'project': ref},
+                  expected_status=501)
+
+    @utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_without_parent_id_and_without_domain_id(self):
+        """Call ``POST /projects``."""
+
+        # Grant a domain role for the user
+        collection_url = (
+            '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
+                'domain_id': self.domain_id,
+                'user_id': self.user['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+        self.put(member_url)
+
+        # Create an authentication request for a domain scoped token
+        auth = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            domain_id=self.domain_id)
+
+        # Without domain_id and parent_id, the domain_id should be
+        # normalized to the domain on the token, when using a domain
+        # scoped token.
+        ref = self.new_project_ref()
+        r = self.post(
+            '/projects',
+            auth=auth,
+            body={'project': ref})
+        ref['domain_id'] = self.domain['id']
+        self.assertValidProjectResponse(r, ref)
+
+    @utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_with_parent_id_and_no_domain_id(self):
+        """Call ``POST /projects``."""
+        # With only the parent_id, the domain_id should be
+        # normalized to the parent's domain_id
+        ref_child = self.new_project_ref(parent_id=self.project['id'])
+
+        r = self.post(
+            '/projects',
+            body={'project': ref_child})
+        self.assertEqual(r.result['project']['domain_id'],
+                         self.project['domain_id'])
+        ref_child['domain_id'] = self.domain['id']
+        self.assertValidProjectResponse(r, ref_child)
 
     def _create_projects_hierarchy(self, hierarchy_size=1):
         """Creates a single-branched project hierarchy with the specified size.
@@ -940,6 +966,22 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                 'project_id': leaf_project['id']},
             body={'project': leaf_project},
             expected_status=403)
+
+    def test_update_project_is_domain_not_allowed(self):
+        """Call ``PATCH /projects/{project_id}`` with is_domain.
+
+        The is_domain flag is immutable.
+        """
+        project = self.new_project_ref(domain_id=self.domain['id'])
+        resp = self.post('/projects',
+                         body={'project': project})
+        self.assertFalse(resp.result['project']['is_domain'])
+
+        project['is_domain'] = True
+        self.patch('/projects/%(project_id)s' % {
+            'project_id': resp.result['project']['id']},
+            body={'project': project},
+            expected_status=400)
 
     def test_disable_leaf_project(self):
         """Call ``PATCH /projects/{project_id}``."""
@@ -1761,8 +1803,8 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
             for i in range(breadth):
                 subprojects.append(self.new_project_ref(
                     domain_id=self.domain_id, parent_id=parent_id))
-                self.assignment_api.create_project(subprojects[-1]['id'],
-                                                   subprojects[-1])
+                self.resource_api.create_project(subprojects[-1]['id'],
+                                                 subprojects[-1])
 
             new_parent = subprojects[random.randint(0, breadth - 1)]
             create_project_hierarchy(new_parent['id'], depth - 1)
@@ -1772,12 +1814,12 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         # Create a domain
         self.domain = self.new_domain_ref()
         self.domain_id = self.domain['id']
-        self.assignment_api.create_domain(self.domain_id, self.domain)
+        self.resource_api.create_domain(self.domain_id, self.domain)
 
         # Create a project hierarchy
         self.project = self.new_project_ref(domain_id=self.domain_id)
         self.project_id = self.project['id']
-        self.assignment_api.create_project(self.project_id, self.project)
+        self.resource_api.create_project(self.project_id, self.project)
 
         # Create a random project hierarchy
         create_project_hierarchy(self.project_id,
@@ -1810,7 +1852,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         # Create a role
         self.role = self.new_role_ref()
         self.role_id = self.role['id']
-        self.assignment_api.create_role(self.role_id, self.role)
+        self.role_api.create_role(self.role_id, self.role)
 
         # Set default user and group to be used on tests
         self.default_user_id = self.user_ids[0]
@@ -2106,11 +2148,11 @@ class RoleAssignmentEffectiveTestCase(RoleAssignmentInheritedTestCase):
         project_ids = [None]
         if filters.get('domain_id'):
             project_ids = [project['id'] for project in
-                           self.assignment_api.list_projects_in_domain(
+                           self.resource_api.list_projects_in_domain(
                                filters.pop('domain_id'))]
         else:
             project_ids = [project['id'] for project in
-                           self.assignment_api.list_projects_in_subtree(
+                           self.resource_api.list_projects_in_subtree(
                                self.project_id)]
 
         # Compute expected role assignments
@@ -3037,7 +3079,7 @@ class AssignmentV3toV2MethodsTestCase(tests.TestCase):
     """Test domain V3 to V2 conversion methods."""
     def _setup_initial_projects(self):
         self.project_id = uuid.uuid4().hex
-        self.domain_id = uuid.uuid4().hex
+        self.domain_id = CONF.identity.default_domain_id
         self.parent_id = uuid.uuid4().hex
         # Project with only domain_id in ref
         self.project1 = {'id': self.project_id,
@@ -3060,7 +3102,7 @@ class AssignmentV3toV2MethodsTestCase(tests.TestCase):
     def test_v2controller_filter_domain_id(self):
         # V2.0 is not domain aware, ensure domain_id is popped off the ref.
         other_data = uuid.uuid4().hex
-        domain_id = uuid.uuid4().hex
+        domain_id = CONF.identity.default_domain_id
         ref = {'domain_id': domain_id,
                'other_data': other_data}
 

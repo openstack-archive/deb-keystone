@@ -40,7 +40,323 @@ DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 NULL_OBJECT = object()
 
 
-class IdentityTests(object):
+class AssignmentTestHelperMixin(object):
+    """Mixin class to aid testing of assignments.
+
+    This class supports data driven test plans that enable:
+
+    - Creation of initial entities, such as domains, users, groups, projects
+      and roles
+    - Creation of assignments referencing the above entities
+    - A set of input parameters and expected outputs to list_role_assignments
+      based on the above test data
+
+    A test plan is a dict of the form:
+
+    test_plan = {
+        entities: details and number of entities,
+        group_memberships: group-user entity memberships,
+        assignments: list of assignments to create,
+        tests: list of pairs of input params and expected outputs}
+
+    An example test plan:
+
+    test_plan = {
+        # First, create the entities required. Entities are specified by
+        # a dict with the key being the entity type and the value an
+        # entity specification which can be one of:
+        #
+        # - a simple number, e.g. {'users': 3} creates 3 users
+        # - a dict where more information regarding the contents of the entity
+        #   is required, e.g. {'domains' : {'users : 3}} creates a domain
+        #   with three users
+        # - a list of entity specifications if multiple are required
+        #
+        # The following creates a domain that contains a single user, group and
+        # project, as well as creating three roles.
+
+        'entities': {'domains': {'users': 1, 'groups': 1, 'projects': 1},
+                     'roles': 3},
+
+        # If it is required that an existing domain be used for the new
+        # entities, then the id of that domain can be included in the
+        # domain dict.  For example, if alternatively we wanted to add 3 users
+        # to the default domain, add a second domain containing 3 projects as
+        # well as 5 additional empty domains, the entities would be defined as:
+        #
+        # 'entities': {'domains': [{'id': DEFAULT_DOMAIN, 'users': 3},
+        #                          {'projects': 3}, 5]},
+        #
+        # A list of groups and their members. In this case make users with
+        # index 0 and 1 members of group with index 0. Users and Groups are
+        # indexed in the order they appear in the 'entities' key above.
+
+        'group_memberships': [{'group': 0, 'users': [0, 1]}]
+
+        # Next, create assignments between the entities, referencing the
+        # entities by index, i.e. 'user': 0 refers to user[0]. Entities are
+        # indexed in the order they appear in the 'entities' key above within
+        # their entity type.
+
+        'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                        {'user': 0, 'role': 1, 'project': 0},
+                        {'group': 0, 'role': 2, 'domain': 0},
+                        {'user': 0, 'role': 2, 'project': 0}],
+
+        # Finally, define an array of tests where list_role_assignment() is
+        # called with the given input parameters and the results are then
+        # confirmed to be as given in 'results'. Again, all entities are
+        # referenced by index.
+
+        'tests': [
+            {'params': {},
+             'results': [{'user': 0, 'role': 0, 'domain': 0},
+                         {'user': 0, 'role': 1, 'project': 0},
+                         {'group': 0, 'role': 2, 'domain': 0},
+                         {'user': 0, 'role': 2, 'project': 0}]},
+            {'params': {'role': 2},
+             'results': [{'group': 0, 'role': 2, 'domain': 0},
+                         {'user': 0, 'role': 2, 'project': 0}]}]
+
+        # The 'params' key also supports the 'effective' and
+        # 'inherited_to_projects' options to list_role_assignments.}
+
+    """
+    def create_entities(self, entity_pattern):
+        """Create the entities specified in the test plan.
+
+        Process the 'entities' key in the test plan, creating the requested
+        entities. Each created entity will be added to the array of entities
+        stored in the returned test_data object, e.g.:
+
+        test_data['users'] = [user[0], user[1]....]
+
+        """
+        def _create_entity_in_domain(entity_type, domain_id):
+            new_entity = {'name': uuid.uuid4().hex, 'domain_id': domain_id}
+            if entity_type == 'users':
+                new_entity = self.identity_api.create_user(new_entity)
+            elif entity_type == 'groups':
+                new_entity = self.identity_api.create_group(new_entity)
+            elif entity_type == 'projects':
+                new_entity['id'] = uuid.uuid4().hex
+                new_entity = self.resource_api.create_project(new_entity['id'],
+                                                              new_entity)
+            else:
+                # Must be a bad test plan
+                raise exception.NotImplemented()
+            return new_entity
+
+        def _create_domain(domain_id=None):
+            if domain_id is None:
+                new_domain = {'id': uuid.uuid4().hex,
+                              'name': uuid.uuid4().hex}
+                self.resource_api.create_domain(new_domain['id'],
+                                                new_domain)
+                return new_domain
+            else:
+                # The test plan specified an existing domain to use
+                return self.resource_api.get_domain(domain_id)
+
+        def _create_role():
+            new_role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            return self.role_api.create_role(new_role['id'], new_role)
+
+        def _handle_domain_spec(domain_spec):
+            """Handle the creation of domains and their contents.
+
+            domain_spec may either be a count of the number of empty domains to
+            create, a dict describing the domain contents, or a list of
+            domain_specs.
+
+            In the case when a list is provided, this method calls itself
+            recursively to handle the list elements.
+
+            """
+            if isinstance(domain_spec, list):
+                for x in domain_spec:
+                    _handle_domain_spec(x)
+            elif isinstance(domain_spec, dict):
+                # If there is a domain ID specified, then use it
+                the_domain = _create_domain(domain_id=domain_spec.get('id'))
+                test_data['domains'].append(the_domain)
+                for entity_type, count in domain_spec.items():
+                    if entity_type == 'id':
+                        # We already used this above to determine whether to
+                        # use and existing domain
+                        continue
+                    for _ in range(count):
+                        test_data[entity_type].append(
+                            _create_entity_in_domain(
+                                entity_type, the_domain['id']))
+            else:
+                for _ in range(domain_spec):
+                    test_data['domains'].append(_create_domain())
+
+        test_data = {}
+        for entity in ['users', 'groups', 'domains', 'projects', 'roles']:
+            test_data[entity] = []
+
+        # Create any domains requested and, if specified, any entities within
+        # those domains
+        if 'domains' in entity_pattern:
+            _handle_domain_spec(entity_pattern['domains'])
+
+        # Create any roles requested
+        if 'roles' in entity_pattern:
+            for _ in range(entity_pattern['roles']):
+                test_data['roles'].append(_create_role())
+
+        return test_data
+
+    def _convert_entity_shorthand(self, key, shorthand_data, reference_data):
+        """Convert a shorthand entity description into a full ID reference.
+
+        In test plan definitions, we allow a shorthand for referencing to an
+        entity of the form:
+
+        'user': 0
+
+        which is actually shorthand for:
+
+        'user_id': reference_data['users'][0]['id']
+
+        This method converts the shorthand version into the full reference.
+
+        """
+        expanded_key = '%s_id' % key
+        reference_index = '%ss' % key
+        index_value = (
+            reference_data[reference_index][shorthand_data[key]]['id'])
+        return expanded_key, index_value
+
+    def create_group_memberships(self, group_pattern, test_data):
+        """Create the group memberships specified in the test plan."""
+
+        for group_spec in group_pattern:
+            # Each membership specification is a dict of the form:
+            #
+            # {'group': 0, 'users': [list of user indexes]}
+            #
+            # Add all users in the list to the specified group, first
+            # converting from index to full entity ID.
+            group_value = test_data['groups'][group_spec['group']]['id']
+            for user_index in group_spec['users']:
+                user_value = test_data['users'][user_index]['id']
+                self.identity_api.add_user_to_group(user_value, group_value)
+        return test_data
+
+    def create_assignments(self, assignment_pattern, test_data):
+        """Create the assignments specified in the test plan."""
+
+        # First store how many assignments are already in the system,
+        # so during the tests we can check the number of new assignments
+        # created.
+        test_data['initial_assignment_count'] = (
+            len(self.assignment_api.list_role_assignments()))
+
+        # Now create the new assignments in the test plan
+        for assignment in assignment_pattern:
+            # Each assignment is a dict of the form:
+            #
+            # { 'user': 0, 'project':1, 'role': 6}
+            #
+            # where the value of each item is the index into the array of
+            # entities created earlier.
+            #
+            # We process the assignment dict to create the args required to
+            # make the create_grant() call.
+            args = {}
+            for param in assignment:
+                if param == 'inherited_to_projects':
+                    args[param] = assignment[param]
+                else:
+                    # Turn 'entity : 0' into 'entity_id = ac6736ba873d'
+                    # where entity in user, group, project or domain
+                    key, value = self._convert_entity_shorthand(
+                        param, assignment, test_data)
+                    args[key] = value
+            self.assignment_api.create_grant(**args)
+        return test_data
+
+    def execute_assignment_tests(self, test_plan, test_data):
+        """Execute the test plan, based on the created test_data."""
+
+        def check_results(expected, actual, param_arg_count):
+            if param_arg_count == 0:
+                # It was an unfiltered call, so default fixture assignments
+                # might be polluting our answer - so we take into account
+                # how many assignments there were before the test.
+                self.assertEqual(
+                    len(expected) + test_data['initial_assignment_count'],
+                    len(actual))
+            else:
+                self.assertThat(actual, matchers.HasLength(len(expected)))
+
+            for each_expected in expected:
+                expected_assignment = {}
+                for param in each_expected:
+                    if param == 'inherited_to_projects':
+                        expected_assignment[param] = each_expected[param]
+                    elif param == 'indirect':
+                        # We're expecting the result to contain an indirect
+                        # dict with the details how the role came to be placed
+                        # on this entity - so convert the key/value pairs of
+                        # that dict into real entity references.
+                        indirect_term = {}
+                        for indirect_param in each_expected[param]:
+                            key, value = self._convert_entity_shorthand(
+                                indirect_param, each_expected[param],
+                                test_data)
+                            indirect_term[key] = value
+                        expected_assignment[param] = indirect_term
+                    else:
+                        # Convert a simple shorthand entry into a full
+                        # entity reference
+                        key, value = self._convert_entity_shorthand(
+                            param, each_expected, test_data)
+                        expected_assignment[key] = value
+                self.assertIn(expected_assignment, actual)
+
+        # Go through each test in the array, processing the input params, which
+        # we build into an args dict, and then call list_role_assignments. Then
+        # check the results against those specified in the test plan.
+        for test in test_plan.get('tests', []):
+            args = {}
+            for param in test['params']:
+                if param in ['effective', 'inherited']:
+                    # Just pass the value into the args
+                    args[param] = test['params'][param]
+                else:
+                    # Turn 'entity : 0' into 'entity_id = ac6736ba873d'
+                    # where entity in user, group, project or domain
+                    key, value = self._convert_entity_shorthand(
+                        param, test['params'], test_data)
+                    args[key] = value
+            results = self.assignment_api.list_role_assignments(**args)
+            check_results(test['results'], results, len(args))
+
+    def execute_assignment_test_plan(self, test_plan):
+        """Create entities, assignments and execute the test plan.
+
+        The standard method to call to create entities and assignments and
+        execute the tests as specified in the test_plan. The test_data
+        dict is returned so that, if required, the caller can execute
+        additional manual tests with the entities and assignments created.
+
+        """
+        test_data = self.create_entities(test_plan['entities'])
+        if 'group_memberships' in test_plan:
+            self.create_group_memberships(test_plan['group_memberships'],
+                                          test_data)
+        if 'assignments' in test_plan:
+            test_data = self.create_assignments(test_plan['assignments'],
+                                                test_data)
+        self.execute_assignment_tests(test_plan, test_data)
+        return test_data
+
+
+class IdentityTests(AssignmentTestHelperMixin):
     def _get_domain_fixture(self):
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.resource_api.create_domain(domain['id'], domain)
@@ -506,129 +822,83 @@ class IdentityTests(object):
                           'fake2')
 
     def test_list_role_assignments_unfiltered(self):
-        """Test for unfiltered listing role assignments.
+        """Test unfiltered listing of role assignments."""
 
-        Test Plan:
+        test_plan = {
+            # Create a domain, with a user, group & project
+            'entities': {'domains': {'users': 1, 'groups': 1, 'projects': 1},
+                         'roles': 3},
+            # Create a grant of each type (user/group on project/domain)
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'user': 0, 'role': 1, 'project': 0},
+                            {'group': 0, 'role': 2, 'domain': 0},
+                            {'group': 0, 'role': 2, 'project': 0}],
+            'tests': [
+                # Check that we get back the 4 assignments
+                {'params': {},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'project': 0},
+                             {'group': 0, 'role': 2, 'domain': 0},
+                             {'group': 0, 'role': 2, 'project': 0}]}
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
 
-        - Create a domain, with a user, group & project
-        - Find how many role assignments already exist (from default
-          fixtures)
-        - Create a grant of each type (user/group on project/domain)
-        - Check the number of assignments has gone up by 4 and that
-          the entries we added are in the list returned
-        - Check that if we list assignments by role_id, then we get back
-          assignments that only contain that role.
+    def test_list_role_assignments_filtered_by_role(self):
+        """Test listing of role assignments filtered by role ID."""
 
-        """
-        new_domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
-        self.resource_api.create_domain(new_domain['id'], new_domain)
-        new_user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
-                    'enabled': True, 'domain_id': new_domain['id']}
-        new_user = self.identity_api.create_user(new_user)
-        new_group = {'domain_id': new_domain['id'], 'name': uuid.uuid4().hex}
-        new_group = self.identity_api.create_group(new_group)
-        new_project = {'id': uuid.uuid4().hex,
-                       'name': uuid.uuid4().hex,
-                       'domain_id': new_domain['id']}
-        self.resource_api.create_project(new_project['id'], new_project)
+        test_plan = {
+            # Create a user, group & project in the default domain
+            'entities': {'domains': {'id': DEFAULT_DOMAIN_ID,
+                                     'users': 1, 'groups': 1, 'projects': 1},
+                         'roles': 3},
+            # Create a grant of each type (user/group on project/domain)
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'user': 0, 'role': 1, 'project': 0},
+                            {'group': 0, 'role': 2, 'domain': 0},
+                            {'group': 0, 'role': 2, 'project': 0}],
+            'tests': [
+                # Check that when filtering by role, we only get back those
+                # that match
+                {'params': {'role': 2},
+                 'results': [{'group': 0, 'role': 2, 'domain': 0},
+                             {'group': 0, 'role': 2, 'project': 0}]}
+            ]
+        }
+        test_data = self.execute_assignment_test_plan(test_plan)
 
-        # First check how many role grants already exist
-        existing_assignments = len(self.assignment_api.list_role_assignments())
-        existing_assignments_for_role = len(
-            self.assignment_api.list_role_assignments_for_role(
-                role_id='admin'))
-
-        # Now create the grants (roles are defined in default_fixtures)
-        self.assignment_api.create_grant(user_id=new_user['id'],
-                                         domain_id=new_domain['id'],
-                                         role_id='member')
-        self.assignment_api.create_grant(user_id=new_user['id'],
-                                         project_id=new_project['id'],
-                                         role_id='other')
-        self.assignment_api.create_grant(group_id=new_group['id'],
-                                         domain_id=new_domain['id'],
-                                         role_id='admin')
-        self.assignment_api.create_grant(group_id=new_group['id'],
-                                         project_id=new_project['id'],
-                                         role_id='admin')
-
-        # Read back the full list of assignments - check it is gone up by 4
-        assignment_list = self.assignment_api.list_role_assignments()
-        self.assertEqual(existing_assignments + 4, len(assignment_list))
-
-        # Now check that each of our four new entries are in the list
-        self.assertIn(
-            {'user_id': new_user['id'], 'domain_id': new_domain['id'],
-             'role_id': 'member'},
-            assignment_list)
-        self.assertIn(
-            {'user_id': new_user['id'], 'project_id': new_project['id'],
-             'role_id': 'other'},
-            assignment_list)
-        self.assertIn(
-            {'group_id': new_group['id'], 'domain_id': new_domain['id'],
-             'role_id': 'admin'},
-            assignment_list)
-        self.assertIn(
-            {'group_id': new_group['id'], 'project_id': new_project['id'],
-             'role_id': 'admin'},
-            assignment_list)
-
-        # Read back the list of assignments for just the admin role, checking
-        # this only goes up by two.
+        # Also test that list_role_assignments_for_role() gives the same answer
         assignment_list = self.assignment_api.list_role_assignments_for_role(
-            role_id='admin')
-        self.assertEqual(existing_assignments_for_role + 2,
-                         len(assignment_list))
+            role_id=test_data['roles'][2]['id'])
+        self.assertThat(assignment_list, matchers.HasLength(2))
 
         # Now check that each of our two new entries are in the list
         self.assertIn(
-            {'group_id': new_group['id'], 'domain_id': new_domain['id'],
-             'role_id': 'admin'},
+            {'group_id': test_data['groups'][0]['id'],
+             'domain_id': DEFAULT_DOMAIN_ID,
+             'role_id': test_data['roles'][2]['id']},
             assignment_list)
         self.assertIn(
-            {'group_id': new_group['id'], 'project_id': new_project['id'],
-             'role_id': 'admin'},
+            {'group_id': test_data['groups'][0]['id'],
+             'project_id': test_data['projects'][0]['id'],
+             'role_id': test_data['roles'][2]['id']},
             assignment_list)
 
     def test_list_group_role_assignment(self):
         # When a group role assignment is created and the role assignments are
         # listed then the group role assignment is included in the list.
 
-        MEMBER_ROLE_ID = 'member'
-
-        def get_member_assignments():
-            assignments = self.assignment_api.list_role_assignments()
-            return [x for x in assignments if x['role_id'] == MEMBER_ROLE_ID]
-
-        orig_member_assignments = get_member_assignments()
-
-        # Create a group.
-        new_group = {
-            'domain_id': DEFAULT_DOMAIN_ID,
-            'name': self.getUniqueString(prefix='tlgra')}
-        new_group = self.identity_api.create_group(new_group)
-
-        # Create a project.
-        new_project = {
-            'id': uuid.uuid4().hex,
-            'name': self.getUniqueString(prefix='tlgra'),
-            'domain_id': DEFAULT_DOMAIN_ID}
-        self.resource_api.create_project(new_project['id'], new_project)
-
-        # Assign a role to the group.
-        self.assignment_api.create_grant(
-            group_id=new_group['id'], project_id=new_project['id'],
-            role_id=MEMBER_ROLE_ID)
-
-        # List role assignments
-        new_member_assignments = get_member_assignments()
-
-        expected_member_assignments = orig_member_assignments + [{
-            'group_id': new_group['id'], 'project_id': new_project['id'],
-            'role_id': MEMBER_ROLE_ID}]
-        self.assertThat(new_member_assignments,
-                        matchers.Equals(expected_member_assignments))
+        test_plan = {
+            'entities': {'domains': {'id': DEFAULT_DOMAIN_ID,
+                                     'groups': 1, 'projects': 1},
+                         'roles': 1},
+            'assignments': [{'group': 0, 'role': 0, 'project': 0}],
+            'tests': [
+                {'params': {},
+                 'results': [{'group': 0, 'role': 0, 'project': 0}]}
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
 
     def test_list_role_assignments_bad_role(self):
         assignment_list = self.assignment_api.list_role_assignments_for_role(
@@ -1656,6 +1926,82 @@ class IdentityTests(object):
         self.identity_api.delete_group(group1['id'])
         self.identity_api.get_user(user1['id'])
 
+    def test_list_role_assignment_by_domain(self):
+        """Test listing of role assignment filtered by domain."""
+
+        test_plan = {
+            # A domain with 3 users, 1 group, a spoiler domain and 2 roles.
+            'entities': {'domains': [{'users': 3, 'groups': 1}, 1],
+                         'roles': 2},
+            # Users 1 & 2 are in the group
+            'group_memberships': [{'group': 0, 'users': [1, 2]}],
+            # Assign a role for user 0 and the group
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'group': 0, 'role': 1, 'domain': 0}],
+            'tests': [
+                # List all effective assignments for domain[0].
+                # Should get one direct user role and user roles for each of
+                # the users in the group.
+                {'params': {'domain': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 1, 'role': 1, 'domain': 0,
+                              'indirect': {'group': 0}},
+                             {'user': 2, 'role': 1, 'domain': 0,
+                              'indirect': {'group': 0}}
+                             ]},
+                # Using domain[1] should return nothing
+                {'params': {'domain': 1, 'effective': True},
+                 'results': []},
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
+
+    def test_list_role_assignment_by_user_with_domain_group_roles(self):
+        """Test listing assignments by user, with group roles on a domain."""
+
+        test_plan = {
+            # A domain with 3 users, 3 groups, a spoiler domain
+            # plus 3 roles.
+            'entities': {'domains': [{'users': 3, 'groups': 3}, 1],
+                         'roles': 3},
+            # Users 1 & 2 are in the group 0, User 1 also in group 1
+            'group_memberships': [{'group': 0, 'users': [0, 1]},
+                                  {'group': 1, 'users': [0]}],
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'group': 0, 'role': 1, 'domain': 0},
+                            {'group': 1, 'role': 2, 'domain': 0},
+                            # ...and two spoiler assignments
+                            {'user': 1, 'role': 1, 'domain': 0},
+                            {'group': 2, 'role': 2, 'domain': 0}],
+            'tests': [
+                # List all effective assignments for user[0].
+                # Should get one direct user role and a user roles for each of
+                # groups 0 and 1
+                {'params': {'user': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'domain': 0,
+                              'indirect': {'group': 0}},
+                             {'user': 0, 'role': 2, 'domain': 0,
+                              'indirect': {'group': 1}}
+                             ]},
+                # Adding domain[0] as a filter should return the same data
+                {'params': {'user': 0, 'domain': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'domain': 0,
+                              'indirect': {'group': 0}},
+                             {'user': 0, 'role': 2, 'domain': 0,
+                              'indirect': {'group': 1}}
+                             ]},
+                # Using domain[1] should return nothing
+                {'params': {'user': 0, 'domain': 1, 'effective': True},
+                 'results': []},
+                # Using user[2] should return nothing
+                {'params': {'user': 2, 'domain': 0, 'effective': True},
+                 'results': []},
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
+
     def test_delete_domain_with_user_group_project_links(self):
         # TODO(chungg):add test case once expected behaviour defined
         pass
@@ -2089,7 +2435,7 @@ class IdentityTests(object):
         # Create a project
         project = {'id': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID,
                    'name': uuid.uuid4().hex, 'description': uuid.uuid4().hex,
-                   'enabled': True, 'parent_id': None}
+                   'enabled': True, 'parent_id': None, 'is_domain': False}
         self.resource_api.create_project(project['id'], project)
 
         # Build driver hints with the project's name and inexistent description
@@ -2141,12 +2487,15 @@ class IdentityTests(object):
         self.assertIn(project2['id'], project_ids)
 
     def _create_projects_hierarchy(self, hierarchy_size=2,
-                                   domain_id=DEFAULT_DOMAIN_ID):
+                                   domain_id=DEFAULT_DOMAIN_ID,
+                                   is_domain=False):
         """Creates a project hierarchy with specified size.
 
         :param hierarchy_size: the desired hierarchy size, default is 2 -
                                a project with one child.
         :param domain_id: domain where the projects hierarchy will be created.
+        :param is_domain: if the hierarchy will have the is_domain flag active
+                          or not.
 
         :returns projects: a list of the projects in the created hierarchy.
 
@@ -2154,25 +2503,194 @@ class IdentityTests(object):
         project_id = uuid.uuid4().hex
         project = {'id': project_id,
                    'description': '',
-                   'domain_id': domain_id,
                    'enabled': True,
                    'name': uuid.uuid4().hex,
-                   'parent_id': None}
+                   'parent_id': None,
+                   'domain_id': domain_id,
+                   'is_domain': is_domain}
         self.resource_api.create_project(project_id, project)
 
         projects = [project]
         for i in range(1, hierarchy_size):
             new_project = {'id': uuid.uuid4().hex,
                            'description': '',
-                           'domain_id': domain_id,
                            'enabled': True,
                            'name': uuid.uuid4().hex,
-                           'parent_id': project_id}
+                           'parent_id': project_id,
+                           'is_domain': is_domain}
+            new_project['domain_id'] = domain_id
+
             self.resource_api.create_project(new_project['id'], new_project)
             projects.append(new_project)
             project_id = new_project['id']
 
         return projects
+
+    @tests.skip_if_no_multiple_domains_support
+    def test_create_domain_with_project_api(self):
+        project_id = uuid.uuid4().hex
+        project = {'id': project_id,
+                   'description': '',
+                   'domain_id': DEFAULT_DOMAIN_ID,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None,
+                   'is_domain': True}
+        ref = self.resource_api.create_project(project['id'], project)
+        self.assertTrue(ref['is_domain'])
+        self.assertEqual(DEFAULT_DOMAIN_ID, ref['domain_id'])
+
+    @tests.skip_if_no_multiple_domains_support
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_is_domain_sub_project_has_parent_domain_id(self):
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': DEFAULT_DOMAIN_ID,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None,
+                   'is_domain': True}
+        self.resource_api.create_project(project['id'], project)
+
+        sub_project_id = uuid.uuid4().hex
+        sub_project = {'id': sub_project_id,
+                       'description': '',
+                       'domain_id': project['id'],
+                       'enabled': True,
+                       'name': uuid.uuid4().hex,
+                       'parent_id': project['id'],
+                       'is_domain': True}
+        ref = self.resource_api.create_project(sub_project['id'], sub_project)
+        self.assertTrue(ref['is_domain'])
+        self.assertEqual(project['id'], ref['parent_id'])
+        self.assertEqual(project['id'], ref['domain_id'])
+
+    @tests.skip_if_no_multiple_domains_support
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_delete_domain_with_project_api(self):
+        project_id = uuid.uuid4().hex
+        project = {'id': project_id,
+                   'description': '',
+                   'domain_id': None,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None,
+                   'is_domain': True}
+        self.resource_api.create_project(project['id'], project)
+
+        # Try to delete is_domain project that is enabled
+        self.assertRaises(exception.ValidationError,
+                          self.resource_api.delete_project,
+                          project['id'])
+
+        # Disable the project
+        project['enabled'] = False
+        self.resource_api.update_project(project['id'], project)
+
+        # Successfuly delete the project
+        self.resource_api.delete_project(project['id'])
+
+    @tests.skip_if_no_multiple_domains_support
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_create_domain_under_regular_project_hierarchy_fails(self):
+        # Creating a regular project hierarchy. Projects acting as domains
+        # can't have a parent that is a regular project.
+        projects_hierarchy = self._create_projects_hierarchy()
+        parent = projects_hierarchy[1]
+        project_id = uuid.uuid4().hex
+        project = {'id': project_id,
+                   'description': '',
+                   'domain_id': parent['id'],
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': parent['id'],
+                   'is_domain': True}
+
+        self.assertRaises(exception.ValidationError,
+                          self.resource_api.create_project,
+                          project['id'], project)
+
+    @tests.skip_if_no_multiple_domains_support
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_under_domain_hierarchy(self):
+        projects_hierarchy = self._create_projects_hierarchy(is_domain=True)
+        parent = projects_hierarchy[1]
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': parent['id'],
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': parent['id'],
+                   'is_domain': False}
+
+        ref = self.resource_api.create_project(project['id'], project)
+        self.assertFalse(ref['is_domain'])
+        self.assertEqual(parent['id'], ref['parent_id'])
+        self.assertEqual(parent['id'], ref['domain_id'])
+
+    def test_create_project_without_is_domain_flag(self):
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': DEFAULT_DOMAIN_ID,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None}
+
+        ref = self.resource_api.create_project(project['id'], project)
+        # The is_domain flag should be False by default
+        self.assertFalse(ref['is_domain'])
+
+    def test_create_is_domain_project(self):
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': DEFAULT_DOMAIN_ID,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None,
+                   'is_domain': True}
+
+        ref = self.resource_api.create_project(project['id'], project)
+        self.assertTrue(ref['is_domain'])
+
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_with_parent_id_and_without_domain_id(self):
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': None,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None}
+        self.resource_api.create_project(project['id'], project)
+
+        sub_project = {'id': uuid.uuid4().hex,
+                       'description': '',
+                       'enabled': True,
+                       'name': uuid.uuid4().hex,
+                       'parent_id': project['id']}
+        ref = self.resource_api.create_project(sub_project['id'], sub_project)
+
+        # The domain_id should be set to the parent domain_id
+        self.assertEqual(project['domain_id'], ref['domain_id'])
+
+    @test_utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_with_domain_id_and_without_parent_id(self):
+        project = {'id': uuid.uuid4().hex,
+                   'description': '',
+                   'domain_id': None,
+                   'enabled': True,
+                   'name': uuid.uuid4().hex,
+                   'parent_id': None}
+        self.resource_api.create_project(project['id'], project)
+
+        sub_project = {'id': uuid.uuid4().hex,
+                       'description': '',
+                       'enabled': True,
+                       'domain_id': project['id'],
+                       'name': uuid.uuid4().hex}
+        ref = self.resource_api.create_project(sub_project['id'], sub_project)
+
+        # The parent_id should be set to the domain_id
+        self.assertEqual(ref['parent_id'], project['id'])
 
     def test_check_leaf_projects(self):
         projects_hierarchy = self._create_projects_hierarchy()
@@ -2201,7 +2719,8 @@ class IdentityTests(object):
                     'domain_id': DEFAULT_DOMAIN_ID,
                     'enabled': True,
                     'name': uuid.uuid4().hex,
-                    'parent_id': project2['id']}
+                    'parent_id': project2['id'],
+                    'is_domain': False}
         self.resource_api.create_project(project4['id'], project4)
 
         subtree = self.resource_api.list_projects_in_subtree(project1['id'])
@@ -2270,7 +2789,8 @@ class IdentityTests(object):
                     'domain_id': DEFAULT_DOMAIN_ID,
                     'enabled': True,
                     'name': uuid.uuid4().hex,
-                    'parent_id': project2['id']}
+                    'parent_id': project2['id'],
+                    'is_domain': False}
         self.resource_api.create_project(project4['id'], project4)
 
         parents1 = self.resource_api.list_project_parents(project3['id'])
@@ -2873,7 +3393,8 @@ class IdentityTests(object):
                    'description': '',
                    'domain_id': DEFAULT_DOMAIN_ID,
                    'enabled': True,
-                   'parent_id': 'fake'}
+                   'parent_id': 'fake',
+                   'is_domain': False}
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.create_project,
                           project['id'],
@@ -2886,7 +3407,8 @@ class IdentityTests(object):
                         'description': '',
                         'domain_id': DEFAULT_DOMAIN_ID,
                         'enabled': True,
-                        'parent_id': None}
+                        'parent_id': None,
+                        'is_domain': False}
         self.resource_api.create_project(root_project['id'], root_project)
 
         domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
@@ -2897,7 +3419,8 @@ class IdentityTests(object):
                         'description': '',
                         'domain_id': domain['id'],
                         'enabled': True,
-                        'parent_id': root_project['id']}
+                        'parent_id': root_project['id'],
+                        'is_domain': False}
 
         self.assertRaises(exception.ValidationError,
                           self.resource_api.create_project,
@@ -2948,13 +3471,15 @@ class IdentityTests(object):
                     'name': uuid.uuid4().hex,
                     'domain_id': DEFAULT_DOMAIN_ID,
                     'enabled': False,
-                    'parent_id': None}
+                    'parent_id': None,
+                    'is_domain': False}
         self.resource_api.create_project(project1['id'], project1)
 
         project2 = {'id': uuid.uuid4().hex,
                     'name': uuid.uuid4().hex,
                     'domain_id': DEFAULT_DOMAIN_ID,
-                    'parent_id': project1['id']}
+                    'parent_id': project1['id'],
+                    'is_domain': False}
 
         # It's not possible to create a project under a disabled one in the
         # hierarchy
@@ -3020,7 +3545,8 @@ class IdentityTests(object):
             'id': project_id,
             'name': uuid.uuid4().hex,
             'domain_id': DEFAULT_DOMAIN_ID,
-            'parent_id': leaf_project['id']}
+            'parent_id': leaf_project['id'],
+            'is_domain': False}
         self.assertRaises(exception.ForbiddenAction,
                           self.resource_api.create_project,
                           project_id,
@@ -3032,7 +3558,8 @@ class IdentityTests(object):
                    'name': uuid.uuid4().hex,
                    'domain_id': DEFAULT_DOMAIN_ID,
                    'enabled': True,
-                   'parent_id': None}
+                   'parent_id': None,
+                   'is_domain': False}
         self.resource_api.create_project(project['id'], project)
 
         # Add a description attribute.
@@ -3048,7 +3575,8 @@ class IdentityTests(object):
                    'name': uuid.uuid4().hex,
                    'domain_id': DEFAULT_DOMAIN_ID,
                    'enabled': True,
-                   'parent_id': None}
+                   'parent_id': None,
+                   'is_domain': False}
         self.resource_api.create_project(project['id'], project)
 
         # Add a description attribute.
@@ -3726,16 +4254,16 @@ class IdentityTests(object):
         domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
         self.resource_api.create_domain(domain2['id'], domain2)
         project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain1['id']}
+                    'domain_id': domain1['id'], 'is_domain': False}
         project1 = self.resource_api.create_project(project1['id'], project1)
         project2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain1['id']}
+                    'domain_id': domain1['id'], 'is_domain': False}
         project2 = self.resource_api.create_project(project2['id'], project2)
         project3 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain1['id']}
+                    'domain_id': domain1['id'], 'is_domain': False}
         project3 = self.resource_api.create_project(project3['id'], project3)
         project4 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain2['id']}
+                    'domain_id': domain2['id'], 'is_domain': False}
         project4 = self.resource_api.create_project(project4['id'], project4)
         group_list = []
         role_list = []
@@ -4654,7 +5182,7 @@ class CatalogTests(object):
                           region_two['id'],
                           {'parent_region_id': region_four['id']})
 
-    @mock.patch.object(core.Driver,
+    @mock.patch.object(core.CatalogDriverV8,
                        "_ensure_no_circle_in_hierarchical_regions")
     def test_circular_regions_can_be_deleted(self, mock_ensure_on_circle):
         # turn off the enforcement so that cycles can be created for the test
@@ -4977,7 +5505,6 @@ class CatalogTests(object):
 
         endpoint = {
             'id': uuid.uuid4().hex,
-            'region_id': None,
             'service_id': service['id'],
             'interface': 'public',
             'url': uuid.uuid4().hex,
@@ -5076,6 +5603,29 @@ class CatalogTests(object):
             service_id, region['id'], enabled=False, interface='internal')
 
         return service_ref, enabled_endpoint_ref, disabled_endpoint_ref
+
+    def test_list_endpoints(self):
+        service = {
+            'id': uuid.uuid4().hex,
+            'type': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_service(service['id'], service.copy())
+
+        expected_ids = set([uuid.uuid4().hex for _ in range(3)])
+        for endpoint_id in expected_ids:
+            endpoint = {
+                'id': endpoint_id,
+                'region_id': None,
+                'service_id': service['id'],
+                'interface': 'public',
+                'url': uuid.uuid4().hex,
+            }
+            self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
+
+        endpoints = self.catalog_api.list_endpoints()
+        self.assertEqual(expected_ids, set(e['id'] for e in endpoints))
 
     def test_get_catalog_endpoint_disabled(self):
         """Get back only enabled endpoints when get the v2 catalog."""
@@ -5225,7 +5775,71 @@ class PolicyTests(object):
                           uuid.uuid4().hex)
 
 
-class InheritanceTests(object):
+class InheritanceTests(AssignmentTestHelperMixin):
+
+    def test_role_assignments_user_domain_to_project_inheritance(self):
+        test_plan = {
+            'entities': {'domains': {'users': 2, 'projects': 1},
+                         'roles': 3},
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'user': 0, 'role': 1, 'project': 0},
+                            {'user': 0, 'role': 2, 'domain': 0,
+                             'inherited_to_projects': True},
+                            {'user': 1, 'role': 1, 'project': 0}],
+            'tests': [
+                # List all direct assignments for user[0]
+                {'params': {'user': 0},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'project': 0},
+                             {'user': 0, 'role': 2, 'domain': 0,
+                              'inherited_to_projects': 'projects'}]},
+                # Now the effective ones - so the domain role should turn into
+                # a project role
+                {'params': {'user': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'project': 0},
+                             {'user': 0, 'role': 2, 'project': 0,
+                              'indirect': {'domain': 0}}]},
+                # Narrow down to effective roles for user[0] and project[0]
+                {'params': {'user': 0, 'project': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 1, 'project': 0},
+                             {'user': 0, 'role': 2, 'project': 0,
+                              'indirect': {'domain': 0}}]}
+            ]
+        }
+        self.config_fixture.config(group='os_inherit', enabled=True)
+        self.execute_assignment_test_plan(test_plan)
+
+    def test_inherited_role_assignments_excluded_if_os_inherit_false(self):
+        test_plan = {
+            'entities': {'domains': {'users': 2, 'groups': 1, 'projects': 1},
+                         'roles': 4},
+            'group_memberships': [{'group': 0, 'users': [0]}],
+            'assignments': [{'user': 0, 'role': 0, 'domain': 0},
+                            {'user': 0, 'role': 1, 'project': 0},
+                            {'user': 0, 'role': 2, 'domain': 0,
+                             'inherited_to_projects': True},
+                            {'user': 1, 'role': 1, 'project': 0},
+                            {'group': 0, 'role': 3, 'project': 0}],
+            'tests': [
+                # List all direct assignments for user[0], since os-inherit is
+                # disabled, we should not see the inherited role
+                {'params': {'user': 0},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'project': 0}]},
+                # Same in effective mode - inherited roles should not be
+                # included or expanded...but the group role should now
+                # turn up as a user role, since group expansion is not
+                # part of os-inherit.
+                {'params': {'user': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'domain': 0},
+                             {'user': 0, 'role': 1, 'project': 0},
+                             {'user': 0, 'role': 3, 'project': 0,
+                              'indirect': {'group': 0}}]},
+            ]
+        }
+        self.config_fixture.config(group='os_inherit', enabled=False)
+        self.execute_assignment_test_plan(test_plan)
 
     def _test_crud_inherited_and_direct_assignment(self, **kwargs):
         """Tests inherited and direct assignments for the actor and target
@@ -5373,6 +5987,42 @@ class InheritanceTests(object):
         self.assertEqual(1, len(combined_role_list))
         self.assertIn(role_list[1]['id'], combined_role_list)
 
+        # TODO(henry-nash): The test above uses get_roles_for_user_and_project
+        # and get_roles_for_user_and_domain, which will, in a subsequent patch,
+        # be re-implemeted to simply call list_role_assignments (see blueprint
+        # remove-role-metadata).
+        #
+        # The test plan below therefore mirrors this test, to ensure that
+        # list_role_assignments works the same. Once get_roles_for_user_and
+        # project/domain have been re-implemented then the manual tests above
+        # can be refactored to simply ensure it gives the same answers.
+        test_plan = {
+            # A domain with a user & project, plus 3 roles.
+            'entities': {'domains': {'users': 1, 'projects': 1},
+                         'roles': 3},
+            'assignments': [{'user': 0, 'role': 0, 'project': 0},
+                            {'user': 0, 'role': 1, 'domain': 0},
+                            {'user': 0, 'role': 2, 'domain': 0,
+                             'inherited_to_projects': True}],
+            'tests': [
+                # List all effective assignments for user[0] on project[0].
+                # Should get one direct role and one inherited role.
+                {'params': {'user': 0, 'project': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'project': 0},
+                             {'user': 0, 'role': 2, 'project': 0,
+                              'indirect': {'domain': 0}}]},
+                # Ensure effective mode on the domain does not list the
+                # inherited role on that domain
+                {'params': {'user': 0, 'domain': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 1, 'domain': 0}]},
+                # Ensure non-inherited mode also only returns the non-inherited
+                # role on the domain
+                {'params': {'user': 0, 'domain': 0, 'inherited': False},
+                 'results': [{'user': 0, 'role': 1, 'domain': 0}]},
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
+
     def test_inherited_role_grants_for_group(self):
         """Test inherited group roles.
 
@@ -5456,6 +6106,42 @@ class InheritanceTests(object):
         self.assertIn(role_list[2]['id'], combined_list)
         self.assertIn(role_list[3]['id'], combined_list)
 
+        # TODO(henry-nash): The test above uses get_roles_for_user_and_project
+        # which will, in a subsequent patch, be re-implemeted to simply call
+        # list_role_assignments (see blueprint remove-role-metadata).
+        #
+        # The test plan below therefore mirrors this test, to ensure that
+        # list_role_assignments works the same. Once
+        # get_roles_for_user_and_project has been re-implemented then the
+        # manual tests above can be refactored to simply ensure it gives
+        # the same answers.
+        test_plan = {
+            # A domain with a user and project, 2 groups, plus 4 roles.
+            'entities': {'domains': {'users': 1, 'projects': 1, 'groups': 2},
+                         'roles': 4},
+            'group_memberships': [{'group': 0, 'users': [0]},
+                                  {'group': 1, 'users': [0]}],
+            'assignments': [{'user': 0, 'role': 0, 'project': 0},
+                            {'group': 0, 'role': 1, 'domain': 0},
+                            {'group': 1, 'role': 2, 'domain': 0,
+                             'inherited_to_projects': True},
+                            {'group': 1, 'role': 3, 'domain': 0,
+                             'inherited_to_projects': True}],
+            'tests': [
+                # List all effective assignments for user[0] on project[0].
+                # Should get one direct role and both inherited roles, but
+                # not the direct one on domain[0], even though user[0] is
+                # in group[0].
+                {'params': {'user': 0, 'project': 0, 'effective': True},
+                 'results': [{'user': 0, 'role': 0, 'project': 0},
+                             {'user': 0, 'role': 2, 'project': 0,
+                              'indirect': {'domain': 0, 'group': 1}},
+                             {'user': 0, 'role': 3, 'project': 0,
+                              'indirect': {'domain': 0, 'group': 1}}]}
+            ]
+        }
+        self.execute_assignment_test_plan(test_plan)
+
     def test_list_projects_for_user_with_inherited_grants(self):
         """Test inherited user roles.
 
@@ -5516,14 +6202,16 @@ class InheritanceTests(object):
                         'domain_id': DEFAULT_DOMAIN_ID,
                         'enabled': True,
                         'name': uuid.uuid4().hex,
-                        'parent_id': None}
+                        'parent_id': None,
+                        'is_domain': False}
         self.resource_api.create_project(root_project['id'], root_project)
         leaf_project = {'id': uuid.uuid4().hex,
                         'description': '',
                         'domain_id': DEFAULT_DOMAIN_ID,
                         'enabled': True,
                         'name': uuid.uuid4().hex,
-                        'parent_id': root_project['id']}
+                        'parent_id': root_project['id'],
+                        'is_domain': False}
         self.resource_api.create_project(leaf_project['id'], leaf_project)
 
         user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
@@ -5637,14 +6325,16 @@ class InheritanceTests(object):
                         'domain_id': DEFAULT_DOMAIN_ID,
                         'enabled': True,
                         'name': uuid.uuid4().hex,
-                        'parent_id': None}
+                        'parent_id': None,
+                        'is_domain': False}
         self.resource_api.create_project(root_project['id'], root_project)
         leaf_project = {'id': uuid.uuid4().hex,
                         'description': '',
                         'domain_id': DEFAULT_DOMAIN_ID,
                         'enabled': True,
                         'name': uuid.uuid4().hex,
-                        'parent_id': root_project['id']}
+                        'parent_id': root_project['id'],
+                        'is_domain': False}
         self.resource_api.create_project(leaf_project['id'], leaf_project)
 
         user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,

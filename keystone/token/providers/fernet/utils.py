@@ -174,7 +174,12 @@ def rotate_keys(keystone_user_id=None, keystone_group_id=None):
     for filename in os.listdir(CONF.fernet_tokens.key_repository):
         path = os.path.join(CONF.fernet_tokens.key_repository, str(filename))
         if os.path.isfile(path):
-            key_files[int(filename)] = path
+            try:
+                key_id = int(filename)
+            except ValueError:
+                pass
+            else:
+                key_files[key_id] = path
 
     LOG.info(_LI('Starting key rotation with %(count)s key files: %(list)s'), {
         'count': len(key_files),
@@ -236,12 +241,25 @@ def load_keys():
         path = os.path.join(CONF.fernet_tokens.key_repository, str(filename))
         if os.path.isfile(path):
             with open(path, 'r') as key_file:
-                keys[int(filename)] = key_file.read()
+                try:
+                    key_id = int(filename)
+                except ValueError:
+                    pass
+                else:
+                    keys[key_id] = key_file.read()
 
-    LOG.info(_LI(
-        'Loaded %(count)s encryption keys from: %(dir)s'), {
-            'count': len(keys),
-            'dir': CONF.fernet_tokens.key_repository})
+    if len(keys) != CONF.fernet_tokens.max_active_keys:
+        # If there haven't been enough key rotations to reach max_active_keys,
+        # or if the configured value of max_active_keys has changed since the
+        # last rotation, then reporting the discrepancy might be useful. Once
+        # the number of keys matches max_active_keys, this log entry is too
+        # repetitive to be useful.
+        LOG.info(_LI(
+            'Loaded %(count)d encryption keys (max_active_keys=%(max)d) from: '
+            '%(dir)s'), {
+                'count': len(keys),
+                'max': CONF.fernet_tokens.max_active_keys,
+                'dir': CONF.fernet_tokens.key_repository})
 
     # return the encryption_keys, sorted by key number, descending
     return [keys[x] for x in sorted(keys.keys(), reverse=True)]

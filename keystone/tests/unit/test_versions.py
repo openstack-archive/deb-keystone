@@ -170,6 +170,8 @@ BASE_ACCESS_TOKEN = (
 # TODO(stevemar): Use BASE_IDP_PROTOCOL when bug 1420125 is resolved.
 FEDERATED_AUTH_URL = ('/OS-FEDERATION/identity_providers/{identity_provider}'
                       '/protocols/{protocol}/auth')
+FEDERATED_IDP_SPECIFIC_WEBSSO = ('/auth/OS-FEDERATION/identity_providers/'
+                                 '{idp_id}/protocols/{protocol_id}/websso')
 
 V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
     json_home.build_v3_resource_relation('auth_tokens'): {
@@ -345,13 +347,13 @@ V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
         'href-vars': {'user_id': json_home.Parameters.USER_ID, }},
     json_home.build_v3_resource_relation('users'): {'href': '/users'},
     _build_federation_rel(resource_name='domains'): {
-        'href': '/OS-FEDERATION/domains'},
+        'href': '/auth/domains'},
     _build_federation_rel(resource_name='websso'): {
         'href-template': '/auth/OS-FEDERATION/websso/{protocol_id}',
         'href-vars': {
             'protocol_id': PROTOCOL_ID_PARAM_RELATION, }},
     _build_federation_rel(resource_name='projects'): {
-        'href': '/OS-FEDERATION/projects'},
+        'href': '/auth/projects'},
     _build_federation_rel(resource_name='saml2'): {
         'href': '/auth/OS-FEDERATION/saml2'},
     _build_federation_rel(resource_name='ecp'): {
@@ -368,6 +370,11 @@ V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
     {
         'href-template': '/OS-FEDERATION/identity_providers/{idp_id}',
         'href-vars': {'idp_id': IDP_ID_PARAMETER_RELATION, }},
+    _build_federation_rel(resource_name='identity_providers'): {
+        'href-template': FEDERATED_IDP_SPECIFIC_WEBSSO,
+        'href-vars': {
+            'idp_id': IDP_ID_PARAMETER_RELATION,
+            'protocol_id': PROTOCOL_ID_PARAM_RELATION, }},
     _build_federation_rel(resource_name='service_provider'):
     {
         'href-template': '/OS-FEDERATION/service_providers/{sp_id}',
@@ -956,6 +963,11 @@ class VersionSingleAppTestCase(tests.TestCase):
                 link['href'] = port
 
     def _test_version(self, app_name):
+        def app_port():
+            if app_name == 'admin':
+                return CONF.eventlet_server.admin_port
+            else:
+                return CONF.eventlet_server.public_port
         app = self.loadapp('keystone', app_name)
         client = tests.TestClient(app)
         resp = client.get('/')
@@ -965,12 +977,10 @@ class VersionSingleAppTestCase(tests.TestCase):
         for version in expected['versions']['values']:
             if version['id'].startswith('v3'):
                 self._paste_in_port(
-                    version, 'http://localhost:%s/v3/' %
-                    CONF.eventlet_server.public_port)
+                    version, 'http://localhost:%s/v3/' % app_port())
             elif version['id'] == 'v2.0':
                 self._paste_in_port(
-                    version, 'http://localhost:%s/v2.0/' %
-                    CONF.eventlet_server.public_port)
+                    version, 'http://localhost:%s/v2.0/' % app_port())
         self.assertThat(data, _VersionsEqual(expected))
 
     def test_public(self):

@@ -16,6 +16,7 @@ import subprocess
 from testtools import matchers
 import uuid
 
+import fixtures
 from lxml import etree
 import mock
 from oslo_config import cfg
@@ -31,11 +32,8 @@ if not xmldsig:
     xmldsig = importutils.try_import("xmldsig")
 
 from keystone.auth import controllers as auth_controllers
-from keystone.auth.plugins import mapped
-from keystone.contrib.federation import constants as federation_constants
 from keystone.contrib.federation import controllers as federation_controllers
 from keystone.contrib.federation import idp as keystone_idp
-from keystone.contrib.federation import utils as mapping_utils
 from keystone import exception
 from keystone import notifications
 from keystone.tests.unit import core
@@ -126,8 +124,25 @@ class FederatedSetupMixin(object):
         os_federation = token['user']['OS-FEDERATION']
         self.assertEqual(self.IDP, os_federation['identity_provider']['id'])
         self.assertEqual(self.PROTOCOL, os_federation['protocol']['id'])
-        self.assertListEqual(sorted(['identity_provider', 'protocol']),
+        self.assertListEqual(sorted(['groups',
+                                     'identity_provider',
+                                     'protocol']),
                              sorted(os_federation.keys()))
+
+    def assertValidMappedUser(self, token):
+        """Check if user object meets all the criteria."""
+
+        user = token['user']
+        self.assertIn('id', user)
+        self.assertIn('name', user)
+        self.assertIn('domain', user)
+
+        self.assertIn('groups', user['OS-FEDERATION'])
+        self.assertIn('identity_provider', user['OS-FEDERATION'])
+        self.assertIn('protocol', user['OS-FEDERATION'])
+
+        # Make sure user_id is url safe
+        self.assertEqual(urllib.parse.quote(user['name']), user['id'])
 
     def _issue_unscoped_token(self,
                               idp=None,
@@ -332,13 +347,17 @@ class FederatedSetupMixin(object):
                         },
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': 'UserName'
+                        },
+                        {
+                            'type': 'Email',
                         },
                         {
                             'type': 'orgPersonType',
@@ -357,13 +376,17 @@ class FederatedSetupMixin(object):
                         },
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': self.ASSERTION_PREFIX + 'UserName'
+                        },
+                        {
+                            'type': self.ASSERTION_PREFIX + 'Email',
                         },
                         {
                             'type': self.ASSERTION_PREFIX + 'orgPersonType',
@@ -382,13 +405,17 @@ class FederatedSetupMixin(object):
                         },
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': 'UserName'
+                        },
+                        {
+                            'type': 'Email'
                         },
                         {
                             'type': 'orgPersonType',
@@ -418,13 +445,17 @@ class FederatedSetupMixin(object):
 
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': 'UserName'
+                        },
+                        {
+                            'type': 'Email'
                         },
                         {
                             'type': 'orgPersonType',
@@ -449,13 +480,17 @@ class FederatedSetupMixin(object):
                         },
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': 'UserName',
+                        },
+                        {
+                            'type': 'Email',
                         },
                         {
                             'type': 'FirstName',
@@ -480,13 +515,17 @@ class FederatedSetupMixin(object):
                         },
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         }
                     ],
                     'remote': [
                         {
                             'type': 'UserName',
+                        },
+                        {
+                            'type': 'Email',
                         },
                         {
                             'type': 'Email',
@@ -507,7 +546,8 @@ class FederatedSetupMixin(object):
                     "local": [
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         },
                         {
@@ -524,6 +564,9 @@ class FederatedSetupMixin(object):
                             'type': 'UserName',
                         },
                         {
+                            'type': 'Email',
+                        },
+                        {
                             "type": "orgPersonType",
                             "any_one_of": [
                                 "CEO",
@@ -536,7 +579,8 @@ class FederatedSetupMixin(object):
                     "local": [
                         {
                             'user': {
-                                'name': '{0}'
+                                'name': '{0}',
+                                'id': '{1}'
                             }
                         },
                         {
@@ -553,6 +597,9 @@ class FederatedSetupMixin(object):
                             "type": "UserName",
                         },
                         {
+                            "type": "Email",
+                        },
+                        {
                             "type": "orgPersonType",
                             "any_one_of": [
                                 "Managers"
@@ -564,7 +611,8 @@ class FederatedSetupMixin(object):
                     "local": [
                         {
                             "user": {
-                                "name": "{0}"
+                                "name": "{0}",
+                                "id": "{1}"
                             }
                         },
                         {
@@ -579,6 +627,9 @@ class FederatedSetupMixin(object):
                     "remote": [
                         {
                             "type": "UserName",
+                        },
+                        {
+                            "type": "Email",
                         },
                         {
                             "type": "UserName",
@@ -1411,587 +1462,6 @@ class MappingCRUDTests(FederationTests):
         self.put(url, expected_status=400, body={'mapping': mapping})
 
 
-class MappingRuleEngineTests(FederationTests):
-    """A class for testing the mapping rule engine."""
-
-    def assertValidMappedUserObject(self, mapped_properties,
-                                    user_type='ephemeral',
-                                    domain_id=None):
-        """Check whether mapped properties object has 'user' within.
-
-        According to today's rules, RuleProcessor does not have to issue user's
-        id or name. What's actually required is user's type and for ephemeral
-        users that would be service domain named 'Federated'.
-        """
-        self.assertIn('user', mapped_properties,
-                      message='Missing user object in mapped properties')
-        user = mapped_properties['user']
-        self.assertIn('type', user)
-        self.assertEqual(user_type, user['type'])
-        self.assertIn('domain', user)
-        domain = user['domain']
-        domain_name_or_id = domain.get('id') or domain.get('name')
-        domain_ref = domain_id or federation_constants.FEDERATED_DOMAIN_KEYWORD
-        self.assertEqual(domain_ref, domain_name_or_id)
-
-    def test_rule_engine_any_one_of_and_direct_mapping(self):
-        """Should return user's name and group id EMPLOYEE_GROUP_ID.
-
-        The ADMIN_ASSERTION should successfully have a match in MAPPING_LARGE.
-        They will test the case where `any_one_of` is valid, and there is
-        a direct mapping for the users name.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_LARGE
-        assertion = mapping_fixtures.ADMIN_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        fn = assertion.get('FirstName')
-        ln = assertion.get('LastName')
-        full_name = '%s %s' % (fn, ln)
-        group_ids = values.get('group_ids')
-        user_name = values.get('user', {}).get('name')
-
-        self.assertIn(mapping_fixtures.EMPLOYEE_GROUP_ID, group_ids)
-        self.assertEqual(full_name, user_name)
-
-    def test_rule_engine_no_regex_match(self):
-        """Should deny authorization, the email of the tester won't match.
-
-        This will not match since the email in the assertion will fail
-        the regex test. It is set to match any @example.com address.
-        But the incoming value is set to eviltester@example.org.
-        RuleProcessor should return list of empty group_ids.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_LARGE
-        assertion = mapping_fixtures.BAD_TESTER_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-
-        self.assertValidMappedUserObject(mapped_properties)
-        self.assertIsNone(mapped_properties['user'].get('name'))
-        self.assertListEqual(list(), mapped_properties['group_ids'])
-
-    def test_rule_engine_regex_many_groups(self):
-        """Should return group CONTRACTOR_GROUP_ID.
-
-        The TESTER_ASSERTION should successfully have a match in
-        MAPPING_TESTER_REGEX. This will test the case where many groups
-        are in the assertion, and a regex value is used to try and find
-        a match.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_TESTER_REGEX
-        assertion = mapping_fixtures.TESTER_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        self.assertValidMappedUserObject(values)
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertEqual(user_name, name)
-        self.assertIn(mapping_fixtures.TESTER_GROUP_ID, group_ids)
-
-    def test_rule_engine_any_one_of_many_rules(self):
-        """Should return group CONTRACTOR_GROUP_ID.
-
-        The CONTRACTOR_ASSERTION should successfully have a match in
-        MAPPING_SMALL. This will test the case where many rules
-        must be matched, including an `any_one_of`, and a direct
-        mapping.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_SMALL
-        assertion = mapping_fixtures.CONTRACTOR_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        self.assertValidMappedUserObject(values)
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertEqual(user_name, name)
-        self.assertIn(mapping_fixtures.CONTRACTOR_GROUP_ID, group_ids)
-
-    def test_rule_engine_not_any_of_and_direct_mapping(self):
-        """Should return user's name and email.
-
-        The CUSTOMER_ASSERTION should successfully have a match in
-        MAPPING_LARGE. This will test the case where a requirement
-        has `not_any_of`, and direct mapping to a username, no group.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_LARGE
-        assertion = mapping_fixtures.CUSTOMER_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        self.assertValidMappedUserObject(values)
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertEqual(user_name, name)
-        self.assertEqual([], group_ids,)
-
-    def test_rule_engine_not_any_of_many_rules(self):
-        """Should return group EMPLOYEE_GROUP_ID.
-
-        The EMPLOYEE_ASSERTION should successfully have a match in
-        MAPPING_SMALL. This will test the case where many remote
-        rules must be matched, including a `not_any_of`.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_SMALL
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        self.assertValidMappedUserObject(values)
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertEqual(user_name, name)
-        self.assertIn(mapping_fixtures.EMPLOYEE_GROUP_ID, group_ids)
-
-    def test_rule_engine_not_any_of_regex_verify_pass(self):
-        """Should return group DEVELOPER_GROUP_ID.
-
-        The DEVELOPER_ASSERTION should successfully have a match in
-        MAPPING_DEVELOPER_REGEX. This will test the case where many
-        remote rules must be matched, including a `not_any_of`, with
-        regex set to True.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_DEVELOPER_REGEX
-        assertion = mapping_fixtures.DEVELOPER_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        self.assertValidMappedUserObject(values)
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertEqual(user_name, name)
-        self.assertIn(mapping_fixtures.DEVELOPER_GROUP_ID, group_ids)
-
-    def test_rule_engine_not_any_of_regex_verify_fail(self):
-        """Should deny authorization.
-
-        The email in the assertion will fail the regex test.
-        It is set to reject any @example.org address, but the
-        incoming value is set to evildeveloper@example.org.
-        RuleProcessor should return list of empty group_ids.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_DEVELOPER_REGEX
-        assertion = mapping_fixtures.BAD_DEVELOPER_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-
-        self.assertValidMappedUserObject(mapped_properties)
-        self.assertIsNone(mapped_properties['user'].get('name'))
-        self.assertListEqual(list(), mapped_properties['group_ids'])
-
-    def _rule_engine_regex_match_and_many_groups(self, assertion):
-        """Should return group DEVELOPER_GROUP_ID and TESTER_GROUP_ID.
-
-        A helper function injecting assertion passed as an argument.
-        Expect DEVELOPER_GROUP_ID and TESTER_GROUP_ID in the results.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_LARGE
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        values = rp.process(assertion)
-
-        user_name = assertion.get('UserName')
-        group_ids = values.get('group_ids')
-        name = values.get('user', {}).get('name')
-
-        self.assertValidMappedUserObject(values)
-        self.assertEqual(user_name, name)
-        self.assertIn(mapping_fixtures.DEVELOPER_GROUP_ID, group_ids)
-        self.assertIn(mapping_fixtures.TESTER_GROUP_ID, group_ids)
-
-    def test_rule_engine_regex_match_and_many_groups(self):
-        """Should return group DEVELOPER_GROUP_ID and TESTER_GROUP_ID.
-
-        The TESTER_ASSERTION should successfully have a match in
-        MAPPING_LARGE. This will test a successful regex match
-        for an `any_one_of` evaluation type, and will have many
-        groups returned.
-
-        """
-        self._rule_engine_regex_match_and_many_groups(
-            mapping_fixtures.TESTER_ASSERTION)
-
-    def test_rule_engine_discards_nonstring_objects(self):
-        """Check whether RuleProcessor discards non string objects.
-
-        Despite the fact that assertion is malformed and contains
-        non string objects, RuleProcessor should correctly discard them and
-        successfully have a match in MAPPING_LARGE.
-
-        """
-        self._rule_engine_regex_match_and_many_groups(
-            mapping_fixtures.MALFORMED_TESTER_ASSERTION)
-
-    def test_rule_engine_fails_after_discarding_nonstring(self):
-        """Check whether RuleProcessor discards non string objects.
-
-        Expect RuleProcessor to discard non string object, which
-        is required for a correct rule match. RuleProcessor will result with
-        empty list of groups.
-
-        """
-        mapping = mapping_fixtures.MAPPING_SMALL
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CONTRACTOR_MALFORMED_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertValidMappedUserObject(mapped_properties)
-        self.assertIsNone(mapped_properties['user'].get('name'))
-        self.assertListEqual(list(), mapped_properties['group_ids'])
-
-    def test_rule_engine_returns_group_names(self):
-        """Check whether RuleProcessor returns group names with their domains.
-
-        RuleProcessor should return 'group_names' entry with a list of
-        dictionaries with two entries 'name' and 'domain' identifying group by
-        its name and domain.
-
-        """
-        mapping = mapping_fixtures.MAPPING_GROUP_NAMES
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-        reference = {
-            mapping_fixtures.DEVELOPER_GROUP_NAME:
-            {
-                "name": mapping_fixtures.DEVELOPER_GROUP_NAME,
-                "domain": {
-                    "name": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_NAME
-                }
-            },
-            mapping_fixtures.TESTER_GROUP_NAME:
-            {
-                "name": mapping_fixtures.TESTER_GROUP_NAME,
-                "domain": {
-                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
-                }
-            }
-        }
-        for rule in mapped_properties['group_names']:
-            self.assertDictEqual(reference.get(rule.get('name')), rule)
-
-    def test_rule_engine_whitelist_and_direct_groups_mapping(self):
-        """Should return user's groups Developer and Contractor.
-
-        The EMPLOYEE_ASSERTION_MULTIPLE_GROUPS should successfully have a match
-        in MAPPING_GROUPS_WHITELIST. It will test the case where 'whitelist'
-        correctly filters out Manager and only allows Developer and Contractor.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_GROUPS_WHITELIST
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-
-        reference = {
-            mapping_fixtures.DEVELOPER_GROUP_NAME:
-            {
-                "name": mapping_fixtures.DEVELOPER_GROUP_NAME,
-                "domain": {
-                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
-                }
-            },
-            mapping_fixtures.CONTRACTOR_GROUP_NAME:
-            {
-                "name": mapping_fixtures.CONTRACTOR_GROUP_NAME,
-                "domain": {
-                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
-                }
-            }
-        }
-        for rule in mapped_properties['group_names']:
-            self.assertDictEqual(reference.get(rule.get('name')), rule)
-
-        self.assertEqual('tbo', mapped_properties['user']['name'])
-        self.assertEqual([], mapped_properties['group_ids'])
-
-    def test_rule_engine_blacklist_and_direct_groups_mapping(self):
-        """Should return user's group Developer.
-
-        The EMPLOYEE_ASSERTION_MULTIPLE_GROUPS should successfully have a match
-        in MAPPING_GROUPS_BLACKLIST. It will test the case where 'blacklist'
-        correctly filters out Manager and Developer and only allows Contractor.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_GROUPS_BLACKLIST
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-
-        reference = {
-            mapping_fixtures.CONTRACTOR_GROUP_NAME:
-            {
-                "name": mapping_fixtures.CONTRACTOR_GROUP_NAME,
-                "domain": {
-                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
-                }
-            }
-        }
-        for rule in mapped_properties['group_names']:
-            self.assertDictEqual(reference.get(rule.get('name')), rule)
-        self.assertEqual('tbo', mapped_properties['user']['name'])
-        self.assertEqual([], mapped_properties['group_ids'])
-
-    def test_rule_engine_blacklist_and_direct_groups_mapping_multiples(self):
-        """Tests matching multiple values before the blacklist.
-
-        Verifies that the local indexes are correct when matching multiple
-        remote values for a field when the field occurs before the blacklist
-        entry in the remote rules.
-
-        """
-
-        mapping = mapping_fixtures.MAPPING_GROUPS_BLACKLIST_MULTIPLES
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-
-        reference = {
-            mapping_fixtures.CONTRACTOR_GROUP_NAME:
-            {
-                "name": mapping_fixtures.CONTRACTOR_GROUP_NAME,
-                "domain": {
-                    "id": mapping_fixtures.DEVELOPER_GROUP_DOMAIN_ID
-                }
-            }
-        }
-        for rule in mapped_properties['group_names']:
-            self.assertDictEqual(reference.get(rule.get('name')), rule)
-        self.assertEqual('tbo', mapped_properties['user']['name'])
-        self.assertEqual([], mapped_properties['group_ids'])
-
-    def test_rule_engine_whitelist_direct_group_mapping_missing_domain(self):
-        """Test if the local rule is rejected upon missing domain value
-
-        This is a variation with a ``whitelist`` filter.
-
-        """
-        mapping = mapping_fixtures.MAPPING_GROUPS_WHITELIST_MISSING_DOMAIN
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        self.assertRaises(exception.ValidationError, rp.process, assertion)
-
-    def test_rule_engine_blacklist_direct_group_mapping_missing_domain(self):
-        """Test if the local rule is rejected upon missing domain value
-
-        This is a variation with a ``blacklist`` filter.
-
-        """
-        mapping = mapping_fixtures.MAPPING_GROUPS_BLACKLIST_MISSING_DOMAIN
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION_MULTIPLE_GROUPS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        self.assertRaises(exception.ValidationError, rp.process, assertion)
-
-    def test_rule_engine_no_groups_allowed(self):
-        """Should return user mapped to no groups.
-
-        The EMPLOYEE_ASSERTION should successfully have a match
-        in MAPPING_GROUPS_WHITELIST, but 'whitelist' should filter out
-        the group values from the assertion and thus map to no groups.
-
-        """
-        mapping = mapping_fixtures.MAPPING_GROUPS_WHITELIST
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertListEqual(mapped_properties['group_names'], [])
-        self.assertListEqual(mapped_properties['group_ids'], [])
-        self.assertEqual('tbo', mapped_properties['user']['name'])
-
-    def test_mapping_federated_domain_specified(self):
-        """Test mapping engine when domain 'ephemeral' is explicitely set.
-
-        For that, we use mapping rule MAPPING_EPHEMERAL_USER and assertion
-        EMPLOYEE_ASSERTION
-
-        """
-        mapping = mapping_fixtures.MAPPING_EPHEMERAL_USER
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-
-    def test_create_user_object_with_bad_mapping(self):
-        """Test if user object is created even with bad mapping.
-
-        User objects will be created by mapping engine always as long as there
-        is corresponding local rule.  This test shows, that even with assertion
-        where no group names nor ids are matched, but there is 'blind' rule for
-        mapping user, such object will be created.
-
-        In this test MAPPING_EHPEMERAL_USER expects UserName set to jsmith
-        whereas value from assertion is 'tbo'.
-
-        """
-        mapping = mapping_fixtures.MAPPING_EPHEMERAL_USER
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CONTRACTOR_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-
-        self.assertNotIn('id', mapped_properties['user'])
-        self.assertNotIn('name', mapped_properties['user'])
-
-    def test_set_ephemeral_domain_to_ephemeral_users(self):
-        """Test auto assigning service domain to ephemeral users.
-
-        Test that ephemeral users will always become members of federated
-        service domain. The check depends on ``type`` value which must be set
-        to ``ephemeral`` in case of ephemeral user.
-
-        """
-        mapping = mapping_fixtures.MAPPING_EPHEMERAL_USER_LOCAL_DOMAIN
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CONTRACTOR_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-
-    def test_local_user_local_domain(self):
-        """Test that local users can have non-service domains assigned."""
-        mapping = mapping_fixtures.MAPPING_LOCAL_USER_LOCAL_DOMAIN
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CONTRACTOR_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(
-            mapped_properties, user_type='local',
-            domain_id=mapping_fixtures.LOCAL_DOMAIN)
-
-    def test_user_identifications_name(self):
-        """Test varius mapping options and how users are identified.
-
-        This test calls mapped.setup_username() for propagating user object.
-
-        Test plan:
-        - Check if the user has proper domain ('federated') set
-        - Check if the user has property type set ('ephemeral')
-        - Check if user's name is properly mapped from the assertion
-        - Check if user's id is properly set and equal to name, as it was not
-        explicitely specified in the mapping.
-
-        """
-        mapping = mapping_fixtures.MAPPING_USER_IDS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CONTRACTOR_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-        mapped.setup_username({}, mapped_properties)
-        self.assertEqual('jsmith', mapped_properties['user']['id'])
-        self.assertEqual('jsmith', mapped_properties['user']['name'])
-
-    def test_user_identifications_name_and_federated_domain(self):
-        """Test varius mapping options and how users are identified.
-
-        This test calls mapped.setup_username() for propagating user object.
-
-        Test plan:
-        - Check if the user has proper domain ('federated') set
-        - Check if the user has propert type set ('ephemeral')
-        - Check if user's name is properly mapped from the assertion
-        - Check if user's id is properly set and equal to name, as it was not
-        explicitely specified in the mapping.
-
-        """
-        mapping = mapping_fixtures.MAPPING_USER_IDS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.EMPLOYEE_ASSERTION
-        mapped_properties = rp.process(assertion)
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-        mapped.setup_username({}, mapped_properties)
-        self.assertEqual('tbo', mapped_properties['user']['name'])
-        self.assertEqual('tbo', mapped_properties['user']['id'])
-
-    def test_user_identification_id(self):
-        """Test varius mapping options and how users are identified.
-
-        This test calls mapped.setup_username() for propagating user object.
-
-        Test plan:
-        - Check if the user has proper domain ('federated') set
-        - Check if the user has propert type set ('ephemeral')
-        - Check if user's id is properly mapped from the assertion
-        - Check if user's name is properly set and equal to id, as it was not
-        explicitely specified in the mapping.
-
-        """
-        mapping = mapping_fixtures.MAPPING_USER_IDS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.ADMIN_ASSERTION
-        mapped_properties = rp.process(assertion)
-        context = {'environment': {}}
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-        mapped.setup_username(context, mapped_properties)
-        self.assertEqual('bob', mapped_properties['user']['name'])
-        self.assertEqual('bob', mapped_properties['user']['id'])
-
-    def test_user_identification_id_and_name(self):
-        """Test varius mapping options and how users are identified.
-
-        This test calls mapped.setup_username() for propagating user object.
-
-        Test plan:
-        - Check if the user has proper domain ('federated') set
-        - Check if the user has proper type set ('ephemeral')
-        - Check if user's name is properly mapped from the assertion
-        - Check if user's id is properly set and and equal to value hardcoded
-        in the mapping
-
-        """
-        mapping = mapping_fixtures.MAPPING_USER_IDS
-        rp = mapping_utils.RuleProcessor(mapping['rules'])
-        assertion = mapping_fixtures.CUSTOMER_ASSERTION
-        mapped_properties = rp.process(assertion)
-        context = {'environment': {}}
-        self.assertIsNotNone(mapped_properties)
-        self.assertValidMappedUserObject(mapped_properties)
-        mapped.setup_username(context, mapped_properties)
-        self.assertEqual('bwilliams', mapped_properties['user']['name'])
-        self.assertEqual('abc123', mapped_properties['user']['id'])
-
-
 class FederatedTokenTests(FederationTests, FederatedSetupMixin):
 
     def auth_plugin_config_override(self):
@@ -2039,6 +1509,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
     def test_issue_unscoped_token(self):
         r = self._issue_unscoped_token()
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+        self.assertValidMappedUser(r.json['token'])
 
     def test_issue_unscoped_token_disabled_idp(self):
         """Checks if authentication works with disabled identity providers.
@@ -2182,6 +1653,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         roles_ref = [self.role_employee]
         projects_ref = self.proj_employees
         self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
+        self.assertValidMappedUser(token_resp)
 
     def test_scope_token_with_idp_disabled(self):
         """Scope token issued by disabled IdP.
@@ -2246,6 +1718,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         roles_ref = [self.role_customer]
         projects_ref = self.project_inherited
         self._check_projects_and_roles(token_resp, roles_ref, projects_ref)
+        self.assertValidMappedUser(token_resp)
 
     def test_scope_token_from_nonexistent_unscoped_token(self):
         """Try to scope token from non-existent unscoped token."""
@@ -2278,6 +1751,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         domain_id = token_resp['domain']['id']
         self.assertEqual(self.domainA['id'], domain_id)
         self._check_scoped_token_attributes(token_resp)
+        self.assertValidMappedUser(token_resp)
 
     def test_scope_to_domain_multiple_tokens(self):
         """Issue multiple tokens scoping to different domains.
@@ -2408,6 +1882,8 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         """
 
         r = self._issue_unscoped_token()
+        token_resp = r.json_body['token']
+        self.assertValidMappedUser(token_resp)
         employee_unscoped_token_id = r.headers.get('X-Subject-Token')
         r = self.get('/OS-FEDERATION/projects',
                      token=employee_unscoped_token_id)
@@ -2423,6 +1899,7 @@ class FederatedTokenTests(FederationTests, FederatedSetupMixin):
         project_id = token_resp['project']['id']
         self.assertEqual(project['id'], project_id)
         self._check_scoped_token_attributes(token_resp)
+        self.assertValidMappedUser(token_resp)
 
     def test_workflow_with_groups_deletion(self):
         """Test full workflow with groups deletion before token scoping.
@@ -2923,12 +2400,14 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
 
     def test_federated_unscoped_token(self):
         resp = self._issue_unscoped_token()
-        self.assertEqual(186, len(resp.headers['X-Subject-Token']))
+        self.assertEqual(204, len(resp.headers['X-Subject-Token']))
+        self.assertValidMappedUser(resp.json_body['token'])
 
     def test_federated_unscoped_token_with_multiple_groups(self):
         assertion = 'ANOTHER_CUSTOMER_ASSERTION'
         resp = self._issue_unscoped_token(assertion=assertion)
-        self.assertEqual(204, len(resp.headers['X-Subject-Token']))
+        self.assertEqual(232, len(resp.headers['X-Subject-Token']))
+        self.assertValidMappedUser(resp.json_body['token'])
 
     def test_validate_federated_unscoped_token(self):
         resp = self._issue_unscoped_token()
@@ -2945,6 +2424,7 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
 
         """
         resp = self._issue_unscoped_token()
+        self.assertValidMappedUser(resp.json_body['token'])
         unscoped_token = resp.headers.get('X-Subject-Token')
         resp = self.get('/OS-FEDERATION/projects',
                         token=unscoped_token)
@@ -2957,6 +2437,7 @@ class FernetFederatedTokenTests(FederationTests, FederatedSetupMixin):
 
         resp = self.v3_authenticate_token(v3_scope_request)
         token_resp = resp.result['token']
+        self.assertValidMappedUser(token_resp)
         project_id = token_resp['project']['id']
         self.assertEqual(project['id'], project_id)
         self._check_scoped_token_attributes(token_resp)
@@ -3422,6 +2903,52 @@ class SAMLGenerationTests(FederationTests):
         project_domain_attribute = assertion[4][4]
         self.assertIsInstance(project_domain_attribute[0].text, str)
 
+    @mock.patch('saml2.create_class_from_xml_string')
+    @mock.patch('oslo_utils.fileutils.write_to_tempfile')
+    @mock.patch('subprocess.check_output')
+    def test__sign_assertion(self, check_output_mock,
+                             write_to_tempfile_mock, create_class_mock):
+        write_to_tempfile_mock.return_value = 'tmp_path'
+        check_output_mock.return_value = 'fakeoutput'
+
+        keystone_idp._sign_assertion(self.signed_assertion)
+
+        create_class_mock.assert_called_with(saml.Assertion, 'fakeoutput')
+
+    @mock.patch('oslo_utils.fileutils.write_to_tempfile')
+    @mock.patch('subprocess.check_output')
+    def test__sign_assertion_exc(self, check_output_mock,
+                                 write_to_tempfile_mock):
+        # If the command fails the command output is logged.
+
+        write_to_tempfile_mock.return_value = 'tmp_path'
+
+        sample_returncode = 1
+        sample_output = self.getUniqueString()
+        check_output_mock.side_effect = subprocess.CalledProcessError(
+            returncode=sample_returncode, cmd=CONF.saml.xmlsec1_binary,
+            output=sample_output)
+
+        # FIXME(blk-u): This should raise exception.SAMLSigningError instead,
+        # but fails with TypeError due to concatenating string to Message, see
+        # bug 1484735.
+        self.assertRaises(TypeError,
+                          keystone_idp._sign_assertion,
+                          self.signed_assertion)
+
+    @mock.patch('oslo_utils.fileutils.write_to_tempfile')
+    def test__sign_assertion_fileutils_exc(self, write_to_tempfile_mock):
+        exception_msg = 'fake'
+        write_to_tempfile_mock.side_effect = Exception(exception_msg)
+
+        logger_fixture = self.useFixture(fixtures.LoggerFixture())
+        self.assertRaises(exception.SAMLSigningError,
+                          keystone_idp._sign_assertion,
+                          self.signed_assertion)
+        expected_log = (
+            'Error when signing assertion, reason: %s\n' % exception_msg)
+        self.assertEqual(expected_log, logger_fixture.output)
+
 
 class IdPMetadataGenerationTests(FederationTests):
     """A class for testing Identity Provider Metadata generation."""
@@ -3835,6 +3362,16 @@ class WebSSOTests(FederatedTokenTests):
         self.assertRaises(exception.Unauthorized,
                           self.api.federated_sso_auth,
                           context, self.PROTOCOL)
+
+    def test_identity_provider_specific_federated_authentication(self):
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
+        context = {'environment': environment}
+        query_string = {'origin': self.ORIGIN}
+        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        resp = self.api.federated_idp_specific_sso_auth(context,
+                                                        self.idp['id'],
+                                                        self.PROTOCOL)
+        self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
 
 
 class K2KServiceCatalogTests(FederationTests):
