@@ -1,8 +1,9 @@
 keystone (1:8.0.0~b3-2) experimental; urgency=medium
 
   * Fixed some (build-)depends versions.
+  * Added patch to fix requiremnts.txt regarding python-jsonschema version.
 
- -- Thomas Goirand <zigo@debian.org>  Thu, 10 Sep 2015 08:26:46 +0000
+ -- Thomas Goirand <zigo@debian.org>  Fri, 11 Sep 2015 08:45:50 +0000
 
 keystone (1:8.0.0~b3-1) experimental; urgency=medium
 
