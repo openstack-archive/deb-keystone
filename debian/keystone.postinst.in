@@ -18,15 +18,11 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
-	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL)
 	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
+	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --tenant admin --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL --enable true)
 
 	ADMIN_ROLE=$(pkgos_get_id keystone role-create --name $ADMIN_ROLE_NAME)
-	KEYSTONEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneAdmin)
-	KEYSTONESERVICEADMIN_ROLE=$(pkgos_get_id keystone role-create --name KeystoneServiceAdmin)
-	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $ADMIN_ROLE --tenant-id $ADMIN_TENANT
-	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONEADMIN_ROLE --tenant-id $ADMIN_TENANT
-	pkgos_get_id keystone user-role-add --user-id $ADMIN_USER --role-id $KEYSTONESERVICEADMIN_ROLE --tenant-id $ADMIN_TENANT
+	pkgos_get_id keystone user-role-add --user ${ADMIN_USER_NAME} --role ${ADMIN_ROLE_NAME} --tenant ${ADMIN_TENANT_NAME}
 	pkgos_get_id keystone tenant-update --enabled true $ADMIN_TENANT
 }
 
