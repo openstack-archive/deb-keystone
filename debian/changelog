@@ -2,6 +2,7 @@ keystone (1:8.0.0~b3-3) experimental; urgency=medium
 
   * Re-enabled KeystoneAdmin and KeystoneServiceAdmin roles, and using
     openstackclient instead of keystoneclient which is deprecated.
+  * Stop doing pki_setup (it's not recommended upstream anymore).
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 21 Sep 2015 09:36:02 +0000
 

@@ -92,7 +92,7 @@ if [ "$1" = "configure" ] ; then
 	# Generate the ssl keys for keystone.
 	# It seems that starting it each time this script is launch
 	# isn't a problem.
-	su keystone -c "keystone-manage pki_setup"
+	#su keystone -c "keystone-manage pki_setup"
 
 	# Activate the keystone.service
 	deb-systemd-helper unmask keystone.service >/dev/null || true
