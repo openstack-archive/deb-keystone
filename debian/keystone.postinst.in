@@ -18,12 +18,12 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
-	openstack ${OSTACKCLI_PARAMS} project create $ADMIN_TENANT_NAME
-	openstack ${OSTACKCLI_PARAMS} user create --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME
+	openstack ${OSTACKCLI_PARAMS} project create $ADMIN_TENANT_NAME >/dev/null
+	openstack ${OSTACKCLI_PARAMS} user create --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME >/dev/null
 
 	for i in admin KeystoneAdmin KeystoneServiceAdmin ; do
-		openstack ${OSTACKCLI_PARAMS} role create ${i}
-		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i}
+		openstack ${OSTACKCLI_PARAMS} role create ${i} >/dev/null
+		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i} >/dev/null
 	done
 }
 
@@ -39,12 +39,12 @@ keystone_create_endpoint_postinst () {
 			db_get keystone/region-name
 			REGION_NAME=${RET}
 			if [ -n "${REGION_NAME}" ] ; then
-				openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity
+				openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity >/dev/null
 				openstack ${OSTACKCLI_PARAMS} endpoint create \
 					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
 					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
 					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ \
-					--region "${REGION_NAME}" keystone
+					--region "${REGION_NAME}" keystone >/dev/null
 			fi
 		fi
 	fi
