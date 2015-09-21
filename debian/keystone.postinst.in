@@ -86,7 +86,12 @@ if [ "$1" = "configure" ] ; then
 	if [ "$RET" = "true" ] ; then
 		# Configure the SQL connection of keystone.conf according to dbconfig-common
 		pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
-		su keystone -c "keystone-manage db_sync"
+		echo "Running su keystone -c 'keystone-manage --noverbose db_sync'..."
+		if [ "${PKGOS_VERBOSE}" = "yes" ] ; then
+			su keystone -c "keystone-manage --verbose db_sync"
+		else
+			su keystone -c "keystone-manage --noverbose db_sync"
+		fi
 	fi
 
 	# Generate the ssl keys for keystone.
@@ -118,8 +123,6 @@ if [ "$1" = "configure" ] ; then
 		echo -n "1..."
 		sleep 1
 		echo "0"
-		echo -n "Upgrading db... "
-		keystone-manage db_sync
 		db_get keystone/create-admin-tenant
 		if [ "$RET" = "true" ] ; then
 			echo -n "Creating tenants... "

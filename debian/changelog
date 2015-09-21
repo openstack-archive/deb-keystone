@@ -1,3 +1,9 @@
+keystone (1:8.0.0~b3-4) experimental; urgency=medium
+
+  * Doing the db_sync using the --noverbose option.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Sep 2015 12:40:13 +0000
+
 keystone (1:8.0.0~b3-3) experimental; urgency=medium
 
   * Re-enabled KeystoneAdmin and KeystoneServiceAdmin roles, and using
