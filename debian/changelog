@@ -1,3 +1,10 @@
+keystone (1:8.0.0~b3-3) experimental; urgency=medium
+
+  * Re-enabled KeystoneAdmin and KeystoneServiceAdmin roles, and using
+    openstackclient instead of keystoneclient which is deprecated.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Sep 2015 09:36:02 +0000
+
 keystone (1:8.0.0~b3-2) experimental; urgency=medium
 
   * Fixed some (build-)depends versions.

@@ -132,7 +132,6 @@ Architecture: all
 Depends: adduser,
          dbconfig-common,
          init-system-helpers (>= 1.18~),
-         python-configobj,
          python-keystone (= ${source:Version}),
          sqlite3,
          ssl-cert (>= 1.0.12),

@@ -18,12 +18,13 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
-	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
-	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --tenant admin --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL --enable true)
+	openstack ${OSTACKCLI_PARAMS} project create $ADMIN_TENANT_NAME
+	openstack ${OSTACKCLI_PARAMS} user create --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME
 
-	ADMIN_ROLE=$(pkgos_get_id keystone role-create --name $ADMIN_ROLE_NAME)
-	pkgos_get_id keystone user-role-add --user ${ADMIN_USER_NAME} --role ${ADMIN_ROLE_NAME} --tenant ${ADMIN_TENANT_NAME}
-	pkgos_get_id keystone tenant-update --enabled true $ADMIN_TENANT
+	for i in admin KeystoneAdmin KeystoneServiceAdmin ; do
+		openstack ${OSTACKCLI_PARAMS} role create ${i}
+		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i}
+	done
 }
 
 keystone_create_endpoint_postinst () {
@@ -38,13 +39,12 @@ keystone_create_endpoint_postinst () {
 			db_get keystone/region-name
 			REGION_NAME=${RET}
 			if [ -n "${REGION_NAME}" ] ; then
-				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
-					--name=keystone --type=identity --description="Keystone Identity Service")
-				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
-					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
+				openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity
+				openstack ${OSTACKCLI_PARAMS} endpoint create \
 					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
 					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
-					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/)
+					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ \
+					--region "${REGION_NAME}" keystone
 			fi
 		fi
 	fi
@@ -75,6 +75,7 @@ if [ "$1" = "configure" ] ; then
 		AUTH_TOKEN=`pkgos_gen_pass`
 	fi
 	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
+	OSTACKCLI_PARAMS="--os-token ${AUTH_TOKEN} --os-url=http://127.0.0.1:35357/v2.0/"
 
 	# Make sure /var/log/keystone/keystone.log is owned by keystone
 	# BEFORE any keystone-manage calls.
