@@ -18,12 +18,13 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
-	ADMIN_TENANT=$(pkgos_get_id keystone tenant-create --name $ADMIN_TENANT_NAME)
-	ADMIN_USER=$(pkgos_get_id keystone user-create --name $ADMIN_USER_NAME --tenant admin --pass $ADMIN_USER_PW --email $ADMIN_USER_EMAIL --enable true)
+	openstack ${OSTACKCLI_PARAMS} project create $ADMIN_TENANT_NAME >/dev/null
+	openstack ${OSTACKCLI_PARAMS} user create --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME >/dev/null
 
-	ADMIN_ROLE=$(pkgos_get_id keystone role-create --name $ADMIN_ROLE_NAME)
-	pkgos_get_id keystone user-role-add --user ${ADMIN_USER_NAME} --role ${ADMIN_ROLE_NAME} --tenant ${ADMIN_TENANT_NAME}
-	pkgos_get_id keystone tenant-update --enabled true $ADMIN_TENANT
+	for i in admin KeystoneAdmin KeystoneServiceAdmin ; do
+		openstack ${OSTACKCLI_PARAMS} role create ${i} >/dev/null
+		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i} >/dev/null
+	done
 }
 
 keystone_create_endpoint_postinst () {
@@ -38,13 +39,12 @@ keystone_create_endpoint_postinst () {
 			db_get keystone/region-name
 			REGION_NAME=${RET}
 			if [ -n "${REGION_NAME}" ] ; then
-				KEYSTONE_SERVICE_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ service-create \
-					--name=keystone --type=identity --description="Keystone Identity Service")
-				KEYSTONE_ENDPOINT_ID=$(pkgos_get_id keystone --os-token ${AUTH_TOKEN} --os-endpoint http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ endpoint-create \
-					--region "${REGION_NAME}" --service_id=${KEYSTONE_SERVICE_ID} \
+				openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity >/dev/null
+				openstack ${OSTACKCLI_PARAMS} endpoint create \
 					--publicurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
 					--internalurl=http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0/ \
-					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/)
+					--adminurl=http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0/ \
+					--region "${REGION_NAME}" keystone >/dev/null
 			fi
 		fi
 	fi
@@ -75,6 +75,7 @@ if [ "$1" = "configure" ] ; then
 		AUTH_TOKEN=`pkgos_gen_pass`
 	fi
 	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
+	OSTACKCLI_PARAMS="--os-token ${AUTH_TOKEN} --os-url=http://127.0.0.1:35357/v2.0/"
 
 	# Make sure /var/log/keystone/keystone.log is owned by keystone
 	# BEFORE any keystone-manage calls.
@@ -85,13 +86,18 @@ if [ "$1" = "configure" ] ; then
 	if [ "$RET" = "true" ] ; then
 		# Configure the SQL connection of keystone.conf according to dbconfig-common
 		pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
-		su keystone -c "keystone-manage db_sync"
+		echo "Running su keystone -c 'keystone-manage --noverbose db_sync'..."
+		if [ "${PKGOS_VERBOSE}" = "yes" ] ; then
+			su keystone -c "keystone-manage --verbose db_sync"
+		else
+			su keystone -c "keystone-manage --noverbose db_sync"
+		fi
 	fi
 
 	# Generate the ssl keys for keystone.
 	# It seems that starting it each time this script is launch
 	# isn't a problem.
-	su keystone -c "keystone-manage pki_setup"
+	#su keystone -c "keystone-manage pki_setup"
 
 	# Activate the keystone.service
 	deb-systemd-helper unmask keystone.service >/dev/null || true
@@ -117,8 +123,6 @@ if [ "$1" = "configure" ] ; then
 		echo -n "1..."
 		sleep 1
 		echo "0"
-		echo -n "Upgrading db... "
-		keystone-manage db_sync
 		db_get keystone/create-admin-tenant
 		if [ "$RET" = "true" ] ; then
 			echo -n "Creating tenants... "

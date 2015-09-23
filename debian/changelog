@@ -5,6 +5,20 @@ keystone (1:8.0.0~rc1-1) experimental; urgency=medium
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 23 Sep 2015 14:11:47 +0200
 
+keystone (1:8.0.0~b3-4) experimental; urgency=medium
+
+  * Doing the db_sync using the --noverbose option.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Sep 2015 12:40:13 +0000
+
+keystone (1:8.0.0~b3-3) experimental; urgency=medium
+
+  * Re-enabled KeystoneAdmin and KeystoneServiceAdmin roles, and using
+    openstackclient instead of keystoneclient which is deprecated.
+  * Stop doing pki_setup (it's not recommended upstream anymore).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Sep 2015 09:36:02 +0000
+
 keystone (1:8.0.0~b3-2) experimental; urgency=medium
 
   * Fixed some (build-)depends versions.
