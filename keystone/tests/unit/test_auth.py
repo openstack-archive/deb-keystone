@@ -29,7 +29,7 @@ from keystone.common import authorization
 from keystone import config
 from keystone import exception
 from keystone.models import token_model
-from keystone.tests import unit as tests
+from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import database
 from keystone import token
@@ -72,7 +72,7 @@ def _build_user_auth(token=None, user_id=None, username=None,
     return auth_json
 
 
-class AuthTest(tests.TestCase):
+class AuthTest(unit.TestCase):
     def setUp(self):
         self.useFixture(database.Database())
         super(AuthTest, self).setUp()
@@ -459,6 +459,37 @@ class AuthWithToken(AuthTest):
             self.controller.validate_token,
             dict(is_admin=True, query_string={}),
             token_id=token_id)
+
+    def test_deleting_role_assignment_does_not_revoke_unscoped_token(self):
+        no_context = {}
+        admin_context = dict(is_admin=True, query_string={})
+
+        project = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID}
+        self.resource_api.create_project(project['id'], project)
+        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.role_api.create_role(role['id'], role)
+        self.assignment_api.add_role_to_user_and_project(
+            self.user_foo['id'], project['id'], role['id'])
+
+        # Get an unscoped token.
+        token = self.controller.authenticate(no_context, _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password']))
+        token_id = token['access']['token']['id']
+
+        # Ensure it is valid
+        self.controller.validate_token(admin_context, token_id=token_id)
+
+        # Delete the role assignment, which should not invalidate the token,
+        # because we're not consuming it with just an unscoped token.
+        self.assignment_api.remove_role_from_user_and_project(
+            self.user_foo['id'], project['id'], role['id'])
+
+        # Ensure it is still valid
+        self.controller.validate_token(admin_context, token_id=token_id)
 
     def test_only_original_audit_id_is_kept(self):
         context = {}
@@ -1285,14 +1316,14 @@ class TokenExpirationTest(AuthTest):
         self._maintain_token_expiration()
 
 
-class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
+class AuthCatalog(unit.SQLDriverOverrides, AuthTest):
     """Tests for the catalog provided in the auth response."""
 
     def config_files(self):
         config_files = super(AuthCatalog, self).config_files()
         # We need to use a backend that supports disabled endpoints, like the
         # SQL backend.
-        config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
+        config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
         return config_files
 
     def _create_endpoints(self):
@@ -1402,7 +1433,7 @@ class AuthCatalog(tests.SQLDriverOverrides, AuthTest):
         self.assertEqual(exp_endpoint, endpoint)
 
 
-class NonDefaultAuthTest(tests.TestCase):
+class NonDefaultAuthTest(unit.TestCase):
 
     def test_add_non_default_auth_method(self):
         self.config_fixture.config(group='auth',

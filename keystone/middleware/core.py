@@ -13,6 +13,7 @@
 # under the License.
 
 from oslo_config import cfg
+from oslo_context import context as oslo_context
 from oslo_log import log
 from oslo_log import versionutils
 from oslo_middleware import sizelimit
@@ -261,6 +262,9 @@ class AuthContextMiddleware(wsgi.Middleware):
         :returns: True if client_issuer is trusted; otherwise False
         """
 
+        if not CONF.tokenless_auth.trusted_issuer:
+            return False
+
         client_issuer = env.get(CONF.tokenless_auth.issuer_attribute)
         if not client_issuer:
             msg = _LI('Cannot find client issuer in env by the '
@@ -280,6 +284,11 @@ class AuthContextMiddleware(wsgi.Middleware):
         return False
 
     def process_request(self, request):
+
+        # The request context stores itself in thread-local memory for logging.
+        oslo_context.RequestContext(
+            request_id=request.environ.get('openstack.request_id'))
+
         if authorization.AUTH_CONTEXT_ENV in request.environ:
             msg = _LW('Auth context already exists in the request '
                       'environment; it will be used for authorization '

@@ -12,7 +12,6 @@
 
 import datetime
 import os
-import subprocess
 import uuid
 
 from oslo_config import cfg
@@ -32,10 +31,13 @@ xmldsig = importutils.try_import("saml2.xmldsig")
 if not xmldsig:
     xmldsig = importutils.try_import("xmldsig")
 
+from keystone.common import environment
 from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _, _LE
 
+
+subprocess = environment.subprocess
 
 LOG = log.getLogger(__name__)
 CONF = cfg.CONF
@@ -426,11 +428,10 @@ def _sign_assertion(assertion):
         stdout = subprocess.check_output(command_list,
                                          stderr=subprocess.STDOUT)
     except Exception as e:
-        msg = _LE('Error when signing assertion, reason: %(reason)s')
-        msg = msg % {'reason': e}
-        if hasattr(e, 'output'):
-            msg += ' output: %(output)s' % {'output': e.output}
-        LOG.error(msg)
+        msg = _LE('Error when signing assertion, reason: %(reason)s%(output)s')
+        LOG.error(msg,
+                  {'reason': e,
+                   'output': ' ' + e.output if hasattr(e, 'output') else ''})
         raise exception.SAMLSigningError(reason=e)
     finally:
         try:

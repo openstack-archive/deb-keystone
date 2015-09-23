@@ -16,6 +16,7 @@ import hashlib
 import uuid
 
 from oslo_config import cfg
+from six.moves import http_client
 import webob
 
 from keystone.common import authorization
@@ -23,7 +24,7 @@ from keystone.common import tokenless_auth
 from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
 from keystone import middleware
-from keystone.tests import unit as tests
+from keystone.tests import unit
 from keystone.tests.unit import mapping_fixtures
 from keystone.tests.unit import test_backend_sql
 
@@ -49,7 +50,7 @@ def make_response(**kwargs):
     return webob.Response(body)
 
 
-class TokenAuthMiddlewareTest(tests.TestCase):
+class TokenAuthMiddlewareTest(unit.TestCase):
     def test_request(self):
         req = make_request()
         req.headers[middleware.AUTH_TOKEN_HEADER] = 'MAGIC'
@@ -58,7 +59,7 @@ class TokenAuthMiddlewareTest(tests.TestCase):
         self.assertEqual('MAGIC', context['token_id'])
 
 
-class AdminTokenAuthMiddlewareTest(tests.TestCase):
+class AdminTokenAuthMiddlewareTest(unit.TestCase):
     def test_request_admin(self):
         req = make_request()
         req.headers[middleware.AUTH_TOKEN_HEADER] = CONF.admin_token
@@ -74,7 +75,7 @@ class AdminTokenAuthMiddlewareTest(tests.TestCase):
         self.assertFalse(context['is_admin'])
 
 
-class PostParamsMiddlewareTest(tests.TestCase):
+class PostParamsMiddlewareTest(unit.TestCase):
     def test_request_with_params(self):
         req = make_request(body="arg1=one", method='POST')
         middleware.PostParamsMiddleware(None).process_request(req)
@@ -82,7 +83,7 @@ class PostParamsMiddlewareTest(tests.TestCase):
         self.assertEqual({"arg1": "one"}, params)
 
 
-class JsonBodyMiddlewareTest(tests.TestCase):
+class JsonBodyMiddlewareTest(unit.TestCase):
     def test_request_with_params(self):
         req = make_request(body='{"arg1": "one", "arg2": ["a"]}',
                            content_type='application/json',
@@ -96,14 +97,14 @@ class JsonBodyMiddlewareTest(tests.TestCase):
                            content_type='application/json',
                            method='POST')
         resp = middleware.JsonBodyMiddleware(None).process_request(req)
-        self.assertEqual(400, resp.status_int)
+        self.assertEqual(http_client.BAD_REQUEST, resp.status_int)
 
     def test_not_dict_body(self):
         req = make_request(body='42',
                            content_type='application/json',
                            method='POST')
         resp = middleware.JsonBodyMiddleware(None).process_request(req)
-        self.assertEqual(400, resp.status_int)
+        self.assertEqual(http_client.BAD_REQUEST, resp.status_int)
         self.assertTrue('valid JSON object' in resp.json['error']['message'])
 
     def test_no_content_type(self):
@@ -118,7 +119,7 @@ class JsonBodyMiddlewareTest(tests.TestCase):
                            content_type='text/plain',
                            method='POST')
         resp = middleware.JsonBodyMiddleware(None).process_request(req)
-        self.assertEqual(400, resp.status_int)
+        self.assertEqual(http_client.BAD_REQUEST, resp.status_int)
 
     def test_unrecognized_content_type_without_body(self):
         req = make_request(content_type='text/plain',

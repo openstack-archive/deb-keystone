@@ -18,6 +18,7 @@ import uuid
 
 from keystoneclient.contrib.ec2 import utils as ec2_utils
 from oslo_config import cfg
+from six.moves import http_client
 from testtools import matchers
 
 from keystone import exception
@@ -97,6 +98,60 @@ class CredentialTestCase(CredentialBaseTestCase):
         self.assertValidCredentialListResponse(r, ref=self.credential)
         for cred in r.result['credentials']:
             self.assertEqual(self.user['id'], cred['user_id'])
+
+    def test_list_credentials_filtered_by_type(self):
+        """Call ``GET  /credentials?type={type}``."""
+        # The type ec2 was chosen, instead of a random string,
+        # because the type must be in the list of supported types
+        ec2_credential = self.new_credential_ref(user_id=uuid.uuid4().hex,
+                                                 project_id=self.project_id,
+                                                 cred_type='ec2')
+
+        ec2_resp = self.credential_api.create_credential(
+            ec2_credential['id'], ec2_credential)
+
+        # The type cert was chosen for the same reason as ec2
+        r = self.get('/credentials?type=cert')
+
+        # Testing the filter for two different types
+        self.assertValidCredentialListResponse(r, ref=self.credential)
+        for cred in r.result['credentials']:
+            self.assertEqual('cert', cred['type'])
+
+        r_ec2 = self.get('/credentials?type=ec2')
+        self.assertThat(r_ec2.result['credentials'], matchers.HasLength(1))
+        cred_ec2 = r_ec2.result['credentials'][0]
+
+        self.assertValidCredentialListResponse(r_ec2, ref=ec2_resp)
+        self.assertEqual('ec2', cred_ec2['type'])
+        self.assertEqual(cred_ec2['id'], ec2_credential['id'])
+
+    def test_list_credentials_filtered_by_type_and_user_id(self):
+        """Call ``GET  /credentials?user_id={user_id}&type={type}``."""
+        user1_id = uuid.uuid4().hex
+        user2_id = uuid.uuid4().hex
+
+        # Creating credentials for two different users
+        credential_user1_ec2 = self.new_credential_ref(
+            user_id=user1_id, cred_type='ec2')
+        credential_user1_cert = self.new_credential_ref(
+            user_id=user1_id)
+        credential_user2_cert = self.new_credential_ref(
+            user_id=user2_id)
+
+        self.credential_api.create_credential(
+            credential_user1_ec2['id'], credential_user1_ec2)
+        self.credential_api.create_credential(
+            credential_user1_cert['id'], credential_user1_cert)
+        self.credential_api.create_credential(
+            credential_user2_cert['id'], credential_user2_cert)
+
+        r = self.get('/credentials?user_id=%s&type=ec2' % user1_id)
+        self.assertValidCredentialListResponse(r, ref=credential_user1_ec2)
+        self.assertThat(r.result['credentials'], matchers.HasLength(1))
+        cred = r.result['credentials'][0]
+        self.assertEqual('ec2', cred['type'])
+        self.assertEqual(user1_id, cred['user_id'])
 
     def test_create_credential(self):
         """Call ``POST /credentials``."""
@@ -198,10 +253,10 @@ class CredentialTestCase(CredentialBaseTestCase):
                 "secret": uuid.uuid4().hex}
         ref['blob'] = json.dumps(blob)
         ref['type'] = 'ec2'
-        # Assert 400 status for bad request with missing project_id
+        # Assert bad request status when missing project_id
         self.post(
             '/credentials',
-            body={'credential': ref}, expected_status=400)
+            body={'credential': ref}, expected_status=http_client.BAD_REQUEST)
 
     def test_create_ec2_credential_with_invalid_blob(self):
         """Call ``POST /credentials`` for creating ec2
@@ -211,11 +266,10 @@ class CredentialTestCase(CredentialBaseTestCase):
                                       project_id=self.project_id)
         ref['blob'] = '{"abc":"def"d}'
         ref['type'] = 'ec2'
-        # Assert 400 status for bad request containing invalid
-        # blob
+        # Assert bad request status when request contains invalid blob
         response = self.post(
             '/credentials',
-            body={'credential': ref}, expected_status=400)
+            body={'credential': ref}, expected_status=http_client.BAD_REQUEST)
         self.assertValidErrorResponse(response)
 
     def test_create_credential_with_admin_token(self):

@@ -22,10 +22,11 @@ import mock
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
+from six.moves import http_client
 from six.moves import range
 import webob
 
-from keystone.tests import unit as tests
+from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import appserver
 from keystone.tests.unit.ksfixtures import database
@@ -35,11 +36,11 @@ CONF = cfg.CONF
 DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
-class ClientDrivenTestCase(tests.TestCase):
+class ClientDrivenTestCase(unit.TestCase):
 
     def config_files(self):
         config_files = super(ClientDrivenTestCase, self).config_files()
-        config_files.append(tests.dirs.tests_conf('backend_sql.conf'))
+        config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
         return config_files
 
     def setUp(self):
@@ -1032,7 +1033,8 @@ class ClientDrivenTestCase(tests.TestCase):
                     (new_password, self.user_two['password']))
         self.public_server.application(req.environ,
                                        responseobject.start_fake_response)
-        self.assertEqual(403, responseobject.response_status)
+        self.assertEqual(http_client.FORBIDDEN,
+                         responseobject.response_status)
 
         self.user_two['password'] = new_password
         self.assertRaises(client_exceptions.Unauthorized,
@@ -1110,10 +1112,10 @@ class ClientDrivenTestCase(tests.TestCase):
         if not client:
             client = self.default_client
         url = '%s/ec2tokens' % self.default_client.auth_url
-        (resp, token) = client.request(
+        resp = client.session.request(
             url=url, method='POST',
-            body={'credentials': credentials})
-        return resp, token
+            json={'credentials': credentials})
+        return resp, resp.json()
 
     def _generate_default_user_ec2_credentials(self):
         cred = self. default_client.ec2.create(

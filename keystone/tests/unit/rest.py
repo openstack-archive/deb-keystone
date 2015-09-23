@@ -13,15 +13,16 @@
 # under the License.
 
 from oslo_serialization import jsonutils
+from six.moves import http_client
 import webtest
 
 from keystone.auth import controllers as auth_controllers
-from keystone.tests import unit as tests
+from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import database
 
 
-class RestfulTestCase(tests.TestCase):
+class RestfulTestCase(unit.TestCase):
     """Performs restful tests against the WSGI app over HTTP.
 
     This class launches public & admin WSGI servers for every test, which can
@@ -125,7 +126,8 @@ class RestfulTestCase(tests.TestCase):
         """Ensures that response headers appear as expected."""
         self.assertIn('X-Auth-Token', response.headers.get('Vary'))
 
-    def assertValidErrorResponse(self, response, expected_status=400):
+    def assertValidErrorResponse(self, response,
+                                 expected_status=http_client.BAD_REQUEST):
         """Verify that the error response is valid.
 
         Subclasses can override this function based on the expected response.
@@ -184,7 +186,8 @@ class RestfulTestCase(tests.TestCase):
         self._from_content_type(response, content_type=response_content_type)
 
         # we can save some code & improve coverage by always doing this
-        if method != 'HEAD' and response.status_code >= 400:
+        if (method != 'HEAD' and
+                response.status_code >= http_client.BAD_REQUEST):
             self.assertValidErrorResponse(response)
 
         # Contains the decoded response.body

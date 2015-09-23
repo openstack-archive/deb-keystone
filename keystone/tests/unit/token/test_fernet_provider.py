@@ -10,6 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import base64
 import datetime
 import hashlib
 import os
@@ -20,7 +21,7 @@ from oslo_utils import timeutils
 from keystone.common import config
 from keystone.common import utils
 from keystone import exception
-from keystone.tests import unit as tests
+from keystone.tests import unit
 from keystone.tests.unit import ksfixtures
 from keystone.token import provider
 from keystone.token.providers import fernet
@@ -31,7 +32,7 @@ from keystone.token.providers.fernet import utils as fernet_utils
 CONF = config.CONF
 
 
-class TestFernetTokenProvider(tests.TestCase):
+class TestFernetTokenProvider(unit.TestCase):
     def setUp(self):
         super(TestFernetTokenProvider, self).setUp()
         self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
@@ -56,7 +57,24 @@ class TestFernetTokenProvider(tests.TestCase):
             uuid.uuid4().hex)
 
 
-class TestPayloads(tests.TestCase):
+class TestTokenFormatter(unit.TestCase):
+    def test_restore_padding(self):
+        # 'a' will result in '==' padding, 'aa' will result in '=' padding, and
+        # 'aaa' will result in no padding.
+        strings_to_test = ['a', 'aa', 'aaa']
+
+        for string in strings_to_test:
+            encoded_string = base64.urlsafe_b64encode(string)
+            encoded_str_without_padding = encoded_string.rstrip('=')
+            self.assertFalse(encoded_str_without_padding.endswith('='))
+            encoded_str_with_padding_restored = (
+                token_formatters.TokenFormatter.restore_padding(
+                    encoded_str_without_padding)
+            )
+            self.assertEqual(encoded_string, encoded_str_with_padding_restored)
+
+
+class TestPayloads(unit.TestCase):
     def test_uuid_hex_to_byte_conversions(self):
         payload_cls = token_formatters.BasePayload
 
@@ -387,7 +405,7 @@ class TestPayloads(tests.TestCase):
         self.assertDictEqual(exp_federated_info, federated_info)
 
 
-class TestFernetKeyRotation(tests.TestCase):
+class TestFernetKeyRotation(unit.TestCase):
     def setUp(self):
         super(TestFernetKeyRotation, self).setUp()
 
@@ -512,7 +530,7 @@ class TestFernetKeyRotation(tests.TestCase):
         self.assertEqual(3, keys)
 
 
-class TestLoadKeys(tests.TestCase):
+class TestLoadKeys(unit.TestCase):
     def test_non_numeric_files(self):
         self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
         evil_file = os.path.join(CONF.fernet_tokens.key_repository, '~1')

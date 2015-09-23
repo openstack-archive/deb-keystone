@@ -28,6 +28,7 @@ import warnings
 import fixtures
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
+from oslo_log import fixture as log_fixture
 from oslo_log import log
 from oslo_utils import timeutils
 import oslotest.base as oslotest
@@ -36,7 +37,6 @@ from paste.deploy import loadwsgi
 import six
 from sqlalchemy import exc
 from testtools import testcase
-import webob
 
 # NOTE(ayoung)
 # environment.use_eventlet must run before any of the code that will
@@ -134,7 +134,7 @@ class EggLoader(loadwsgi.EggLoader):
 
 # NOTE(dstanek): class paths were remove from the keystone-paste.ini in
 # favor of using entry points. This caused tests to slow to a crawl
-# since we reload the application object for test RESTful test. This
+# since we reload the application object for each RESTful test. This
 # monkey-patching adds caching to paste deploy's egg lookup.
 loadwsgi.EggLoader = EggLoader
 
@@ -223,41 +223,6 @@ class UnexpectedExit(Exception):
     pass
 
 
-class BadLog(Exception):
-    """Raised on invalid call to logging (parameter mismatch)."""
-    pass
-
-
-class TestClient(object):
-    def __init__(self, app=None, token=None):
-        self.app = app
-        self.token = token
-
-    def request(self, method, path, headers=None, body=None):
-        if headers is None:
-            headers = {}
-
-        if self.token:
-            headers.setdefault('X-Auth-Token', self.token)
-
-        req = webob.Request.blank(path)
-        req.method = method
-        for k, v in headers.items():
-            req.headers[k] = v
-        if body:
-            req.body = body
-        return req.get_response(self.app)
-
-    def get(self, path, headers=None):
-        return self.request('GET', path=path, headers=headers)
-
-    def post(self, path, headers=None, body=None):
-        return self.request('POST', path=path, headers=headers, body=body)
-
-    def put(self, path, headers=None, body=None):
-        return self.request('PUT', path=path, headers=headers, body=body)
-
-
 def new_ref():
     """Populates a ref with attributes common to some API entities."""
     return {
@@ -329,7 +294,7 @@ def new_credential_ref(user_id, project_id=None, cred_type=None):
     ref['user_id'] = user_id
     if cred_type == 'ec2':
         ref['type'] = 'ec2'
-        ref['blob'] = {'blah': 'test'}
+        ref['blob'] = uuid.uuid4().hex
     else:
         ref['type'] = 'cert'
         ref['blob'] = uuid.uuid4().hex
@@ -402,8 +367,7 @@ class BaseTestCase(oslotest.BaseTestCase):
         super(BaseTestCase, self).setUp()
         self.useFixture(mockpatch.PatchObject(sys, 'exit',
                                               side_effect=UnexpectedExit))
-        self.useFixture(mockpatch.PatchObject(logging.Handler, 'handleError',
-                                              side_effect=BadLog))
+        self.useFixture(log_fixture.get_logging_handle_error_fixture())
 
         warnings.filterwarnings('error', category=DeprecationWarning,
                                 module='^keystone\\.')
