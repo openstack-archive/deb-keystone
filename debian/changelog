@@ -2,6 +2,7 @@ keystone (1:8.0.0~rc1-1) experimental; urgency=medium
 
   * New upstream release.
   * Fixed (build-)depends for this release.
+  * Rebased fixes-jsonschema-requirements.txt.patch.
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 23 Sep 2015 14:11:47 +0200
 
