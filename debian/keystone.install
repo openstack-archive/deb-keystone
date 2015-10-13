@@ -3,3 +3,4 @@ etc/keystone-paste.ini	/etc/keystone
 etc/logging.conf.sample	/usr/share/doc/keystone
 etc/policy.json		/etc/keystone
 usr/bin/*
+debian/apache-conf/keystone.conf	/etc/apache2/sites-available
