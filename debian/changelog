@@ -1,3 +1,9 @@
+keystone (1:8.0.0~rc1-2) UNRELEASED; urgency=medium
+
+  * Now depends on pymysql.
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 13 Oct 2015 14:56:01 +0200
+
 keystone (1:8.0.0~rc1-1) experimental; urgency=medium
 
   * New upstream release.
