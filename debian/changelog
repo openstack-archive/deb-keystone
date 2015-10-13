@@ -2,7 +2,7 @@ keystone (1:8.0.0~rc2-1) experimental; urgency=medium
 
   * New upstream release.
   * Now depends on pymysql.
-  * Added a /etc/apache2/sites-available/keystone.conf.
+  * Added a /etc/apache2/sites-available/wsgi-keystone.conf.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 13 Oct 2015 14:56:01 +0200
 
