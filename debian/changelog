@@ -1,5 +1,6 @@
-keystone (1:8.0.0~rc1-2) experimental; urgency=medium
+keystone (1:8.0.0~rc2-1) experimental; urgency=medium
 
+  * New upstream release.
   * Now depends on pymysql.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 13 Oct 2015 14:56:01 +0200
