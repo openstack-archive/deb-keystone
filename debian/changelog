@@ -1,3 +1,9 @@
+keystone (1:8.0.0-3) unstable; urgency=medium
+
+  * Switching Keystone to use and configure API v3 by default.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 02 Nov 2015 13:04:02 +0000
+
 keystone (1:8.0.0-2) unstable; urgency=medium
 
   * Uploading to unstable.
