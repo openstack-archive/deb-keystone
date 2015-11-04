@@ -45,11 +45,11 @@ keystone_create_endpoint_postinst () {
 					openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity >/dev/null
 
 					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
+						keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 >/dev/null
 					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
+						keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 >/dev/null
 					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v3/ >/dev/null
+						keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0 >/dev/null
 				else
 					echo -n "Keystone service already registered..."
 				fi
