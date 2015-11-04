@@ -2,6 +2,7 @@ keystone (1:8.0.0-4) unstable; urgency=medium
 
   * If the debconf prompt for creating Keystone endpoint was yes, check first
     if there's no service already registered.
+  * Also create a service project when creating users and tenants.
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 04 Nov 2015 09:06:22 +0000
 
