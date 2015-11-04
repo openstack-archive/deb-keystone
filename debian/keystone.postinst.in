@@ -40,17 +40,18 @@ keystone_create_endpoint_postinst () {
 			REGION_NAME=${RET}
 			if [ -n "${REGION_NAME}" ] ; then
 				NUM_LINES=$(openstack ${OSTACKCLI_PARAMS} service list --format=csv | q -d , -H 'SELECT ID FROM - WHERE `Type`="identity"' | wc -l)
-				if [ "${NUM_LINES}" = "1" ] ; then
+				if [ "${NUM_LINES}" = "0" ] ; then
 					openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity >/dev/null
+
+					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
+						keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
+					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
+						keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
+					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
+						keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v3/ >/dev/null
 				else
 					echo -n "Keystone service already registered..."
 				fi
-				openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-					keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
-				openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-					keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v3/ >/dev/null
-				openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-					keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v3/ >/dev/null
 			fi
 		fi
 	fi

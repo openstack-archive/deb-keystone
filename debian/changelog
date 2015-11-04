@@ -1,3 +1,10 @@
+keystone (1:8.0.0-4) unstable; urgency=medium
+
+  * If the debconf prompt for creating Keystone endpoint was yes, check first
+    if there's no service already registered.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 04 Nov 2015 09:06:22 +0000
+
 keystone (1:8.0.0-3) unstable; urgency=medium
 
   * Switching Keystone to use and configure API v3 by default.
