@@ -34,6 +34,7 @@ import json
 import uuid
 
 from migrate.versioning import api as versioning_api
+import mock
 from oslo_config import cfg
 from oslo_db import exception as db_exception
 from oslo_db.sqlalchemy import migration
@@ -45,8 +46,6 @@ from sqlalchemy import schema
 from keystone.common import sql
 from keystone.common.sql import migrate_repo
 from keystone.common.sql import migration_helpers
-from keystone.contrib import federation
-from keystone.contrib import revoke
 from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
@@ -109,19 +108,6 @@ INITIAL_TABLE_STRUCTURE = {
         'type', 'actor_id', 'target_id', 'role_id', 'inherited',
     ],
 }
-
-
-INITIAL_EXTENSION_TABLE_STRUCTURE = {
-    'revocation_event': [
-        'id', 'domain_id', 'project_id', 'user_id', 'role_id',
-        'trust_id', 'consumer_id', 'access_token_id',
-        'issued_before', 'expires_at', 'revoked_at', 'audit_id',
-        'audit_chain_id',
-    ],
-}
-
-EXTENSIONS = {'federation': federation,
-              'revoke': revoke}
 
 
 class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
@@ -347,7 +333,7 @@ class SqlUpgradeTests(SqlMigrateBase):
 
         def add_service():
             service_id = uuid.uuid4().hex
-
+            # Older style service ref, must create by hand
             service = {
                 'id': service_id,
                 'type': uuid.uuid4().hex
@@ -360,6 +346,8 @@ class SqlUpgradeTests(SqlMigrateBase):
         def add_endpoint(service_id, region):
             endpoint_id = uuid.uuid4().hex
 
+            # Can't use new_endpoint_ref to make the older style endpoint
+            # so make it by hand.
             endpoint = {
                 'id': endpoint_id,
                 'interface': uuid.uuid4().hex[:8],
@@ -431,7 +419,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTrue(self.does_fk_exist('assignment', 'role_id'))
         self.upgrade(62)
         if self.engine.name != 'sqlite':
-            # sqlite does not support FK deletions (or enforcement)
+            # SQLite does not support FK deletions (or enforcement)
             self.assertFalse(self.does_fk_exist('assignment', 'role_id'))
 
     def test_insert_assignment_inherited_pk(self):
@@ -502,7 +490,6 @@ class SqlUpgradeTests(SqlMigrateBase):
 
     def does_pk_exist(self, table, pk_column):
         """Checks whether a column is primary key on a table."""
-
         inspector = reflection.Inspector.from_engine(self.engine)
         pk_columns = inspector.get_pk_constraint(table)['constrained_columns']
 
@@ -543,11 +530,160 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableColumns(sensitive_table,
                                 ['domain_id', 'group', 'option', 'value'])
 
+    def test_endpoint_policy_upgrade(self):
+        self.assertTableDoesNotExist('policy_association')
+        self.upgrade(81)
+        self.assertTableColumns('policy_association',
+                                ['id', 'policy_id', 'endpoint_id',
+                                 'service_id', 'region_id'])
+
+    @mock.patch.object(migration_helpers, 'get_db_version', return_value=1)
+    def test_endpoint_policy_already_migrated(self, mock_ep):
+
+        # By setting the return value to 1, the migration has already been
+        # run, and there's no need to create the table again
+
+        self.upgrade(81)
+
+        mock_ep.assert_called_once_with(extension='endpoint_policy',
+                                        engine=mock.ANY)
+
+        # It won't exist because we are mocking it, but we can verify
+        # that 081 did not create the table
+        self.assertTableDoesNotExist('policy_association')
+
+    def test_create_federation_tables(self):
+        self.identity_provider = 'identity_provider'
+        self.federation_protocol = 'federation_protocol'
+        self.service_provider = 'service_provider'
+        self.mapping = 'mapping'
+        self.remote_ids = 'idp_remote_ids'
+
+        self.assertTableDoesNotExist(self.identity_provider)
+        self.assertTableDoesNotExist(self.federation_protocol)
+        self.assertTableDoesNotExist(self.service_provider)
+        self.assertTableDoesNotExist(self.mapping)
+        self.assertTableDoesNotExist(self.remote_ids)
+
+        self.upgrade(82)
+        self.assertTableColumns(self.identity_provider,
+                                ['id', 'description', 'enabled'])
+
+        self.assertTableColumns(self.federation_protocol,
+                                ['id', 'idp_id', 'mapping_id'])
+
+        self.assertTableColumns(self.mapping,
+                                ['id', 'rules'])
+
+        self.assertTableColumns(self.service_provider,
+                                ['id', 'description', 'enabled', 'auth_url',
+                                 'relay_state_prefix', 'sp_url'])
+
+        self.assertTableColumns(self.remote_ids, ['idp_id', 'remote_id'])
+
+        federation_protocol = sqlalchemy.Table(self.federation_protocol,
+                                               self.metadata,
+                                               autoload=True)
+        self.assertFalse(federation_protocol.c.mapping_id.nullable)
+
+        sp_table = sqlalchemy.Table(self.service_provider,
+                                    self.metadata,
+                                    autoload=True)
+        self.assertFalse(sp_table.c.auth_url.nullable)
+        self.assertFalse(sp_table.c.sp_url.nullable)
+
+    @mock.patch.object(migration_helpers, 'get_db_version', return_value=8)
+    def test_federation_already_migrated(self, mock_federation):
+
+        # By setting the return value to 8, the migration has already been
+        # run, and there's no need to create the table again.
+        self.upgrade(82)
+
+        mock_federation.assert_any_call(extension='federation',
+                                        engine=mock.ANY)
+
+        # It won't exist because we are mocking it, but we can verify
+        # that 082 did not create the table.
+        self.assertTableDoesNotExist('identity_provider')
+        self.assertTableDoesNotExist('federation_protocol')
+        self.assertTableDoesNotExist('mapping')
+        self.assertTableDoesNotExist('service_provider')
+        self.assertTableDoesNotExist('idp_remote_ids')
+
+    def test_create_oauth_tables(self):
+        consumer = 'consumer'
+        request_token = 'request_token'
+        access_token = 'access_token'
+        self.assertTableDoesNotExist(consumer)
+        self.assertTableDoesNotExist(request_token)
+        self.assertTableDoesNotExist(access_token)
+        self.upgrade(83)
+        self.assertTableColumns(consumer,
+                                ['id',
+                                 'description',
+                                 'secret',
+                                 'extra'])
+        self.assertTableColumns(request_token,
+                                ['id',
+                                 'request_secret',
+                                 'verifier',
+                                 'authorizing_user_id',
+                                 'requested_project_id',
+                                 'role_ids',
+                                 'consumer_id',
+                                 'expires_at'])
+        self.assertTableColumns(access_token,
+                                ['id',
+                                 'access_secret',
+                                 'authorizing_user_id',
+                                 'project_id',
+                                 'role_ids',
+                                 'consumer_id',
+                                 'expires_at'])
+
+    @mock.patch.object(migration_helpers, 'get_db_version', return_value=5)
+    def test_oauth1_already_migrated(self, mock_oauth1):
+
+        # By setting the return value to 5, the migration has already been
+        # run, and there's no need to create the table again.
+        self.upgrade(83)
+
+        mock_oauth1.assert_any_call(extension='oauth1', engine=mock.ANY)
+
+        # It won't exist because we are mocking it, but we can verify
+        # that 083 did not create the table.
+        self.assertTableDoesNotExist('consumer')
+        self.assertTableDoesNotExist('request_token')
+        self.assertTableDoesNotExist('access_token')
+
+    def test_create_revoke_table(self):
+        self.assertTableDoesNotExist('revocation_event')
+        self.upgrade(84)
+        self.assertTableColumns('revocation_event',
+                                ['id', 'domain_id', 'project_id', 'user_id',
+                                 'role_id', 'trust_id', 'consumer_id',
+                                 'access_token_id', 'issued_before',
+                                 'expires_at', 'revoked_at',
+                                 'audit_chain_id', 'audit_id'])
+
+    @mock.patch.object(migration_helpers, 'get_db_version', return_value=2)
+    def test_revoke_already_migrated(self, mock_revoke):
+
+        # By setting the return value to 2, the migration has already been
+        # run, and there's no need to create the table again.
+        self.upgrade(84)
+
+        mock_revoke.assert_any_call(extension='revoke', engine=mock.ANY)
+
+        # It won't exist because we are mocking it, but we can verify
+        # that 084 did not create the table.
+        self.assertTableDoesNotExist('revocation_event')
+
     def test_fixup_service_name_value_upgrade(self):
         """Update service name data from `extra` to empty string."""
         def add_service(**extra_data):
             service_id = uuid.uuid4().hex
-
+            # Older style service ref, must create by hand
             service = {
                 'id': service_id,
                 'type': uuid.uuid4().hex,
@@ -642,6 +778,35 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableDoesNotExist(config_registration)
         self.upgrade(75)
         self.assertTableColumns(config_registration, ['type', 'domain_id'])
+
+    def test_endpoint_filter_upgrade(self):
+        def assert_tables_columns_exist():
+            self.assertTableColumns('project_endpoint',
+                                    ['endpoint_id', 'project_id'])
+            self.assertTableColumns('endpoint_group',
+                                    ['id', 'name', 'description', 'filters'])
+            self.assertTableColumns('project_endpoint_group',
+                                    ['endpoint_group_id', 'project_id'])
+
+        self.assertTableDoesNotExist('project_endpoint')
+        self.upgrade(85)
+        assert_tables_columns_exist()
+
+    @mock.patch.object(migration_helpers, 'get_db_version', return_value=2)
+    def test_endpoint_filter_already_migrated(self, mock_endpoint_filter):
+
+        # By setting the return value to 2, the migration has already been
+        # run, and there's no need to create the table again.
+        self.upgrade(85)
+
+        mock_endpoint_filter.assert_any_call(extension='endpoint_filter',
+                                             engine=mock.ANY)
+
+        # It won't exist because we are mocking it, but we can verify
+        # that 085 did not create the table.
+        self.assertTableDoesNotExist('project_endpoint')
+        self.assertTableDoesNotExist('endpoint_group')
+        self.assertTableDoesNotExist('project_endpoint_group')
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):
@@ -793,97 +958,15 @@ class VersionTests(SqlMigrateBase):
                           migration_helpers.get_db_version,
                           extension='federation')
 
-    def test_extension_initial(self):
-        """When get the initial version of an extension, it's 0."""
-        for name, extension in EXTENSIONS.items():
-            abs_path = migration_helpers.find_migrate_repo(extension)
-            migration.db_version_control(sql.get_engine(), abs_path)
-            version = migration_helpers.get_db_version(extension=name)
-            self.assertEqual(0, version,
-                             'Migrate version for %s is not 0' % name)
-
-    def test_extension_migrated(self):
-        """When get the version after migrating an extension, it's not 0."""
-        for name, extension in EXTENSIONS.items():
-            abs_path = migration_helpers.find_migrate_repo(extension)
-            migration.db_version_control(sql.get_engine(), abs_path)
-            migration.db_sync(sql.get_engine(), abs_path)
-            version = migration_helpers.get_db_version(extension=name)
-            self.assertTrue(
-                version > 0,
-                "Version for %s didn't change after migrated?" % name)
-            # Verify downgrades cannot occur
-            self.assertRaises(
-                db_exception.DbMigrationError,
-                migration_helpers._sync_extension_repo,
-                extension=name,
-                version=0)
-
-    def test_extension_federation_upgraded_values(self):
-        abs_path = migration_helpers.find_migrate_repo(federation)
-        migration.db_version_control(sql.get_engine(), abs_path)
-        migration.db_sync(sql.get_engine(), abs_path, version=6)
-        idp_table = sqlalchemy.Table("identity_provider",
-                                     self.metadata,
-                                     autoload=True)
-        idps = [{'id': uuid.uuid4().hex,
-                 'enabled': True,
-                 'description': uuid.uuid4().hex,
-                 'remote_id': uuid.uuid4().hex},
-                {'id': uuid.uuid4().hex,
-                 'enabled': True,
-                 'description': uuid.uuid4().hex,
-                 'remote_id': uuid.uuid4().hex}]
-        for idp in idps:
-            ins = idp_table.insert().values({'id': idp['id'],
-                                             'enabled': idp['enabled'],
-                                             'description': idp['description'],
-                                             'remote_id': idp['remote_id']})
-            self.engine.execute(ins)
-        migration.db_sync(sql.get_engine(), abs_path)
-        idp_remote_ids_table = sqlalchemy.Table("idp_remote_ids",
-                                                self.metadata,
-                                                autoload=True)
-        for idp in idps:
-            s = idp_remote_ids_table.select().where(
-                idp_remote_ids_table.c.idp_id == idp['id'])
-            remote = self.engine.execute(s).fetchone()
-            self.assertEqual(idp['remote_id'],
-                             remote['remote_id'],
-                             'remote_ids must be preserved during the '
-                             'migration from identity_provider table to '
-                             'idp_remote_ids table')
-
     def test_unexpected_extension(self):
-        """The version for an extension that doesn't exist raises ImportError.
-
-        """
-
+        """The version for a non-existent extension raises ImportError."""
         extension_name = uuid.uuid4().hex
         self.assertRaises(ImportError,
                           migration_helpers.get_db_version,
                           extension=extension_name)
 
     def test_unversioned_extension(self):
-        """The version for extensions without migrations raise an exception.
-
-        """
-
+        """The version for extensions without migrations raise an exception."""
         self.assertRaises(exception.MigrationNotProvided,
                           migration_helpers.get_db_version,
                           extension='admin_crud')
-
-    def test_initial_with_extension_version_None(self):
-        """When performing a default migration, also migrate extensions."""
-        migration_helpers.sync_database_to_version(extension=None,
-                                                   version=None)
-        for table in INITIAL_EXTENSION_TABLE_STRUCTURE:
-            self.assertTableColumns(table,
-                                    INITIAL_EXTENSION_TABLE_STRUCTURE[table])
-
-    def test_initial_with_extension_version_max(self):
-        """When migrating to max version, do not migrate extensions."""
-        migration_helpers.sync_database_to_version(extension=None,
-                                                   version=self.max_version)
-        for table in INITIAL_EXTENSION_TABLE_STRUCTURE:
-            self.assertTableDoesNotExist(table)

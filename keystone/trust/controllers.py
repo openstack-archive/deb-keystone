@@ -16,7 +16,6 @@ import uuid
 
 from oslo_config import cfg
 from oslo_log import log
-from oslo_log import versionutils
 from oslo_utils import timeutils
 import six
 
@@ -56,7 +55,6 @@ class TrustV3(controller.V3Controller):
     @classmethod
     def base_url(cls, context, path=None):
         """Construct a path and pass it to V3Controller.base_url method."""
-
         # NOTE(stevemar): Overriding path to /OS-TRUST/trusts so that
         # V3Controller.base_url handles setting the self link correctly.
         path = '/OS-TRUST/' + cls.collection_name
@@ -113,7 +111,7 @@ class TrustV3(controller.V3Controller):
                     trust_roles.append({'id':
                                         all_role_names[rolename]['id']})
                 else:
-                    raise exception.RoleNotFound("role %s is not defined" %
+                    raise exception.RoleNotFound(_("role %s is not defined") %
                                                  rolename)
             else:
                 raise exception.ValidationError(attribute='id or name',
@@ -128,7 +126,6 @@ class TrustV3(controller.V3Controller):
         The user creating the trust must be the trustor.
 
         """
-
         auth_context = context.get('environment',
                                    {}).get('KEYSTONE_AUTH_CONTEXT', {})
 
@@ -261,12 +258,6 @@ class TrustV3(controller.V3Controller):
         _trustor_trustee_only(trust, user_id)
         return {'roles': trust['roles'],
                 'links': trust['roles_links']}
-
-    @versionutils.deprecated(
-        versionutils.deprecated.KILO,
-        remove_in=+2)
-    def check_role_for_trust(self, context, trust_id, role_id):
-        return self._check_role_for_trust(self, context, trust_id, role_id)
 
     @controller.protected()
     def get_role_for_trust(self, context, trust_id, role_id):

@@ -15,24 +15,25 @@
 import copy
 import uuid
 
+import mock
+from oslo_log import versionutils
 from six.moves import http_client
 from testtools import matchers
 
+from keystone.contrib.endpoint_filter import routers
+from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
 
-class TestExtensionCase(test_v3.RestfulTestCase):
-
-    EXTENSION_NAME = 'endpoint_filter'
-    EXTENSION_TO_ADD = 'endpoint_filter_extension'
+class EndpointFilterTestCase(test_v3.RestfulTestCase):
 
     def config_overrides(self):
-        super(TestExtensionCase, self).config_overrides()
+        super(EndpointFilterTestCase, self).config_overrides()
         self.config_fixture.config(
             group='catalog', driver='endpoint_filter.sql')
 
     def setUp(self):
-        super(TestExtensionCase, self).setUp()
+        super(EndpointFilterTestCase, self).setUp()
         self.default_request_url = (
             '/OS-EP-FILTER/projects/%(project_id)s'
             '/endpoints/%(endpoint_id)s' % {
@@ -40,7 +41,17 @@ class TestExtensionCase(test_v3.RestfulTestCase):
                 'endpoint_id': self.endpoint_id})
 
 
-class EndpointFilterCRUDTestCase(TestExtensionCase):
+class EndpointFilterDeprecateTestCase(test_v3.RestfulTestCase):
+
+    @mock.patch.object(versionutils, 'report_deprecated_feature')
+    def test_exception_happens(self, mock_deprecator):
+        routers.EndpointFilterExtension(mock.ANY)
+        mock_deprecator.assert_called_once_with(mock.ANY, mock.ANY)
+        args, _kwargs = mock_deprecator.call_args
+        self.assertIn("Remove endpoint_filter_extension from", args[1])
+
+
+class EndpointFilterCRUDTestCase(EndpointFilterTestCase):
 
     def test_create_endpoint_project_association(self):
         """PUT /OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -48,8 +59,7 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
         Valid endpoint and project id test case.
 
         """
-        self.put(self.default_request_url,
-                 expected_status=204)
+        self.put(self.default_request_url)
 
     def test_create_endpoint_project_association_with_invalid_project(self):
         """PUT OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -82,8 +92,7 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
 
         """
         self.put(self.default_request_url,
-                 body={'project_id': self.default_domain_project_id},
-                 expected_status=204)
+                 body={'project_id': self.default_domain_project_id})
 
     def test_check_endpoint_project_association(self):
         """HEAD /OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -91,13 +100,11 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
         Valid project and endpoint id test case.
 
         """
-        self.put(self.default_request_url,
-                 expected_status=204)
+        self.put(self.default_request_url)
         self.head('/OS-EP-FILTER/projects/%(project_id)s'
                   '/endpoints/%(endpoint_id)s' % {
                       'project_id': self.default_domain_project_id,
-                      'endpoint_id': self.endpoint_id},
-                  expected_status=204)
+                      'endpoint_id': self.endpoint_id})
 
     def test_check_endpoint_project_association_with_invalid_project(self):
         """HEAD /OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -169,8 +176,7 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
 
         """
         r = self.get('/OS-EP-FILTER/endpoints/%(endpoint_id)s/projects' %
-                     {'endpoint_id': self.endpoint_id},
-                     expected_status=200)
+                     {'endpoint_id': self.endpoint_id})
         self.assertValidProjectListResponse(r, expected_length=0)
 
     def test_list_projects_associated_with_invalid_endpoint(self):
@@ -193,8 +199,7 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
         self.delete('/OS-EP-FILTER/projects/%(project_id)s'
                     '/endpoints/%(endpoint_id)s' % {
                         'project_id': self.default_domain_project_id,
-                        'endpoint_id': self.endpoint_id},
-                    expected_status=204)
+                        'endpoint_id': self.endpoint_id})
 
     def test_remove_endpoint_project_association_with_invalid_project(self):
         """DELETE /OS-EP-FILTER/projects/{project_id}/endpoints/{endpoint_id}
@@ -226,30 +231,162 @@ class EndpointFilterCRUDTestCase(TestExtensionCase):
         self.put(self.default_request_url)
         association_url = ('/OS-EP-FILTER/endpoints/%(endpoint_id)s/projects' %
                            {'endpoint_id': self.endpoint_id})
-        r = self.get(association_url, expected_status=200)
+        r = self.get(association_url)
         self.assertValidProjectListResponse(r, expected_length=1)
 
         self.delete('/projects/%(project_id)s' % {
             'project_id': self.default_domain_project_id})
 
-        r = self.get(association_url, expected_status=200)
+        r = self.get(association_url)
         self.assertValidProjectListResponse(r, expected_length=0)
 
     def test_endpoint_project_association_cleanup_when_endpoint_deleted(self):
         self.put(self.default_request_url)
         association_url = '/OS-EP-FILTER/projects/%(project_id)s/endpoints' % {
             'project_id': self.default_domain_project_id}
-        r = self.get(association_url, expected_status=200)
+        r = self.get(association_url)
         self.assertValidEndpointListResponse(r, expected_length=1)
 
         self.delete('/endpoints/%(endpoint_id)s' % {
             'endpoint_id': self.endpoint_id})
 
-        r = self.get(association_url, expected_status=200)
+        r = self.get(association_url)
         self.assertValidEndpointListResponse(r, expected_length=0)
 
+    @unit.skip_if_cache_disabled('catalog')
+    def test_create_endpoint_project_association_invalidates_cache(self):
+        # NOTE(davechen): create another endpoint which will be added to
+        # default project, this should be done at first since
+        # `create_endpoint` will also invalidate cache.
+        endpoint_id2 = uuid.uuid4().hex
+        endpoint2 = unit.new_endpoint_ref(service_id=self.service_id,
+                                          region_id=self.region_id,
+                                          interface='public',
+                                          id=endpoint_id2)
+        self.catalog_api.create_endpoint(endpoint_id2, endpoint2.copy())
 
-class EndpointFilterTokenRequestTestCase(TestExtensionCase):
+        # create endpoint project association.
+        self.put(self.default_request_url)
+
+        # should get back only one endpoint that was just created.
+        user_id = uuid.uuid4().hex
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        # there is only one endpoints associated with the default project.
+        self.assertEqual(1, len(catalog[0]['endpoints']))
+        self.assertEqual(self.endpoint_id, catalog[0]['endpoints'][0]['id'])
+
+        # add the second endpoint to default project, bypassing
+        # catalog_api API manager.
+        self.catalog_api.driver.add_endpoint_to_project(
+            endpoint_id2,
+            self.default_domain_project_id)
+
+        # but, we can just get back one endpoint from the cache, since the
+        # catalog is pulled out from cache and its haven't been invalidated.
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        self.assertEqual(1, len(catalog[0]['endpoints']))
+
+        # remove the endpoint2 from the default project, and add it again via
+        # catalog_api API manager.
+        self.catalog_api.driver.remove_endpoint_from_project(
+            endpoint_id2,
+            self.default_domain_project_id)
+
+        # add second endpoint to default project, this can be done by calling
+        # the catalog_api API manager directly but call the REST API
+        # instead for consistency.
+        self.put('/OS-EP-FILTER/projects/%(project_id)s'
+                 '/endpoints/%(endpoint_id)s' % {
+                     'project_id': self.default_domain_project_id,
+                     'endpoint_id': endpoint_id2})
+
+        # should get back two endpoints since the cache has been
+        # invalidated when the second endpoint was added to default project.
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        self.assertEqual(2, len(catalog[0]['endpoints']))
+
+        ep_id_list = [catalog[0]['endpoints'][0]['id'],
+                      catalog[0]['endpoints'][1]['id']]
+        self.assertItemsEqual([self.endpoint_id, endpoint_id2], ep_id_list)
+
+    @unit.skip_if_cache_disabled('catalog')
+    def test_remove_endpoint_from_project_invalidates_cache(self):
+        endpoint_id2 = uuid.uuid4().hex
+        endpoint2 = unit.new_endpoint_ref(service_id=self.service_id,
+                                          region_id=self.region_id,
+                                          interface='public',
+                                          id=endpoint_id2)
+        self.catalog_api.create_endpoint(endpoint_id2, endpoint2.copy())
+        # create endpoint project association.
+        self.put(self.default_request_url)
+
+        # add second endpoint to default project.
+        self.put('/OS-EP-FILTER/projects/%(project_id)s'
+                 '/endpoints/%(endpoint_id)s' % {
+                     'project_id': self.default_domain_project_id,
+                     'endpoint_id': endpoint_id2})
+
+        # should get back only one endpoint that was just created.
+        user_id = uuid.uuid4().hex
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        # there are two endpoints associated with the default project.
+        ep_id_list = [catalog[0]['endpoints'][0]['id'],
+                      catalog[0]['endpoints'][1]['id']]
+        self.assertEqual(2, len(catalog[0]['endpoints']))
+        self.assertItemsEqual([self.endpoint_id, endpoint_id2], ep_id_list)
+
+        # remove the endpoint2 from the default project, bypassing
+        # catalog_api API manager.
+        self.catalog_api.driver.remove_endpoint_from_project(
+            endpoint_id2,
+            self.default_domain_project_id)
+
+        # but, we can just still get back two endpoints from the cache,
+        # since the catalog is pulled out from cache and its haven't
+        # been invalidated.
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        self.assertEqual(2, len(catalog[0]['endpoints']))
+
+        # add back the endpoint2 to the default project, and remove it by
+        # catalog_api API manage.
+        self.catalog_api.driver.add_endpoint_to_project(
+            endpoint_id2,
+            self.default_domain_project_id)
+
+        # remove the endpoint2 from the default project, this can be done
+        # by calling the catalog_api API manager directly but call
+        # the REST API instead for consistency.
+        self.delete('/OS-EP-FILTER/projects/%(project_id)s'
+                    '/endpoints/%(endpoint_id)s' % {
+                        'project_id': self.default_domain_project_id,
+                        'endpoint_id': endpoint_id2})
+
+        # should only get back one endpoint since the cache has been
+        # invalidated after the endpoint project association was removed.
+        catalog = self.catalog_api.get_v3_catalog(
+            user_id,
+            self.default_domain_project_id)
+
+        self.assertEqual(1, len(catalog[0]['endpoints']))
+        self.assertEqual(self.endpoint_id, catalog[0]['endpoints'][0]['id'])
+
+
+class EndpointFilterTokenRequestTestCase(EndpointFilterTestCase):
 
     def test_project_scoped_token_using_endpoint_filter(self):
         """Verify endpoints from project scoped token filtered."""
@@ -276,8 +413,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         # attempt to authenticate without requesting a project
         auth_data = self.build_authentication_request(
@@ -289,7 +425,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
             require_catalog=True,
             endpoint_filter=True,
             ep_filter_assoc=1)
-        self.assertEqual(r.result['token']['project']['id'], project['id'])
+        self.assertEqual(project['id'], r.result['token']['project']['id'])
 
     def test_default_scoped_token_using_endpoint_filter(self):
         """Verify endpoints from default scoped token filtered."""
@@ -297,8 +433,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -310,16 +445,15 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
             require_catalog=True,
             endpoint_filter=True,
             ep_filter_assoc=1)
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
 
     def test_scoped_token_with_no_catalog_using_endpoint_filter(self):
         """Verify endpoint filter does not affect no catalog."""
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -329,8 +463,8 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.assertValidProjectScopedTokenResponse(
             r,
             require_catalog=False)
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
 
     def test_invalid_endpoint_project_association(self):
         """Verify an invalid endpoint-project association is handled."""
@@ -338,28 +472,26 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         # create a second temporary endpoint
-        self.endpoint_id2 = uuid.uuid4().hex
-        self.endpoint2 = self.new_endpoint_ref(service_id=self.service_id)
-        self.endpoint2['id'] = self.endpoint_id2
-        self.catalog_api.create_endpoint(
-            self.endpoint_id2,
-            self.endpoint2.copy())
+        endpoint_id2 = uuid.uuid4().hex
+        endpoint2 = unit.new_endpoint_ref(service_id=self.service_id,
+                                          region_id=self.region_id,
+                                          interface='public',
+                                          id=endpoint_id2)
+        self.catalog_api.create_endpoint(endpoint_id2, endpoint2.copy())
 
         # add second endpoint to default project
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id2},
-                 expected_status=204)
+                     'endpoint_id': endpoint_id2})
 
         # remove the temporary reference
         # this will create inconsistency in the endpoint filter table
         # which is fixed during the catalog creation for token request
-        self.catalog_api.delete_endpoint(self.endpoint_id2)
+        self.catalog_api.delete_endpoint(endpoint_id2)
 
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -371,8 +503,8 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
             require_catalog=True,
             endpoint_filter=True,
             ep_filter_assoc=1)
-        self.assertEqual(r.result['token']['project']['id'],
-                         self.project['id'])
+        self.assertEqual(self.project['id'],
+                         r.result['token']['project']['id'])
 
     def test_disabled_endpoint(self):
         """Test that a disabled endpoint is handled."""
@@ -380,8 +512,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         # Add a disabled endpoint to the default project.
 
@@ -399,8 +530,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': disabled_endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': disabled_endpoint_id})
 
         # Authenticate to get token with catalog
         auth_data = self.build_authentication_request(
@@ -416,7 +546,9 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
     def test_multiple_endpoint_project_associations(self):
 
         def _create_an_endpoint():
-            endpoint_ref = self.new_endpoint_ref(service_id=self.service_id)
+            endpoint_ref = unit.new_endpoint_ref(service_id=self.service_id,
+                                                 interface='public',
+                                                 region_id=self.region_id)
             r = self.post('/endpoints', body={'endpoint': endpoint_ref})
             return r.result['endpoint']['id']
 
@@ -429,13 +561,11 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': endpoint_id1},
-                 expected_status=204)
+                     'endpoint_id': endpoint_id1})
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': endpoint_id2},
-                 expected_status=204)
+                     'endpoint_id': endpoint_id2})
 
         # there should be only two endpoints in token catalog
         auth_data = self.build_authentication_request(
@@ -454,8 +584,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
         self.put('/OS-EP-FILTER/projects/%(project_id)s'
                  '/endpoints/%(endpoint_id)s' % {
                      'project_id': self.project['id'],
-                     'endpoint_id': self.endpoint_id},
-                 expected_status=204)
+                     'endpoint_id': self.endpoint_id})
 
         auth_data = self.build_authentication_request(
             user_id=self.user['id'],
@@ -474,7 +603,7 @@ class EndpointFilterTokenRequestTestCase(TestExtensionCase):
                          auth_catalog.result['catalog'])
 
 
-class JsonHomeTests(TestExtensionCase, test_v3.JsonHomeTestMixin):
+class JsonHomeTests(EndpointFilterTestCase, test_v3.JsonHomeTestMixin):
     JSON_HOME_DATA = {
         'http://docs.openstack.org/api/openstack-identity/3/ext/OS-EP-FILTER/'
         '1.0/rel/endpoint_projects': {
@@ -545,7 +674,7 @@ class JsonHomeTests(TestExtensionCase, test_v3.JsonHomeTestMixin):
     }
 
 
-class EndpointGroupCRUDTestCase(TestExtensionCase):
+class EndpointGroupCRUDTestCase(EndpointFilterTestCase):
 
     DEFAULT_ENDPOINT_GROUP_BODY = {
         'endpoint_group': {
@@ -638,7 +767,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
             self.DEFAULT_ENDPOINT_GROUP_URL, self.DEFAULT_ENDPOINT_GROUP_BODY)
         url = '/OS-EP-FILTER/endpoint_groups/%(endpoint_group_id)s' % {
             'endpoint_group_id': endpoint_group_id}
-        self.head(url, expected_status=200)
+        self.head(url, expected_status=http_client.OK)
 
     def test_check_invalid_endpoint_group(self):
         """HEAD /OS-EP-FILTER/endpoint_groups/{endpoint_group_id}
@@ -832,7 +961,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
                                                         self.project_id)
         url = self._get_project_endpoint_group_url(
             endpoint_group_id, self.project_id)
-        self.head(url, expected_status=200)
+        self.head(url, expected_status=http_client.OK)
 
     def test_check_endpoint_group_to_project_with_invalid_project_id(self):
         """Test HEAD with an invalid endpoint group and project association."""
@@ -891,7 +1020,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
 
         """
         # create a service
-        service_ref = self.new_service_ref()
+        service_ref = unit.new_service_ref()
         response = self.post(
             '/services',
             body={'service': service_ref})
@@ -899,10 +1028,10 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
         service_id = response.result['service']['id']
 
         # create an endpoint
-        endpoint_ref = self.new_endpoint_ref(service_id=service_id)
-        response = self.post(
-            '/endpoints',
-            body={'endpoint': endpoint_ref})
+        endpoint_ref = unit.new_endpoint_ref(service_id=service_id,
+                                             interface='public',
+                                             region_id=self.region_id)
+        response = self.post('/endpoints', body={'endpoint': endpoint_ref})
         endpoint_id = response.result['endpoint']['id']
 
         # create an endpoint group
@@ -929,7 +1058,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
 
         """
         # create a temporary service
-        service_ref = self.new_service_ref()
+        service_ref = unit.new_service_ref()
         response = self.post('/services', body={'service': service_ref})
         service_id2 = response.result['service']['id']
 
@@ -957,7 +1086,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
             'project_id': self.default_domain_project_id}
         r = self.get(endpoints_url)
         endpoints = self.assertValidEndpointListResponse(r)
-        self.assertEqual(len(endpoints), 2)
+        self.assertEqual(2, len(endpoints))
 
         # Now remove project endpoint group association
         url = self._get_project_endpoint_group_url(
@@ -971,7 +1100,7 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
 
         r = self.get(endpoints_url)
         endpoints = self.assertValidEndpointListResponse(r)
-        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(1, len(endpoints))
 
     def test_endpoint_group_project_cleanup_with_project(self):
         # create endpoint group
@@ -1072,13 +1201,15 @@ class EndpointGroupCRUDTestCase(TestExtensionCase):
         """Creates an endpoint associated with service and project."""
         if not service_id:
             # create a new service
-            service_ref = self.new_service_ref()
+            service_ref = unit.new_service_ref()
             response = self.post(
                 '/services', body={'service': service_ref})
             service_id = response.result['service']['id']
 
         # create endpoint
-        endpoint_ref = self.new_endpoint_ref(service_id=service_id)
+        endpoint_ref = unit.new_endpoint_ref(service_id=service_id,
+                                             interface='public',
+                                             region_id=self.region_id)
         response = self.post('/endpoints', body={'endpoint': endpoint_ref})
         endpoint = response.result['endpoint']
 

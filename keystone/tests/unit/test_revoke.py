@@ -20,8 +20,8 @@ from six.moves import range
 from testtools import matchers
 
 from keystone.common import utils
-from keystone.contrib.revoke import model
 from keystone import exception
+from keystone.revoke import model
 from keystone.tests import unit
 from keystone.tests.unit import test_backend_sql
 from keystone.token import provider
@@ -67,7 +67,6 @@ def _matches(event, token_values):
     :returns if the token matches the revocation event, indicating the
     token has been revoked
     """
-
     # The token has three attributes that can match the user_id
     if event.user_id is not None:
         for attribute_name in ['user_id', 'trustor_id', 'trustee_id']:
@@ -126,9 +125,10 @@ class RevokeTests(object):
         self.revoke_api.revoke_by_user(user_id=1)
         self.revoke_api.revoke_by_user(user_id=2)
         past = timeutils.utcnow() - datetime.timedelta(seconds=1000)
-        self.assertEqual(2, len(self.revoke_api.list_events(past)))
+        self.assertEqual(2, len(self.revoke_api.list_events(last_fetch=past)))
         future = timeutils.utcnow() + datetime.timedelta(seconds=1000)
-        self.assertEqual(0, len(self.revoke_api.list_events(future)))
+        self.assertEqual(0,
+                         len(self.revoke_api.list_events(last_fetch=future)))
 
     def test_past_expiry_are_removed(self):
         user_id = 1

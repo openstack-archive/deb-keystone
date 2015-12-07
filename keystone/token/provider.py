@@ -38,7 +38,7 @@ from keystone.token import utils
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
-MEMOIZE = cache.get_memoization_decorator(section='token')
+MEMOIZE = cache.get_memoization_decorator(group='token')
 
 # NOTE(morganfainberg): This is for compatibility in case someone was relying
 # on the old location of the UnsupportedTokenVersionException for their code.
@@ -232,10 +232,8 @@ class Manager(manager.Manager):
     def validate_v3_token(self, token_id):
         unique_id = utils.generate_unique_id(token_id)
         # NOTE(lbragstad): Only go to persistent storage if we have a token to
-        # fetch from the backend. If the Fernet token provider is being used
-        # this step isn't necessary. The Fernet token reference is persisted in
-        # the token_id, so in this case set the token_ref as the identifier of
-        # the token.
+        # fetch from the backend (the driver persists the token). Otherwise
+        # the information about the token must be in the token id.
         if not self._needs_persistence:
             token_ref = token_id
         else:
@@ -268,7 +266,6 @@ class Manager(manager.Manager):
 
     def _is_valid_token(self, token):
         """Verify the token is valid format and has not expired."""
-
         current_time = timeutils.normalize_time(timeutils.utcnow())
 
         try:
@@ -490,7 +487,8 @@ class Provider(object):
         :param token_data: token_data
         :type token_data: dict
         :returns: token version string
-        :raises: keystone.token.provider.UnsupportedTokenVersionException
+        :raises keystone.exception.UnsupportedTokenVersionException:
+            If the token version is not expected.
         """
         raise exception.NotImplemented()  # pragma: no cover
 
@@ -548,7 +546,7 @@ class Provider(object):
         :param token_ref: the token reference
         :type token_ref: dict
         :returns: token data
-        :raises: keystone.exception.TokenNotFound
+        :raises keystone.exception.TokenNotFound: If the token doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -560,7 +558,7 @@ class Provider(object):
         :param token_ref: the token reference
         :type token_ref: dict
         :returns: token data
-        :raises: keystone.exception.TokenNotFound
+        :raises keystone.exception.TokenNotFound: If the token doesn't exist.
         """
         raise exception.NotImplemented()  # pragma: no cover
 

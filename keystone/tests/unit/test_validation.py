@@ -21,10 +21,9 @@ from keystone.catalog import schema as catalog_schema
 from keystone.common import validation
 from keystone.common.validation import parameter_types
 from keystone.common.validation import validators
-from keystone.contrib.endpoint_filter import schema as endpoint_filter_schema
-from keystone.contrib.federation import schema as federation_schema
 from keystone.credential import schema as credential_schema
 from keystone import exception
+from keystone.federation import schema as federation_schema
 from keystone.identity import schema as identity_schema
 from keystone.policy import schema as policy_schema
 from keystone.resource import schema as resource_schema
@@ -90,7 +89,7 @@ _VALID_URLS = ['https://example.com', 'http://EXAMPLE.com/v3',
 
 _INVALID_URLS = [False, 'this is not a URL', 1234, 'www.example.com',
                  'localhost', 'http//something.com',
-                 'https//something.com']
+                 'https//something.com', ' http://example.com']
 
 _VALID_FILTERS = [{'interface': 'admin'},
                   {'region': 'US-WEST',
@@ -499,11 +498,22 @@ class ProjectValidationTestCase(unit.BaseTestCase):
                           self.update_project_validator.validate,
                           request_to_validate)
 
-    def test_validate_project_update_request_with_null_domain_id_fails(self):
-        request_to_validate = {'domain_id': None}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.update_project_validator.validate,
-                          request_to_validate)
+    def test_validate_project_create_request_with_valid_domain_id(self):
+        """Test that we validate `domain_id` in create project requests."""
+        # domain_id is nullable
+        for domain_id in [None, uuid.uuid4().hex]:
+            request_to_validate = {'name': self.project_name,
+                                   'domain_id': domain_id}
+            self.create_project_validator.validate(request_to_validate)
+
+    def test_validate_project_request_with_invalid_domain_id_fails(self):
+        """Exception is raised when `domain_id` as a non-id value."""
+        for domain_id in [False, 'fake_project']:
+            request_to_validate = {'name': self.project_name,
+                                   'domain_id': domain_id}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_project_validator.validate,
+                              request_to_validate)
 
 
 class DomainValidationTestCase(unit.BaseTestCase):
@@ -1298,8 +1308,8 @@ class EndpointGroupValidationTestCase(unit.BaseTestCase):
     def setUp(self):
         super(EndpointGroupValidationTestCase, self).setUp()
 
-        create = endpoint_filter_schema.endpoint_group_create
-        update = endpoint_filter_schema.endpoint_group_update
+        create = catalog_schema.endpoint_group_create
+        update = catalog_schema.endpoint_group_update
         self.create_endpoint_grp_validator = validators.SchemaValidator(create)
         self.update_endpoint_grp_validator = validators.SchemaValidator(update)
 
@@ -1321,8 +1331,7 @@ class EndpointGroupValidationTestCase(unit.BaseTestCase):
         self.create_endpoint_grp_validator.validate(request_to_validate)
 
     def test_validate_endpoint_group_create_succeeds_with_valid_filters(self):
-        """Validate dict values as `filters` in endpoint group create requests.
-        """
+        """Validate `filters` in endpoint group create requests."""
         request_to_validate = {'description': 'endpoint group description',
                                'name': 'endpoint_group_name'}
         for valid_filters in _VALID_FILTERS:
@@ -1718,13 +1727,8 @@ class UserValidationTestCase(unit.BaseTestCase):
 
     def test_validate_user_create_with_all_valid_parameters_succeeds(self):
         """Test that validating a user create request succeeds."""
-        request_to_validate = {'name': self.user_name,
-                               'default_project_id': uuid.uuid4().hex,
-                               'domain_id': uuid.uuid4().hex,
-                               'description': uuid.uuid4().hex,
-                               'enabled': True,
-                               'email': uuid.uuid4().hex,
-                               'password': uuid.uuid4().hex}
+        request_to_validate = unit.new_user_ref(domain_id=uuid.uuid4().hex,
+                                                name=self.user_name)
         self.create_user_validator.validate(request_to_validate)
 
     def test_validate_user_create_fails_without_name(self):

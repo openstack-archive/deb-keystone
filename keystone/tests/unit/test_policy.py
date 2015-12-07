@@ -16,10 +16,8 @@
 import json
 import os
 
-import mock
 from oslo_policy import policy as common_policy
 import six
-from six.moves.urllib import request as urlrequest
 from testtools import matchers
 
 from keystone import exception
@@ -118,28 +116,6 @@ class PolicyTestCase(BasePolicyTestCase):
         action = "example:allowed"
         rules.enforce(self.credentials, action, self.target)
 
-    def test_enforce_http_true(self):
-
-        def fakeurlopen(url, post_data):
-            return six.StringIO("True")
-
-        action = "example:get_http"
-        target = {}
-        with mock.patch.object(urlrequest, 'urlopen', fakeurlopen):
-            result = rules.enforce(self.credentials, action, target)
-        self.assertTrue(result)
-
-    def test_enforce_http_false(self):
-
-        def fakeurlopen(url, post_data):
-            return six.StringIO("False")
-
-        action = "example:get_http"
-        target = {}
-        with mock.patch.object(urlrequest, 'urlopen', fakeurlopen):
-            self.assertRaises(exception.ForbiddenAction, rules.enforce,
-                              self.credentials, action, target)
-
     def test_templatized_enforcement(self):
         target_mine = {'project_id': 'fake'}
         target_not_mine = {'project_id': 'another'}
@@ -161,7 +137,7 @@ class PolicyTestCase(BasePolicyTestCase):
     def test_ignore_case_role_check(self):
         lowercase_action = "example:lowercase_admin"
         uppercase_action = "example:uppercase_admin"
-        # NOTE(dprince) we mix case in the Admin role here to ensure
+        # NOTE(dprince): We mix case in the Admin role here to ensure
         # case is ignored
         admin_credentials = {'roles': ['AdMiN']}
         rules.enforce(admin_credentials, lowercase_action, self.target)
@@ -184,7 +160,7 @@ class DefaultPolicyTestCase(BasePolicyTestCase):
         # its enforce() method even though rules has been initialized via
         # set_rules(). To make it easier to do our tests, we're going to
         # monkeypatch load_roles() so it does nothing. This seem like a bug in
-        # Oslo policy as we shoudn't have to reload the rules if they have
+        # Oslo policy as we shouldn't have to reload the rules if they have
         # already been set using set_rules().
         self._old_load_rules = rules._ENFORCER.load_rules
         self.addCleanup(setattr, rules._ENFORCER, 'load_rules',

@@ -16,7 +16,6 @@ import logging
 
 from oslo_config import cfg
 import oslo_i18n
-import oslo_middleware.cors as cors
 
 
 # NOTE(dstanek): i18n.enable_lazy() must be called before
@@ -26,28 +25,16 @@ import oslo_middleware.cors as cors
 oslo_i18n.enable_lazy()
 
 
+from keystone.common import config
 from keystone.common import environment
-from keystone import config
-import keystone.middleware.core as middleware_core
 from keystone.server import common
-from keystone import service as keystone_service
+from keystone.version import service as keystone_service
 
 
 CONF = cfg.CONF
 
-KEYSTONE_HEADERS = [
-    middleware_core.AUTH_TOKEN_HEADER,
-    middleware_core.SUBJECT_TOKEN_HEADER,
-    'X-Project-Id',
-    'X-Project-Name',
-    'X-Project-Domain-Id',
-    'X-Project-Domain-Name',
-    'X-Domain-Id',
-    'X-Domain-Name'
-]
 
-
-def initialize_application(name):
+def initialize_application(name, post_log_configured_function=lambda: None):
     common.configure()
 
     # Log the options used when starting if we're in debug mode...
@@ -56,21 +43,14 @@ def initialize_application(name):
 
     environment.use_stdlib()
 
+    post_log_configured_function()
+
     def loadapp():
         return keystone_service.loadapp(
             'config:%s' % config.find_paste_config(), name)
 
     _unused, application = common.setup_backends(
         startup_application_fn=loadapp)
-
-    # Create a CORS wrapper, and attach keystone-specific defaults that must be
-    # included in all CORS responses
-    application = cors.CORS(application, CONF)
-    application.set_latent(
-        allow_headers=KEYSTONE_HEADERS,
-        allow_methods=['GET', 'PUT', 'POST', 'DELETE', 'PATCH'],
-        expose_headers=KEYSTONE_HEADERS
-    )
     return application
 
 

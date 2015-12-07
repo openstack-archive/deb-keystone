@@ -108,13 +108,15 @@ class Role(controller.V2Controller):
             role_id = uuid.uuid4().hex
 
         role['id'] = role_id
-        role_ref = self.role_api.create_role(role_id, role)
+        initiator = notifications._get_request_audit_info(context)
+        role_ref = self.role_api.create_role(role_id, role, initiator)
         return {'role': role_ref}
 
     @controller.v2_deprecated
     def delete_role(self, context, role_id):
         self.assert_admin(context)
-        self.role_api.delete_role(role_id)
+        initiator = notifications._get_request_audit_info(context)
+        self.role_api.delete_role(role_id, initiator)
 
     @controller.v2_deprecated
     def get_roles(self, context):
@@ -136,6 +138,11 @@ class RoleAssignmentV2(controller.V2Controller):
 
         """
         self.assert_admin(context)
+        # NOTE(davechen): Router without project id is defined,
+        # but we don't plan on implementing this.
+        if tenant_id is None:
+            raise exception.NotImplemented(
+                message=_('User roles not supported: tenant_id required'))
         roles = self.assignment_api.get_roles_for_user_and_project(
             user_id, tenant_id)
         return {'roles': [self.role_api.get_role(x)
@@ -503,7 +510,6 @@ class RoleAssignmentV3(controller.V3Controller):
         }
 
         """
-
         formatted_entity = {'links': {}}
         inherited_assignment = entity.get('inherited_to_projects')
 
@@ -643,15 +649,3 @@ class RoleAssignmentV3(controller.V3Controller):
         formatted_refs = [self._format_entity(context, ref) for ref in refs]
 
         return self.wrap_collection(context, formatted_refs)
-
-    @controller.protected()
-    def get_role_assignment(self, context):
-        raise exception.NotImplemented()
-
-    @controller.protected()
-    def update_role_assignment(self, context):
-        raise exception.NotImplemented()
-
-    @controller.protected()
-    def delete_role_assignment(self, context):
-        raise exception.NotImplemented()

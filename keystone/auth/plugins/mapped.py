@@ -19,9 +19,9 @@ from six.moves.urllib import parse
 from keystone import auth
 from keystone.auth import plugins as auth_plugins
 from keystone.common import dependency
-from keystone.contrib.federation import constants as federation_constants
-from keystone.contrib.federation import utils
 from keystone import exception
+from keystone.federation import constants as federation_constants
+from keystone.federation import utils
 from keystone.i18n import _
 from keystone.models import token_model
 from keystone import notifications
@@ -56,7 +56,6 @@ class Mapped(auth.AuthMethodHandler):
         ``OS-FEDERATION:protocol``
 
         """
-
         if 'id' in auth_payload:
             token_ref = self._get_token_ref(auth_payload)
             handle_scoped_token(context, auth_payload, auth_context, token_ref,
@@ -225,7 +224,8 @@ def setup_username(context, mapped_properties):
     :param mapped_properties: Properties issued by a RuleProcessor.
     :type: dictionary
 
-    :raises: exception.Unauthorized
+    :raises keystone.exception.Unauthorized: If neither `user_name` nor
+        `user_id` is set.
     :returns: dictionary with user identification
     :rtype: dict
 

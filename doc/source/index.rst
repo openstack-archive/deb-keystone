@@ -47,7 +47,7 @@ Getting Started
 .. toctree::
     :maxdepth: 1
 
-    setup
+    devref/development.environment
     installing
     configuration
     policy_mapping
@@ -85,6 +85,7 @@ Developers Documentation
    external-auth
    event_notifications
    extension_development
+   services
 
 Code Documentation
 ==================

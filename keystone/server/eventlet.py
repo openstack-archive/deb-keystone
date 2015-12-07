@@ -32,12 +32,12 @@ import pbr.version
 oslo_i18n.enable_lazy()
 
 
+from keystone.common import config
 from keystone.common import environment
 from keystone.common import utils
-from keystone import config
 from keystone.i18n import _
 from keystone.server import common
-from keystone import service as keystone_service
+from keystone.version import service as keystone_service
 
 
 CONF = cfg.CONF

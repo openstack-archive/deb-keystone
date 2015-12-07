@@ -21,10 +21,10 @@ Developing with Keystone
 Setup
 -----
 
-Get your development environment set up according to :doc:`setup`. The
-instructions from here will assume that you have installed Keystone into a
-virtualenv. If you chose not to, simply exclude "tools/with_venv.sh" from the
-example commands below.
+Get your development environment set up according to
+:doc:`devref/development.environment`. The instructions from here will assume
+that you have installed Keystone into a virtualenv. If you chose not to, simply
+exclude "tools/with_venv.sh" from the example commands below.
 
 
 Configuring Keystone
@@ -100,7 +100,7 @@ the script, the version is the number before the underline.
 For example, if the script is named ``001_add_X_table.py`` then the
 version of the SQL migration is ``1``.
 
-.. _SQLAlchemy-migrate: http://code.google.com/p/sqlalchemy-migrate/
+.. _SQLAlchemy-migrate: https://git.openstack.org/cgit/openstack/sqlalchemy-migrate
 
 Extensions should be created as directories under ``keystone/contrib``. An
 extension that requires SQL migrations should not change the common repository,
@@ -247,7 +247,8 @@ Running Tests
 =============
 
 Before running tests, you should have ``tox`` installed and available in your
-environment (in addition to the other external dependencies in :doc:`setup`):
+environment (in addition to the other external dependencies in
+:doc:`devref/development.environment`):
 
 .. code-block:: bash
 
@@ -328,7 +329,7 @@ Not all of the tests in the keystone/tests/unit directory are strictly unit
 tests. Keystone intentionally includes tests that run the service locally and
 drives the entire configuration to achieve basic functional testing.
 
-For the functional tests, an in-memory key-value store or in-memory sqlite
+For the functional tests, an in-memory key-value store or in-memory SQLite
 database is used to keep the tests fast.
 
 Within the tests directory, the general structure of the backend tests is a
@@ -819,3 +820,44 @@ The documentation is generated with Sphinx using the tox command.  To create HTM
     $ tox -e docs
 
 The results are in the doc/build/html and doc/build/man directories respectively.
+
+
+Release Notes
+-------------
+
+The release notes for a patch should be included in the patch. If not, the
+release notes should be in a follow-on review.
+
+If the following applies to the patch, a release note is required:
+
+* The deployer needs to take an action when upgrading
+* The backend driver interface changes
+* A new feature is implemented
+* Function was removed (hopefully it was deprecated)
+* Current behavior is changed
+* A new config option is added that the deployer should consider changing from
+  the default
+* A security bug is fixed
+
+A release note is suggested if a long-standing or important bug is fixed.
+Otherwise, a release note is not required.
+
+Keystone uses `reno <http://docs.openstack.org/developer/reno/usage.html>`_ to
+generate release notes. Please read the docs for details. In summary, use
+
+.. code-block:: bash
+
+  $ tox -e venv -- reno new <bug-,bp-,whatever>
+
+Then edit the sample file that was created and push it with your change.
+
+To see the results:
+
+.. code-block:: bash
+
+  $ git commit  # Commit the change because reno scans git log.
+
+  $ tox -e releasenotes
+
+Then look at the generated release notes files in releasenotes/build/html in
+your favorite browser.

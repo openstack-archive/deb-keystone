@@ -23,12 +23,11 @@ from oslo_utils import importutils
 import six
 import stevedore
 
+from keystone.common import config
 from keystone.common import controller
 from keystone.common import dependency
 from keystone.common import utils
 from keystone.common import wsgi
-from keystone import config
-from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
 from keystone.i18n import _, _LI, _LW
 from keystone.resource import controllers as resource_controllers
@@ -423,7 +422,8 @@ class Auth(controller.V3Controller):
             return
 
         # Skip scoping when unscoped federated token is being issued
-        if federation_constants.IDENTITY_PROVIDER in auth_context:
+        # FIXME(stevemar): Use constants from keystone.federation.constants
+        if 'OS-FEDERATION:identity_provider' in auth_context:
             return
 
         # Do not scope if request is for explicitly unscoped token
@@ -479,7 +479,6 @@ class Auth(controller.V3Controller):
 
     def authenticate(self, context, auth_info, auth_context):
         """Authenticate user."""
-
         # The 'external' method allows any 'REMOTE_USER' based authentication
         # In some cases the server can set REMOTE_USER as '' instead of
         # dropping it, so this must be filtered out
@@ -580,7 +579,7 @@ class Auth(controller.V3Controller):
         if user_id:
             try:
                 user_refs = self.assignment_api.list_projects_for_user(user_id)
-            except exception.UserNotFound:
+            except exception.UserNotFound:  # nosec
                 # federated users have an id but they don't link to anything
                 pass
 
@@ -601,7 +600,7 @@ class Auth(controller.V3Controller):
         if user_id:
             try:
                 user_refs = self.assignment_api.list_domains_for_user(user_id)
-            except exception.UserNotFound:
+            except exception.UserNotFound:  # nosec
                 # federated users have an id but they don't link to anything
                 pass
 

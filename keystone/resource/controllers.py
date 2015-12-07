@@ -40,11 +40,11 @@ class Tenant(controller.V2Controller):
     @controller.v2_deprecated
     def get_all_projects(self, context, **kw):
         """Gets a list of all tenants for an admin user."""
-        if 'name' in context['query_string']:
-            return self.get_project_by_name(
-                context, context['query_string'].get('name'))
-
         self.assert_admin(context)
+
+        if 'name' in context['query_string']:
+            return self._get_project_by_name(context['query_string']['name'])
+
         tenant_refs = self.resource_api.list_projects_in_domain(
             CONF.identity.default_domain_id)
         tenant_refs = [self.v3_to_v2_project(tenant_ref)
@@ -71,12 +71,11 @@ class Tenant(controller.V2Controller):
         self._assert_not_is_domain_project(tenant_id, ref)
         return {'tenant': self.v3_to_v2_project(ref)}
 
-    @controller.v2_deprecated
-    def get_project_by_name(self, context, tenant_name):
-        self.assert_admin(context)
+    def _get_project_by_name(self, tenant_name):
         # Projects acting as a domain should not be visible via v2
         ref = self.resource_api.get_project_by_name(
             tenant_name, CONF.identity.default_domain_id)
+        self._assert_not_is_domain_project(ref['id'], ref)
         return {'tenant': self.v3_to_v2_project(ref)}
 
     # CRUD Extension
@@ -90,9 +89,11 @@ class Tenant(controller.V2Controller):
 
         self.assert_admin(context)
         tenant_ref['id'] = tenant_ref.get('id', uuid.uuid4().hex)
+        initiator = notifications._get_request_audit_info(context)
         tenant = self.resource_api.create_project(
             tenant_ref['id'],
-            self._normalize_domain_id(context, tenant_ref))
+            self._normalize_domain_id(context, tenant_ref),
+            initiator)
         return {'tenant': self.v3_to_v2_project(tenant)}
 
     @controller.v2_deprecated
@@ -104,15 +105,17 @@ class Tenant(controller.V2Controller):
         clean_tenant = tenant.copy()
         clean_tenant.pop('domain_id', None)
         clean_tenant.pop('is_domain', None)
+        initiator = notifications._get_request_audit_info(context)
         tenant_ref = self.resource_api.update_project(
-            tenant_id, clean_tenant)
+            tenant_id, clean_tenant, initiator)
         return {'tenant': self.v3_to_v2_project(tenant_ref)}
 
     @controller.v2_deprecated
     def delete_project(self, context, tenant_id):
         self.assert_admin(context)
         self._assert_not_is_domain_project(tenant_id)
-        self.resource_api.delete_project(tenant_id)
+        initiator = notifications._get_request_audit_info(context)
+        self.resource_api.delete_project(tenant_id, initiator)
 
 
 @dependency.requires('resource_api')
@@ -212,7 +215,9 @@ class ProjectV3(controller.V3Controller):
     @validation.validated(schema.project_create, 'project')
     def create_project(self, context, project):
         ref = self._assign_unique_id(self._normalize_dict(project))
-        ref = self._normalize_domain_id(context, ref)
+
+        if not ref.get('parent_id') and not ref.get('domain_id'):
+            ref = self._normalize_domain_id(context, ref)
 
         if ref.get('is_domain'):
             msg = _('The creation of projects acting as domains is not '

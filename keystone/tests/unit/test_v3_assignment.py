@@ -21,7 +21,6 @@ from keystone.common import controller
 from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
-from keystone.tests.unit import utils
 
 
 CONF = cfg.CONF
@@ -34,8 +33,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
     def setUp(self):
         super(AssignmentTestCase, self).setUp()
 
-        self.group = self.new_group_ref(
-            domain_id=self.domain_id)
+        self.group = unit.new_group_ref(domain_id=self.domain_id)
         self.group = self.identity_api.create_group(self.group)
         self.group_id = self.group['id']
 
@@ -52,7 +50,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_create_domain(self):
         """Call ``POST /domains``."""
-        ref = self.new_domain_ref()
+        ref = unit.new_domain_ref()
         r = self.post(
             '/domains',
             body={'domain': ref})
@@ -60,7 +58,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_create_domain_case_sensitivity(self):
         """Call `POST /domains`` twice with upper() and lower() cased name."""
-        ref = self.new_domain_ref()
+        ref = unit.new_domain_ref()
 
         # ensure the name is lowercase
         ref['name'] = ref['name'].lower()
@@ -96,7 +94,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_update_domain(self):
         """Call ``PATCH /domains/{domain_id}``."""
-        ref = self.new_domain_ref()
+        ref = unit.new_domain_ref()
         del ref['id']
         r = self.patch('/domains/%(domain_id)s' % {
             'domain_id': self.domain_id},
@@ -106,30 +104,27 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
     def test_disable_domain(self):
         """Call ``PATCH /domains/{domain_id}`` (set enabled=False)."""
         # Create a 2nd set of entities in a 2nd domain
-        self.domain2 = self.new_domain_ref()
+        self.domain2 = unit.new_domain_ref()
         self.resource_api.create_domain(self.domain2['id'], self.domain2)
 
         self.project2 = self.new_project_ref(
             domain_id=self.domain2['id'])
         self.resource_api.create_project(self.project2['id'], self.project2)
 
-        self.user2 = self.new_user_ref(
-            domain_id=self.domain2['id'],
-            project_id=self.project2['id'])
-        password = self.user2['password']
-        self.user2 = self.identity_api.create_user(self.user2)
-        self.user2['password'] = password
+        user2 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain2['id'],
+                                 project_id=self.project2['id'])
 
         self.assignment_api.add_user_to_project(self.project2['id'],
-                                                self.user2['id'])
+                                                user2['id'])
 
         # First check a user in that domain can authenticate. The v2 user
         # cannot authenticate because they exist outside the default domain.
         body = {
             'auth': {
                 'passwordCredentials': {
-                    'userId': self.user2['id'],
-                    'password': self.user2['password']
+                    'userId': user2['id'],
+                    'password': user2['password']
                 },
                 'tenantId': self.project2['id']
             }
@@ -139,10 +134,10 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
             expected_status=http_client.UNAUTHORIZED)
 
         auth_data = self.build_authentication_request(
-            user_id=self.user2['id'],
-            password=self.user2['password'],
+            user_id=user2['id'],
+            password=user2['password'],
             project_id=self.project2['id'])
-        self.v3_authenticate_token(auth_data)
+        self.v3_create_token(auth_data)
 
         # Now disable the domain
         self.domain2['enabled'] = False
@@ -156,8 +151,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         body = {
             'auth': {
                 'passwordCredentials': {
-                    'userId': self.user2['id'],
-                    'password': self.user2['password']
+                    'userId': user2['id'],
+                    'password': user2['password']
                 },
                 'tenantId': self.project2['id']
             }
@@ -168,23 +163,22 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
         # Try looking up in v3 by name and id
         auth_data = self.build_authentication_request(
-            user_id=self.user2['id'],
-            password=self.user2['password'],
+            user_id=user2['id'],
+            password=user2['password'],
             project_id=self.project2['id'])
-        self.v3_authenticate_token(auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         auth_data = self.build_authentication_request(
-            username=self.user2['name'],
+            username=user2['name'],
             user_domain_id=self.domain2['id'],
-            password=self.user2['password'],
+            password=user2['password'],
             project_id=self.project2['id'])
-        self.v3_authenticate_token(auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
     def test_delete_enabled_domain_fails(self):
         """Call ``DELETE /domains/{domain_id}`` (when domain enabled)."""
-
         # Try deleting an enabled domain, which should fail
         self.delete('/domains/%(domain_id)s' % {
             'domain_id': self.domain['id']},
@@ -210,26 +204,23 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         - Check entities in self.domain are unaffected
 
         """
-
         # Create a 2nd set of entities in a 2nd domain
-        self.domain2 = self.new_domain_ref()
+        self.domain2 = unit.new_domain_ref()
         self.resource_api.create_domain(self.domain2['id'], self.domain2)
 
         self.project2 = self.new_project_ref(
             domain_id=self.domain2['id'])
         self.resource_api.create_project(self.project2['id'], self.project2)
 
-        self.user2 = self.new_user_ref(
-            domain_id=self.domain2['id'],
-            project_id=self.project2['id'])
-        self.user2 = self.identity_api.create_user(self.user2)
+        user2 = unit.new_user_ref(domain_id=self.domain2['id'],
+                                  project_id=self.project2['id'])
+        user2 = self.identity_api.create_user(user2)
 
-        self.group2 = self.new_group_ref(
-            domain_id=self.domain2['id'])
-        self.group2 = self.identity_api.create_group(self.group2)
+        group2 = unit.new_group_ref(domain_id=self.domain2['id'])
+        group2 = self.identity_api.create_group(group2)
 
         self.credential2 = self.new_credential_ref(
-            user_id=self.user2['id'],
+            user_id=user2['id'],
             project_id=self.project2['id'])
         self.credential_api.create_credential(
             self.credential2['id'],
@@ -253,26 +244,26 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                           self.project2['id'])
         self.assertRaises(exception.GroupNotFound,
                           self.identity_api.get_group,
-                          self.group2['id'])
+                          group2['id'])
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user,
-                          self.user2['id'])
+                          user2['id'])
         self.assertRaises(exception.CredentialNotFound,
                           self.credential_api.get_credential,
                           self.credential2['id'])
 
         # ...and that all self.domain entities are still here
         r = self.resource_api.get_domain(self.domain['id'])
-        self.assertDictEqual(r, self.domain)
+        self.assertDictEqual(self.domain, r)
         r = self.resource_api.get_project(self.project['id'])
-        self.assertDictEqual(r, self.project)
+        self.assertDictEqual(self.project, r)
         r = self.identity_api.get_group(self.group['id'])
-        self.assertDictEqual(r, self.group)
+        self.assertDictEqual(self.group, r)
         r = self.identity_api.get_user(self.user['id'])
         self.user.pop('password')
-        self.assertDictEqual(r, self.user)
+        self.assertDictEqual(self.user, r)
         r = self.credential_api.get_credential(self.credential['id'])
-        self.assertDictEqual(r, self.credential)
+        self.assertDictEqual(self.credential, r)
 
     def test_delete_default_domain_fails(self):
         # Attempting to delete the default domain results in 403 Forbidden.
@@ -291,7 +282,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # results in a 403 Forbidden.
 
         # Create a new domain that's not the default
-        new_domain = self.new_domain_ref()
+        new_domain = unit.new_domain_ref()
         new_domain_id = new_domain['id']
         self.resource_api.create_domain(new_domain_id, new_domain)
 
@@ -314,7 +305,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # works.
 
         # Create a new domain that's not the default
-        new_domain = self.new_domain_ref()
+        new_domain = unit.new_domain_ref()
         new_domain_id = new_domain['id']
         self.resource_api.create_domain(new_domain_id, new_domain)
 
@@ -341,19 +332,16 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         becomes invalid once that domain is disabled.
 
         """
-
-        self.domain = self.new_domain_ref()
+        self.domain = unit.new_domain_ref()
         self.resource_api.create_domain(self.domain['id'], self.domain)
 
-        self.user2 = self.new_user_ref(domain_id=self.domain['id'])
-        password = self.user2['password']
-        self.user2 = self.identity_api.create_user(self.user2)
-        self.user2['password'] = password
+        user2 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
 
         # build a request body
         auth_body = self.build_authentication_request(
-            user_id=self.user2['id'],
-            password=self.user2['password'])
+            user_id=user2['id'],
+            password=user2['password'])
 
         # sends a request for the user's token
         token_resp = self.post('/auth/tokens', body=auth_body)
@@ -363,14 +351,13 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # validates the returned token and it should be valid.
         self.head('/auth/tokens',
                   headers={'x-subject-token': subject_token},
-                  expected_status=200)
+                  expected_status=http_client.OK)
 
         # now disable the domain
         self.domain['enabled'] = False
         url = "/domains/%(domain_id)s" % {'domain_id': self.domain['id']}
         self.patch(url,
-                   body={'domain': {'enabled': False}},
-                   expected_status=200)
+                   body={'domain': {'enabled': False}})
 
         # validates the same token again and it should be 'not found'
         # as the domain has already been disabled.
@@ -380,7 +367,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_delete_domain_hierarchy(self):
         """Call ``DELETE /domains/{domain_id}``."""
-        domain = self.new_domain_ref()
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
 
         root_project = self.new_project_ref(
@@ -424,7 +411,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         def create_domains():
             for variation in ('Federated', 'FEDERATED',
                               'federated', 'fEderated'):
-                domain = self.new_domain_ref()
+                domain = unit.new_domain_ref()
                 domain['id'] = variation
                 yield domain
 
@@ -458,12 +445,10 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         This includes operations like create, update, delete.
 
         """
-
         non_default_name = 'beta_federated_domain'
         self.config_fixture.config(group='federation',
                                    federated_domain_name=non_default_name)
-        domain = self.new_domain_ref()
-        domain['name'] = non_default_name
+        domain = unit.new_domain_ref(name=non_default_name)
         self.assertRaises(AssertionError,
                           self.resource_api.create_domain,
                           domain['id'], domain)
@@ -512,12 +497,39 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         ref = self.new_project_ref(domain_id=self.domain_id, is_domain=True)
         self.post('/projects',
                   body={'project': ref},
-                  expected_status=501)
+                  expected_status=http_client.NOT_IMPLEMENTED)
 
-    @utils.wip('waiting for projects acting as domains implementation')
+    def test_create_project_with_parent_id_none_and_domain_id_none(self):
+        """Call ``POST /projects``."""
+        # Grant a domain role for the user
+        collection_url = (
+            '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
+                'domain_id': self.domain_id,
+                'user_id': self.user['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+        self.put(member_url)
+
+        # Create an authentication request for a domain scoped token
+        auth = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            domain_id=self.domain_id)
+
+        # Without parent_id and domain_id passed as None, the domain_id should
+        # be normalized to the domain on the token, when using a domain
+        # scoped token.
+        ref = self.new_project_ref()
+        r = self.post(
+            '/projects',
+            auth=auth,
+            body={'project': ref})
+        ref['domain_id'] = self.domain['id']
+        self.assertValidProjectResponse(r, ref)
+
     def test_create_project_without_parent_id_and_without_domain_id(self):
         """Call ``POST /projects``."""
-
         # Grant a domain role for the user
         collection_url = (
             '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
@@ -538,6 +550,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # normalized to the domain on the token, when using a domain
         # scoped token.
         ref = self.new_project_ref()
+        ref.pop('domain_id')
+        ref.pop('parent_id')
         r = self.post(
             '/projects',
             auth=auth,
@@ -545,7 +559,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         ref['domain_id'] = self.domain['id']
         self.assertValidProjectResponse(r, ref)
 
-    @utils.wip('waiting for projects acting as domains implementation')
     def test_create_project_with_parent_id_and_no_domain_id(self):
         """Call ``POST /projects``."""
         # With only the parent_id, the domain_id should be
@@ -717,7 +730,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           'project' and 'parent'.
 
         """
-
         # Create the project hierarchy
         parent, project, subproject = self._create_projects_hierarchy(2)
 
@@ -748,7 +760,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           'parent'.
 
         """
-
         # Create the project hierarchy
         parent, project, subproject = self._create_projects_hierarchy(2)
 
@@ -768,7 +779,11 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertEqual(1, len(r.result['project']['parents']))
 
     def test_get_project_with_parents_as_list_and_parents_as_ids(self):
-        """Call ``GET /projects/{project_id}?parents_as_list&parents_as_ids``.
+        """Attempt to list a project's parents as both a list and as IDs.
+
+        This uses ``GET /projects/{project_id}?parents_as_list&parents_as_ids``
+        which should fail with a Bad Request due to the conflicting query
+        strings.
 
         """
         projects = self._create_projects_hierarchy(hierarchy_size=2)
@@ -880,7 +895,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           and 'subproject'.
 
         """
-
         # Create the project hierarchy
         parent, project, subproject = self._create_projects_hierarchy(2)
 
@@ -910,7 +924,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         - Check that calling subtree_as_list on 'parent' returns 'subproject'.
 
         """
-
         # Create the project hierarchy
         parent, project, subproject = self._create_projects_hierarchy(2)
 
@@ -930,7 +943,11 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertEqual(1, len(r.result['project']['subtree']))
 
     def test_get_project_with_subtree_as_list_and_subtree_as_ids(self):
-        """Call ``GET /projects/{project_id}?subtree_as_list&subtree_as_ids``.
+        """Attempt to get a project subtree as both a list and as IDs.
+
+        This uses ``GET /projects/{project_id}?subtree_as_list&subtree_as_ids``
+        which should fail with a bad request due to the conflicting query
+        strings.
 
         """
         projects = self._create_projects_hierarchy(hierarchy_size=2)
@@ -1026,7 +1043,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         """
         # First check the credential for this project is present
         r = self.credential_api.get_credential(self.credential['id'])
-        self.assertDictEqual(r, self.credential)
+        self.assertDictEqual(self.credential, r)
         # Create a second credential with a different project
         self.project2 = self.new_project_ref(
             domain_id=self.domain['id'])
@@ -1050,7 +1067,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                           credential_id=self.credential['id'])
         # But the credential for project2 is unaffected
         r = self.credential_api.get_credential(self.credential2['id'])
-        self.assertDictEqual(r, self.credential2)
+        self.assertDictEqual(self.credential2, r)
 
     def test_delete_not_leaf_project(self):
         """Call ``DELETE /projects/{project_id}``."""
@@ -1064,7 +1081,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_create_role(self):
         """Call ``POST /roles``."""
-        ref = self.new_role_ref()
+        ref = unit.new_role_ref()
         r = self.post(
             '/roles',
             body={'role': ref})
@@ -1090,7 +1107,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
 
     def test_update_role(self):
         """Call ``PATCH /roles/{role_id}``."""
-        ref = self.new_role_ref()
+        ref = unit.new_role_ref()
         del ref['id']
         r = self.patch('/roles/%(role_id)s' % {
             'role_id': self.role_id},
@@ -1105,8 +1122,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
     def test_create_member_role(self):
         """Call ``POST /roles``."""
         # specify only the name on creation
-        ref = self.new_role_ref()
-        ref['name'] = CONF.member_role_name
+        ref = unit.new_role_ref(name=CONF.member_role_name)
         r = self.post(
             '/roles',
             body={'role': ref})
@@ -1140,13 +1156,12 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # self.assertIn(collection_url, r.result['links']['self'])
 
     def test_crud_user_project_role_grants_no_user(self):
-        """Grant role on a project to a user that doesn't exist, 404 result.
+        """Grant role on a project to a user that doesn't exist.
 
         When grant a role on a project to a user that doesn't exist, the server
         returns Not Found for the user.
 
         """
-
         user_id = uuid.uuid4().hex
 
         collection_url = (
@@ -1179,13 +1194,12 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                                          resource_url=collection_url)
 
     def test_crud_user_domain_role_grants_no_user(self):
-        """Grant role on a domain to a user that doesn't exist, 404 result.
+        """Grant role on a domain to a user that doesn't exist.
 
         When grant a role on a domain to a user that doesn't exist, the server
         returns 404 Not Found for the user.
 
         """
-
         user_id = uuid.uuid4().hex
 
         collection_url = (
@@ -1218,13 +1232,12 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                                          resource_url=collection_url)
 
     def test_crud_group_project_role_grants_no_group(self):
-        """Grant role on a project to a group that doesn't exist, 404 result.
+        """Grant role on a project to a group that doesn't exist.
 
         When grant a role on a project to a group that doesn't exist, the
         server returns 404 Not Found for the group.
 
         """
-
         group_id = uuid.uuid4().hex
 
         collection_url = (
@@ -1258,13 +1271,12 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                                          resource_url=collection_url)
 
     def test_crud_group_domain_role_grants_no_group(self):
-        """Grant role on a domain to a group that doesn't exist, 404 result.
+        """Grant role on a domain to a group that doesn't exist.
 
         When grant a role on a domain to a group that doesn't exist, the server
         returns 404 Not Found for the group.
 
         """
-
         group_id = uuid.uuid4().hex
 
         collection_url = (
@@ -1280,7 +1292,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
     def _create_new_user_and_assign_role_on_project(self):
         """Create a new user and assign user a role on a project."""
         # Create a new user
-        new_user = self.new_user_ref(domain_id=self.domain_id)
+        new_user = unit.new_user_ref(domain_id=self.domain_id)
         user_ref = self.identity_api.create_user(new_user)
         # Assign the user a role on the project
         collection_url = (
@@ -1290,9 +1302,9 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         member_url = ('%(collection_url)s/%(role_id)s' % {
             'collection_url': collection_url,
             'role_id': self.role_id})
-        self.put(member_url, expected_status=204)
+        self.put(member_url)
         # Check the user has the role assigned
-        self.head(member_url, expected_status=204)
+        self.head(member_url)
         return member_url, user_ref
 
     def test_delete_user_before_removing_role_assignment_succeeds(self):
@@ -1301,7 +1313,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # Delete the user from identity backend
         self.identity_api.driver.delete_user(user['id'])
         # Clean up the role assignment
-        self.delete(member_url, expected_status=204)
+        self.delete(member_url)
         # Make sure the role is gone
         self.head(member_url, expected_status=http_client.NOT_FOUND)
 
@@ -1310,8 +1322,9 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         member_url, user = self._create_new_user_and_assign_role_on_project()
         # Delete the user from identity backend
         self.identity_api.delete_user(user['id'])
-        # We should get a 404 when looking for the user in the identity
-        # backend because we're not performing a delete operation on the role.
+        # We should get a 404 Not Found when looking for the user in the
+        # identity backend because we're not performing a delete operation on
+        # the role.
         self.head(member_url, expected_status=http_client.NOT_FOUND)
 
     def test_token_revoked_once_group_role_grant_revoked(self):
@@ -1344,7 +1357,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # validates the returned token; it should be valid.
         self.head('/auth/tokens',
                   headers={'x-subject-token': token},
-                  expected_status=200)
+                  expected_status=http_client.OK)
 
         # revokes the grant from group on project.
         self.assignment_api.delete_grant(role_id=self.role['id'],
@@ -1384,13 +1397,11 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           been removed
 
         """
-
         # Since the default fixtures already assign some roles to the
         # user it creates, we also need a new user that will not have any
         # existing assignments
-        self.user1 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        self.user1 = self.identity_api.create_user(self.user1)
+        user1 = unit.new_user_ref(domain_id=self.domain['id'])
+        user1 = self.identity_api.create_user(user1)
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
@@ -1412,7 +1423,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, gd_entity)
 
         ud_entity = self.build_role_assignment_entity(domain_id=self.domain_id,
-                                                      user_id=self.user1['id'],
+                                                      user_id=user1['id'],
                                                       role_id=self.role_id)
         self.put(ud_entity['links']['assignment'])
         r = self.get(collection_url)
@@ -1434,7 +1445,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, gp_entity)
 
         up_entity = self.build_role_assignment_entity(
-            project_id=self.project_id, user_id=self.user1['id'],
+            project_id=self.project_id, user_id=user1['id'],
             role_id=self.role_id)
         self.put(up_entity['links']['assignment'])
         r = self.get(collection_url)
@@ -1475,18 +1486,13 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           for each of the group members.
 
         """
-        self.user1 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user1['password']
-        self.user1 = self.identity_api.create_user(self.user1)
-        self.user1['password'] = password
-        self.user2 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user2['password']
-        self.user2 = self.identity_api.create_user(self.user2)
-        self.user2['password'] = password
-        self.identity_api.add_user_to_group(self.user1['id'], self.group['id'])
-        self.identity_api.add_user_to_group(self.user2['id'], self.group['id'])
+        user1 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+        user2 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+
+        self.identity_api.add_user_to_group(user1['id'], self.group['id'])
+        self.identity_api.add_user_to_group(user2['id'], self.group['id'])
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
@@ -1516,11 +1522,11 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
             resource_url=collection_url)
         ud_entity = self.build_role_assignment_entity(
             link=gd_entity['links']['assignment'], domain_id=self.domain_id,
-            user_id=self.user1['id'], role_id=self.role_id)
+            user_id=user1['id'], role_id=self.role_id)
         self.assertRoleAssignmentInListResponse(r, ud_entity)
         ud_entity = self.build_role_assignment_entity(
             link=gd_entity['links']['assignment'], domain_id=self.domain_id,
-            user_id=self.user2['id'], role_id=self.role_id)
+            user_id=user2['id'], role_id=self.role_id)
         self.assertRoleAssignmentInListResponse(r, ud_entity)
 
     def test_check_effective_values_for_role_assignments(self):
@@ -1549,18 +1555,13 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           know if we are getting effective roles or not
 
         """
-        self.user1 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user1['password']
-        self.user1 = self.identity_api.create_user(self.user1)
-        self.user1['password'] = password
-        self.user2 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user2['password']
-        self.user2 = self.identity_api.create_user(self.user2)
-        self.user2['password'] = password
-        self.identity_api.add_user_to_group(self.user1['id'], self.group['id'])
-        self.identity_api.add_user_to_group(self.user2['id'], self.group['id'])
+        user1 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+        user2 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+
+        self.identity_api.add_user_to_group(user1['id'], self.group['id'])
+        self.identity_api.add_user_to_group(user2['id'], self.group['id'])
 
         collection_url = '/role_assignments'
         r = self.get(collection_url)
@@ -1633,54 +1634,45 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
           token (all effective roles for a user on a project)
 
         """
-
         # Since the default fixtures already assign some roles to the
         # user it creates, we also need a new user that will not have any
         # existing assignments
-        self.user1 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user1['password']
-        self.user1 = self.identity_api.create_user(self.user1)
-        self.user1['password'] = password
-        self.user2 = self.new_user_ref(
-            domain_id=self.domain['id'])
-        password = self.user2['password']
-        self.user2 = self.identity_api.create_user(self.user2)
-        self.user2['password'] = password
-        self.group1 = self.new_group_ref(
-            domain_id=self.domain['id'])
-        self.group1 = self.identity_api.create_group(self.group1)
-        self.identity_api.add_user_to_group(self.user1['id'],
-                                            self.group1['id'])
-        self.identity_api.add_user_to_group(self.user2['id'],
-                                            self.group1['id'])
+        user1 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+        user2 = unit.create_user(self.identity_api,
+                                 domain_id=self.domain['id'])
+
+        group1 = unit.new_group_ref(domain_id=self.domain['id'])
+        group1 = self.identity_api.create_group(group1)
+        self.identity_api.add_user_to_group(user1['id'], group1['id'])
+        self.identity_api.add_user_to_group(user2['id'], group1['id'])
         self.project1 = self.new_project_ref(
             domain_id=self.domain['id'])
         self.resource_api.create_project(self.project1['id'], self.project1)
-        self.role1 = self.new_role_ref()
+        self.role1 = unit.new_role_ref()
         self.role_api.create_role(self.role1['id'], self.role1)
-        self.role2 = self.new_role_ref()
+        self.role2 = unit.new_role_ref()
         self.role_api.create_role(self.role2['id'], self.role2)
 
         # Now add one of each of the four types of assignment
 
         gd_entity = self.build_role_assignment_entity(
-            domain_id=self.domain_id, group_id=self.group1['id'],
+            domain_id=self.domain_id, group_id=group1['id'],
             role_id=self.role1['id'])
         self.put(gd_entity['links']['assignment'])
 
         ud_entity = self.build_role_assignment_entity(domain_id=self.domain_id,
-                                                      user_id=self.user1['id'],
+                                                      user_id=user1['id'],
                                                       role_id=self.role2['id'])
         self.put(ud_entity['links']['assignment'])
 
         gp_entity = self.build_role_assignment_entity(
-            project_id=self.project1['id'], group_id=self.group1['id'],
+            project_id=self.project1['id'], group_id=group1['id'],
             role_id=self.role1['id'])
         self.put(gp_entity['links']['assignment'])
 
         up_entity = self.build_role_assignment_entity(
-            project_id=self.project1['id'], user_id=self.user1['id'],
+            project_id=self.project1['id'], user_id=user1['id'],
             role_id=self.role2['id'])
         self.put(up_entity['links']['assignment'])
 
@@ -1704,7 +1696,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, ud_entity)
         self.assertRoleAssignmentInListResponse(r, gd_entity)
 
-        collection_url = '/role_assignments?user.id=%s' % self.user1['id']
+        collection_url = '/role_assignments?user.id=%s' % user1['id']
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=2,
@@ -1712,7 +1704,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, up_entity)
         self.assertRoleAssignmentInListResponse(r, ud_entity)
 
-        collection_url = '/role_assignments?group.id=%s' % self.group1['id']
+        collection_url = '/role_assignments?group.id=%s' % group1['id']
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=2,
@@ -1733,7 +1725,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         collection_url = (
             '/role_assignments?user.id=%(user_id)s'
             '&scope.project.id=%(project_id)s' % {
-                'user_id': self.user1['id'],
+                'user_id': user1['id'],
                 'project_id': self.project1['id']})
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
@@ -1746,7 +1738,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         # assigned as well as by virtue of group membership
 
         collection_url = ('/role_assignments?effective&user.id=%s' %
-                          self.user1['id'])
+                          user1['id'])
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=4,
@@ -1756,17 +1748,17 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, ud_entity)
         # ...and the two via group membership...
         gp1_link = self.build_role_assignment_link(
-            project_id=self.project1['id'], group_id=self.group1['id'],
+            project_id=self.project1['id'], group_id=group1['id'],
             role_id=self.role1['id'])
         gd1_link = self.build_role_assignment_link(domain_id=self.domain_id,
-                                                   group_id=self.group1['id'],
+                                                   group_id=group1['id'],
                                                    role_id=self.role1['id'])
 
         up1_entity = self.build_role_assignment_entity(
             link=gp1_link, project_id=self.project1['id'],
-            user_id=self.user1['id'], role_id=self.role1['id'])
+            user_id=user1['id'], role_id=self.role1['id'])
         ud1_entity = self.build_role_assignment_entity(
-            link=gd1_link, domain_id=self.domain_id, user_id=self.user1['id'],
+            link=gd1_link, domain_id=self.domain_id, user_id=user1['id'],
             role_id=self.role1['id'])
         self.assertRoleAssignmentInListResponse(r, up1_entity)
         self.assertRoleAssignmentInListResponse(r, ud1_entity)
@@ -1778,7 +1770,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         collection_url = (
             '/role_assignments?effective&user.id=%(user_id)s'
             '&scope.project.id=%(project_id)s' % {
-                'user_id': self.user1['id'],
+                'user_id': user1['id'],
                 'project_id': self.project1['id']})
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
@@ -1804,7 +1796,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
 
         """
         def create_project_hierarchy(parent_id, depth):
-            "Creates a random project hierarchy."
+            """Creates a random project hierarchy."""
             if depth == 0:
                 return
 
@@ -1823,7 +1815,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         super(RoleAssignmentBaseTestCase, self).load_sample_data()
 
         # Create a domain
-        self.domain = self.new_domain_ref()
+        self.domain = unit.new_domain_ref()
         self.domain_id = self.domain['id']
         self.resource_api.create_domain(self.domain_id, self.domain)
 
@@ -1839,14 +1831,14 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         # Create 3 users
         self.user_ids = []
         for i in range(3):
-            user = self.new_user_ref(domain_id=self.domain_id)
+            user = unit.new_user_ref(domain_id=self.domain_id)
             user = self.identity_api.create_user(user)
             self.user_ids.append(user['id'])
 
         # Create 3 groups
         self.group_ids = []
         for i in range(3):
-            group = self.new_group_ref(domain_id=self.domain_id)
+            group = unit.new_group_ref(domain_id=self.domain_id)
             group = self.identity_api.create_group(group)
             self.group_ids.append(group['id'])
 
@@ -1861,7 +1853,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
                                          role_id=self.role_id)
 
         # Create a role
-        self.role = self.new_role_ref()
+        self.role = unit.new_role_ref()
         self.role_id = self.role['id']
         self.role_api.create_role(self.role_id, self.role)
 
@@ -1869,7 +1861,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         self.default_user_id = self.user_ids[0]
         self.default_group_id = self.group_ids[0]
 
-    def get_role_assignments(self, expected_status=200, **filters):
+    def get_role_assignments(self, expected_status=http_client.OK, **filters):
         """Returns the result from querying role assignment API + queried URL.
 
         Calls GET /v3/role_assignments?<params> and returns its result, where
@@ -1880,7 +1872,6 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
                   queried URL.
 
         """
-
         query_url = self._get_role_assignments_query_url(**filters)
         response = self.get(query_url, expected_status=expected_status)
 
@@ -1903,11 +1894,11 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
 class RoleAssignmentFailureTestCase(RoleAssignmentBaseTestCase):
     """Class for testing invalid query params on /v3/role_assignments API.
 
-    Querying domain and project, or user and group results in a HTTP 400, since
-    a role assignment must contain only a single pair of (actor, target). In
-    addition, since filtering on role assignments applies only to the final
-    result, effective mode cannot be combined with i) group or ii) domain and
-    inherited, because it would always result in an empty list.
+    Querying domain and project, or user and group results in a HTTP 400 Bad
+    Request, since a role assignment must contain only a single pair of (actor,
+    target). In addition, since filtering on role assignments applies only to
+    the final result, effective mode cannot be combined with i) group or ii)
+    domain and inherited, because it would always result in an empty list.
 
     """
 
@@ -1959,7 +1950,6 @@ class RoleAssignmentDirectTestCase(RoleAssignmentBaseTestCase):
                         group_id, user_id and inherited_to_projects.
 
         """
-
         # Fills default assignment with provided filters
         test_assignment = self._set_default_assignment_attributes(**filters)
 
@@ -2188,10 +2178,7 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
 
     def test_get_token_from_inherited_user_domain_role_grants(self):
         # Create a new user to ensure that no grant is loaded from sample data
-        user = self.new_user_ref(domain_id=self.domain_id)
-        password = user['password']
-        user = self.identity_api.create_user(user)
-        user['password'] = password
+        user = unit.create_user(self.identity_api, domain_id=self.domain_id)
 
         # Define domain and project authentication data
         domain_auth_data = self.build_authentication_request(
@@ -2204,10 +2191,10 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             project_id=self.project_id)
 
         # Check the user cannot get a domain nor a project token
-        self.v3_authenticate_token(domain_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Grant non-inherited role for user on domain
         non_inher_ud_link = self.build_role_assignment_link(
@@ -2215,12 +2202,12 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(non_inher_ud_link)
 
         # Check the user can get only a domain token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Create inherited role
-        inherited_role = {'id': uuid.uuid4().hex, 'name': 'inherited'}
+        inherited_role = unit.new_role_ref(name='inherited')
         self.role_api.create_role(inherited_role['id'], inherited_role)
 
         # Grant inherited role for user on domain
@@ -2230,33 +2217,30 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(inher_ud_link)
 
         # Check the user can get both a domain and a project token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data)
 
         # Delete inherited grant
         self.delete(inher_ud_link)
 
         # Check the user can only get a domain token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Delete non-inherited grant
         self.delete(non_inher_ud_link)
 
         # Check the user cannot get a domain token anymore
-        self.v3_authenticate_token(domain_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
     def test_get_token_from_inherited_group_domain_role_grants(self):
         # Create a new group and put a new user in it to
         # ensure that no grant is loaded from sample data
-        user = self.new_user_ref(domain_id=self.domain_id)
-        password = user['password']
-        user = self.identity_api.create_user(user)
-        user['password'] = password
+        user = unit.create_user(self.identity_api, domain_id=self.domain_id)
 
-        group = self.new_group_ref(domain_id=self.domain['id'])
+        group = unit.new_group_ref(domain_id=self.domain['id'])
         group = self.identity_api.create_group(group)
         self.identity_api.add_user_to_group(user['id'], group['id'])
 
@@ -2271,10 +2255,10 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             project_id=self.project_id)
 
         # Check the user cannot get a domain nor a project token
-        self.v3_authenticate_token(domain_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Grant non-inherited role for user on domain
         non_inher_gd_link = self.build_role_assignment_link(
@@ -2282,12 +2266,12 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(non_inher_gd_link)
 
         # Check the user can get only a domain token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Create inherited role
-        inherited_role = {'id': uuid.uuid4().hex, 'name': 'inherited'}
+        inherited_role = unit.new_role_ref(name='inherited')
         self.role_api.create_role(inherited_role['id'], inherited_role)
 
         # Grant inherited role for user on domain
@@ -2297,27 +2281,27 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(inher_gd_link)
 
         # Check the user can get both a domain and a project token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data)
 
         # Delete inherited grant
         self.delete(inher_gd_link)
 
         # Check the user can only get a domain token
-        self.v3_authenticate_token(domain_auth_data)
-        self.v3_authenticate_token(project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data)
+        self.v3_create_token(project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Delete non-inherited grant
         self.delete(non_inher_gd_link)
 
         # Check the user cannot get a domain token anymore
-        self.v3_authenticate_token(domain_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(domain_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
     def _test_crud_inherited_and_direct_assignment_on_target(self, target_url):
         # Create a new role to avoid assignments loaded from sample data
-        role = self.new_role_ref()
+        role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
 
         # Define URLs
@@ -2360,7 +2344,7 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
     def test_crud_user_inherited_domain_role_grants(self):
         role_list = []
         for _ in range(2):
-            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            role = unit.new_role_ref()
             self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
@@ -2409,17 +2393,13 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         """
         role_list = []
         for _ in range(4):
-            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            role = unit.new_role_ref()
             self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
-        domain = self.new_domain_ref()
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user1 = self.new_user_ref(
-            domain_id=domain['id'])
-        password = user1['password']
-        user1 = self.identity_api.create_user(user1)
-        user1['password'] = password
+        user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
         project1 = self.new_project_ref(
             domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
@@ -2503,20 +2483,15 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
           shows up.
 
         """
-
         role_list = []
         for _ in range(4):
-            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            role = unit.new_role_ref()
             self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
-        domain = self.new_domain_ref()
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user1 = self.new_user_ref(
-            domain_id=domain['id'])
-        password = user1['password']
-        user1 = self.identity_api.create_user(user1)
-        user1['password'] = password
+        user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
         project1 = self.new_project_ref(
             domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
@@ -2598,24 +2573,15 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         """
         role_list = []
         for _ in range(4):
-            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            role = unit.new_role_ref()
             self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
-        domain = self.new_domain_ref()
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user1 = self.new_user_ref(
-            domain_id=domain['id'])
-        password = user1['password']
-        user1 = self.identity_api.create_user(user1)
-        user1['password'] = password
-        user2 = self.new_user_ref(
-            domain_id=domain['id'])
-        password = user2['password']
-        user2 = self.identity_api.create_user(user2)
-        user2['password'] = password
-        group1 = self.new_group_ref(
-            domain_id=domain['id'])
+        user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
+        user2 = unit.create_user(self.identity_api, domain_id=domain['id'])
+        group1 = unit.new_group_ref(domain_id=domain['id'])
         group1 = self.identity_api.create_group(group1)
         self.identity_api.add_user_to_group(user1['id'],
                                             group1['id'])
@@ -2704,19 +2670,14 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         """
         role_list = []
         for _ in range(5):
-            role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+            role = unit.new_role_ref()
             self.role_api.create_role(role['id'], role)
             role_list.append(role)
 
-        domain = self.new_domain_ref()
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user1 = self.new_user_ref(
-            domain_id=domain['id'])
-        password = user1['password']
-        user1 = self.identity_api.create_user(user1)
-        user1['password'] = password
-        group1 = self.new_group_ref(
-            domain_id=domain['id'])
+        user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
+        group1 = unit.new_group_ref(domain_id=domain['id'])
         group1 = self.identity_api.create_group(group1)
         project1 = self.new_project_ref(
             domain_id=domain['id'])
@@ -2798,9 +2759,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.resource_api.create_project(leaf['id'], leaf)
 
         # Create 'non-inherited' and 'inherited' roles
-        non_inherited_role = {'id': uuid.uuid4().hex, 'name': 'non-inherited'}
+        non_inherited_role = unit.new_role_ref(name='non-inherited')
         self.role_api.create_role(non_inherited_role['id'], non_inherited_role)
-        inherited_role = {'id': uuid.uuid4().hex, 'name': 'inherited'}
+        inherited_role = unit.new_role_ref(name='inherited')
         self.role_api.create_role(inherited_role['id'], inherited_role)
 
         return (root['id'], leaf['id'],
@@ -2822,10 +2783,10 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             project_id=leaf_id)
 
         # Check the user cannot get a token on root nor leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Grant non-inherited role for user on leaf project
         non_inher_up_link = self.build_role_assignment_link(
@@ -2834,9 +2795,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(non_inher_up_link)
 
         # Check the user can only get a token on leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Grant inherited role for user on root project
         inher_up_link = self.build_role_assignment_link(
@@ -2845,24 +2806,24 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(inher_up_link)
 
         # Check the user still can get a token only on leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Delete non-inherited grant
         self.delete(non_inher_up_link)
 
         # Check the inherited role still applies for leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Delete inherited grant
         self.delete(inher_up_link)
 
         # Check the user cannot get a token on leaf project anymore
-        self.v3_authenticate_token(leaf_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
     def test_get_token_from_inherited_group_project_role_grants(self):
         # Create default scenario
@@ -2870,7 +2831,7 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             self._setup_hierarchical_projects_scenario())
 
         # Create group and add user to it
-        group = self.new_group_ref(domain_id=self.domain['id'])
+        group = unit.new_group_ref(domain_id=self.domain['id'])
         group = self.identity_api.create_group(group)
         self.identity_api.add_user_to_group(self.user['id'], group['id'])
 
@@ -2885,10 +2846,10 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             project_id=leaf_id)
 
         # Check the user cannot get a token on root nor leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
         # Grant non-inherited role for group on leaf project
         non_inher_gp_link = self.build_role_assignment_link(
@@ -2897,9 +2858,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(non_inher_gp_link)
 
         # Check the user can only get a token on leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Grant inherited role for group on root project
         inher_gp_link = self.build_role_assignment_link(
@@ -2908,22 +2869,22 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.put(inher_gp_link)
 
         # Check the user still can get a token only on leaf project
-        self.v3_authenticate_token(root_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(root_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Delete no-inherited grant
         self.delete(non_inher_gp_link)
 
         # Check the inherited role still applies for leaf project
-        self.v3_authenticate_token(leaf_project_auth_data)
+        self.v3_create_token(leaf_project_auth_data)
 
         # Delete inherited grant
         self.delete(inher_gp_link)
 
         # Check the user cannot get a token on leaf project anymore
-        self.v3_authenticate_token(leaf_project_auth_data,
-                                   expected_status=http_client.UNAUTHORIZED)
+        self.v3_create_token(leaf_project_auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
 
     def test_get_role_assignments_for_project_hierarchy(self):
         """Call ``GET /role_assignments``.
@@ -3089,7 +3050,7 @@ class AssignmentInheritanceDisabledTestCase(test_v3.RestfulTestCase):
         self.config_fixture.config(group='os_inherit', enabled=False)
 
     def test_crud_inherited_role_grants_failed_if_disabled(self):
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
 
         base_collection_url = (
@@ -3109,6 +3070,7 @@ class AssignmentInheritanceDisabledTestCase(test_v3.RestfulTestCase):
 
 class AssignmentV3toV2MethodsTestCase(unit.TestCase):
     """Test domain V3 to V2 conversion methods."""
+
     def _setup_initial_projects(self):
         self.project_id = uuid.uuid4().hex
         self.domain_id = CONF.identity.default_domain_id
@@ -3143,11 +3105,11 @@ class AssignmentV3toV2MethodsTestCase(unit.TestCase):
 
         updated_ref = controller.V2Controller.filter_domain_id(ref)
         self.assertIs(ref, updated_ref)
-        self.assertDictEqual(ref, expected_ref)
+        self.assertDictEqual(expected_ref, ref)
         # Make sure we don't error/muck up data if domain_id isn't present
         updated_ref = controller.V2Controller.filter_domain_id(ref_no_domain)
         self.assertIs(ref_no_domain, updated_ref)
-        self.assertDictEqual(ref_no_domain, expected_ref)
+        self.assertDictEqual(expected_ref, ref_no_domain)
 
     def test_v3controller_filter_domain_id(self):
         # No data should be filtered out in this case.
@@ -3159,7 +3121,7 @@ class AssignmentV3toV2MethodsTestCase(unit.TestCase):
         expected_ref = ref.copy()
         updated_ref = controller.V3Controller.filter_domain_id(ref)
         self.assertIs(ref, updated_ref)
-        self.assertDictEqual(ref, expected_ref)
+        self.assertDictEqual(expected_ref, ref)
 
     def test_v2controller_filter_domain(self):
         other_data = uuid.uuid4().hex
@@ -3186,27 +3148,27 @@ class AssignmentV3toV2MethodsTestCase(unit.TestCase):
 
         updated_ref = controller.V2Controller.filter_project_parent_id(ref)
         self.assertIs(ref, updated_ref)
-        self.assertDictEqual(ref, expected_ref)
+        self.assertDictEqual(expected_ref, ref)
         # Make sure we don't error/muck up data if parent_id isn't present
         updated_ref = controller.V2Controller.filter_project_parent_id(
             ref_no_parent)
         self.assertIs(ref_no_parent, updated_ref)
-        self.assertDictEqual(ref_no_parent, expected_ref)
+        self.assertDictEqual(expected_ref, ref_no_parent)
 
     def test_v3_to_v2_project_method(self):
         self._setup_initial_projects()
         updated_project1 = controller.V2Controller.v3_to_v2_project(
             self.project1)
         self.assertIs(self.project1, updated_project1)
-        self.assertDictEqual(self.project1, self.expected_project)
+        self.assertDictEqual(self.expected_project, self.project1)
         updated_project2 = controller.V2Controller.v3_to_v2_project(
             self.project2)
         self.assertIs(self.project2, updated_project2)
-        self.assertDictEqual(self.project2, self.expected_project)
+        self.assertDictEqual(self.expected_project, self.project2)
         updated_project3 = controller.V2Controller.v3_to_v2_project(
             self.project3)
         self.assertIs(self.project3, updated_project3)
-        self.assertDictEqual(self.project3, self.expected_project)
+        self.assertDictEqual(self.expected_project, self.project2)
 
     def test_v3_to_v2_project_method_list(self):
         self._setup_initial_projects()
@@ -3219,6 +3181,6 @@ class AssignmentV3toV2MethodsTestCase(unit.TestCase):
             # Order should not change.
             self.assertIs(ref, project_list[i])
 
-        self.assertDictEqual(self.project1, self.expected_project)
-        self.assertDictEqual(self.project2, self.expected_project)
-        self.assertDictEqual(self.project3, self.expected_project)
+        self.assertDictEqual(self.expected_project, self.project1)
+        self.assertDictEqual(self.expected_project, self.project2)
+        self.assertDictEqual(self.expected_project, self.project3)

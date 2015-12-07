@@ -12,9 +12,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import logging
+import os
+
+from oslo_cache import core as cache
 from oslo_config import cfg
+from oslo_log import log
 import oslo_messaging
 import passlib.utils
+
+from keystone import exception
 
 
 _DEFAULT_AUTH_METHODS = ['external', 'password', 'token', 'oauth1']
@@ -197,7 +204,7 @@ FILE_OPTIONS = {
                          'already have assignments for users and '
                          'groups from the default LDAP domain, and it is '
                          'acceptable for Keystone to provide the different '
-                         'IDs to clients than it did previously.  Typically '
+                         'IDs to clients than it did previously. Typically '
                          'this means that the only time you can set this '
                          'value to False is when configuring a fresh '
                          'installation.'),
@@ -279,12 +286,12 @@ FILE_OPTIONS = {
                     'allow_rescoped_scoped_token to false prevents a user '
                     'from exchanging a scoped token for any other token.'),
         cfg.StrOpt('hash_algorithm', default='md5',
-                   help="The hash algorithm to use for PKI tokens. This can "
-                        "be set to any algorithm that hashlib supports. "
-                        "WARNING: Before changing this value, the auth_token "
-                        "middleware must be configured with the "
-                        "hash_algorithms, otherwise token revocation will "
-                        "not be processed correctly."),
+                   help='The hash algorithm to use for PKI tokens. This can '
+                        'be set to any algorithm that hashlib supports. '
+                        'WARNING: Before changing this value, the auth_token '
+                        'middleware must be configured with the '
+                        'hash_algorithms, otherwise token revocation will '
+                        'not be processed correctly.'),
     ],
     'revoke': [
         cfg.StrOpt('driver',
@@ -305,82 +312,6 @@ FILE_OPTIONS = {
                         'global and token caching are enabled.',
                    deprecated_opts=[cfg.DeprecatedOpt(
                        'revocation_cache_time', group='token')]),
-    ],
-    'cache': [
-        cfg.StrOpt('config_prefix', default='cache.keystone',
-                   help='Prefix for building the configuration dictionary '
-                        'for the cache region. This should not need to be '
-                        'changed unless there is another dogpile.cache '
-                        'region with the same configuration name.'),
-        cfg.IntOpt('expiration_time', default=600,
-                   help='Default TTL, in seconds, for any cached item in '
-                        'the dogpile.cache region. This applies to any '
-                        'cached method that doesn\'t have an explicit '
-                        'cache expiration time defined for it.'),
-        # NOTE(morganfainberg): the dogpile.cache.memory acceptable in devstack
-        # and other such single-process/thread deployments. Running
-        # dogpile.cache.memory in any other configuration has the same pitfalls
-        # as the KVS token backend. It is recommended that either Redis or
-        # Memcached are used as the dogpile backend for real workloads. To
-        # prevent issues with the memory cache ending up in "production"
-        # unintentionally, we register a no-op as the keystone default caching
-        # backend.
-        cfg.StrOpt('backend', default='keystone.common.cache.noop',
-                   help='Dogpile.cache backend module. It is recommended '
-                        'that Memcache with pooling '
-                        '(keystone.cache.memcache_pool) or Redis '
-                        '(dogpile.cache.redis) be used in production '
-                        'deployments.  Small workloads (single process) '
-                        'like devstack can use the dogpile.cache.memory '
-                        'backend.'),
-        cfg.MultiStrOpt('backend_argument', default=[], secret=True,
-                        help='Arguments supplied to the backend module. '
-                             'Specify this option once per argument to be '
-                             'passed to the dogpile.cache backend. Example '
-                             'format: "<argname>:<value>".'),
-        cfg.ListOpt('proxies', default=[],
-                    help='Proxy classes to import that will affect the way '
-                         'the dogpile.cache backend functions. See the '
-                         'dogpile.cache documentation on '
-                         'changing-backend-behavior.'),
-        cfg.BoolOpt('enabled', default=False,
-                    help='Global toggle for all caching using the '
-                         'should_cache_fn mechanism.'),
-        cfg.BoolOpt('debug_cache_backend', default=False,
-                    help='Extra debugging from the cache backend (cache '
-                         'keys, get/set/delete/etc calls). This is only '
-                         'really useful if you need to see the specific '
-                         'cache-backend get/set/delete calls with the '
-                         'keys/values.  Typically this should be left set '
-                         'to false.'),
-        cfg.ListOpt('memcache_servers', default=['localhost:11211'],
-                    help='Memcache servers in the format of "host:port".'
-                    ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
-                    ' backends only).'),
-        cfg.IntOpt('memcache_dead_retry',
-                   default=5 * 60,
-                   help='Number of seconds memcached server is considered dead'
-                   ' before it is tried again. (dogpile.cache.memcache and'
-                   ' keystone.cache.memcache_pool backends only).'),
-        cfg.IntOpt('memcache_socket_timeout',
-                   default=3,
-                   help='Timeout in seconds for every call to a server.'
-                   ' (dogpile.cache.memcache and keystone.cache.memcache_pool'
-                   ' backends only).'),
-        cfg.IntOpt('memcache_pool_maxsize',
-                   default=10,
-                   help='Max total number of open connections to every'
-                   ' memcached server. (keystone.cache.memcache_pool backend'
-                   ' only).'),
-        cfg.IntOpt('memcache_pool_unused_timeout',
-                   default=60,
-                   help='Number of seconds a connection to memcached is held'
-                   ' unused in the pool before it is closed.'
-                   ' (keystone.cache.memcache_pool backend only).'),
-        cfg.IntOpt('memcache_pool_connection_get_timeout',
-                   default=10,
-                   help='Number of seconds that an operation will wait to get '
-                        'a memcache client connection.'),
     ],
     'ssl': [
         cfg.StrOpt('ca_key',
@@ -496,7 +427,7 @@ FILE_OPTIONS = {
     'oauth1': [
         cfg.StrOpt('driver',
                    default='sql',
-                   help='Entrypoint for hte OAuth backend driver in the '
+                   help='Entrypoint for the OAuth backend driver in the '
                         'keystone.oauth1 namespace.'),
         cfg.IntOpt('request_token_duration', default=28800,
                    help='Duration (in seconds) for the OAuth Request Token.'),
@@ -558,6 +489,7 @@ FILE_OPTIONS = {
     'endpoint_policy': [
         cfg.BoolOpt('enabled',
                     default=True,
+                    deprecated_for_removal=True,
                     help='Enable endpoint_policy functionality.'),
         cfg.StrOpt('driver',
                    default='sql',
@@ -668,6 +600,10 @@ FILE_OPTIONS = {
         cfg.StrOpt('user_enabled_emulation_dn',
                    help='DN of the group entry to hold enabled users when '
                         'using enabled emulation.'),
+        cfg.BoolOpt('user_enabled_emulation_use_group_config', default=False,
+                    help='Use the "group_member_attribute" and '
+                         '"group_objectclass" settings to determine '
+                         'membership in the emulated enabled group.'),
         cfg.ListOpt('user_additional_attribute_mapping',
                     default=[],
                     help='List of additional LDAP attributes used for mapping '
@@ -759,6 +695,11 @@ FILE_OPTIONS = {
                    deprecated_for_removal=True,
                    help='DN of the group entry to hold enabled projects when '
                         'using enabled emulation.'),
+        cfg.BoolOpt('project_enabled_emulation_use_group_config',
+                    default=False,
+                    help='Use the "group_member_attribute" and '
+                         '"group_objectclass" settings to determine '
+                         'membership in the emulated enabled group.'),
         cfg.ListOpt('project_additional_attribute_mapping',
                     deprecated_opts=[cfg.DeprecatedOpt(
                         'tenant_additional_attribute_mapping', group='ldap')],
@@ -879,7 +820,8 @@ FILE_OPTIONS = {
     'auth': [
         cfg.ListOpt('methods', default=_DEFAULT_AUTH_METHODS,
                     help='Allowed authentication methods.'),
-        cfg.StrOpt('password',
+        cfg.StrOpt('password',  # nosec : This is the name of the plugin, not
+                   # a password that needs to be protected.
                    help='Entrypoint for the password auth plugin module in '
                         'the keystone.auth.password namespace.'),
         cfg.StrOpt('token',
@@ -1081,7 +1023,8 @@ FILE_OPTIONS = {
                         'eventlet application. Defaults to number of CPUs '
                         '(minimum of 2).'),
         cfg.StrOpt('public_bind_host',
-                   default='0.0.0.0',
+                   default='0.0.0.0',  # nosec : Bind to all interfaces by
+                   # default for backwards compatibility.
                    deprecated_opts=[cfg.DeprecatedOpt('bind_host',
                                                       group='DEFAULT'),
                                     cfg.DeprecatedOpt('public_bind_host',
@@ -1096,7 +1039,8 @@ FILE_OPTIONS = {
                    help='The port number which the public service listens '
                         'on.'),
         cfg.StrOpt('admin_bind_host',
-                   default='0.0.0.0',
+                   default='0.0.0.0',  # nosec : Bind to all interfaces by
+                   # default for backwards compatibility.
                    deprecated_opts=[cfg.DeprecatedOpt('bind_host',
                                                       group='DEFAULT'),
                                     cfg.DeprecatedOpt('admin_bind_host',
@@ -1111,14 +1055,14 @@ FILE_OPTIONS = {
                    help='The port number which the admin service listens '
                         'on.'),
         cfg.BoolOpt('wsgi_keep_alive', default=True,
-                    help="If set to false, disables keepalives on the server; "
-                         "all connections will be closed after serving one "
-                         "request."),
+                    help='If set to false, disables keepalives on the server; '
+                         'all connections will be closed after serving one '
+                         'request.'),
         cfg.IntOpt('client_socket_timeout', default=900,
-                   help="Timeout for socket operations on a client "
-                        "connection. If an incoming connection is idle for "
-                        "this number of seconds it will be closed. A value "
-                        "of '0' means wait forever."),
+                   help='Timeout for socket operations on a client '
+                        'connection. If an incoming connection is idle for '
+                        'this number of seconds it will be closed. A value '
+                        'of "0" means wait forever.'),
         cfg.BoolOpt('tcp_keepalive', default=False,
                     deprecated_name='tcp_keepalive',
                     deprecated_group='DEFAULT',
@@ -1143,7 +1087,7 @@ FILE_OPTIONS = {
                     help='Toggle for SSL support on the Keystone '
                          'eventlet servers.'),
         cfg.StrOpt('certfile',
-                   default="/etc/keystone/ssl/certs/keystone.pem",
+                   default='/etc/keystone/ssl/certs/keystone.pem',
                    deprecated_name='certfile', deprecated_group='ssl',
                    deprecated_for_removal=True,
                    help='Path of the certfile for SSL. For non-production '
@@ -1186,6 +1130,68 @@ def setup_authentication(conf=None):
             _register_auth_plugin_opt(conf, option)
 
 
+def set_default_for_default_log_levels():
+    """Set the default for the default_log_levels option for keystone.
+
+    Keystone uses some packages that other OpenStack services don't use that do
+    logging. This will set the default_log_levels default level for those
+    packages.
+
+    This function needs to be called before CONF().
+
+    """
+    extra_log_level_defaults = [
+        'dogpile=INFO',
+        'routes=INFO',
+        'keystone.common._memcache_pool=INFO',
+    ]
+
+    log.register_options(CONF)
+    CONF.set_default('default_log_levels',
+                     CONF.default_log_levels + extra_log_level_defaults)
+
+
+def setup_logging():
+    """Sets up logging for the keystone package."""
+    log.setup(CONF, 'keystone')
+    logging.captureWarnings(True)
+
+
+def find_paste_config():
+    """Find Keystone's paste.deploy configuration file.
+
+    Keystone's paste.deploy configuration file is specified in the
+    ``[paste_deploy]`` section of the main Keystone configuration file,
+    ``keystone.conf``.
+
+    For example::
+
+        [paste_deploy]
+        config_file = keystone-paste.ini
+
+    :returns: The selected configuration filename
+    :raises: exception.ConfigFileNotFound
+
+    """
+    if CONF.paste_deploy.config_file:
+        paste_config = CONF.paste_deploy.config_file
+        paste_config_value = paste_config
+        if not os.path.isabs(paste_config):
+            paste_config = CONF.find_file(paste_config)
+    elif CONF.config_file:
+        paste_config = CONF.config_file[0]
+        paste_config_value = paste_config
+    else:
+        # this provides backwards compatibility for keystone.conf files that
+        # still have the entire paste configuration included, rather than just
+        # a [paste_deploy] configuration section referring to an external file
+        paste_config = CONF.find_file('keystone.conf')
+        paste_config_value = 'keystone.conf'
+    if not paste_config or not os.path.exists(paste_config):
+        raise exception.ConfigFileNotFound(config_file=paste_config_value)
+    return paste_config
+
+
 def configure(conf=None):
     if conf is None:
         conf = CONF
@@ -1209,6 +1215,8 @@ def configure(conf=None):
 
     # register any non-default auth methods here (used by extensions, etc)
     setup_authentication(conf)
+    # add oslo.cache related config options
+    cache.configure(conf)
 
 
 def list_opts():

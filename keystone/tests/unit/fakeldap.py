@@ -18,7 +18,7 @@
 
 This class does very little error checking, and knows nothing about ldap
 class definitions.  It implements the minimum emulation of the python ldap
-library to work with nova.
+library to work with keystone.
 
 """
 
@@ -132,7 +132,6 @@ def _paren_groups(source):
 
 def _match(key, value, attrs):
     """Match a given key and value against an attribute list."""
-
     def match_with_wildcards(norm_val, val_list):
         # Case insensitive checking with wildcards
         if norm_val.startswith('*'):

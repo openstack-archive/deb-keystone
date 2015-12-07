@@ -176,12 +176,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_password_hashed(self):
         session = sql.get_session()
         user_ref = self.identity_api._get_user(session, self.user_foo['id'])
-        self.assertNotEqual(user_ref['password'], self.user_foo['password'])
+        self.assertNotEqual(self.user_foo['password'], user_ref['password'])
 
     def test_delete_user_with_project_association(self):
-        user = {'name': uuid.uuid4().hex,
-                'domain_id': DEFAULT_DOMAIN_ID,
-                'password': uuid.uuid4().hex}
+        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
         user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
@@ -191,9 +189,8 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                           user['id'])
 
     def test_create_null_user_name(self):
-        user = {'name': None,
-                'domain_id': DEFAULT_DOMAIN_ID,
-                'password': uuid.uuid4().hex}
+        user = unit.new_user_ref(name=None,
+                                 domain_id=DEFAULT_DOMAIN_ID)
         self.assertRaises(exception.ValidationError,
                           self.identity_api.create_user,
                           user)
@@ -208,9 +205,8 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # LDAP.
 
         # create a ref with a lowercase name
-        ref = {
-            'name': uuid.uuid4().hex.lower(),
-            'domain_id': DEFAULT_DOMAIN_ID}
+        ref = unit.new_user_ref(name=uuid.uuid4().hex.lower(),
+                                domain_id=DEFAULT_DOMAIN_ID)
         ref = self.identity_api.create_user(ref)
 
         # assign a new ID with the same name, but this time in uppercase
@@ -251,61 +247,13 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
                           DEFAULT_DOMAIN_ID)
 
     def test_delete_project_with_user_association(self):
-        user = {'name': 'fakeuser',
-                'domain_id': DEFAULT_DOMAIN_ID,
-                'password': 'passwd'}
+        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
         user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
         self.resource_api.delete_project(self.tenant_bar['id'])
         tenants = self.assignment_api.list_projects_for_user(user['id'])
         self.assertEqual([], tenants)
-
-    def test_metadata_removed_on_delete_user(self):
-        # A test to check that the internal representation
-        # or roles is correctly updated when a user is deleted
-        user = {'name': uuid.uuid4().hex,
-                'domain_id': DEFAULT_DOMAIN_ID,
-                'password': 'passwd'}
-        user = self.identity_api.create_user(user)
-        role = {'id': uuid.uuid4().hex,
-                'name': uuid.uuid4().hex}
-        self.role_api.create_role(role['id'], role)
-        self.assignment_api.add_role_to_user_and_project(
-            user['id'],
-            self.tenant_bar['id'],
-            role['id'])
-        self.identity_api.delete_user(user['id'])
-
-        # Now check whether the internal representation of roles
-        # has been deleted
-        self.assertRaises(exception.MetadataNotFound,
-                          self.assignment_api._get_metadata,
-                          user['id'],
-                          self.tenant_bar['id'])
-
-    def test_metadata_removed_on_delete_project(self):
-        # A test to check that the internal representation
-        # or roles is correctly updated when a project is deleted
-        user = {'name': uuid.uuid4().hex,
-                'domain_id': DEFAULT_DOMAIN_ID,
-                'password': 'passwd'}
-        user = self.identity_api.create_user(user)
-        role = {'id': uuid.uuid4().hex,
-                'name': uuid.uuid4().hex}
-        self.role_api.create_role(role['id'], role)
-        self.assignment_api.add_role_to_user_and_project(
-            user['id'],
-            self.tenant_bar['id'],
-            role['id'])
-        self.resource_api.delete_project(self.tenant_bar['id'])
-
-        # Now check whether the internal representation of roles
-        # has been deleted
-        self.assertRaises(exception.MetadataNotFound,
-                          self.assignment_api._get_metadata,
-                          user['id'],
-                          self.tenant_bar['id'])
 
     def test_update_project_returns_extra(self):
         """This tests for backwards-compatibility with an essex/folsom bug.
@@ -346,11 +294,9 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         """
         arbitrary_key = uuid.uuid4().hex
         arbitrary_value = uuid.uuid4().hex
-        user = {
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID,
-            'password': uuid.uuid4().hex,
-            arbitrary_key: arbitrary_value}
+        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
+        user[arbitrary_key] = arbitrary_value
+        del user["id"]
         ref = self.identity_api.create_user(user)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('password'))
@@ -365,11 +311,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
     def test_sql_user_to_dict_null_default_project_id(self):
-        user = {
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID,
-            'password': uuid.uuid4().hex}
-
+        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
         user = self.identity_api.create_user(user)
         session = sql.get_session()
         query = session.query(identity_sql.User)
@@ -381,14 +323,13 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         session.close()
 
     def test_list_domains_for_user(self):
-        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
-                'domain_id': domain['id'], 'enabled': True}
+        user = unit.new_user_ref(domain_id=domain['id'])
 
-        test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        test_domain1 = unit.new_domain_ref()
         self.resource_api.create_domain(test_domain1['id'], test_domain1)
-        test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        test_domain2 = unit.new_domain_ref()
         self.resource_api.create_domain(test_domain2['id'], test_domain2)
 
         user = self.identity_api.create_user(user)
@@ -407,21 +348,20 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # Create two groups each with a role on a different domain, and
         # make user1 a member of both groups.  Both these new domains
         # should now be included, along with any direct user grants.
-        domain = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
-        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
-                'domain_id': domain['id'], 'enabled': True}
+        user = unit.new_user_ref(domain_id=domain['id'])
         user = self.identity_api.create_user(user)
-        group1 = {'name': uuid.uuid4().hex, 'domain_id': domain['id']}
+        group1 = unit.new_group_ref(domain_id=domain['id'])
         group1 = self.identity_api.create_group(group1)
-        group2 = {'name': uuid.uuid4().hex, 'domain_id': domain['id']}
+        group2 = unit.new_group_ref(domain_id=domain['id'])
         group2 = self.identity_api.create_group(group2)
 
-        test_domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        test_domain1 = unit.new_domain_ref()
         self.resource_api.create_domain(test_domain1['id'], test_domain1)
-        test_domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        test_domain2 = unit.new_domain_ref()
         self.resource_api.create_domain(test_domain2['id'], test_domain2)
-        test_domain3 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        test_domain3 = unit.new_domain_ref()
         self.resource_api.create_domain(test_domain3['id'], test_domain3)
 
         self.identity_api.add_user_to_group(user['id'], group1['id'])
@@ -451,17 +391,16 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         - When listing domains for user, neither domain should be returned
 
         """
-        domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        domain1 = unit.new_domain_ref()
         domain1 = self.resource_api.create_domain(domain1['id'], domain1)
-        domain2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        domain2 = unit.new_domain_ref()
         domain2 = self.resource_api.create_domain(domain2['id'], domain2)
-        user = {'name': uuid.uuid4().hex, 'password': uuid.uuid4().hex,
-                'domain_id': domain1['id'], 'enabled': True}
+        user = unit.new_user_ref(domain_id=domain1['id'])
         user = self.identity_api.create_user(user)
-        group = {'name': uuid.uuid4().hex, 'domain_id': domain1['id']}
+        group = unit.new_group_ref(domain_id=domain1['id'])
         group = self.identity_api.create_group(group)
         self.identity_api.add_user_to_group(user['id'], group['id'])
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
 
         # Create a grant on each domain, one user grant, one group grant,
@@ -550,12 +489,12 @@ class SqlToken(SqlTests, test_backend.TokenTests):
             if i == 0:
                 # The first time the batch iterator returns, it should return
                 # the first result that comes back from the database.
-                self.assertEqual(x, 'test')
+                self.assertEqual('test', x)
             elif i == 1:
                 # The second time, the database range function should return
                 # nothing, so the batch iterator returns the result of the
                 # upper_bound function
-                self.assertEqual(x, "final value")
+                self.assertEqual("final value", x)
             else:
                 self.fail("range batch function returned more than twice")
 
@@ -568,15 +507,15 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         tok = token_sql.Token()
         db2_strategy = tok._expiry_range_strategy('ibm_db_sa')
         self.assertIsInstance(db2_strategy, functools.partial)
-        self.assertEqual(db2_strategy.func, token_sql._expiry_range_batched)
-        self.assertEqual(db2_strategy.keywords, {'batch_size': 100})
+        self.assertEqual(token_sql._expiry_range_batched, db2_strategy.func)
+        self.assertEqual({'batch_size': 100}, db2_strategy.keywords)
 
     def test_expiry_range_strategy_mysql(self):
         tok = token_sql.Token()
         mysql_strategy = tok._expiry_range_strategy('mysql')
         self.assertIsInstance(mysql_strategy, functools.partial)
-        self.assertEqual(mysql_strategy.func, token_sql._expiry_range_batched)
-        self.assertEqual(mysql_strategy.keywords, {'batch_size': 1000})
+        self.assertEqual(token_sql._expiry_range_batched, mysql_strategy.func)
+        self.assertEqual({'batch_size': 1000}, mysql_strategy.keywords)
 
 
 class SqlCatalog(SqlTests, test_backend.CatalogTests):
@@ -585,22 +524,13 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
     _enabled_default_to_true_when_creating_endpoint = True
 
     def test_catalog_ignored_malformed_urls(self):
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
+        service = unit.new_service_ref()
         self.catalog_api.create_service(service['id'], service.copy())
 
         malformed_url = "http://192.168.1.104:8774/v2/$(tenant)s"
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region_id': None,
-            'service_id': service['id'],
-            'interface': 'public',
-            'url': malformed_url,
-        }
+        endpoint = unit.new_endpoint_ref(service_id=service['id'],
+                                         url=malformed_url,
+                                         region_id=None)
         self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
 
         # NOTE(dstanek): there are no valid URLs, so nothing is in the catalog
@@ -608,21 +538,11 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         self.assertEqual({}, catalog)
 
     def test_get_catalog_with_empty_public_url(self):
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
+        service = unit.new_service_ref()
         self.catalog_api.create_service(service['id'], service.copy())
 
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region_id': None,
-            'interface': 'public',
-            'url': '',
-            'service_id': service['id'],
-        }
+        endpoint = unit.new_endpoint_ref(url='', service_id=service['id'],
+                                         region_id=None)
         self.catalog_api.create_endpoint(endpoint['id'], endpoint.copy())
 
         catalog = self.catalog_api.get_catalog('user', 'tenant')
@@ -633,22 +553,12 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
         self.assertIsNone(catalog_endpoint.get('adminURL'))
         self.assertIsNone(catalog_endpoint.get('internalURL'))
 
-    def test_create_endpoint_region_404(self):
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
+    def test_create_endpoint_region_returns_not_found(self):
+        service = unit.new_service_ref()
         self.catalog_api.create_service(service['id'], service.copy())
 
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region_id': uuid.uuid4().hex,
-            'service_id': service['id'],
-            'interface': 'public',
-            'url': uuid.uuid4().hex,
-        }
+        endpoint = unit.new_endpoint_ref(region_id=uuid.uuid4().hex,
+                                         service_id=service['id'])
 
         self.assertRaises(exception.ValidationError,
                           self.catalog_api.create_endpoint,
@@ -656,21 +566,16 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
                           endpoint.copy())
 
     def test_create_region_invalid_id(self):
-        region = {
-            'id': '0' * 256,
-            'description': '',
-            'extra': {},
-        }
+        region = unit.new_region_ref(id='0' * 256,
+                                     description='',
+                                     extra={})
 
         self.assertRaises(exception.StringLengthExceeded,
                           self.catalog_api.create_region,
                           region.copy())
 
     def test_create_region_invalid_parent_id(self):
-        region = {
-            'id': uuid.uuid4().hex,
-            'parent_region_id': '0' * 256,
-        }
+        region = unit.new_region_ref(parent_region_id='0' * 256)
 
         self.assertRaises(exception.RegionNotFound,
                           self.catalog_api.create_region,
@@ -678,49 +583,29 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
     def test_delete_region_with_endpoint(self):
         # create a region
-        region = {
-            'id': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
+        region = unit.new_region_ref()
         self.catalog_api.create_region(region)
 
         # create a child region
-        child_region = {
-            'id': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-            'parent_id': region['id']
-        }
+        child_region = unit.new_region_ref(parent_region_id=region['id'])
         self.catalog_api.create_region(child_region)
         # create a service
-        service = {
-            'id': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'description': uuid.uuid4().hex,
-        }
+        service = unit.new_service_ref()
         self.catalog_api.create_service(service['id'], service)
 
         # create an endpoint attached to the service and child region
-        child_endpoint = {
-            'id': uuid.uuid4().hex,
-            'region_id': child_region['id'],
-            'interface': uuid.uuid4().hex[:8],
-            'url': uuid.uuid4().hex,
-            'service_id': service['id'],
-        }
+        child_endpoint = unit.new_endpoint_ref(region_id=child_region['id'],
+                                               service_id=service['id'])
+
         self.catalog_api.create_endpoint(child_endpoint['id'], child_endpoint)
         self.assertRaises(exception.RegionDeletionError,
                           self.catalog_api.delete_region,
                           child_region['id'])
 
         # create an endpoint attached to the service and parent region
-        endpoint = {
-            'id': uuid.uuid4().hex,
-            'region_id': region['id'],
-            'interface': uuid.uuid4().hex[:8],
-            'url': uuid.uuid4().hex,
-            'service_id': service['id'],
-        }
+        endpoint = unit.new_endpoint_ref(region_id=region['id'],
+                                         service_id=service['id'])
+
         self.catalog_api.create_endpoint(endpoint['id'], endpoint)
         self.assertRaises(exception.RegionDeletionError,
                           self.catalog_api.delete_region,
@@ -748,7 +633,6 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
 
     def clean_up_entities(self):
         """Clean up entity test data from Filter Test Cases."""
-
         for entity in ['user', 'group', 'project']:
             self._delete_test_data(entity, self.entity_list[entity])
             self._delete_test_data(entity, self.domain1_entity_list[entity])
@@ -764,7 +648,7 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
         # since any domain filtering with LDAP is handled by the manager
         # layer (and is already tested elsewhere) not at the driver level.
         self.addCleanup(self.clean_up_entities)
-        self.domain1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        self.domain1 = unit.new_domain_ref()
         self.resource_api.create_domain(self.domain1['id'], self.domain1)
 
         self.entity_list = {}
@@ -804,7 +688,7 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
 
         # See if we can add a SQL command...use the group table instead of the
         # user table since 'user' is reserved word for SQLAlchemy.
-        group = {'name': uuid.uuid4().hex, 'domain_id': DEFAULT_DOMAIN_ID}
+        group = unit.new_group_ref(domain_id=DEFAULT_DOMAIN_ID)
         group = self.identity_api.create_group(group)
 
         hints = driver_hints.Hints()
@@ -850,11 +734,6 @@ class SqlDecorators(unit.TestCase):
         tt = FakeTable(col='a')
         self.assertEqual('a', tt.col)
 
-    def test_non_ascii_init(self):
-        # NOTE(I159): Non ASCII characters must cause UnicodeDecodeError
-        # if encoding is not provided explicitly.
-        self.assertRaises(UnicodeDecodeError, FakeTable, col='Я')
-
     def test_conflict_happend(self):
         self.assertRaises(exception.Conflict, FakeTable().insert)
         self.assertRaises(exception.UnexpectedError, FakeTable().update)
@@ -890,7 +769,7 @@ class SqlCredential(SqlTests):
 
     def _validateCredentialList(self, retrieved_credentials,
                                 expected_credentials):
-        self.assertEqual(len(retrieved_credentials), len(expected_credentials))
+        self.assertEqual(len(expected_credentials), len(retrieved_credentials))
         retrived_ids = [c['id'] for c in retrieved_credentials]
         for cred in expected_credentials:
             self.assertIn(cred['id'], retrived_ids)

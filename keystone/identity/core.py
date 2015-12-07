@@ -25,10 +25,10 @@ import six
 
 from keystone.common import cache
 from keystone.common import clean
+from keystone.common import config
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
-from keystone import config
 from keystone import exception
 from keystone.i18n import _, _LW
 from keystone.identity.mapping_backends import mapping
@@ -39,7 +39,7 @@ CONF = cfg.CONF
 
 LOG = log.getLogger(__name__)
 
-MEMOIZE = cache.get_memoization_decorator(section='identity')
+MEMOIZE = cache.get_memoization_decorator(group='identity')
 
 DOMAIN_CONF_FHEAD = 'keystone.'
 DOMAIN_CONF_FTAIL = '.conf'
@@ -70,7 +70,8 @@ def filter_user(user_ref):
         try:
             user_ref['extra'].pop('password', None)
             user_ref['extra'].pop('tenants', None)
-        except KeyError:
+        except KeyError:  # nosec
+            # ok to not have extra in the user_ref.
             pass
     return user_ref
 
@@ -92,6 +93,7 @@ class DomainConfigs(dict):
     the identity manager and driver can use.
 
     """
+
     configured = False
     driver = None
     _any_sql = False
@@ -101,34 +103,22 @@ class DomainConfigs(dict):
                                    domain_config['cfg'].identity.driver,
                                    domain_config['cfg'])
 
-    def _assert_no_more_than_one_sql_driver(self, domain_id, new_config,
-                                            config_file=None):
-        """Ensure there is no more than one sql driver.
-
-        Check to see if the addition of the driver in this new config
-        would cause there to now be more than one sql driver.
-
-        If we are loading from configuration files, the config_file will hold
-        the name of the file we have just loaded.
-
-        """
-        if (new_config['driver'].is_sql and
-                (self.driver.is_sql or self._any_sql)):
-            # The addition of this driver would cause us to have more than
-            # one sql driver, so raise an exception.
-
-            # TODO(henry-nash): This method is only used in the file-based
-            # case, so has no need to worry about the database/API case. The
-            # code that overrides config_file below is therefore never used
-            # and should be removed, and this method perhaps moved inside
-            # _load_config_from_file(). This is raised as bug #1466772.
-
-            if not config_file:
-                config_file = _('Database at /domains/%s/config') % domain_id
-            raise exception.MultipleSQLDriversInConfig(source=config_file)
-        self._any_sql = self._any_sql or new_config['driver'].is_sql
-
     def _load_config_from_file(self, resource_api, file_list, domain_name):
+
+        def _assert_no_more_than_one_sql_driver(domain_id, new_config,
+                                                config_file):
+            """Ensure there is no more than one sql driver.
+
+            Check to see if the addition of the driver in this new config
+            would cause there to be more than one sql driver.
+
+            """
+            if (new_config['driver'].is_sql and
+                    (self.driver.is_sql or self._any_sql)):
+                # The addition of this driver would cause us to have more than
+                # one sql driver, so raise an exception.
+                raise exception.MultipleSQLDriversInConfig(source=config_file)
+            self._any_sql = self._any_sql or new_config['driver'].is_sql
 
         try:
             domain_ref = resource_api.get_domain_by_name(domain_name)
@@ -149,9 +139,9 @@ class DomainConfigs(dict):
         domain_config['cfg'](args=[], project='keystone',
                              default_config_files=file_list)
         domain_config['driver'] = self._load_driver(domain_config)
-        self._assert_no_more_than_one_sql_driver(domain_ref['id'],
-                                                 domain_config,
-                                                 config_file=file_list)
+        _assert_no_more_than_one_sql_driver(domain_ref['id'],
+                                            domain_config,
+                                            file_list)
         self[domain_ref['id']] = domain_config
 
     def _setup_domain_drivers_from_files(self, standard_driver, resource_api):
@@ -275,7 +265,7 @@ class DomainConfigs(dict):
             # being able to find who has it...either we were very very very
             # unlucky or something is awry.
             msg = _('Exceeded attempts to register domain %(domain)s to use '
-                    'the SQL driver, the last  domain that appears to have '
+                    'the SQL driver, the last domain that appears to have '
                     'had it is %(last_domain)s, giving up') % {
                         'domain': domain_id, 'last_domain': domain_registered}
             raise exception.UnexpectedError(msg)
@@ -404,7 +394,7 @@ class DomainConfigs(dict):
             # specific driver for this domain.
             try:
                 del self[domain_id]
-            except KeyError:
+            except KeyError:  # nosec
                 # Allow this error in case we are unlucky and in a
                 # multi-threaded situation, two threads happen to be running
                 # in lock step.
@@ -436,7 +426,6 @@ def domains_configured(f):
 
 def exception_translated(exception_type):
     """Wraps API calls to map to correct exception."""
-
     def _exception_translated(f):
         @functools.wraps(f)
         def wrapper(self, *args, **kwargs):
@@ -710,7 +699,7 @@ class Manager(manager.Manager):
 
         Use the mapping table to look up the domain, driver and local entity
         that is represented by the provided public ID.  Handle the situations
-        were we do not use the mapping (e.g. single driver that understands
+        where we do not use the mapping (e.g. single driver that understands
         UUIDs etc.)
 
         """
@@ -1184,7 +1173,7 @@ class IdentityDriverV8(object):
     def authenticate(self, user_id, password):
         """Authenticate a given user and password.
         :returns: user_ref
-        :raises: AssertionError
+        :raises AssertionError: If user or password is invalid.
         """
         raise exception.NotImplemented()  # pragma: no cover
 
@@ -1194,7 +1183,7 @@ class IdentityDriverV8(object):
     def create_user(self, user_id, user):
         """Creates a new user.
 
-        :raises: keystone.exception.Conflict
+        :raises keystone.exception.Conflict: If a duplicate user exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1229,7 +1218,7 @@ class IdentityDriverV8(object):
         """Get a user by ID.
 
         :returns: user_ref
-        :raises: keystone.exception.UserNotFound
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1238,8 +1227,8 @@ class IdentityDriverV8(object):
     def update_user(self, user_id, user):
         """Updates an existing user.
 
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.Conflict
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
+        :raises keystone.exception.Conflict: If a duplicate user exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1248,8 +1237,8 @@ class IdentityDriverV8(object):
     def add_user_to_group(self, user_id, group_id):
         """Adds a user to a group.
 
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.GroupNotFound
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1258,8 +1247,8 @@ class IdentityDriverV8(object):
     def check_user_in_group(self, user_id, group_id):
         """Checks if a user is a member of a group.
 
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.GroupNotFound
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1268,7 +1257,7 @@ class IdentityDriverV8(object):
     def remove_user_from_group(self, user_id, group_id):
         """Removes a user from a group.
 
-        :raises: keystone.exception.NotFound
+        :raises keystone.exception.NotFound: If the entity not found.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1277,7 +1266,7 @@ class IdentityDriverV8(object):
     def delete_user(self, user_id):
         """Deletes an existing user.
 
-        :raises: keystone.exception.UserNotFound
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1287,7 +1276,7 @@ class IdentityDriverV8(object):
         """Get a user by name.
 
         :returns: user_ref
-        :raises: keystone.exception.UserNotFound
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1298,7 +1287,7 @@ class IdentityDriverV8(object):
     def create_group(self, group_id, group):
         """Creates a new group.
 
-        :raises: keystone.exception.Conflict
+        :raises keystone.exception.Conflict: If a duplicate group exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1333,7 +1322,7 @@ class IdentityDriverV8(object):
         """Get a group by ID.
 
         :returns: group_ref
-        :raises: keystone.exception.GroupNotFound
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1343,7 +1332,7 @@ class IdentityDriverV8(object):
         """Get a group by name.
 
         :returns: group_ref
-        :raises: keystone.exception.GroupNotFound
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1352,8 +1341,8 @@ class IdentityDriverV8(object):
     def update_group(self, group_id, group):
         """Updates an existing group.
 
-        :raises: keystone.exceptionGroupNotFound,
-                 keystone.exception.Conflict
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
+        :raises keystone.exception.Conflict: If a duplicate group exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1362,7 +1351,7 @@ class IdentityDriverV8(object):
     def delete_group(self, group_id):
         """Deletes an existing group.
 
-        :raises: keystone.exception.GroupNotFound
+        :raises keystone.exception.GroupNotFound: If the group doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover

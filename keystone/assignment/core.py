@@ -33,7 +33,7 @@ from keystone import notifications
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
-MEMOIZE = cache.get_memoization_decorator(section='role')
+MEMOIZE = cache.get_memoization_decorator(group='role')
 
 
 @dependency.provider('assignment_api')
@@ -42,7 +42,7 @@ MEMOIZE = cache.get_memoization_decorator(section='role')
 class Manager(manager.Manager):
     """Default pivot point for the Assignment backend.
 
-    See :mod:`keystone.common.manager.Manager` for more details on how this
+    See :class:`keystone.common.manager.Manager` for more details on how this
     dynamically calls the backend.
 
     """
@@ -87,105 +87,35 @@ class Manager(manager.Manager):
         """Get the roles associated with a user within given project.
 
         This includes roles directly assigned to the user on the
-        project, as well as those by virtue of group membership. If
-        the OS-INHERIT extension is enabled, then this will also
-        include roles inherited from the domain.
+        project, as well as those by virtue of group membership or
+        inheritance.
 
         :returns: a list of role ids.
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.ProjectNotFound
+        :raises keystone.exception.ProjectNotFound: If the project doesn't
+            exist.
 
         """
-        def _get_group_project_roles(user_id, project_ref):
-            group_ids = self._get_group_ids_for_user_id(user_id)
-            return self.list_role_ids_for_groups_on_project(
-                group_ids,
-                project_ref['id'],
-                project_ref['domain_id'],
-                self._list_parent_ids_of_project(project_ref['id']))
-
-        def _get_user_project_roles(user_id, project_ref):
-            role_list = []
-            try:
-                metadata_ref = self._get_metadata(user_id=user_id,
-                                                  tenant_id=project_ref['id'])
-                role_list = self._roles_from_role_dicts(
-                    metadata_ref.get('roles', {}), False)
-            except exception.MetadataNotFound:
-                pass
-
-            if CONF.os_inherit.enabled:
-                # Now get any inherited roles for the owning domain
-                try:
-                    metadata_ref = self._get_metadata(
-                        user_id=user_id, domain_id=project_ref['domain_id'])
-                    role_list += self._roles_from_role_dicts(
-                        metadata_ref.get('roles', {}), True)
-                except (exception.MetadataNotFound, exception.NotImplemented):
-                    pass
-                # As well inherited roles from parent projects
-                for p in self.resource_api.list_project_parents(
-                        project_ref['id']):
-                    p_roles = self.list_grants(
-                        user_id=user_id, project_id=p['id'],
-                        inherited_to_projects=True)
-                    role_list += [x['id'] for x in p_roles]
-
-            return role_list
-
-        project_ref = self.resource_api.get_project(tenant_id)
-        user_role_list = _get_user_project_roles(user_id, project_ref)
-        group_role_list = _get_group_project_roles(user_id, project_ref)
+        self.resource_api.get_project(tenant_id)
+        assignment_list = self.list_role_assignments(
+            user_id=user_id, project_id=tenant_id, effective=True)
         # Use set() to process the list to remove any duplicates
-        return list(set(user_role_list + group_role_list))
+        return list(set([x['role_id'] for x in assignment_list]))
 
     def get_roles_for_user_and_domain(self, user_id, domain_id):
         """Get the roles associated with a user within given domain.
 
         :returns: a list of role ids.
-        :raises: keystone.exception.UserNotFound,
-                 keystone.exception.DomainNotFound
+        :raises keystone.exception.DomainNotFound: If the domain doesn't exist.
 
         """
-
-        def _get_group_domain_roles(user_id, domain_id):
-            role_list = []
-            group_ids = self._get_group_ids_for_user_id(user_id)
-            for group_id in group_ids:
-                try:
-                    metadata_ref = self._get_metadata(group_id=group_id,
-                                                      domain_id=domain_id)
-                    role_list += self._roles_from_role_dicts(
-                        metadata_ref.get('roles', {}), False)
-                except (exception.MetadataNotFound, exception.NotImplemented):
-                    # MetadataNotFound implies no group grant, so skip.
-                    # Ignore NotImplemented since not all backends support
-                    # domains.
-                    pass
-            return role_list
-
-        def _get_user_domain_roles(user_id, domain_id):
-            metadata_ref = {}
-            try:
-                metadata_ref = self._get_metadata(user_id=user_id,
-                                                  domain_id=domain_id)
-            except (exception.MetadataNotFound, exception.NotImplemented):
-                # MetadataNotFound implies no user grants.
-                # Ignore NotImplemented since not all backends support
-                # domains
-                pass
-            return self._roles_from_role_dicts(
-                metadata_ref.get('roles', {}), False)
-
         self.resource_api.get_domain(domain_id)
-        user_role_list = _get_user_domain_roles(user_id, domain_id)
-        group_role_list = _get_group_domain_roles(user_id, domain_id)
+        assignment_list = self.list_role_assignments(
+            user_id=user_id, domain_id=domain_id, effective=True)
         # Use set() to process the list to remove any duplicates
-        return list(set(user_role_list + group_role_list))
+        return list(set([x['role_id'] for x in assignment_list]))
 
     def get_roles_for_groups(self, group_ids, project_id=None, domain_id=None):
         """Get a list of roles for this group on domain and/or project."""
-
         if project_id is not None:
             project = self.resource_api.get_project(project_id)
             role_ids = self.list_role_ids_for_groups_on_project(
@@ -202,8 +132,9 @@ class Manager(manager.Manager):
     def add_user_to_project(self, tenant_id, user_id):
         """Add user to a tenant by creating a default role relationship.
 
-        :raises: keystone.exception.ProjectNotFound,
-                 keystone.exception.UserNotFound
+        :raises keystone.exception.ProjectNotFound: If the project doesn't
+            exist.
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
 
         """
         self.resource_api.get_project(tenant_id)
@@ -253,8 +184,9 @@ class Manager(manager.Manager):
     def remove_user_from_project(self, tenant_id, user_id):
         """Remove user from a tenant
 
-        :raises: keystone.exception.ProjectNotFound,
-                 keystone.exception.UserNotFound
+        :raises keystone.exception.ProjectNotFound: If the project doesn't
+            exist.
+        :raises keystone.exception.UserNotFound: If the user doesn't exist.
 
         """
         roles = self.get_roles_for_user_and_project(user_id, tenant_id)
@@ -355,17 +287,6 @@ class Manager(manager.Manager):
 
         return self.resource_api.list_projects_from_ids(
             list(set(project_ids + project_ids_from_domains + subproject_ids)))
-
-    def list_role_assignments_for_role(self, role_id=None):
-        # NOTE(henry-nash): Currently the efficiency of the key driver
-        # implementation (SQL) of list_role_assignments is severely hampered by
-        # the existence of the multiple grant tables - hence there is little
-        # advantage in pushing the logic of this method down into the driver.
-        # Once the single assignment table is implemented, then this situation
-        # will be different, and this method should have its own driver
-        # implementation.
-        return [r for r in self.driver.list_role_assignments()
-                if r['role_id'] == role_id]
 
     @notifications.role_assignment('deleted')
     def _remove_role_from_user_and_project_adapter(self, role_id, user_id=None,
@@ -498,7 +419,7 @@ class Manager(manager.Manager):
     # this case.
 
     def _expand_indirect_assignment(self, ref, user_id=None,
-                                    project_id=None):
+                                    project_id=None, subtree_ids=None):
         """Returns a list of expanded role assignments.
 
         This methods is called for each discovered assignment that either needs
@@ -508,11 +429,17 @@ class Manager(manager.Manager):
         In all cases, if either user_id and/or project_id is specified, then we
         filter the result on those values.
 
-        """
+        If project_id is specified and subtree_ids is None, then this
+        indicates that we are only interested in that one project. If
+        subtree_ids is not None, then this is an indicator that any
+        inherited assignments need to be expanded down the tree. The
+        actual subtree_ids don't need to be used as a filter here, since we
+        already ensured only those assignments that could affect them
+        were passed to this method.
 
+        """
         def create_group_assignment(base_ref, user_id):
             """Creates a group assignment from the provided ref."""
-
             ref = copy.deepcopy(base_ref)
 
             ref['user_id'] = user_id
@@ -529,7 +456,7 @@ class Manager(manager.Manager):
             of role assignments containing one for each user of that group on
             that target.
 
-            An example of accepted ref is:
+            An example of accepted ref is::
 
             {
                 'group_id': group_id,
@@ -539,6 +466,8 @@ class Manager(manager.Manager):
 
             Once expanded, it should be returned as a list of entities like the
             one below, one for each each user_id in the provided group_id.
+
+            ::
 
             {
                 'user_id': user_id,
@@ -562,18 +491,22 @@ class Manager(manager.Manager):
                     for m in self.identity_api.list_users_in_group(
                         ref['group_id'])]
 
-        def expand_inherited_assignment(ref, user_id, project_id=None):
+        def expand_inherited_assignment(ref, user_id, project_id, subtree_ids):
             """Expands inherited role assignments.
 
             If this is a group role assignment on a target, replace it by a
             list of role assignments containing one for each user of that
             group, on every project under that target.
 
-            If this is a user role assignment on a target, replace it by a
+            If this is a user role assignment on a specific target (i.e.
+            project_id is specified, but subtree_ids is None) then simply
+            format this as a single assignment (since we are effectively
+            filtering on project_id). If however, project_id is None or
+            subtree_ids is not None, then replace this one assignment with a
             list of role assignments for that user on every project under
             that target.
 
-            An example of accepted ref is:
+            An example of accepted ref is::
 
             {
                 'group_id': group_id,
@@ -585,6 +518,8 @@ class Manager(manager.Manager):
             Once expanded, it should be returned as a list of entities like the
             one below, one for each each user_id in the provided group_id and
             for each subproject_id in the project_id subtree.
+
+            ::
 
             {
                 'user_id': user_id,
@@ -626,10 +561,25 @@ class Manager(manager.Manager):
 
             # Define expanded project list to which to apply this assignment
             if project_id:
-                # Since ref is an inherited assignment, it must have come from
-                # the domain or a parent. We only need apply it to the project
-                # requested.
+                # Since ref is an inherited assignment and we are filtering by
+                # project(s), we are only going to apply the assignment to the
+                # relevant project(s)
                 project_ids = [project_id]
+                if subtree_ids:
+                    project_ids += subtree_ids
+                    # If this is a domain inherited assignment, then we know
+                    # that all the project_ids will get this assignment. If
+                    # it's a project inherited assignment, and the assignment
+                    # point is an ancestor of project_id, then we know that
+                    # again all the project_ids will get the assignment.  If,
+                    # however, the assignment point is within the subtree,
+                    # then only a partial tree will get the assignment.
+                    if ref.get('project_id'):
+                        if ref['project_id'] in project_ids:
+                            project_ids = (
+                                [x['id'] for x in
+                                    self.resource_api.list_projects_in_subtree(
+                                        ref['project_id'])])
             elif ref.get('domain_id'):
                 # A domain inherited assignment, so apply it to all projects
                 # in this domain
@@ -638,7 +588,7 @@ class Manager(manager.Manager):
                         self.resource_api.list_projects_in_domain(
                             ref['domain_id'])])
             else:
-                # It must be a project assignment, so apply it to the subtree
+                # It must be a project assignment, so apply it to its subtree
                 project_ids = (
                     [x['id'] for x in
                         self.resource_api.list_projects_in_subtree(
@@ -658,13 +608,15 @@ class Manager(manager.Manager):
             return new_refs
 
         if ref.get('inherited_to_projects') == 'projects':
-            return expand_inherited_assignment(ref, user_id, project_id)
+            return expand_inherited_assignment(ref, user_id, project_id,
+                                               subtree_ids)
         elif 'group_id' in ref:
             return expand_group_assignment(ref, user_id)
         return [ref]
 
     def _list_effective_role_assignments(self, role_id, user_id, group_id,
-                                         domain_id, project_id, inherited):
+                                         domain_id, project_id, subtree_ids,
+                                         inherited):
         """List role assignments in effective mode.
 
         When using effective mode, besides the direct assignments, the indirect
@@ -672,24 +624,24 @@ class Manager(manager.Manager):
         be expanded.
 
         The resulting list of assignments will be filtered by the provided
-        parameters, although since we are in effective mode, group can never
-        act as a filter (since group assignments are expanded into user roles)
-        and domain can only be filter if we want non-inherited assignments,
-        since domains can't inherit assignments.
+        parameters. If subtree_ids is not None, then we also want to include
+        all subtree_ids in the filter as well. Since we are in effective mode,
+        group can never act as a filter (since group assignments are expanded
+        into user roles) and domain can only be filter if we want non-inherited
+        assignments, since domains can't inherit assignments.
 
         The goal of this method is to only ask the driver for those
         assignments as could effect the result based on the parameter filters
         specified, hence avoiding retrieving a huge list.
 
         """
-
         def list_role_assignments_for_actor(
-                role_id, inherited, user_id=None,
-                group_ids=None, project_id=None, domain_id=None):
+                role_id, inherited, user_id=None, group_ids=None,
+                project_id=None, subtree_ids=None, domain_id=None):
             """List role assignments for actor on target.
 
             List direct and indirect assignments for an actor, optionally
-            for a given target (i.e. project or domain).
+            for a given target (i.e. projects or domain).
 
             :param role_id: List for a specific role, can be None meaning all
                             roles
@@ -701,7 +653,16 @@ class Manager(manager.Manager):
             :param group_ids: A list of groups required. Only one of user_id
                               and group_ids can be specified
             :param project_id: If specified, only include those assignments
-                               that affect this project
+                               that affect at least this project, with
+                               additionally any projects specified in
+                               subtree_ids
+            :param subtree_ids: The list of projects in the subtree. If
+                                specified, also include those assignments that
+                                affect these projects. These projects are
+                                guaranteed to be in the same domain as the
+                                project specified in project_id. subtree_ids
+                                can only be specified if project_id has also
+                                been specified.
             :param domain_id: If specified, only include those assignments
                               that affect this domain - by definition this will
                               not include any inherited assignments
@@ -711,25 +672,31 @@ class Manager(manager.Manager):
                       response are included.
 
             """
+            project_ids_of_interest = None
+            if project_id:
+                if subtree_ids:
+                    project_ids_of_interest = subtree_ids + [project_id]
+                else:
+                    project_ids_of_interest = [project_id]
 
             # List direct project role assignments
-            project_ids = [project_id] if project_id else None
-
             non_inherited_refs = []
             if inherited is False or inherited is None:
                 # Get non inherited assignments
                 non_inherited_refs = self.driver.list_role_assignments(
                     role_id=role_id, domain_id=domain_id,
-                    project_ids=project_ids, user_id=user_id,
+                    project_ids=project_ids_of_interest, user_id=user_id,
                     group_ids=group_ids, inherited_to_projects=False)
 
             inherited_refs = []
             if inherited is True or inherited is None:
                 # Get inherited assignments
                 if project_id:
-                    # If we are filtering by a specific project, then we can
-                    # only get inherited assignments from its domain or from
-                    # any of its parents.
+                    # The project and any subtree are guaranteed to be owned by
+                    # the same domain, so since we are filtering by these
+                    # specific projects, then we can only get inherited
+                    # assignments from their common domain or from any of
+                    # their parents projects.
 
                     # List inherited assignments from the project's domain
                     proj_domain_id = self.resource_api.get_project(
@@ -739,14 +706,18 @@ class Manager(manager.Manager):
                         user_id=user_id, group_ids=group_ids,
                         inherited_to_projects=True)
 
-                    # And those assignments that could be inherited from the
-                    # project's parents.
-                    parent_ids = [project['id'] for project in
+                    # For inherited assignments from projects, since we know
+                    # they are from the same tree the only places these can
+                    # come from are from parents of the main project or
+                    # inherited assignments on the project or subtree itself.
+                    source_ids = [project['id'] for project in
                                   self.resource_api.list_project_parents(
                                       project_id)]
-                    if parent_ids:
+                    if subtree_ids:
+                        source_ids += project_ids_of_interest
+                    if source_ids:
                         inherited_refs += self.driver.list_role_assignments(
-                            role_id=role_id, project_ids=parent_ids,
+                            role_id=role_id, project_ids=source_ids,
                             user_id=user_id, group_ids=group_ids,
                             inherited_to_projects=True)
                 else:
@@ -758,7 +729,7 @@ class Manager(manager.Manager):
             return non_inherited_refs + inherited_refs
 
         # If filtering by group or inherited domain assignment the list is
-        # guranteed to be empty
+        # guaranteed to be empty
         if group_id or (domain_id and inherited):
             return []
 
@@ -769,7 +740,8 @@ class Manager(manager.Manager):
         # List user assignments
         direct_refs = list_role_assignments_for_actor(
             role_id=role_id, user_id=user_id, project_id=project_id,
-            domain_id=domain_id, inherited=inherited)
+            subtree_ids=subtree_ids, domain_id=domain_id,
+            inherited=inherited)
 
         # And those from the user's groups
         group_refs = []
@@ -778,41 +750,52 @@ class Manager(manager.Manager):
             if group_ids:
                 group_refs = list_role_assignments_for_actor(
                     role_id=role_id, project_id=project_id,
-                    group_ids=group_ids, domain_id=domain_id,
-                    inherited=inherited)
+                    subtree_ids=subtree_ids, group_ids=group_ids,
+                    domain_id=domain_id, inherited=inherited)
 
         # Expand grouping and inheritance on retrieved role assignments
         refs = []
         for ref in (direct_refs + group_refs):
-            refs += self._expand_indirect_assignment(ref=ref, user_id=user_id,
-                                                     project_id=project_id)
+            refs += self._expand_indirect_assignment(
+                ref=ref, user_id=user_id, project_id=project_id,
+                subtree_ids=subtree_ids)
 
         return refs
 
     def _list_direct_role_assignments(self, role_id, user_id, group_id,
-                                      domain_id, project_id, inherited):
+                                      domain_id, project_id, subtree_ids,
+                                      inherited):
         """List role assignments without applying expansion.
 
         Returns a list of direct role assignments, where their attributes match
-        the provided filters.
+        the provided filters. If subtree_ids is not None, then we also want to
+        include all subtree_ids in the filter as well.
 
         """
         group_ids = [group_id] if group_id else None
-        project_ids = [project_id] if project_id else None
+        project_ids_of_interest = None
+        if project_id:
+            if subtree_ids:
+                project_ids_of_interest = subtree_ids + [project_id]
+            else:
+                project_ids_of_interest = [project_id]
 
         return self.driver.list_role_assignments(
             role_id=role_id, user_id=user_id, group_ids=group_ids,
-            domain_id=domain_id, project_ids=project_ids,
+            domain_id=domain_id, project_ids=project_ids_of_interest,
             inherited_to_projects=inherited)
 
     def list_role_assignments(self, role_id=None, user_id=None, group_id=None,
-                              domain_id=None, project_id=None, inherited=None,
+                              domain_id=None, project_id=None,
+                              include_subtree=False, inherited=None,
                               effective=None):
         """List role assignments, honoring effective mode and provided filters.
 
         Returns a list of role assignments, where their attributes match the
         provided filters (role_id, user_id, group_id, domain_id, project_id and
-        inherited). The inherited filter defaults to None, meaning to get both
+        inherited). If include_subtree is True, then assignments on all
+        descendants of the project specified by project_id are also included.
+        The inherited filter defaults to None, meaning to get both
         non-inherited and inherited role assignments.
 
         If effective mode is specified, this means that rather than simply
@@ -827,21 +810,28 @@ class Manager(manager.Manager):
         inherited roles retrieval, inherited role assignments will be ignored.
 
         """
-
         if not CONF.os_inherit.enabled:
             if inherited:
                 return []
             inherited = False
 
+        subtree_ids = None
+        if project_id and include_subtree:
+            subtree_ids = (
+                [x['id'] for x in
+                    self.resource_api.list_projects_in_subtree(project_id)])
+
         if effective:
             return self._list_effective_role_assignments(
-                role_id, user_id, group_id, domain_id, project_id, inherited)
+                role_id, user_id, group_id, domain_id, project_id,
+                subtree_ids, inherited)
         else:
             return self._list_direct_role_assignments(
-                role_id, user_id, group_id, domain_id, project_id, inherited)
+                role_id, user_id, group_id, domain_id, project_id,
+                subtree_ids, inherited)
 
     def delete_tokens_for_role_assignments(self, role_id):
-        assignments = self.list_role_assignments_for_role(role_id=role_id)
+        assignments = self.list_role_assignments(role_id=role_id)
 
         # Iterate over the assignments for this role and build the list of
         # user or user+project IDs for the tokens we need to delete
@@ -916,20 +906,6 @@ class Manager(manager.Manager):
 @six.add_metaclass(abc.ABCMeta)
 class AssignmentDriverV8(object):
 
-    def _role_to_dict(self, role_id, inherited):
-        role_dict = {'id': role_id}
-        if inherited:
-            role_dict['inherited_to'] = 'projects'
-        return role_dict
-
-    def _roles_from_role_dicts(self, dict_list, inherited):
-        role_list = []
-        for d in dict_list:
-            if ((not d.get('inherited_to') and not inherited) or
-               (d.get('inherited_to') == 'projects' and inherited)):
-                role_list.append(d['id'])
-        return role_list
-
     def _get_list_limit(self):
         return CONF.assignment.list_limit or CONF.list_limit
 
@@ -946,8 +922,8 @@ class AssignmentDriverV8(object):
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
         """Add a role to a user within given tenant.
 
-        :raises: keystone.exception.Conflict
-
+        :raises keystone.exception.Conflict: If a duplicate role assignment
+            exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -956,7 +932,7 @@ class AssignmentDriverV8(object):
     def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
         """Remove a role from a user within given tenant.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -981,7 +957,6 @@ class AssignmentDriverV8(object):
                             domain_id=None, project_id=None,
                             inherited_to_projects=False):
         """Lists role ids for assignments/grants."""
-
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
@@ -990,7 +965,8 @@ class AssignmentDriverV8(object):
                             inherited_to_projects=False):
         """Checks an assignment/grant role id.
 
-        :raises: keystone.exception.RoleAssignmentNotFound
+        :raises keystone.exception.RoleAssignmentNotFound: If the role
+            assignment doesn't exist.
         :returns: None or raises an exception if grant not found
 
         """
@@ -1002,7 +978,8 @@ class AssignmentDriverV8(object):
                      inherited_to_projects=False):
         """Deletes assignments/grants.
 
-        :raises: keystone.exception.RoleAssignmentNotFound
+        :raises keystone.exception.RoleAssignmentNotFound: If the role
+            assignment doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1131,7 +1108,8 @@ class AssignmentDriverV8(object):
     def delete_project_assignments(self, project_id):
         """Deletes all assignments for a project.
 
-        :raises: keystone.exception.ProjectNotFound
+        :raises keystone.exception.ProjectNotFound: If the project doesn't
+            exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1139,14 +1117,13 @@ class AssignmentDriverV8(object):
     @abc.abstractmethod
     def delete_role_assignments(self, role_id):
         """Deletes all assignments for a role."""
-
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def delete_user_assignments(self, user_id):
         """Deletes all assignments for a user.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1155,7 +1132,7 @@ class AssignmentDriverV8(object):
     def delete_group_assignments(self, group_id):
         """Deletes all assignments for a group.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1206,18 +1183,7 @@ class RoleManager(manager.Manager):
         return ret
 
     def delete_role(self, role_id, initiator=None):
-        try:
-            self.assignment_api.delete_tokens_for_role_assignments(role_id)
-        except exception.NotImplemented:
-            # FIXME(morganfainberg): Not all backends (ldap) implement
-            # `list_role_assignments_for_role` which would have previously
-            # caused a NotImplmented error to be raised when called through
-            # the controller. Now error or proper action will always come from
-            # the `delete_role` method logic. Work needs to be done to make
-            # the behavior between drivers consistent (capable of revoking
-            # tokens for the same circumstances).  This is related to the bug
-            # https://bugs.launchpad.net/keystone/+bug/1221805
-            pass
+        self.assignment_api.delete_tokens_for_role_assignments(role_id)
         self.assignment_api.delete_role_assignments(role_id)
         self.driver.delete_role(role_id)
         notifications.Audit.deleted(self._ROLE, role_id, initiator)
@@ -1234,7 +1200,7 @@ class RoleDriverV8(object):
     def create_role(self, role_id, role):
         """Creates a new role.
 
-        :raises: keystone.exception.Conflict
+        :raises keystone.exception.Conflict: If a duplicate role exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1270,7 +1236,7 @@ class RoleDriverV8(object):
         """Get a role by ID.
 
         :returns: role_ref
-        :raises: keystone.exception.RoleNotFound
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1279,8 +1245,8 @@ class RoleDriverV8(object):
     def update_role(self, role_id, role):
         """Updates an existing role.
 
-        :raises: keystone.exception.RoleNotFound,
-                 keystone.exception.Conflict
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
+        :raises keystone.exception.Conflict: If a duplicate role exists.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1289,7 +1255,7 @@ class RoleDriverV8(object):
     def delete_role(self, role_id):
         """Deletes an existing role.
 
-        :raises: keystone.exception.RoleNotFound
+        :raises keystone.exception.RoleNotFound: If the role doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover

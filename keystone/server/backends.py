@@ -14,15 +14,14 @@ from keystone import assignment
 from keystone import auth
 from keystone import catalog
 from keystone.common import cache
-from keystone.contrib import endpoint_filter
-from keystone.contrib import federation
-from keystone.contrib import oauth1
-from keystone.contrib import revoke
 from keystone import credential
 from keystone import endpoint_policy
+from keystone import federation
 from keystone import identity
+from keystone import oauth1
 from keystone import policy
 from keystone import resource
+from keystone import revoke
 from keystone import token
 from keystone import trust
 
@@ -30,7 +29,8 @@ from keystone import trust
 def load_backends():
 
     # Configure and build the cache
-    cache.configure_cache_region(cache.REGION)
+    cache.configure_cache()
+    cache.configure_cache(region=catalog.COMPUTED_CATALOG_REGION)
 
     # Ensure that the identity driver is created before the assignment manager
     # and that the assignment driver is created before the resource manager.
@@ -44,7 +44,6 @@ def load_backends():
         catalog_api=catalog.Manager(),
         credential_api=credential.Manager(),
         domain_config_api=resource.DomainConfigManager(),
-        endpoint_filter_api=endpoint_filter.Manager(),
         endpoint_policy_api=endpoint_policy.Manager(),
         federation_api=federation.Manager(),
         id_generator_api=identity.generator.Manager(),

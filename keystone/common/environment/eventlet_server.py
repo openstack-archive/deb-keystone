@@ -73,7 +73,8 @@ class Server(service.ServiceBase):
     def __init__(self, application, host=None, port=None, keepalive=False,
                  keepidle=None):
         self.application = application
-        self.host = host or '0.0.0.0'
+        self.host = host or '0.0.0.0'  # nosec : Bind to all interfaces by
+        # default for backwards compatibility.
         self.port = port or 0
         # Pool for a green thread in which wsgi server will be running
         self.pool = eventlet.GreenPool(POOL_SIZE)
@@ -92,7 +93,6 @@ class Server(service.ServiceBase):
 
         Raises Exception if this has already been called.
         """
-
         # TODO(dims): eventlet's green dns/socket module does not actually
         # support IPv6 in getaddrinfo(). We need to get around this in the
         # future or monitor upstream for a fix.
@@ -120,7 +120,6 @@ class Server(service.ServiceBase):
 
     def start(self, key=None, backlog=128):
         """Run a WSGI server with the given application."""
-
         if self.socket is None:
             self.listen(key=key, backlog=backlog)
 
@@ -168,9 +167,11 @@ class Server(service.ServiceBase):
         """Wait until all servers have completed running."""
         try:
             self.pool.waitall()
-        except KeyboardInterrupt:
+        except KeyboardInterrupt:  # nosec
+            # If CTRL-C, just break out of the loop.
             pass
-        except greenlet.GreenletExit:
+        except greenlet.GreenletExit:  # nosec
+            # If exiting, break out of the loop.
             pass
 
     def reset(self):
@@ -198,7 +199,7 @@ class Server(service.ServiceBase):
                 socket, application, log=EventletFilteringLogger(logger),
                 debug=False, keepalive=CONF.eventlet_server.wsgi_keep_alive,
                 socket_timeout=socket_timeout)
-        except greenlet.GreenletExit:
+        except greenlet.GreenletExit:  # nosec
             # Wait until all servers have completed running
             pass
         except Exception:

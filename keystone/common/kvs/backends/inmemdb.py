@@ -12,9 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""
-Keystone In-Memory Dogpile.cache backend implementation.
-"""
+"""Keystone In-Memory Dogpile.cache backend implementation."""
 
 import copy
 
@@ -40,6 +38,7 @@ class MemoryBackend(api.CacheBackend):
             'keystone.common.kvs.Memory'
         )
     """
+
     def __init__(self, arguments):
         self._db = {}
 

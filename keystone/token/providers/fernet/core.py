@@ -15,8 +15,8 @@ from oslo_log import log
 
 from keystone.common import dependency
 from keystone.common import utils as ks_utils
-from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
+from keystone.federation import constants as federation_constants
 from keystone.i18n import _
 from keystone.token import provider
 from keystone.token.providers import common
@@ -127,18 +127,18 @@ class Provider(common.BaseProvider):
         the values and build federated Fernet tokens.
 
         """
-        idp_id = token_data['token'].get('user', {}).get(
-            federation_constants.FEDERATION, {}).get(
-                'identity_provider', {}).get('id')
-        protocol_id = token_data['token'].get('user', {}).get(
-            federation_constants.FEDERATION, {}).get('protocol', {}).get('id')
-        # If we don't have an identity provider ID and a protocol ID, it's safe
-        # to assume we aren't dealing with a federated token.
-        if not (idp_id and protocol_id):
-            return None
+        token_data = token_data['token']
+        try:
+            user = token_data['user']
+            federation = user[federation_constants.FEDERATION]
+            idp_id = federation['identity_provider']['id']
+            protocol_id = federation['protocol']['id']
+        except KeyError:
+            # The token data doesn't have federated info, so we aren't dealing
+            # with a federated token and no federated info to build.
+            return
 
-        group_ids = token_data['token'].get('user', {}).get(
-            federation_constants.FEDERATION, {}).get('groups')
+        group_ids = federation.get('groups')
 
         return {'group_ids': group_ids,
                 'idp_id': idp_id,
@@ -167,7 +167,9 @@ class Provider(common.BaseProvider):
             'user': {
                 federation_constants.FEDERATION: federated_info,
                 'id': user_id,
-                'name': user_id
+                'name': user_id,
+                'domain': {'id': CONF.federation.federated_domain_name,
+                           'name': CONF.federation.federated_domain_name, },
             }
         }
 
@@ -235,7 +237,7 @@ class Provider(common.BaseProvider):
         :param token: a string describing the token to validate
         :returns: the token data
         :raises keystone.exception.TokenNotFound: if token format version isn't
-                                                 supported
+            supported
 
         """
         try:
@@ -246,13 +248,14 @@ class Provider(common.BaseProvider):
             raise exception.TokenNotFound(e)
 
         token_dict = None
-        trust_ref = None
         if federated_info:
             token_dict = self._rebuild_federated_info(federated_info, user_id)
             if project_id or domain_id:
                 self._rebuild_federated_token_roles(token_dict, federated_info,
                                                     user_id, project_id,
                                                     domain_id)
+
+        trust_ref = None
         if trust_id:
             trust_ref = self.trust_api.get_trust(trust_id)
 
@@ -272,7 +275,7 @@ class Provider(common.BaseProvider):
 
         :param token_data: token information
         :type token_data: dict
-        :raises keystone.exception.NotImplemented: when called
+
         """
         return self.token_formatter.create_token(
             token_data['token']['user']['id'],
@@ -290,5 +293,6 @@ class Provider(common.BaseProvider):
         """Return if the token provider supports bind authentication methods.
 
         :returns: False
+
         """
         return False

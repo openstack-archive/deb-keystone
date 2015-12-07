@@ -12,20 +12,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""
-Keystone Memcached dogpile.cache backend implementation.
-"""
+"""Keystone Memcached dogpile.cache backend implementation."""
 
 import random as _random
 import time
 
 from dogpile.cache import api
 from dogpile.cache.backends import memcached
+from oslo_cache.backends import memcache_pool
 from oslo_config import cfg
 from oslo_log import log
 from six.moves import range
 
-from keystone.common.cache.backends import memcache_pool
 from keystone import exception
 from keystone.i18n import _
 
@@ -49,6 +47,7 @@ class MemcachedLock(object):
     http://amix.dk/blog/post/19386
 
     """
+
     def __init__(self, client_fn, key, lock_timeout, max_lock_attempts):
         self.client_fn = client_fn
         self.key = "_lock" + key
@@ -63,7 +62,9 @@ class MemcachedLock(object):
             elif not wait:
                 return False
             else:
-                sleep_time = random.random()
+                sleep_time = random.random()  # nosec : random is not used for
+                # crypto or security, it's just the time to delay between
+                # retries.
                 time.sleep(sleep_time)
         raise exception.UnexpectedError(
             _('Maximum lock attempts on %s occurred.') % self.key)
@@ -81,6 +82,7 @@ class MemcachedBackend(object):
     time `memcached`, `bmemcached`, `pylibmc` and `pooled_memcached` are
     valid).
     """
+
     def __init__(self, arguments):
         self._key_mangler = None
         self.raw_no_expiry_keys = set(arguments.pop('no_expiry_keys', set()))

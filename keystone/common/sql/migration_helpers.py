@@ -34,12 +34,14 @@ from keystone.i18n import _
 
 
 CONF = cfg.CONF
-DEFAULT_EXTENSIONS = ['endpoint_filter',
-                      'endpoint_policy',
-                      'federation',
-                      'oauth1',
-                      'revoke',
-                      ]
+DEFAULT_EXTENSIONS = []
+
+MIGRATED_EXTENSIONS = ['endpoint_policy',
+                       'federation',
+                       'oauth1',
+                       'revoke',
+                       'endpoint_filter'
+                       ]
 
 
 def get_default_domain():
@@ -117,9 +119,8 @@ def rename_tables_with_constraints(renames, constraints, engine):
 
     `renames` is a dict, mapping {'to_table_name': from_table, ...}
     """
-
     if engine.name != 'sqlite':
-        # Sqlite doesn't support constraints, so nothing to remove.
+        # SQLite doesn't support constraints, so nothing to remove.
         remove_constraints(constraints)
 
     for to_table_name in renames:
@@ -154,13 +155,16 @@ def _assert_not_schema_downgrade(extension=None, version=None):
             current_ver = int(six.text_type(get_db_version(extension)))
             if int(version) < current_ver:
                 raise migration.exception.DbMigrationError()
-        except exceptions.DatabaseNotControlledError:
+        except exceptions.DatabaseNotControlledError:  # nosec
             # NOTE(morganfainberg): The database is not controlled, this action
             # cannot be a downgrade.
             pass
 
 
 def _sync_extension_repo(extension, version):
+    if extension in MIGRATED_EXTENSIONS:
+        raise exception.MigrationMovedFailure(extension=extension)
+
     init_version = 0
     engine = sql.get_engine()
 
@@ -177,7 +181,7 @@ def _sync_extension_repo(extension, version):
         # Register the repo with the version control API
         # If it already knows about the repo, it will throw
         # an exception that we can safely ignore
-        except exceptions.DatabaseAlreadyControlledError:
+        except exceptions.DatabaseAlreadyControlledError:  # nosec
             pass
     except exception.MigrationNotProvided as e:
         print(e)

@@ -15,16 +15,20 @@
 import copy
 import uuid
 
+import mock
 from oslo_config import cfg
+from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from pycadf import cadftaxonomy
 from six.moves import http_client
 from six.moves import urllib
 
-from keystone.contrib import oauth1
-from keystone.contrib.oauth1 import controllers
-from keystone.contrib.oauth1 import core
+from keystone.contrib.oauth1 import routers
 from keystone import exception
+from keystone import oauth1
+from keystone.oauth1 import controllers
+from keystone.oauth1 import core
+from keystone.tests import unit
 from keystone.tests.unit.common import test_notifications
 from keystone.tests.unit.ksfixtures import temporaryfile
 from keystone.tests.unit import test_v3
@@ -33,10 +37,17 @@ from keystone.tests.unit import test_v3
 CONF = cfg.CONF
 
 
-class OAuth1Tests(test_v3.RestfulTestCase):
+class OAuth1ContribTests(test_v3.RestfulTestCase):
 
-    EXTENSION_NAME = 'oauth1'
-    EXTENSION_TO_ADD = 'oauth1_extension'
+    @mock.patch.object(versionutils, 'report_deprecated_feature')
+    def test_exception_happens(self, mock_deprecator):
+        routers.OAuth1Extension(mock.ANY)
+        mock_deprecator.assert_called_once_with(mock.ANY, mock.ANY)
+        args, _kwargs = mock_deprecator.call_args
+        self.assertIn("Remove oauth1_extension from", args[1])
+
+
+class OAuth1Tests(test_v3.RestfulTestCase):
 
     CONSUMER_URL = '/OS-OAUTH1/consumers'
 
@@ -140,7 +151,7 @@ class ConsumerCRUDTests(OAuth1Tests):
         consumer = self._create_single_consumer()
         consumer_id = consumer['id']
         resp = self.delete(self.CONSUMER_URL + '/%s' % consumer_id)
-        self.assertResponseStatus(resp, 204)
+        self.assertResponseStatus(resp, http_client.NO_CONTENT)
 
     def test_consumer_get(self):
         consumer = self._create_single_consumer()
@@ -262,7 +273,7 @@ class OAuthFlowTests(OAuth1Tests):
 
         url = self._authorize_request_token(request_key)
         body = {'roles': [{'id': self.role_id}]}
-        resp = self.put(url, body=body, expected_status=200)
+        resp = self.put(url, body=body, expected_status=http_client.OK)
         self.verifier = resp.result['token']['oauth_verifier']
         self.assertTrue(all(i in core.VERIFIER_CHARS for i in self.verifier))
         self.assertEqual(8, len(self.verifier))
@@ -357,7 +368,7 @@ class AccessTokenCRUDTests(OAuthFlowTests):
         resp = self.delete('/users/%(user)s/OS-OAUTH1/access_tokens/%(auth)s'
                            % {'user': self.user_id,
                               'auth': self.access_token.key})
-        self.assertResponseStatus(resp, 204)
+        self.assertResponseStatus(resp, http_client.NO_CONTENT)
 
         # List access_token should be 0
         resp = self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens'
@@ -388,7 +399,7 @@ class AuthTokenTests(OAuthFlowTests):
         self.assertEqual(self.role_id, roles_list[0]['id'])
 
         # verify that the token can perform delegated tasks
-        ref = self.new_user_ref(domain_id=self.domain_id)
+        ref = unit.new_user_ref(domain_id=self.domain_id)
         r = self.admin_request(path='/v3/users', headers=headers,
                                method='POST', body={'user': ref})
         self.assertValidUserResponse(r, ref)
@@ -400,7 +411,7 @@ class AuthTokenTests(OAuthFlowTests):
         resp = self.delete('/users/%(user)s/OS-OAUTH1/access_tokens/%(auth)s'
                            % {'user': self.user_id,
                               'auth': self.access_token.key})
-        self.assertResponseStatus(resp, 204)
+        self.assertResponseStatus(resp, http_client.NO_CONTENT)
 
         # Check Keystone Token no longer exists
         headers = {'X-Subject-Token': self.keystone_token_id,
@@ -415,7 +426,7 @@ class AuthTokenTests(OAuthFlowTests):
         consumer_id = self.consumer['key']
         resp = self.delete('/OS-OAUTH1/consumers/%(consumer_id)s'
                            % {'consumer_id': consumer_id})
-        self.assertResponseStatus(resp, 204)
+        self.assertResponseStatus(resp, http_client.NO_CONTENT)
 
         # List access_token should be 0
         resp = self.get('/users/%(user_id)s/OS-OAUTH1/access_tokens'
@@ -645,7 +656,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
 
         url = self._authorize_request_token(request_key)
         body = {'roles': [{'id': self.role_id}]}
-        resp = self.put(url, body=body, expected_status=200)
+        resp = self.put(url, body=body, expected_status=http_client.OK)
         verifier = resp.result['token']['oauth_verifier']
         self.assertIsNotNone(verifier)
 
@@ -719,7 +730,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
 
         url = self._authorize_request_token(request_key)
         body = {'roles': [{'id': self.role_id}]}
-        resp = self.put(url, body=body, expected_status=200)
+        resp = self.put(url, body=body, expected_status=http_client.OK)
         self.verifier = resp.result['token']['oauth_verifier']
 
         self.request_token.set_verifier(self.verifier)
@@ -753,7 +764,8 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         # NOTE(stevemar): To simulate this error, we remove the Authorization
         # header from the post request.
         del headers['Authorization']
-        self.post(endpoint, headers=headers, expected_status=500)
+        self.post(endpoint, headers=headers,
+                  expected_status=http_client.INTERNAL_SERVER_ERROR)
 
 
 class OAuthNotificationTests(OAuth1Tests,
@@ -800,7 +812,6 @@ class OAuthNotificationTests(OAuth1Tests,
         notifications for request token creation, and access token
         creation/deletion are emitted.
         """
-
         consumer = self._create_single_consumer()
         consumer_id = consumer['id']
         consumer_secret = consumer['secret']
@@ -829,7 +840,7 @@ class OAuthNotificationTests(OAuth1Tests,
 
         url = self._authorize_request_token(request_key)
         body = {'roles': [{'id': self.role_id}]}
-        resp = self.put(url, body=body, expected_status=200)
+        resp = self.put(url, body=body, expected_status=http_client.OK)
         self.verifier = resp.result['token']['oauth_verifier']
         self.assertTrue(all(i in core.VERIFIER_CHARS for i in self.verifier))
         self.assertEqual(8, len(self.verifier))
@@ -858,7 +869,7 @@ class OAuthNotificationTests(OAuth1Tests,
         resp = self.delete('/users/%(user)s/OS-OAUTH1/access_tokens/%(auth)s'
                            % {'user': self.user_id,
                               'auth': self.access_token.key})
-        self.assertResponseStatus(resp, 204)
+        self.assertResponseStatus(resp, http_client.NO_CONTENT)
 
         # Test to ensure the delete access token notification is sent
         self._assert_notify_sent(access_key,
@@ -873,7 +884,7 @@ class OAuthNotificationTests(OAuth1Tests,
 class OAuthCADFNotificationTests(OAuthNotificationTests):
 
     def setUp(self):
-        """Repeat the tests for CADF notifications """
+        """Repeat the tests for CADF notifications."""
         super(OAuthCADFNotificationTests, self).setUp()
         self.config_fixture.config(notification_format='cadf')
 

@@ -127,7 +127,6 @@ class Manager(manager.Manager):
                 :returns: list of endpoints that match
 
                 """
-
                 if region_id in regions_examined:
                     msg = _LE('Circular reference or a repeated entry found '
                               'in region tree - %(region_id)s.')
@@ -217,7 +216,8 @@ class Manager(manager.Manager):
                         service_id=endpoint['service_id'],
                         region_id=region_id)
                     return ref['policy_id']
-                except exception.PolicyAssociationNotFound:
+                except exception.PolicyAssociationNotFound:  # nosec
+                    # There wasn't one for that region & service, handle below.
                     pass
 
                 # There wasn't one for that region & service, let's
@@ -239,7 +239,9 @@ class Manager(manager.Manager):
         try:
             ref = self.driver.get_policy_association(endpoint_id=endpoint_id)
             return _get_policy(ref['policy_id'], endpoint_id)
-        except exception.PolicyAssociationNotFound:
+        except exception.PolicyAssociationNotFound:  # nosec
+            # There wasn't a policy explicitly defined for this endpoint,
+            # handled below.
             pass
 
         # There wasn't a policy explicitly defined for this endpoint, so
@@ -255,7 +257,8 @@ class Manager(manager.Manager):
             ref = self.driver.get_policy_association(
                 service_id=endpoint['service_id'])
             return _get_policy(ref['policy_id'], endpoint_id)
-        except exception.PolicyAssociationNotFound:
+        except exception.PolicyAssociationNotFound:  # nosec
+            # No policy is associated with endpoint, handled below.
             pass
 
         msg = _('No policy is associated with endpoint '
@@ -304,8 +307,8 @@ class EndpointPolicyDriverV8(object):
         :type service_id: string
         :param region_id: identity of the region to associate
         :type region_id: string
-        :raises: keystone.exception.PolicyAssociationNotFound if there is no
-                 match for the specified association
+        :raises keystone.exception.PolicyAssociationNotFound: If there is no
+            match for the specified association.
         :returns: None
 
         """
@@ -343,8 +346,8 @@ class EndpointPolicyDriverV8(object):
         :type service_id: string
         :param region_id: identity of the region
         :type region_id: string
-        :raises: keystone.exception.PolicyAssociationNotFound if there is no
-                 match for the specified association
+        :raises keystone.exception.PolicyAssociationNotFound: If there is no
+            match for the specified association.
         :returns: dict containing policy_id
 
         """

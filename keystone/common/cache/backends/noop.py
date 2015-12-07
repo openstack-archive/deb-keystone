@@ -13,11 +13,17 @@
 # under the License.
 
 from dogpile.cache import api
+from oslo_log import versionutils
 
 
 NO_VALUE = api.NO_VALUE
 
 
+@versionutils.deprecated(
+    versionutils.deprecated.MITAKA,
+    what='keystone.common.cache.noop backend',
+    in_favor_of="dogpile.cache's Null backend",
+    remove_in=+1)
 class NoopCacheBackend(api.CacheBackend):
     """A no op backend as a default caching backend.
 
@@ -27,6 +33,7 @@ class NoopCacheBackend(api.CacheBackend):
     mechanism to cleanup it's internal dict and therefore could cause run-away
     memory utilization.
     """
+
     def __init__(self, *args):
         return
 

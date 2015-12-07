@@ -119,7 +119,7 @@ class TokenFormatter(object):
         # Restore padding on token before decoding it
         fernet_token = TokenFormatter.restore_padding(fernet_token)
 
-        # fernet tokens are base64 encoded, so we need to unpack them first
+        # Fernet tokens are base64 encoded, so we need to unpack them first
         token_bytes = base64.urlsafe_b64decode(fernet_token)
 
         # slice into the byte array to get just the timestamp
@@ -303,7 +303,7 @@ class BasePayload(object):
 
         """
         # TODO(lbragstad): Wrap this in an exception. Not sure what the case
-        # would be where we couldn't handle what we've been given but incase
+        # would be where we couldn't handle what we've been given but in case
         # the integrity of the token has been compromised.
         uuid_obj = uuid.UUID(uuid_string)
         return uuid_obj.bytes
@@ -317,17 +317,17 @@ class BasePayload(object):
 
         """
         # TODO(lbragstad): Wrap this in an exception. Not sure what the case
-        # would be where we couldn't handle what we've been given but incase
+        # would be where we couldn't handle what we've been given but in case
         # the integrity of the token has been compromised.
         uuid_obj = uuid.UUID(bytes=uuid_byte_string)
         return uuid_obj.hex
 
     @classmethod
-    def _convert_time_string_to_int(cls, time_string):
-        """Convert a time formatted string to a timestamp integer.
+    def _convert_time_string_to_float(cls, time_string):
+        """Convert a time formatted string to a float.
 
         :param time_string: time formatted string
-        :returns: an integer timestamp
+        :returns: a timestamp as a float
 
         """
         time_object = timeutils.parse_isotime(time_string)
@@ -335,14 +335,14 @@ class BasePayload(object):
                 datetime.datetime.utcfromtimestamp(0)).total_seconds()
 
     @classmethod
-    def _convert_int_to_time_string(cls, time_int):
-        """Convert a timestamp integer to a string.
+    def _convert_float_to_time_string(cls, time_float):
+        """Convert a floating point timestamp to a string.
 
-        :param time_int: integer representing timestamp
+        :param time_float: integer representing timestamp
         :returns: a time formatted strings
 
         """
-        time_object = datetime.datetime.utcfromtimestamp(time_int)
+        time_object = datetime.datetime.utcfromtimestamp(time_float)
         return ks_utils.isotime(time_object, subsecond=True)
 
     @classmethod
@@ -350,15 +350,16 @@ class BasePayload(object):
         """Attempt to convert value to bytes or return value.
 
         :param value: value to attempt to convert to bytes
-        :returns: uuid value in bytes or value
+        :returns: tuple containing boolean indicating whether user_id was
+                  stored as bytes and uuid value as bytes or the original value
 
         """
         try:
-            return cls.convert_uuid_hex_to_bytes(value)
+            return (True, cls.convert_uuid_hex_to_bytes(value))
         except ValueError:
             # this might not be a UUID, depending on the situation (i.e.
             # federation)
-            return value
+            return (False, value)
 
     @classmethod
     def attempt_convert_uuid_bytes_to_hex(cls, value):
@@ -390,7 +391,7 @@ class UnscopedPayload(BasePayload):
         """
         b_user_id = cls.attempt_convert_uuid_hex_to_bytes(user_id)
         methods = auth_plugins.convert_method_list_to_integer(methods)
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                            audit_ids))
         return (b_user_id, methods, expires_at_int, b_audit_ids)
@@ -404,9 +405,11 @@ class UnscopedPayload(BasePayload):
                  audit_ids
 
         """
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
-        expires_at_str = cls._convert_int_to_time_string(payload[2])
+        expires_at_str = cls._convert_float_to_time_string(payload[2])
         audit_ids = list(map(provider.base64_encode, payload[3]))
         return (user_id, methods, expires_at_str, audit_ids)
 
@@ -436,7 +439,7 @@ class DomainScopedPayload(BasePayload):
                 b_domain_id = domain_id
             else:
                 raise
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                            audit_ids))
         return (b_user_id, methods, b_domain_id, expires_at_int, b_audit_ids)
@@ -450,7 +453,9 @@ class DomainScopedPayload(BasePayload):
                  expires_at_str, and audit_ids
 
         """
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
         try:
             domain_id = cls.convert_uuid_bytes_to_hex(payload[2])
@@ -460,7 +465,7 @@ class DomainScopedPayload(BasePayload):
                 domain_id = payload[2]
             else:
                 raise
-        expires_at_str = cls._convert_int_to_time_string(payload[3])
+        expires_at_str = cls._convert_float_to_time_string(payload[3])
         audit_ids = list(map(provider.base64_encode, payload[4]))
 
         return (user_id, methods, domain_id, expires_at_str, audit_ids)
@@ -484,7 +489,7 @@ class ProjectScopedPayload(BasePayload):
         b_user_id = cls.attempt_convert_uuid_hex_to_bytes(user_id)
         methods = auth_plugins.convert_method_list_to_integer(methods)
         b_project_id = cls.attempt_convert_uuid_hex_to_bytes(project_id)
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                            audit_ids))
         return (b_user_id, methods, b_project_id, expires_at_int, b_audit_ids)
@@ -498,10 +503,14 @@ class ProjectScopedPayload(BasePayload):
                  expires_at_str, and audit_ids
 
         """
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
-        project_id = cls.attempt_convert_uuid_bytes_to_hex(payload[2])
-        expires_at_str = cls._convert_int_to_time_string(payload[3])
+        (is_stored_as_bytes, project_id) = payload[2]
+        if is_stored_as_bytes:
+            project_id = cls.attempt_convert_uuid_bytes_to_hex(project_id)
+        expires_at_str = cls._convert_float_to_time_string(payload[3])
         audit_ids = list(map(provider.base64_encode, payload[4]))
 
         return (user_id, methods, project_id, expires_at_str, audit_ids)
@@ -528,7 +537,7 @@ class TrustScopedPayload(BasePayload):
         methods = auth_plugins.convert_method_list_to_integer(methods)
         b_project_id = cls.attempt_convert_uuid_hex_to_bytes(project_id)
         b_trust_id = cls.convert_uuid_hex_to_bytes(trust_id)
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                            audit_ids))
 
@@ -544,10 +553,14 @@ class TrustScopedPayload(BasePayload):
                   expires_at_str, audit_ids, and trust_id
 
         """
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
-        project_id = cls.attempt_convert_uuid_bytes_to_hex(payload[2])
-        expires_at_str = cls._convert_int_to_time_string(payload[3])
+        (is_stored_as_bytes, project_id) = payload[2]
+        if is_stored_as_bytes:
+            project_id = cls.attempt_convert_uuid_bytes_to_hex(project_id)
+        expires_at_str = cls._convert_float_to_time_string(payload[3])
         audit_ids = list(map(provider.base64_encode, payload[4]))
         trust_id = cls.convert_uuid_bytes_to_hex(payload[5])
 
@@ -564,7 +577,9 @@ class FederatedUnscopedPayload(BasePayload):
 
     @classmethod
     def unpack_group_id(cls, group_id_in_bytes):
-        group_id = cls.attempt_convert_uuid_bytes_to_hex(group_id_in_bytes)
+        (is_stored_as_bytes, group_id) = group_id_in_bytes
+        if is_stored_as_bytes:
+            group_id = cls.attempt_convert_uuid_bytes_to_hex(group_id)
         return {'id': group_id}
 
     @classmethod
@@ -581,7 +596,6 @@ class FederatedUnscopedPayload(BasePayload):
         :returns: the payload of a federated token
 
         """
-
         b_user_id = cls.attempt_convert_uuid_hex_to_bytes(user_id)
         methods = auth_plugins.convert_method_list_to_integer(methods)
         b_group_ids = list(map(cls.pack_group_id,
@@ -589,7 +603,7 @@ class FederatedUnscopedPayload(BasePayload):
         b_idp_id = cls.attempt_convert_uuid_hex_to_bytes(
             federated_info['idp_id'])
         protocol_id = federated_info['protocol_id']
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                                audit_ids))
 
@@ -607,13 +621,16 @@ class FederatedUnscopedPayload(BasePayload):
                  federated domain ID
 
         """
-
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
         group_ids = list(map(cls.unpack_group_id, payload[2]))
-        idp_id = cls.attempt_convert_uuid_bytes_to_hex(payload[3])
+        (is_stored_as_bytes, idp_id) = payload[3]
+        if is_stored_as_bytes:
+            idp_id = cls.attempt_convert_uuid_bytes_to_hex(idp_id)
         protocol_id = payload[4]
-        expires_at_str = cls._convert_int_to_time_string(payload[5])
+        expires_at_str = cls._convert_float_to_time_string(payload[5])
         audit_ids = list(map(provider.base64_encode, payload[6]))
         federated_info = dict(group_ids=group_ids, idp_id=idp_id,
                               protocol_id=protocol_id)
@@ -646,7 +663,7 @@ class FederatedScopedPayload(FederatedUnscopedPayload):
         b_idp_id = cls.attempt_convert_uuid_hex_to_bytes(
             federated_info['idp_id'])
         protocol_id = federated_info['protocol_id']
-        expires_at_int = cls._convert_time_string_to_int(expires_at)
+        expires_at_int = cls._convert_time_string_to_float(expires_at)
         b_audit_ids = list(map(provider.random_urlsafe_str_to_bytes,
                                audit_ids))
 
@@ -665,13 +682,19 @@ class FederatedScopedPayload(FederatedUnscopedPayload):
                   group IDs
 
         """
-        user_id = cls.attempt_convert_uuid_bytes_to_hex(payload[0])
+        (is_stored_as_bytes, user_id) = payload[0]
+        if is_stored_as_bytes:
+            user_id = cls.attempt_convert_uuid_bytes_to_hex(user_id)
         methods = auth_plugins.convert_integer_to_method_list(payload[1])
-        scope_id = cls.attempt_convert_uuid_bytes_to_hex(payload[2])
+        (is_stored_as_bytes, scope_id) = payload[2]
+        if is_stored_as_bytes:
+            scope_id = cls.attempt_convert_uuid_bytes_to_hex(scope_id)
         group_ids = list(map(cls.unpack_group_id, payload[3]))
-        idp_id = cls.attempt_convert_uuid_bytes_to_hex(payload[4])
+        (is_stored_as_bytes, idp_id) = payload[4]
+        if is_stored_as_bytes:
+            idp_id = cls.attempt_convert_uuid_bytes_to_hex(idp_id)
         protocol_id = payload[5]
-        expires_at_str = cls._convert_int_to_time_string(payload[6])
+        expires_at_str = cls._convert_float_to_time_string(payload[6])
         audit_ids = list(map(provider.base64_encode, payload[7]))
         federated_info = dict(idp_id=idp_id, protocol_id=protocol_id,
                               group_ids=group_ids)

@@ -22,7 +22,6 @@ import socket
 
 from oslo_config import cfg
 from oslo_log import log
-from oslo_log import versionutils
 import oslo_messaging
 import pycadf
 from pycadf import cadftaxonomy as taxonomy
@@ -157,15 +156,16 @@ class ManagerNotificationWrapper(object):
     """Send event notifications for ``Manager`` methods.
 
     Sends a notification if the wrapped Manager method does not raise an
-    ``Exception`` (such as ``keystone.exception.NotFound``).
+    :class:`Exception` (such as :class:`keystone.exception.NotFound`).
 
-    :param operation:  one of the values from ACTIONS
+    :param operation: one of the values from ACTIONS
     :param resource_type: type of resource being affected
     :param public:  If True (default), the event will be sent to the notifier
-                API.  If False, the event will only be sent via
-                notify_event_callbacks to in process listeners
+                    API.  If False, the event will only be sent via
+                    notify_event_callbacks to in process listeners
 
     """
+
     def __init__(self, operation, resource_type, public=True,
                  resource_id_arg_index=1, result_id_arg_attr=None):
         self.operation = operation
@@ -175,6 +175,7 @@ class ManagerNotificationWrapper(object):
         self.result_id_arg_attr = result_id_arg_attr
 
     def __call__(self, f):
+        @functools.wraps(f)
         def wrapper(*args, **kwargs):
             """Send a notification if the wrapped callable is successful."""
             try:
@@ -326,7 +327,6 @@ def listener(cls):
                 }
 
     """
-
     def init_wrapper(init):
         @functools.wraps(init)
         def __new_init__(self, *args, **kwargs):
@@ -424,7 +424,6 @@ def _create_cadf_payload(operation, resource_type, resource_id,
     :param outcome: outcomes of the operation (SUCCESS, FAILURE, etc)
     :param initiator: CADF representation of the user that created the request
     """
-
     if resource_type not in CADF_TYPE_MAP:
         target_uri = taxonomy.UNKNOWN
     else:
@@ -484,7 +483,6 @@ def _get_request_audit_info(context, user_id=None):
     :returns: Auditing data about the request
     :rtype: :class:`pycadf.Resource`
     """
-
     remote_addr = None
     http_user_agent = None
     project_id = None
@@ -519,8 +517,8 @@ class CadfNotificationWrapper(object):
     This function is only used for Authentication events. Its ``action`` and
     ``event_type`` are dictated below.
 
-    - action: authenticate
-    - event_type: identity.authenticate
+    - action: ``authenticate``
+    - event_type: ``identity.authenticate``
 
     Sends CADF notifications for events such as whether an authentication was
     successful or not.
@@ -534,9 +532,9 @@ class CadfNotificationWrapper(object):
         self.event_type = '%s.%s' % (SERVICE, operation)
 
     def __call__(self, f):
+        @functools.wraps(f)
         def wrapper(wrapped_self, context, user_id, *args, **kwargs):
             """Always send a notification."""
-
             initiator = _get_request_audit_info(context, user_id)
             target = resource.Resource(typeURI=taxonomy.ACCOUNT_USER)
             try:
@@ -562,42 +560,44 @@ class CadfRoleAssignmentNotificationWrapper(object):
     This function is only used for role assignment events. Its ``action`` and
     ``event_type`` are dictated below.
 
-    - action: created.role_assignment or deleted.role_assignment
-    - event_type: identity.role_assignment.created or
-        identity.role_assignment.deleted
+    - action: ``created.role_assignment`` or ``deleted.role_assignment``
+    - event_type: ``identity.role_assignment.created`` or
+        ``identity.role_assignment.deleted``
 
     Sends a CADF notification if the wrapped method does not raise an
-    ``Exception`` (such as ``keystone.exception.NotFound``).
+    :class:`Exception` (such as :class:`keystone.exception.NotFound`).
 
-    :param operation: one of the values from ACTIONS (create or delete)
+    :param operation: one of the values from ACTIONS (created or deleted)
     """
 
     ROLE_ASSIGNMENT = 'role_assignment'
 
     def __init__(self, operation):
         self.action = '%s.%s' % (operation, self.ROLE_ASSIGNMENT)
-        self.deprecated_event_type = '%s.%s.%s' % (SERVICE, operation,
-                                                   self.ROLE_ASSIGNMENT)
         self.event_type = '%s.%s.%s' % (SERVICE, self.ROLE_ASSIGNMENT,
                                         operation)
 
     def __call__(self, f):
+        @functools.wraps(f)
         def wrapper(wrapped_self, role_id, *args, **kwargs):
-            """Send a notification if the wrapped callable is successful."""
+            """Send a notification if the wrapped callable is successful.
 
-            """ NOTE(stevemar): The reason we go through checking kwargs
+            NOTE(stevemar): The reason we go through checking kwargs
             and args for possible target and actor values is because the
             create_grant() (and delete_grant()) method are called
             differently in various tests.
-            Using named arguments, i.e.:
+            Using named arguments, i.e.::
+
                 create_grant(user_id=user['id'], domain_id=domain['id'],
                              role_id=role['id'])
 
-            Or, using positional arguments, i.e.:
+            Or, using positional arguments, i.e.::
+
                 create_grant(role_id['id'], user['id'], None,
                              domain_id=domain['id'], None)
 
-            Or, both, i.e.:
+            Or, both, i.e.::
+
                 create_grant(role_id['id'], user_id=user['id'],
                              domain_id=domain['id'])
 
@@ -605,6 +605,9 @@ class CadfRoleAssignmentNotificationWrapper(object):
             in as a dictionary
 
             The actual method signature is
+
+            ::
+
                 create_grant(role_id, user_id=None, group_id=None,
                              domain_id=None, project_id=None,
                              inherited_to_projects=False)
@@ -635,30 +638,19 @@ class CadfRoleAssignmentNotificationWrapper(object):
             audit_kwargs['inherited_to_projects'] = inherited
             audit_kwargs['role'] = role_id
 
-            # For backward compatibility, send both old and new event_type.
-            # Deprecate old format and remove it in the next release.
-            event_types = [self.deprecated_event_type, self.event_type]
-            versionutils.deprecated(
-                as_of=versionutils.deprecated.KILO,
-                remove_in=+1,
-                what=('sending duplicate %s notification event type' %
-                      self.deprecated_event_type),
-                in_favor_of='%s notification event type' % self.event_type)
             try:
                 result = f(wrapped_self, role_id, *args, **kwargs)
             except Exception:
-                for event_type in event_types:
-                    _send_audit_notification(self.action, initiator,
-                                             taxonomy.OUTCOME_FAILURE,
-                                             target, event_type,
-                                             **audit_kwargs)
+                _send_audit_notification(self.action, initiator,
+                                         taxonomy.OUTCOME_FAILURE,
+                                         target, self.event_type,
+                                         **audit_kwargs)
                 raise
             else:
-                for event_type in event_types:
-                    _send_audit_notification(self.action, initiator,
-                                             taxonomy.OUTCOME_SUCCESS,
-                                             target, event_type,
-                                             **audit_kwargs)
+                _send_audit_notification(self.action, initiator,
+                                         taxonomy.OUTCOME_SUCCESS,
+                                         target, self.event_type,
+                                         **audit_kwargs)
                 return result
 
         return wrapper
@@ -686,7 +678,6 @@ def send_saml_audit_notification(action, context, user_id, group_ids,
     :param outcome: One of :class:`pycadf.cadftaxonomy`
     :type outcome: str
     """
-
     initiator = _get_request_audit_info(context)
     target = resource.Resource(typeURI=taxonomy.ACCOUNT_USER)
     audit_type = SAML_AUDIT_TYPE
@@ -718,7 +709,6 @@ def _send_audit_notification(action, initiator, outcome, target,
         key-value pairs to the CADF event.
 
     """
-
     event = eventfactory.EventFactory().new_event(
         eventType=cadftype.EVENTTYPE_ACTIVITY,
         outcome=outcome,

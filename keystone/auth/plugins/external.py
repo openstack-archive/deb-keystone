@@ -78,7 +78,6 @@ class Domain(Base):
         The domain will be extracted from the REMOTE_DOMAIN environment
         variable if present. If not, the default domain will be used.
         """
-
         username = remote_user
         try:
             domain_name = context['environment']['REMOTE_DOMAIN']
@@ -94,6 +93,7 @@ class Domain(Base):
 
 class KerberosDomain(Domain):
     """Allows `kerberos` as a method."""
+
     def _authenticate(self, remote_user, context):
         auth_type = context['environment'].get('AUTH_TYPE')
         if auth_type != 'Negotiate':

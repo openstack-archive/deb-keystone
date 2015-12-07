@@ -22,13 +22,15 @@ from oslo_log import log
 from oslo_serialization import jsonutils
 import pbr.version
 
+from keystone.common import config
 from keystone.common import driver_hints
 from keystone.common import openssl
 from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone.common import utils
-from keystone import config
 from keystone import exception
+from keystone.federation import idp
+from keystone.federation import utils as mapping_engine
 from keystone.i18n import _, _LW
 from keystone.server import backends
 from keystone import token
@@ -271,7 +273,7 @@ class MappingPurge(BaseApp):
     @staticmethod
     def main():
         def validate_options():
-            # NOTE(henry-nash); It would be nice to use the argparse automated
+            # NOTE(henry-nash): It would be nice to use the argparse automated
             # checking for this validation, but the only way I can see doing
             # that is to make the default (i.e. if no optional parameters
             # are specified) to purge all mappings - and that sounds too
@@ -368,11 +370,10 @@ class DomainConfigUploadFiles(object):
         :param file_name: the file containing the config options
         :param domain_name: the domain name
 
-        :raises: ValueError: the domain does not exist or already has domain
-                             specific configurations defined
-        :raises: Exceptions from oslo config: there is an issue with options
-                                              defined in the config file or its
-                                              format
+        :raises ValueError: the domain does not exist or already has domain
+            specific configurations defined.
+        :raises Exceptions from oslo config: there is an issue with options
+            defined in the config file or its format.
 
         The caller of this method should catch the errors raised and handle
         appropriately in order that the best UX experience can be provided for
@@ -428,7 +429,7 @@ class DomainConfigUploadFiles(object):
         """
         try:
             self.upload_config_to_database(file_name, domain_name)
-        except ValueError:
+        except ValueError:  # nosec
             # We've already given all the info we can in a message, so carry
             # on to the next one
             pass
@@ -538,9 +539,6 @@ class SamlIdentityProviderMetadata(BaseApp):
 
     @staticmethod
     def main():
-        # NOTE(marek-denis): Since federation is currently an extension import
-        # corresponding modules only when they are really going to be used.
-        from keystone.contrib.federation import idp
         metadata = idp.MetadataGenerator().generate_metadata()
         print(metadata.to_string())
 
@@ -598,7 +596,6 @@ class MappingEngineTester(BaseApp):
 
     @classmethod
     def main(cls):
-        from keystone.contrib.federation import utils as mapping_engine
         if not CONF.command.engine_debug:
             mapping_engine.LOG.logger.setLevel('WARN')
 

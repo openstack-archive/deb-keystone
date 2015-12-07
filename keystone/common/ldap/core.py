@@ -62,7 +62,7 @@ def utf8_encode(value):
 
     :param value: A basestring
     :returns: UTF-8 encoded version of value
-    :raises: TypeError if value is not basestring
+    :raises TypeError: If value is not basestring
     """
     if isinstance(value, six.text_type):
         return _utf8_encoder(value)[0]
@@ -84,7 +84,7 @@ def utf8_decode(value):
 
     :param value: value to be returned as unicode
     :returns: value as unicode
-    :raises: UnicodeDecodeError for invalid UTF-8 encoding
+    :raises UnicodeDecodeError: for invalid UTF-8 encoding
     """
     if isinstance(value, six.binary_type):
         return _utf8_decoder(value)[0]
@@ -110,14 +110,15 @@ def py2ldap(val):
 
 def enabled2py(val):
     """Similar to ldap2py, only useful for the enabled attribute."""
-
     try:
         return LDAP_VALUES[val]
-    except KeyError:
+    except KeyError:  # nosec
+        # It wasn't a boolean value, will try as an int instead.
         pass
     try:
         return int(val)
-    except ValueError:
+    except ValueError:  # nosec
+        # It wasn't an int either, will try as utf8 instead.
         pass
     return utf8_decode(val)
 
@@ -239,7 +240,6 @@ def is_ava_value_equal(attribute_type, val1, val2):
     that function apply here.
 
     """
-
     return prep_case_insensitive(val1) == prep_case_insensitive(val2)
 
 
@@ -259,7 +259,6 @@ def is_rdn_equal(rdn1, rdn2):
     limitations of that function apply here.
 
     """
-
     if len(rdn1) != len(rdn2):
         return False
 
@@ -292,7 +291,6 @@ def is_dn_equal(dn1, dn2):
     :param dn2: Either a string DN or a DN parsed by ldap.dn.str2dn.
 
     """
-
     if not isinstance(dn1, list):
         dn1 = ldap.dn.str2dn(utf8_encode(dn1))
     if not isinstance(dn2, list):
@@ -314,7 +312,6 @@ def dn_startswith(descendant_dn, dn):
     :param dn: Either a string DN or a DN parsed by ldap.dn.str2dn.
 
     """
-
     if not isinstance(descendant_dn, list):
         descendant_dn = ldap.dn.str2dn(utf8_encode(descendant_dn))
     if not isinstance(dn, list):
@@ -419,6 +416,7 @@ class LDAPHandler(object):
     derived classes.
 
     """
+
     @abc.abstractmethod
     def __init__(self, conn=None):
         self.conn = conn
@@ -625,6 +623,7 @@ def _common_ldap_initialization(url, use_tls=False, tls_cacertfile=None,
 
 class MsgId(list):
     """Wrapper class to hold connection and msgid."""
+
     pass
 
 
@@ -665,6 +664,7 @@ class PooledLDAPHandler(LDAPHandler):
     the methods in this class.
 
     """
+
     # Added here to allow override for testing
     Connector = ldappool.StateConnector
     auth_pool_prefix = 'auth_pool_'
@@ -815,7 +815,6 @@ class PooledLDAPHandler(LDAPHandler):
         which requested msgId and used it in result3 exits.
 
         """
-
         conn, msg_id = msgid
         return conn.result3(msg_id, all, timeout)
 
@@ -1354,7 +1353,8 @@ class BaseLdap(object):
                     continue
 
                 v = lower_res[map_attr.lower()]
-            except KeyError:
+            except KeyError:  # nosec
+                # Didn't find the attr, so don't add it.
                 pass
             else:
                 try:
@@ -1383,7 +1383,8 @@ class BaseLdap(object):
         if values.get('name') is not None:
             try:
                 self.get_by_name(values['name'])
-            except exception.NotFound:
+            except exception.NotFound:  # nosec
+                # Didn't find it so it's unique, good.
                 pass
             else:
                 raise exception.Conflict(type=self.options_name,
@@ -1393,7 +1394,8 @@ class BaseLdap(object):
         if values.get('id') is not None:
             try:
                 self.get(values['id'])
-            except exception.NotFound:
+            except exception.NotFound:  # nosec
+                # Didn't find it, so it's unique, good.
                 pass
             else:
                 raise exception.Conflict(type=self.options_name,
@@ -1609,8 +1611,8 @@ class BaseLdap(object):
         :param member_list_dn: DN of group to which the
                                member will be added.
 
-        :raises: exception.Conflict: If the user was already a member.
-                 self.NotFound: If the group entry didn't exist.
+        :raises keystone.exception.Conflict: If the user was already a member.
+        :raises self.NotFound: If the group entry didn't exist.
         """
         with self.get_connection() as conn:
             try:
@@ -1632,8 +1634,8 @@ class BaseLdap(object):
         :param member_list_dn: DN of group from which the
                                member will be removed.
 
-        :raises: self.NotFound: If the group entry didn't exist.
-                 ldap.NO_SUCH_ATTRIBUTE: If the user wasn't a member.
+        :raises self.NotFound: If the group entry didn't exist.
+        :raises ldap.NO_SUCH_ATTRIBUTE: If the user wasn't a member.
         """
         with self.get_connection() as conn:
             try:
@@ -1771,18 +1773,22 @@ class BaseLdap(object):
 class EnabledEmuMixIn(BaseLdap):
     """Emulates boolean 'enabled' attribute if turned on.
 
-    Creates groupOfNames holding all enabled objects of this class, all missing
+    Creates a group holding all enabled objects of this class, all missing
     objects are considered disabled.
 
     Options:
 
     * $name_enabled_emulation - boolean, on/off
-    * $name_enabled_emulation_dn - DN of that groupOfNames, default is
+    * $name_enabled_emulation_dn - DN of that group, default is
       cn=enabled_${name}s,${tree_dn}
+    * $name_enabled_emulation_use_group_config - boolean, on/off
 
     Where ${name}s is the plural of self.options_name ('users' or 'tenants'),
     ${tree_dn} is self.tree_dn.
     """
+
+    DEFAULT_GROUP_OBJECTCLASS = 'groupOfNames'
+    DEFAULT_MEMBER_ATTRIBUTE = 'member'
 
     def __init__(self, conf):
         super(EnabledEmuMixIn, self).__init__(conf)
@@ -1791,6 +1797,18 @@ class EnabledEmuMixIn(BaseLdap):
 
         enabled_emulation_dn = '%s_enabled_emulation_dn' % self.options_name
         self.enabled_emulation_dn = getattr(conf.ldap, enabled_emulation_dn)
+
+        use_group_config = ('%s_enabled_emulation_use_group_config' %
+                            self.options_name)
+        self.use_group_config = getattr(conf.ldap, use_group_config)
+
+        if not self.use_group_config:
+            self.member_attribute = self.DEFAULT_MEMBER_ATTRIBUTE
+            self.group_objectclass = self.DEFAULT_GROUP_OBJECTCLASS
+        else:
+            self.member_attribute = conf.ldap.group_member_attribute
+            self.group_objectclass = conf.ldap.group_objectclass
+
         if not self.enabled_emulation_dn:
             naming_attr_name = 'cn'
             naming_attr_value = 'enabled_%ss' % self.options_name
@@ -1807,7 +1825,7 @@ class EnabledEmuMixIn(BaseLdap):
 
     def _get_enabled(self, object_id, conn):
         dn = self._id_to_dn(object_id)
-        query = '(member=%s)' % dn
+        query = '(%s=%s)' % (self.member_attribute, dn)
         try:
             enabled_value = conn.search_s(self.enabled_emulation_dn,
                                           ldap.SCOPE_BASE,
@@ -1821,13 +1839,14 @@ class EnabledEmuMixIn(BaseLdap):
         with self.get_connection() as conn:
             if not self._get_enabled(object_id, conn):
                 modlist = [(ldap.MOD_ADD,
-                            'member',
+                            self.member_attribute,
                             [self._id_to_dn(object_id)])]
                 try:
                     conn.modify_s(self.enabled_emulation_dn, modlist)
                 except ldap.NO_SUCH_OBJECT:
-                    attr_list = [('objectClass', ['groupOfNames']),
-                                 ('member', [self._id_to_dn(object_id)]),
+                    attr_list = [('objectClass', [self.group_objectclass]),
+                                 (self.member_attribute,
+                                  [self._id_to_dn(object_id)]),
                                  self.enabled_emulation_naming_attr]
                     if self.use_dumb_member:
                         attr_list[1][1].append(self.dumb_member)
@@ -1835,12 +1854,13 @@ class EnabledEmuMixIn(BaseLdap):
 
     def _remove_enabled(self, object_id):
         modlist = [(ldap.MOD_DELETE,
-                    'member',
+                    self.member_attribute,
                     [self._id_to_dn(object_id)])]
         with self.get_connection() as conn:
             try:
                 conn.modify_s(self.enabled_emulation_dn, modlist)
-            except (ldap.NO_SUCH_OBJECT, ldap.NO_SUCH_ATTRIBUTE):
+            except (ldap.NO_SUCH_OBJECT, ldap.NO_SUCH_ATTRIBUTE):  # nosec
+                # It's already gone, good.
                 pass
 
     def create(self, values):
@@ -1905,6 +1925,7 @@ class ProjectLdapStructureMixin(object):
     This is shared between the resource and assignment LDAP backends.
 
     """
+
     DEFAULT_OU = 'ou=Groups'
     DEFAULT_STRUCTURAL_CLASSES = []
     DEFAULT_OBJECTCLASS = 'groupOfNames'

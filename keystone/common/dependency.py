@@ -60,6 +60,7 @@ class UnresolvableDependencyException(Exception):
     See ``resolve_future_dependencies()`` for more details.
 
     """
+
     def __init__(self, name, targets):
         msg = _('Unregistered dependency: %(name)s for %(targets)s') % {
             'name': name, 'targets': targets}
@@ -225,6 +226,5 @@ def reset():
     This is useful for unit testing to ensure that tests don't use providers
     from previous tests.
     """
-
     _REGISTRY.clear()
     _future_dependencies.clear()

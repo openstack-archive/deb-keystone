@@ -99,7 +99,7 @@ def _create_new_key(keystone_user_id, keystone_group_id):
 
     Create a new key that is readable by the Keystone group and Keystone user.
     """
-    key = fernet.Fernet.generate_key()
+    key = fernet.Fernet.generate_key()  # key is bytes
 
     # This ensures the key created is not world-readable
     old_umask = os.umask(0o177)
@@ -117,7 +117,7 @@ def _create_new_key(keystone_user_id, keystone_group_id):
     key_file = os.path.join(CONF.fernet_tokens.key_repository, '0')
     try:
         with open(key_file, 'w') as f:
-            f.write(key)
+            f.write(key.decode('utf-8'))  # convert key to str for the file.
     finally:
         # After writing the key, set the umask back to it's original value. Do
         # the same with group and user identifiers if a Keystone group or user
@@ -176,7 +176,7 @@ def rotate_keys(keystone_user_id=None, keystone_group_id=None):
         if os.path.isfile(path):
             try:
                 key_id = int(filename)
-            except ValueError:
+            except ValueError:  # nosec : name isn't a number, ignore the file.
                 pass
             else:
                 key_files[key_id] = path
@@ -243,7 +243,8 @@ def load_keys():
             with open(path, 'r') as key_file:
                 try:
                     key_id = int(filename)
-                except ValueError:
+                except ValueError:  # nosec : filename isn't a number, ignore
+                    # this file since it's not a key.
                     pass
                 else:
                     keys[key_id] = key_file.read()

@@ -86,6 +86,7 @@ class BaseBackendLdapCommon(object):
 
 class BaseBackendLdap(object):
     """Mixin class to set up an all-LDAP configuration."""
+
     def setUp(self):
         # NOTE(dstanek): The database must be setup prior to calling the
         # parent's setUp. The parent's setUp uses services (like
@@ -113,7 +114,7 @@ class BaseBackendLdapIdentitySqlEverythingElse(unit.SQLDriverOverrides):
         super(BaseBackendLdapIdentitySqlEverythingElse, self).setUp()
         self.clear_database()
         self.load_backends()
-        cache.configure_cache_region(cache.REGION)
+        cache.configure_cache()
 
         sqldb.recreate()
         self.load_fixtures(default_fixtures)
@@ -137,6 +138,7 @@ class BaseBackendLdapIdentitySqlEverythingElseWithMapping(object):
     Setting backward_compatible_ids to False will enable this mapping.
 
     """
+
     def config_overrides(self):
         super(BaseBackendLdapIdentitySqlEverythingElseWithMapping,
               self).config_overrides()

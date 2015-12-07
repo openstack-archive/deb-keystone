@@ -45,19 +45,18 @@ from keystone.common import environment  # noqa
 environment.use_eventlet()
 
 from keystone import auth
-from keystone.common import config as common_cfg
+from keystone.common import config
 from keystone.common import dependency
 from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
 from keystone.common import sql
-from keystone import config
-from keystone import controllers
 from keystone import exception
 from keystone import notifications
 from keystone.policy.backends import rules
 from keystone.server import common
-from keystone import service
 from keystone.tests.unit import ksfixtures
+from keystone.version import controllers
+from keystone.version import service
 
 
 config.configure()
@@ -208,6 +207,22 @@ def skip_if_cache_disabled(*sections):
     return wrapper
 
 
+def skip_if_cache_is_enabled(*sections):
+    def wrapper(f):
+        @functools.wraps(f)
+        def inner(*args, **kwargs):
+            if CONF.cache.enabled:
+                for s in sections:
+                    conf_sec = getattr(CONF, s, None)
+                    if conf_sec is not None:
+                        if getattr(conf_sec, 'caching', True):
+                            raise testcase.TestSkipped('%s caching enabled.' %
+                                                       s)
+            return f(*args, **kwargs)
+        return inner
+    return wrapper
+
+
 def skip_if_no_multiple_domains_support(f):
     """Decorator to skip tests for identity drivers limited to one domain."""
     @functools.wraps(f)
@@ -232,35 +247,59 @@ def new_ref():
         'enabled': True}
 
 
-def new_region_ref():
+def new_region_ref(parent_region_id=None, **kwargs):
     ref = new_ref()
     # Region doesn't have name or enabled.
     del ref['name']
     del ref['enabled']
-    ref['parent_region_id'] = None
+    ref['parent_region_id'] = parent_region_id
+    ref.update(kwargs)
     return ref
 
 
-def new_service_ref():
+def new_service_ref(**kwargs):
     ref = new_ref()
     ref['type'] = uuid.uuid4().hex
+    ref.update(**kwargs)
     return ref
 
 
-def new_endpoint_ref(service_id, interface='public', default_region_id=None,
-                     **kwargs):
+NEEDS_REGION_ID = object()
+
+
+def new_endpoint_ref(service_id, interface='public',
+                     region_id=NEEDS_REGION_ID, **kwargs):
     ref = new_ref()
     del ref['enabled']  # enabled is optional
     ref['interface'] = interface
     ref['service_id'] = service_id
     ref['url'] = 'https://' + uuid.uuid4().hex + '.com'
-    ref['region_id'] = default_region_id
+    if region_id is NEEDS_REGION_ID:
+        ref['region_id'] = uuid.uuid4().hex
+    elif region_id is None and kwargs.get('region', None) is not None:
+        # pre-3.2 form endpoints are not supported by this function
+        raise NotImplementedError("use new_endpoint_ref_with_region")
+    else:
+        ref['region_id'] = region_id
     ref.update(kwargs)
     return ref
 
 
-def new_domain_ref():
+def new_endpoint_ref_with_region(service_id, region, interface='public',
+                                 **kwargs):
+    """Define an endpoint_ref having a pre-3.2 form.
+
+    Contains the deprecated 'region' instead of 'region_id'.
+    """
+    ref = new_endpoint_ref(service_id, interface, region=region,
+                           region_id='invalid', **kwargs)
+    del ref['region_id']
+    return ref
+
+
+def new_domain_ref(**kwargs):
     ref = new_ref()
+    ref.update(**kwargs)
     return ref
 
 
@@ -272,19 +311,29 @@ def new_project_ref(domain_id=None, parent_id=None, is_domain=False):
     return ref
 
 
-def new_user_ref(domain_id, project_id=None):
+def new_user_ref(domain_id, project_id=None, **kwargs):
     ref = new_ref()
+
+    # do not include by default, allow user to add with kwargs
+    del ref['description']
+
     ref['domain_id'] = domain_id
     ref['email'] = uuid.uuid4().hex
     ref['password'] = uuid.uuid4().hex
     if project_id:
         ref['default_project_id'] = project_id
+    ref.update(**kwargs)
     return ref
 
 
-def new_group_ref(domain_id):
+def new_group_ref(domain_id, **kwargs):
     ref = new_ref()
+
+    # Group does not have enabled field
+    del ref['enabled']
+
     ref['domain_id'] = domain_id
+    ref.update(**kwargs)
     return ref
 
 
@@ -303,11 +352,12 @@ def new_credential_ref(user_id, project_id=None, cred_type=None):
     return ref
 
 
-def new_role_ref():
+def new_role_ref(**kwargs):
     ref = new_ref()
     # Roles don't have a description or the enabled flag
     del ref['description']
     del ref['enabled']
+    ref.update(**kwargs)
     return ref
 
 
@@ -352,6 +402,20 @@ def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
             ref['roles'].append({'name': role_name})
 
     return ref
+
+
+def create_user(api, domain_id, **kwargs):
+    """Create a user via the API. Keep the created password.
+
+    The password is saved and restored when api.create_user() is called.
+    Only use this routine if there is a requirement for the user object to
+    have a valid password after api.create_user() is called.
+    """
+    user = new_user_ref(domain_id=domain_id, **kwargs)
+    password = user['password']
+    user = api.create_user(user)
+    user['password'] = password
+    return user
 
 
 class BaseTestCase(oslotest.BaseTestCase):
@@ -411,7 +475,7 @@ class TestCase(BaseTestCase):
             group='cache',
             backend='dogpile.cache.memory',
             enabled=True,
-            proxies=['keystone.tests.unit.test_cache.CacheIsolatingProxy'])
+            proxies=['oslo_cache.testing.CacheIsolatingProxy'])
         self.config_fixture.config(
             group='catalog',
             driver='templated',
@@ -452,7 +516,7 @@ class TestCase(BaseTestCase):
     def auth_plugin_config_override(self, methods=None, **method_classes):
         if methods is not None:
             self.config_fixture.config(group='auth', methods=methods)
-            common_cfg.setup_authentication()
+            config.setup_authentication()
         if method_classes:
             self.config_fixture.config(group='auth', **method_classes)
 
@@ -473,7 +537,7 @@ class TestCase(BaseTestCase):
         def mocked_register_auth_plugin_opt(conf, opt):
             self.config_fixture.register_opt(opt, group='auth')
         self.useFixture(mockpatch.PatchObject(
-            common_cfg, '_register_auth_plugin_opt',
+            config, '_register_auth_plugin_opt',
             new=mocked_register_auth_plugin_opt))
 
         self.config_overrides()
@@ -515,7 +579,6 @@ class TestCase(BaseTestCase):
 
     def load_backends(self):
         """Initializes each manager and assigns them to an attribute."""
-
         # TODO(blk-u): Shouldn't need to clear the registry here, but some
         # tests call load_backends multiple times. These should be fixed to
         # only call load_backends once.
@@ -708,6 +771,7 @@ class TestCase(BaseTestCase):
 
 class SQLDriverOverrides(object):
     """A mixin for consolidating sql-specific test overrides."""
+
     def config_overrides(self):
         super(SQLDriverOverrides, self).config_overrides()
         # SQL specific driver overrides

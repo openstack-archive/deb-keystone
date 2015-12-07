@@ -106,11 +106,11 @@ class CoreApiTests(object):
         self.assertValidExtensionListResponse(
             r, keystone_extension.ADMIN_EXTENSIONS)
 
-    def test_admin_extensions_404(self):
+    def test_admin_extensions_returns_not_found(self):
         self.admin_request(path='/v2.0/extensions/invalid-extension',
                            expected_status=http_client.NOT_FOUND)
 
-    def test_public_osksadm_extension_404(self):
+    def test_public_osksadm_extension_returns_not_found(self):
         self.public_request(path='/v2.0/extensions/OS-KSADM',
                             expected_status=http_client.NOT_FOUND)
 
@@ -132,7 +132,7 @@ class CoreApiTests(object):
                     'tenantId': self.tenant_bar['id'],
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertValidAuthenticationResponse(r, require_service_catalog=True)
 
     def test_authenticate_unscoped(self):
@@ -147,7 +147,7 @@ class CoreApiTests(object):
                     },
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertValidAuthenticationResponse(r)
 
     def test_get_tenants_for_token(self):
@@ -164,7 +164,7 @@ class CoreApiTests(object):
             token=token)
         self.assertValidAuthenticationResponse(r)
 
-    def test_invalid_token_404(self):
+    def test_invalid_token_returns_not_found(self):
         token = self.get_scoped_token()
         self.admin_request(
             path='/v2.0/tokens/%(token_id)s' % {
@@ -234,7 +234,7 @@ class CoreApiTests(object):
                 'token_id': token,
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
     def test_endpoints(self):
         token = self.get_scoped_token()
@@ -272,6 +272,14 @@ class CoreApiTests(object):
             },
             token=token)
         self.assertValidRoleListResponse(r)
+
+    def test_get_user_roles_without_tenant(self):
+        token = self.get_scoped_token()
+        self.admin_request(
+            path='/v2.0/users/%(user_id)s/roles' % {
+                'user_id': self.user_foo['id'],
+            },
+            token=token, expected_status=http_client.NOT_IMPLEMENTED)
 
     def test_get_user(self):
         token = self.get_scoped_token()
@@ -370,7 +378,7 @@ class CoreApiTests(object):
                                },
                            },
                            token=token,
-                           expected_status=200)
+                           expected_status=http_client.OK)
 
     def test_error_response(self):
         """This triggers assertValidErrorResponse by convention."""
@@ -459,7 +467,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         user_id = self._get_user_id(r.result)
 
@@ -470,7 +478,7 @@ class CoreApiTests(object):
                 'user_id': user_id
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertEqual(CONF.member_role_name, self._get_role_name(r.result))
 
         # Create a new tenant
@@ -485,7 +493,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         project_id = self._get_project_id(r.result)
 
@@ -501,7 +509,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         # 'member_role' should be in new_tenant
         r = self.admin_request(
@@ -510,7 +518,7 @@ class CoreApiTests(object):
                 'user_id': user_id
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertEqual('_member_', self._get_role_name(r.result))
 
         # 'member_role' should not be in tenant_bar any more
@@ -520,7 +528,7 @@ class CoreApiTests(object):
                 'user_id': user_id
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertNoRoles(r.result)
 
     def test_update_user_with_invalid_tenant(self):
@@ -539,7 +547,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         user_id = self._get_user_id(r.result)
 
         # Update user with an invalid tenant
@@ -571,7 +579,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         user_id = self._get_user_id(r.result)
 
         # Update user with an invalid tenant
@@ -604,7 +612,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         user_id = self._get_user_id(r.result)
 
@@ -615,7 +623,7 @@ class CoreApiTests(object):
                 'user_id': user_id
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertEqual(CONF.member_role_name, self._get_role_name(r.result))
 
         # Update user's tenant with old tenant id
@@ -630,7 +638,7 @@ class CoreApiTests(object):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         # 'member_role' should still be in tenant_bar
         r = self.admin_request(
@@ -639,7 +647,7 @@ class CoreApiTests(object):
                 'user_id': user_id
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertEqual('_member_', self._get_role_name(r.result))
 
     def test_authenticating_a_user_with_no_password(self):
@@ -721,7 +729,7 @@ class LegacyV2UsernameTests(object):
             path='/v2.0/users',
             token=token,
             body=body,
-            expected_status=200)
+            expected_status=http_client.OK)
 
     def test_create_with_extra_username(self):
         """The response for creating a user will contain the extra fields."""
@@ -772,7 +780,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': enabled,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -802,7 +810,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': enabled,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -881,7 +889,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': enabled,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -911,7 +919,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': enabled,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -931,7 +939,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': True,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -956,7 +964,7 @@ class LegacyV2UsernameTests(object):
                     'enabled': enabled,
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         self.assertValidUserResponse(r)
 
@@ -1200,7 +1208,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
             method='GET',
             path='/v2.0/tokens/revoked',
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertValidRevocationListResponse(r)
 
     def assertValidRevocationListResponse(self, response):
@@ -1231,7 +1239,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
             method='GET',
             path='/v2.0/tokens/revoked',
             token=token1,
-            expected_status=200)
+            expected_status=http_client.OK)
         signed_text = r.result['signed']
 
         data_json = cms.cms_verify(signed_text, CONF.signing.certfile,
@@ -1243,9 +1251,8 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
 
     def test_fetch_revocation_list_md5(self):
         """If the server is configured for md5, then the revocation list has
-           tokens hashed with MD5.
+        tokens hashed with MD5.
         """
-
         # The default hash algorithm is md5.
         hash_algorithm = 'md5'
 
@@ -1255,9 +1262,8 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
 
     def test_fetch_revocation_list_sha256(self):
         """If the server is configured for sha256, then the revocation list has
-           tokens hashed with SHA256
+        tokens hashed with SHA256
         """
-
         hash_algorithm = 'sha256'
         self.config_fixture.config(group='token',
                                    hash_algorithm=hash_algorithm)
@@ -1333,7 +1339,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
                     },
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         # ensure password doesn't leak
         user_id = r.result['user']['id']
@@ -1341,7 +1347,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
             method='GET',
             path='/v2.0/users/%s' % user_id,
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
         self.assertNotIn('OS-KSADM:password', r.result['user'])
 
     def test_updating_a_user_with_an_OSKSADM_password(self):
@@ -1360,7 +1366,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
                 },
             },
             token=token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
         # successfully authenticate
         self.public_request(
@@ -1374,7 +1380,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
                     },
                 },
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
 
 class RevokeApiTestCase(V2TestCase):
@@ -1436,7 +1442,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
             method='GET',
             path=path,
             token=admin_token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
     def test_authenticate_scoped_token(self):
         project_ref = self.new_project_ref()
@@ -1466,7 +1472,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
             method='GET',
             path=path,
             token=admin_token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
     def test_token_authentication_and_validation(self):
         """Test token authentication for Fernet token provider.
@@ -1491,7 +1497,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
                     }
                 }
             },
-            expected_status=200)
+            expected_status=http_client.OK)
 
         token_id = self._get_token_id(r)
         path = ('/v2.0/tokens/%s?belongsTo=%s' % (token_id, project_ref['id']))
@@ -1500,7 +1506,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
             method='GET',
             path=path,
             token=CONF.admin_token,
-            expected_status=200)
+            expected_status=http_client.OK)
 
     def test_rescoped_tokens_maintain_original_expiration(self):
         project_ref = self.new_project_ref()
@@ -1522,7 +1528,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
             },
             # NOTE(lbragstad): This test may need to be refactored if Keystone
             # decides to disallow rescoping using a scoped token.
-            expected_status=200)
+            expected_status=http_client.OK)
         original_token = resp.result['access']['token']['id']
         original_expiration = resp.result['access']['token']['expires']
 
@@ -1537,7 +1543,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
                     }
                 }
             },
-            expected_status=200)
+            expected_status=http_client.OK)
         rescoped_token = resp.result['access']['token']['id']
         rescoped_expiration = resp.result['access']['token']['expires']
         self.assertNotEqual(original_token, rescoped_token)

@@ -130,7 +130,8 @@ class DomainConfig(resource.DomainConfigDriverV8):
                 ref = ConfigRegister(type=type, domain_id=domain_id)
                 session.add(ref)
             return True
-        except sql.DBDuplicateEntry:
+        except sql.DBDuplicateEntry:  # nosec
+            # Continue on and return False to indicate failure.
             pass
         return False
 
@@ -143,7 +144,6 @@ class DomainConfig(resource.DomainConfigDriverV8):
 
     def release_registration(self, domain_id, type=None):
         """Silently delete anything registered for the domain specified."""
-
         with sql.transaction() as session:
             query = session.query(ConfigRegister)
             if type:

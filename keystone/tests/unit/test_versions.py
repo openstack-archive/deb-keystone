@@ -25,9 +25,9 @@ from testtools import matchers as tt_matchers
 import webob
 
 from keystone.common import json_home
-from keystone import controllers
 from keystone.tests import unit
 from keystone.tests.unit import utils
+from keystone.version import controllers
 
 
 CONF = cfg.CONF
@@ -169,9 +169,8 @@ BASE_EP_FILTER = BASE_EP_FILTER_PREFIX + '/endpoint_groups/{endpoint_group_id}'
 BASE_ACCESS_TOKEN = (
     '/users/{user_id}/OS-OAUTH1/access_tokens/{access_token_id}')
 
-# TODO(stevemar): Use BASE_IDP_PROTOCOL when bug 1420125 is resolved.
-FEDERATED_AUTH_URL = ('/OS-FEDERATION/identity_providers/{identity_provider}'
-                      '/protocols/{protocol}/auth')
+FEDERATED_AUTH_URL = ('/OS-FEDERATION/identity_providers/{idp_id}'
+                      '/protocols/{protocol_id}/auth')
 FEDERATED_IDP_SPECIFIC_WEBSSO = ('/auth/OS-FEDERATION/identity_providers/'
                                  '{idp_id}/protocols/{protocol_id}/websso')
 
@@ -231,8 +230,8 @@ V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
     _build_ec2tokens_relation(resource_name='user_credential'): {
         'href-template': '/users/{user_id}/credentials/OS-EC2/{credential_id}',
         'href-vars': {
-            'credential_id': json_home.build_v3_extension_parameter_relation(
-                'OS-EC2', '1.0', 'credential_id'),
+            'credential_id':
+            json_home.build_v3_parameter_relation('credential_id'),
             'user_id': json_home.Parameters.USER_ID, }},
     _build_ec2tokens_relation(resource_name='user_credentials'): {
         'href-template': '/users/{user_id}/credentials/OS-EC2',
@@ -394,12 +393,11 @@ V3_JSON_HOME_RESOURCES_INHERIT_DISABLED = {
         'href-template': BASE_IDP_PROTOCOL,
         'href-vars': {
             'idp_id': IDP_ID_PARAMETER_RELATION}},
-    # TODO(stevemar): Update href-vars when bug 1420125 is resolved.
     _build_federation_rel(resource_name='identity_provider_protocol_auth'): {
         'href-template': FEDERATED_AUTH_URL,
         'href-vars': {
-            'identity_provider': IDP_ID_PARAMETER_RELATION,
-            'protocol': PROTOCOL_ID_PARAM_RELATION, }},
+            'idp_id': IDP_ID_PARAMETER_RELATION,
+            'protocol_id': PROTOCOL_ID_PARAM_RELATION, }},
     _build_oauth1_rel(resource_name='access_tokens'): {
         'href': '/OS-OAUTH1/access_token'},
     _build_oauth1_rel(resource_name='request_tokens'): {
@@ -751,7 +749,7 @@ class VersionTestCase(unit.TestCase):
     def test_public_version_v2(self):
         client = TestClient(self.public_app)
         resp = client.get('/v2.0/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v2_VERSION_RESPONSE
         self._paste_in_port(expected['version'],
@@ -762,7 +760,7 @@ class VersionTestCase(unit.TestCase):
     def test_admin_version_v2(self):
         client = TestClient(self.admin_app)
         resp = client.get('/v2.0/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v2_VERSION_RESPONSE
         self._paste_in_port(expected['version'],
@@ -775,7 +773,7 @@ class VersionTestCase(unit.TestCase):
         for app in (self.public_app, self.admin_app):
             client = TestClient(app)
             resp = client.get('/v2.0/')
-            self.assertEqual(200, resp.status_int)
+            self.assertEqual(http_client.OK, resp.status_int)
             data = jsonutils.loads(resp.body)
             expected = v2_VERSION_RESPONSE
             self._paste_in_port(expected['version'], 'http://localhost/v2.0/')
@@ -784,7 +782,7 @@ class VersionTestCase(unit.TestCase):
     def test_public_version_v3(self):
         client = TestClient(self.public_app)
         resp = client.get('/v3/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v3_VERSION_RESPONSE
         self._paste_in_port(expected['version'],
@@ -796,7 +794,7 @@ class VersionTestCase(unit.TestCase):
     def test_admin_version_v3(self):
         client = TestClient(self.admin_app)
         resp = client.get('/v3/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v3_VERSION_RESPONSE
         self._paste_in_port(expected['version'],
@@ -809,7 +807,7 @@ class VersionTestCase(unit.TestCase):
         for app in (self.public_app, self.admin_app):
             client = TestClient(app)
             resp = client.get('/v3/')
-            self.assertEqual(200, resp.status_int)
+            self.assertEqual(http_client.OK, resp.status_int)
             data = jsonutils.loads(resp.body)
             expected = v3_VERSION_RESPONSE
             self._paste_in_port(expected['version'], 'http://localhost/v3/')
@@ -824,7 +822,7 @@ class VersionTestCase(unit.TestCase):
 
         # request to /v3 should pass
         resp = client.get('/v3/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v3_VERSION_RESPONSE
         self._paste_in_port(expected['version'],
@@ -857,7 +855,7 @@ class VersionTestCase(unit.TestCase):
 
         # request to /v2.0 should pass
         resp = client.get('/v2.0/')
-        self.assertEqual(200, resp.status_int)
+        self.assertEqual(http_client.OK, resp.status_int)
         data = jsonutils.loads(resp.body)
         expected = v2_VERSION_RESPONSE
         self._paste_in_port(expected['version'],

@@ -179,7 +179,7 @@ class Manager(manager.Manager):
     def delete_trust(self, trust_id, initiator=None):
         """Remove a trust.
 
-        :raises: keystone.exception.TrustNotFound
+        :raises keystone.exception.TrustNotFound: If the trust doesn't exist.
 
         Recursively remove given and redelegated trusts
         """
@@ -192,7 +192,7 @@ class Manager(manager.Manager):
                 # recursive call to make sure all notifications are sent
                 try:
                     self.delete_trust(t['id'])
-                except exception.TrustNotFound:
+                except exception.TrustNotFound:  # nosec
                     # if trust was deleted by concurrent process
                     # consistency must not suffer
                     pass
@@ -247,8 +247,9 @@ class TrustDriverV8(object):
         """Consume one use when a trust was created with a limitation on its
         uses, provided there are still uses available.
 
-        :raises: keystone.exception.TrustUseLimitReached,
-                 keystone.exception.TrustNotFound
+        :raises keystone.exception.TrustUseLimitReached: If no remaining uses
+            for trust.
+        :raises keystone.exception.TrustNotFound: If the trust doesn't exist.
         """
         raise exception.NotImplemented()  # pragma: no cover
 

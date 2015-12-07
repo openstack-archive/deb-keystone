@@ -48,10 +48,13 @@ a *<Location>* directive for each identity provider::
         ShibRequestSetting requireSession 1
         ShibRequestSetting applicationId idp_1
         AuthType shibboleth
-        ShibRequireAll On
-        ShibRequireSession On
         ShibExportAssertion Off
         Require valid-user
+
+        <IfVersion < 2.4>
+            ShibRequireSession On
+            ShibRequireAll On
+       </IfVersion>
     </Location>
 
 .. NOTE::
@@ -61,7 +64,7 @@ a *<Location>* directive for each identity provider::
       The same name is used inside the shibboleth2.xml configuration file but they could
       be different.
     * The ``ShibRequireSession`` and ``ShibRequireAll`` rules are invalid in
-      Apache 2.4+ and should be dropped in that specific setup.
+      Apache 2.4+.
     * You are advised to carefully examine `Shibboleth Apache configuration
       documentation
       <https://wiki.shibboleth.net/confluence/display/SHIB2/NativeSPApacheConfig>`_
@@ -265,7 +268,7 @@ environment variable is present so make sure Shibboleth doesn't set the
 ``/etc/shibboleth/shibboleth2.xml`` configuration file and remove the
 ``REMOTE_USER`` directives.
 
-Examine your attributes map file ``/etc/shibboleth/attributes-map.xml`` and adjust
+Examine your attributes map file ``/etc/shibboleth/attribute-map.xml`` and adjust
 your requirements if needed. For more information see
 `attributes documentation <https://wiki.shibboleth.net/confluence/display/SHIB2/NativeSPAddAttribute>`_
 

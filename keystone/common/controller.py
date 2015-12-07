@@ -167,7 +167,6 @@ def protected(callback=None):
 
 def filterprotected(*filters):
     """Wraps filtered API calls with role based access controls (RBAC)."""
-
     def _filterprotected(f):
         @functools.wraps(f)
         def wrapper(self, context, **kwargs):
@@ -211,6 +210,7 @@ def filterprotected(*filters):
 
 class V2Controller(wsgi.Application):
     """Base controller class for Identity API v2."""
+
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id since v2 calls are not domain-aware.
 
@@ -300,7 +300,6 @@ class V2Controller(wsgi.Application):
         If ref is a list type, we will iterate through each element and do the
         conversion.
         """
-
         def _format_default_project_id(ref):
             """Convert default_project_id to tenantId for v2 calls."""
             default_project_id = ref.pop('default_project_id', None)
@@ -342,7 +341,6 @@ class V2Controller(wsgi.Application):
         If ref is a list type, we will iterate through each element and do the
         conversion.
         """
-
         def _filter_project_properties(ref):
             """Run through the various filter methods."""
             V2Controller.filter_domain_id(ref)
@@ -450,7 +448,6 @@ class V3Controller(wsgi.Application):
         True, including the absence of a value
 
         """
-
         if (isinstance(filter_value, six.string_types) and
                 filter_value == '0'):
             val = False
@@ -545,7 +542,6 @@ class V3Controller(wsgi.Application):
     @classmethod
     def filter_by_attributes(cls, refs, hints):
         """Filters a list of references by filter values."""
-
         def _attr_match(ref_attr, val_attr):
             """Matches attributes allowing for booleans as strings.
 
@@ -751,7 +747,7 @@ class V3Controller(wsgi.Application):
 
     def _normalize_domain_id(self, context, ref):
         """Fill in domain_id if not specified in a v3 call."""
-        if 'domain_id' not in ref:
+        if not ref.get('domain_id'):
             ref['domain_id'] = self._get_domain_id_from_token(context)
         return ref
 
@@ -768,7 +764,7 @@ class V3Controller(wsgi.Application):
         additional entities or attributes (passed in target_attr), so that
         they can be referenced by policy rules.
 
-         """
+        """
         if 'is_admin' in context and context['is_admin']:
             LOG.warning(_LW('RBAC: Bypassing authorization'))
         else:

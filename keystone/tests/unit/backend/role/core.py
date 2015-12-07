@@ -22,14 +22,13 @@ from keystone.tests.unit import default_fixtures
 
 class RoleTests(object):
 
-    def test_get_role_404(self):
+    def test_get_role_returns_not_found(self):
         self.assertRaises(exception.RoleNotFound,
                           self.role_api.get_role,
                           uuid.uuid4().hex)
 
     def test_create_duplicate_role_name_fails(self):
-        role = {'id': 'fake1',
-                'name': 'fake1name'}
+        role = unit.new_role_ref(id='fake1', name='fake1name')
         self.role_api.create_role('fake1', role)
         role['id'] = 'fake2'
         self.assertRaises(exception.Conflict,
@@ -38,14 +37,8 @@ class RoleTests(object):
                           role)
 
     def test_rename_duplicate_role_name_fails(self):
-        role1 = {
-            'id': 'fake1',
-            'name': 'fake1name'
-        }
-        role2 = {
-            'id': 'fake2',
-            'name': 'fake2name'
-        }
+        role1 = unit.new_role_ref(id='fake1', name='fake1name')
+        role2 = unit.new_role_ref(id='fake2', name='fake2name')
         self.role_api.create_role('fake1', role1)
         self.role_api.create_role('fake2', role2)
         role1['name'] = 'fake2name'
@@ -55,17 +48,17 @@ class RoleTests(object):
                           role1)
 
     def test_role_crud(self):
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
         role_ref = self.role_api.get_role(role['id'])
         role_ref_dict = {x: role_ref[x] for x in role_ref}
-        self.assertDictEqual(role_ref_dict, role)
+        self.assertDictEqual(role, role_ref_dict)
 
         role['name'] = uuid.uuid4().hex
         updated_role_ref = self.role_api.update_role(role['id'], role)
         role_ref = self.role_api.get_role(role['id'])
         role_ref_dict = {x: role_ref[x] for x in role_ref}
-        self.assertDictEqual(role_ref_dict, role)
+        self.assertDictEqual(role, role_ref_dict)
         self.assertDictEqual(role_ref_dict, updated_role_ref)
 
         self.role_api.delete_role(role['id'])
@@ -73,8 +66,8 @@ class RoleTests(object):
                           self.role_api.get_role,
                           role['id'])
 
-    def test_update_role_404(self):
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+    def test_update_role_returns_not_found(self):
+        role = unit.new_role_ref()
         self.assertRaises(exception.RoleNotFound,
                           self.role_api.update_role,
                           role['id'],
@@ -89,7 +82,7 @@ class RoleTests(object):
 
     @unit.skip_if_cache_disabled('role')
     def test_cache_layer_role_crud(self):
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = unit.new_role_ref()
         role_id = role['id']
         # Create role
         self.role_api.create_role(role_id, role)

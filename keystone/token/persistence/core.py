@@ -32,9 +32,9 @@ from keystone.token import utils
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
-MEMOIZE = cache.get_memoization_decorator(section='token')
-REVOCATION_MEMOIZE = cache.get_memoization_decorator(
-    section='token', expiration_section='revoke')
+MEMOIZE = cache.get_memoization_decorator(group='token')
+REVOCATION_MEMOIZE = cache.get_memoization_decorator(group='token',
+                                                     expiration_group='revoke')
 
 
 @dependency.requires('assignment_api', 'identity_api', 'resource_api',
@@ -206,13 +206,13 @@ class Manager(object):
     This class is a proxy class to the token_provider_api's persistence
     manager.
     """
+
     def __init__(self):
         # NOTE(morganfainberg): __init__ is required for dependency processing.
         super(Manager, self).__init__()
 
     def __getattr__(self, item):
         """Forward calls to the `token_provider_api` persistence manager."""
-
         # NOTE(morganfainberg): Prevent infinite recursion, raise an
         # AttributeError for 'token_provider_api' ensuring that the dep
         # injection doesn't infinitely try and lookup self.token_provider_api
@@ -240,7 +240,7 @@ class TokenDriverV8(object):
         :param token_id: identity of the token
         :type token_id: string
         :returns: token_ref
-        :raises: keystone.exception.TokenNotFound
+        :raises keystone.exception.TokenNotFound: If the token doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -276,7 +276,7 @@ class TokenDriverV8(object):
         :param token_id: identity of the token
         :type token_id: string
         :returns: None.
-        :raises: keystone.exception.TokenNotFound
+        :raises keystone.exception.TokenNotFound: If the token doesn't exist.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -304,7 +304,7 @@ class TokenDriverV8(object):
         :param consumer_id: identity of the consumer
         :type consumer_id: string
         :returns: The tokens that have been deleted.
-        :raises: keystone.exception.TokenNotFound
+        :raises keystone.exception.TokenNotFound: If the token doesn't exist.
 
         """
         if not CONF.token.revoke_by_id:
@@ -317,7 +317,8 @@ class TokenDriverV8(object):
         for token in token_list:
             try:
                 self.delete_token(token)
-            except exception.NotFound:
+            except exception.NotFound:  # nosec
+                # The token is already gone, good.
                 pass
         return token_list
 
@@ -354,8 +355,7 @@ class TokenDriverV8(object):
 
     @abc.abstractmethod
     def flush_expired_tokens(self):
-        """Archive or delete tokens that have expired.
-        """
+        """Archive or delete tokens that have expired."""
         raise exception.NotImplemented()  # pragma: no cover
 
 

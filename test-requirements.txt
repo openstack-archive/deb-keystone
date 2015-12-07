@@ -3,6 +3,8 @@
 # process, which may cause wedges in the gate later.
 
 hacking<0.11,>=0.10.0
+pep257==0.7.0 # MIT License
+flake8-docstrings==0.2.1.post1
 bashate>=0.2 # Apache-2.0
 
 # computes code coverage percentages
@@ -28,9 +30,10 @@ testrepository>=0.0.18
 testtools>=1.4.0
 
 # For documentation
-oslosphinx>=2.5.0 # Apache-2.0
+oslosphinx!=3.4.0,>=2.5.0 # Apache-2.0
+reno>=0.1.1 # Apache2
 
-tempest-lib>=0.8.0
+tempest-lib>=0.10.0
 
 # Functional tests.
-requests>=2.5.2
+requests>=2.8.1

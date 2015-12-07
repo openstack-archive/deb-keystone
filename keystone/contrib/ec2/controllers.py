@@ -75,13 +75,14 @@ class Ec2ControllerCommon(object):
                                         signature):
                     return True
                 raise exception.Unauthorized(
-                    message='Invalid EC2 signature.')
+                    message=_('Invalid EC2 signature.'))
             else:
                 raise exception.Unauthorized(
-                    message='EC2 signature not supplied.')
+                    message=_('EC2 signature not supplied.'))
         # Raise the exception when credentials.get('signature') is None
         else:
-            raise exception.Unauthorized(message='EC2 signature not supplied.')
+            raise exception.Unauthorized(
+                message=_('EC2 signature not supplied.'))
 
     @abc.abstractmethod
     def authenticate(self, context, credentials=None, ec2Credentials=None):
@@ -111,7 +112,6 @@ class Ec2ControllerCommon(object):
 
         :returns: user_ref, tenant_ref, metadata_ref, roles_ref, catalog_ref
         """
-
         # FIXME(ja): validate that a service token was used!
 
         # NOTE(termie): backwards compat hack
@@ -119,7 +119,8 @@ class Ec2ControllerCommon(object):
             credentials = ec2credentials
 
         if 'access' not in credentials:
-            raise exception.Unauthorized(message='EC2 signature not supplied.')
+            raise exception.Unauthorized(
+                message=_('EC2 signature not supplied.'))
 
         creds_ref = self._get_credentials(credentials['access'])
         self.check_signature(creds_ref, credentials)
@@ -152,7 +153,8 @@ class Ec2ControllerCommon(object):
 
         roles = metadata_ref.get('roles', [])
         if not roles:
-            raise exception.Unauthorized(message='User not valid for tenant.')
+            raise exception.Unauthorized(
+                message=_('User not valid for tenant.'))
         roles_ref = [self.role_api.get_role(role_id) for role_id in roles]
 
         catalog_ref = self.catalog_api.get_catalog(
@@ -171,7 +173,6 @@ class Ec2ControllerCommon(object):
         :param tenant_id: id of tenant
         :returns: credential: dict of ec2 credential
         """
-
         self.identity_api.get_user(user_id)
         self.resource_api.get_project(tenant_id)
         trust_id = self._get_trust_id_for_request(context)
@@ -193,7 +194,6 @@ class Ec2ControllerCommon(object):
         :param user_id: id of user
         :returns: credentials: list of ec2 credential dicts
         """
-
         self.identity_api.get_user(user_id)
         credential_refs = self.credential_api.list_credentials_for_user(
             user_id)
@@ -210,7 +210,6 @@ class Ec2ControllerCommon(object):
         :param credential_id: access key for credentials
         :returns: credential: dict of ec2 credential
         """
-
         self.identity_api.get_user(user_id)
         return {'credential': self._get_credentials(credential_id)}
 
@@ -223,7 +222,6 @@ class Ec2ControllerCommon(object):
         :param credential_id: access key for credentials
         :returns: bool: success
         """
-
         self.identity_api.get_user(user_id)
         self._get_credentials(credential_id)
         ec2_credential_id = utils.hash_access_key(credential_id)
@@ -249,13 +247,14 @@ class Ec2ControllerCommon(object):
         """Return credentials from an ID.
 
         :param credential_id: id of credential
-        :raises exception.Unauthorized: when credential id is invalid
+        :raises keystone.exception.Unauthorized: when credential id is invalid
         :returns: credential: dict of ec2 credential.
         """
         ec2_credential_id = utils.hash_access_key(credential_id)
         creds = self.credential_api.get_credential(ec2_credential_id)
         if not creds:
-            raise exception.Unauthorized(message='EC2 access key not found.')
+            raise exception.Unauthorized(
+                message=_('EC2 access key not found.'))
         return self._convert_v3_to_ec2_credential(creds)
 
 
@@ -315,7 +314,7 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
 
         :param context: standard context
         :param user_id: id of user
-        :raises exception.Forbidden: when token is invalid
+        :raises keystone.exception.Forbidden: when token is invalid
 
         """
         token_ref = utils.get_token_ref(context)
@@ -343,7 +342,7 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
 
         :param user_id: expected credential owner
         :param credential_id: id of credential object
-        :raises exception.Forbidden: on failure
+        :raises keystone.exception.Forbidden: on failure
 
         """
         ec2_credential_id = utils.hash_access_key(credential_id)

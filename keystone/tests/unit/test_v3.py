@@ -12,12 +12,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import datetime
 import uuid
 
 from oslo_config import cfg
+import oslo_context.context
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
+from six.moves import http_client
 from testtools import matchers
 
 from keystone import auth
@@ -38,6 +39,7 @@ TIME_FORMAT = unit.TIME_FORMAT
 
 class AuthTestMixin(object):
     """To hold auth building helper functions."""
+
     def build_auth_scope(self, project_id=None, project_name=None,
                          project_domain_id=None, project_domain_name=None,
                          domain_id=None, domain_name=None, trust_id=None,
@@ -146,9 +148,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             pass
 
     def setUp(self, app_conf='keystone'):
-        """Setup for v3 Restful Test Cases.
-
-        """
+        """Setup for v3 Restful Test Cases."""
         new_paste_file = self.generate_paste_config()
         self.addCleanup(self.remove_generated_paste_config)
         if new_paste_file:
@@ -167,7 +167,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
 
     def load_backends(self):
         # ensure the cache region instance is setup
-        cache.configure_cache_region(cache.REGION)
+        cache.configure_cache()
 
         super(RestfulTestCase, self).load_backends()
 
@@ -183,19 +183,17 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             try:
                 self.resource_api.get_domain(DEFAULT_DOMAIN_ID)
             except exception.DomainNotFound:
-                domain = {'description': (u'Owns users and tenants (i.e. '
-                                          u'projects) available on Identity '
-                                          u'API v2.'),
-                          'enabled': True,
-                          'id': DEFAULT_DOMAIN_ID,
-                          'name': u'Default'}
+                domain = unit.new_domain_ref(
+                    description=(u'Owns users and tenants (i.e. projects)'
+                                 u' available on Identity API v2.'),
+                    id=DEFAULT_DOMAIN_ID,
+                    name=u'Default')
                 self.resource_api.create_domain(DEFAULT_DOMAIN_ID, domain)
 
     def load_sample_data(self):
         self._populate_default_domain()
-        self.domain_id = uuid.uuid4().hex
-        self.domain = self.new_domain_ref()
-        self.domain['id'] = self.domain_id
+        self.domain = unit.new_domain_ref()
+        self.domain_id = self.domain['id']
         self.resource_api.create_domain(self.domain_id, self.domain)
 
         self.project_id = uuid.uuid4().hex
@@ -204,10 +202,8 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.project['id'] = self.project_id
         self.resource_api.create_project(self.project_id, self.project)
 
-        self.user = self.new_user_ref(domain_id=self.domain_id)
-        password = self.user['password']
-        self.user = self.identity_api.create_user(self.user)
-        self.user['password'] = password
+        self.user = unit.create_user(self.identity_api,
+                                     domain_id=self.domain_id)
         self.user_id = self.user['id']
 
         self.default_domain_project_id = uuid.uuid4().hex
@@ -217,19 +213,14 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.resource_api.create_project(self.default_domain_project_id,
                                          self.default_domain_project)
 
-        self.default_domain_user = self.new_user_ref(
+        self.default_domain_user = unit.create_user(
+            self.identity_api,
             domain_id=DEFAULT_DOMAIN_ID)
-        password = self.default_domain_user['password']
-        self.default_domain_user = (
-            self.identity_api.create_user(self.default_domain_user))
-        self.default_domain_user['password'] = password
         self.default_domain_user_id = self.default_domain_user['id']
 
         # create & grant policy.json's default role for admin_required
-        self.role_id = uuid.uuid4().hex
-        self.role = self.new_role_ref()
-        self.role['id'] = self.role_id
-        self.role['name'] = 'admin'
+        self.role = unit.new_role_ref(name='admin')
+        self.role_id = self.role['id']
         self.role_api.create_role(self.role_id, self.role)
         self.assignment_api.add_role_to_user_and_project(
             self.user_id, self.project_id, self.role_id)
@@ -240,26 +231,20 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             self.default_domain_user_id, self.project_id,
             self.role_id)
 
-        self.region_id = uuid.uuid4().hex
-        self.region = self.new_region_ref()
-        self.region['id'] = self.region_id
-        self.catalog_api.create_region(
-            self.region.copy())
+        self.region = unit.new_region_ref()
+        self.region_id = self.region['id']
+        self.catalog_api.create_region(self.region.copy())
 
-        self.service_id = uuid.uuid4().hex
-        self.service = self.new_service_ref()
-        self.service['id'] = self.service_id
-        self.catalog_api.create_service(
-            self.service_id,
-            self.service.copy())
+        self.service = unit.new_service_ref()
+        self.service_id = self.service['id']
+        self.catalog_api.create_service(self.service_id, self.service.copy())
 
-        self.endpoint_id = uuid.uuid4().hex
-        self.endpoint = self.new_endpoint_ref(service_id=self.service_id)
-        self.endpoint['id'] = self.endpoint_id
-        self.endpoint['region_id'] = self.region['id']
-        self.catalog_api.create_endpoint(
-            self.endpoint_id,
-            self.endpoint.copy())
+        self.endpoint = unit.new_endpoint_ref(service_id=self.service_id,
+                                              interface='public',
+                                              region_id=self.region_id)
+        self.endpoint_id = self.endpoint['id']
+        self.catalog_api.create_endpoint(self.endpoint_id,
+                                         self.endpoint.copy())
         # The server adds 'enabled' and defaults to True.
         self.endpoint['enabled'] = True
 
@@ -267,36 +252,13 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         """Populates a ref with attributes common to some API entities."""
         return unit.new_ref()
 
-    def new_region_ref(self):
-        return unit.new_region_ref()
-
-    def new_service_ref(self):
-        return unit.new_service_ref()
-
-    def new_endpoint_ref(self, service_id, interface='public', **kwargs):
-        return unit.new_endpoint_ref(
-            service_id, interface=interface, default_region_id=self.region_id,
-            **kwargs)
-
-    def new_domain_ref(self):
-        return unit.new_domain_ref()
-
     def new_project_ref(self, domain_id=None, parent_id=None, is_domain=False):
         return unit.new_project_ref(domain_id=domain_id, parent_id=parent_id,
                                     is_domain=is_domain)
 
-    def new_user_ref(self, domain_id, project_id=None):
-        return unit.new_user_ref(domain_id, project_id=project_id)
-
-    def new_group_ref(self, domain_id):
-        return unit.new_group_ref(domain_id)
-
     def new_credential_ref(self, user_id, project_id=None, cred_type=None):
         return unit.new_credential_ref(user_id, project_id=project_id,
                                        cred_type=cred_type)
-
-    def new_role_ref(self):
-        return unit.new_role_ref()
 
     def new_policy_ref(self):
         return unit.new_policy_ref()
@@ -407,11 +369,10 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
 
     def get_requested_token(self, auth):
         """Request the specific token we want."""
-
-        r = self.v3_authenticate_token(auth)
+        r = self.v3_create_token(auth)
         return r.headers.get('X-Subject-Token')
 
-    def v3_authenticate_token(self, auth, expected_status=201):
+    def v3_create_token(self, auth, expected_status=http_client.CREATED):
         return self.admin_request(method='POST',
                                   path='/v3/auth/tokens',
                                   body=auth,
@@ -440,42 +401,31 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
 
         return self.admin_request(path=path, token=token, **kwargs)
 
-    def get(self, path, **kwargs):
-        r = self.v3_request(method='GET', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 200)
-        return r
+    def get(self, path, expected_status=http_client.OK, **kwargs):
+        return self.v3_request(path, method='GET',
+                               expected_status=expected_status, **kwargs)
 
-    def head(self, path, **kwargs):
-        r = self.v3_request(method='HEAD', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 204)
+    def head(self, path, expected_status=http_client.NO_CONTENT, **kwargs):
+        r = self.v3_request(path, method='HEAD',
+                            expected_status=expected_status, **kwargs)
         self.assertEqual('', r.body)
         return r
 
-    def post(self, path, **kwargs):
-        r = self.v3_request(method='POST', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 201)
-        return r
+    def post(self, path, expected_status=http_client.CREATED, **kwargs):
+        return self.v3_request(path, method='POST',
+                               expected_status=expected_status, **kwargs)
 
-    def put(self, path, **kwargs):
-        r = self.v3_request(method='PUT', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 204)
-        return r
+    def put(self, path, expected_status=http_client.NO_CONTENT, **kwargs):
+        return self.v3_request(path, method='PUT',
+                               expected_status=expected_status, **kwargs)
 
-    def patch(self, path, **kwargs):
-        r = self.v3_request(method='PATCH', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 200)
-        return r
+    def patch(self, path, expected_status=http_client.OK, **kwargs):
+        return self.v3_request(path, method='PATCH',
+                               expected_status=expected_status, **kwargs)
 
-    def delete(self, path, **kwargs):
-        r = self.v3_request(method='DELETE', path=path, **kwargs)
-        if 'expected_status' not in kwargs:
-            self.assertResponseStatus(r, 204)
-        return r
+    def delete(self, path, expected_status=http_client.NO_CONTENT, **kwargs):
+        return self.v3_request(path, method='DELETE',
+                               expected_status=expected_status, **kwargs)
 
     def assertValidErrorResponse(self, r):
         resp = r.result
@@ -582,7 +532,6 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         except Exception:
             msg = '%s is not a valid ISO 8601 extended format date time.' % dt
             raise AssertionError(msg)
-        self.assertIsInstance(dt, datetime.datetime)
 
     def assertValidTokenResponse(self, r, user=None):
         self.assertTrue(r.headers.get('X-Subject-Token'))
@@ -888,6 +837,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'users',
             self.assertValidUser,
+            keys_to_check=['name', 'enabled'],
             *args,
             **kwargs)
 
@@ -896,6 +846,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'user',
             self.assertValidUser,
+            keys_to_check=['name', 'enabled'],
             *args,
             **kwargs)
 
@@ -920,6 +871,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'groups',
             self.assertValidGroup,
+            keys_to_check=['name', 'description', 'domain_id'],
             *args,
             **kwargs)
 
@@ -928,6 +880,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             resp,
             'group',
             self.assertValidGroup,
+            keys_to_check=['name', 'description', 'domain_id'],
             *args,
             **kwargs)
 
@@ -1222,8 +1175,8 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         req = self._mock_request_object(CONF.admin_token)
         application = None
         middleware.AuthContextMiddleware(application).process_request(req)
-        self.assertDictEqual(req.environ.get(authorization.AUTH_CONTEXT_ENV),
-                             {})
+        self.assertDictEqual({}, req.environ.get(
+            authorization.AUTH_CONTEXT_ENV))
 
     def test_unscoped_token_auth_context(self):
         unscoped_token = self.get_unscoped_token()
@@ -1261,6 +1214,31 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
             self.domain['name'],
             req.environ.get(authorization.AUTH_CONTEXT_ENV)['domain_name'])
 
+    def test_oslo_context(self):
+        # After AuthContextMiddleware runs, an
+        # oslo_context.context.RequestContext was created so that its fields
+        # can be logged. This test validates that the RequestContext was
+        # created and the fields are set as expected.
+
+        # Use a scoped token so more fields can be set.
+        token = self.get_scoped_token()
+        req = self._mock_request_object(token)
+
+        # oslo_middleware RequestId middleware sets openstack.request_id.
+        request_id = uuid.uuid4().hex
+        req.environ['openstack.request_id'] = request_id
+        middleware.AuthContextMiddleware(application=None).process_request(req)
+
+        req_context = oslo_context.context.get_current()
+        self.assertEqual(request_id, req_context.request_id)
+        self.assertEqual(token, req_context.auth_token)
+        self.assertEqual(self.user['id'], req_context.user)
+        self.assertEqual(self.project['id'], req_context.tenant)
+        self.assertIsNone(req_context.domain)
+        self.assertEqual(self.user['domain_id'], req_context.user_domain)
+        self.assertEqual(self.project['domain_id'], req_context.project_domain)
+        self.assertFalse(req_context.is_admin)
+
 
 class JsonHomeTestMixin(object):
     """JSON Home test
@@ -1273,6 +1251,7 @@ class JsonHomeTestMixin(object):
     data must be in the response.
 
     """
+
     def test_get_json_home(self):
         resp = self.get('/', convert=False,
                         headers={'Accept': 'application/json-home'})
@@ -1295,7 +1274,6 @@ class AssignmentTestMixin(object):
         Available filters are: domain_id, project_id, user_id, group_id,
         role_id and inherited_to_projects.
         """
-
         query_params = '?effective' if effective else ''
 
         for k, v in filters.items():
@@ -1320,7 +1298,6 @@ class AssignmentTestMixin(object):
         Provided attributes are expected to contain: domain_id or project_id,
         user_id or group_id, role_id and, optionally, inherited_to_projects.
         """
-
         if attribs.get('domain_id'):
             link = '/domains/' + attribs['domain_id']
         else:
@@ -1344,7 +1321,6 @@ class AssignmentTestMixin(object):
         Provided attributes are expected to contain: domain_id or project_id,
         user_id or group_id, role_id and, optionally, inherited_to_projects.
         """
-
         entity = {'links': {'assignment': (
             link or self.build_role_assignment_link(**attribs))}}
 

@@ -15,6 +15,7 @@
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import encodeutils
+import six
 
 from keystone.i18n import _, _LW
 
@@ -33,6 +34,7 @@ class Error(Exception):
     message_format.
 
     """
+
     code = None
     title = None
     message_format = None
@@ -53,7 +55,7 @@ class Error(Exception):
     def _build_message(self, message, **kwargs):
         """Builds and returns an exception message.
 
-        :raises: KeyError given insufficient kwargs
+        :raises KeyError: given insufficient kwargs
 
         """
         if not message:
@@ -155,18 +157,24 @@ class PKITokenExpected(Error):
                        'It is likely that this server does not use PKI tokens '
                        'otherwise this is the result of misconfiguration.')
     code = 403
-    title = 'Cannot retrieve certificates'
+    title = 'Forbidden'
 
 
 class SecurityError(Error):
     """Avoids exposing details of security failures, unless in debug mode."""
+
     amendment = _('(Disable debug mode to suppress these details.)')
 
     def _build_message(self, message, **kwargs):
         """Only returns detailed messages in debug mode."""
-        if CONF.debug:
+        if message and CONF.debug:
+            if isinstance(message, six.string_types):
+                # Only do replacement if message is string. The message is
+                # sometimes a different exception or bytes, which would raise
+                # TypeError.
+                message = message % kwargs
             return _('%(message)s %(amendment)s') % {
-                'message': message or self.message_format % kwargs,
+                'message': message,
                 'amendment': self.amendment}
         else:
             return self.message_format % kwargs
@@ -255,6 +263,7 @@ class MetadataNotFound(NotFound):
     """(dolph): metadata is not a user-facing concept,
     so this exception should not be exposed
     """
+
     message_format = _("An unhandled exception has occurred:"
                        " Could not find metadata.")
 
@@ -373,26 +382,22 @@ class Conflict(Error):
 
 class UnexpectedError(SecurityError):
     """Avoids exposing details of failures, unless in debug mode."""
-    _message_format = _("An unexpected error prevented the server "
-                        "from fulfilling your request.")
+
+    message_format = _("An unexpected error prevented the server "
+                       "from fulfilling your request.")
 
     debug_message_format = _("An unexpected error prevented the server "
                              "from fulfilling your request: %(exception)s")
 
-    @property
-    def message_format(self):
-        """Return the generic message format string unless debug is enabled."""
-        if CONF.debug:
-            return self.debug_message_format
-        return self._message_format
-
     def _build_message(self, message, **kwargs):
-        if CONF.debug and 'exception' not in kwargs:
-            # Ensure that exception has a value to be extra defensive for
-            # substitutions and make sure the exception doesn't raise an
-            # exception.
-            kwargs['exception'] = ''
-        return super(UnexpectedError, self)._build_message(message, **kwargs)
+
+        # Ensure that exception has a value to be extra defensive for
+        # substitutions and make sure the exception doesn't raise an
+        # exception.
+        kwargs.setdefault('exception', '')
+
+        return super(UnexpectedError, self)._build_message(
+            message or self.debug_message_format, **kwargs)
 
     code = 500
     title = 'Internal Server Error'
@@ -420,11 +425,11 @@ class MappedGroupNotFound(UnexpectedError):
 
 
 class MetadataFileError(UnexpectedError):
-    message_format = _("Error while reading metadata file, %(reason)s")
+    debug_message_format = _("Error while reading metadata file, %(reason)s")
 
 
 class AssignmentTypeCalculationError(UnexpectedError):
-    message_format = _(
+    debug_message_format = _(
         'Unexpected combination of grant attributes - '
         'User: %(user_id)s, Group: %(group_id)s, Project: %(project_id)s, '
         'Domain: %(domain_id)s')
@@ -450,14 +455,14 @@ class ConfigFileNotFound(UnexpectedError):
 
 
 class KeysNotFound(UnexpectedError):
-    message_format = _('No encryption keys found; run keystone-manage '
-                       'fernet_setup to bootstrap one.')
+    debug_message_format = _('No encryption keys found; run keystone-manage '
+                             'fernet_setup to bootstrap one.')
 
 
 class MultipleSQLDriversInConfig(UnexpectedError):
-    message_format = _('The Keystone domain-specific configuration has '
-                       'specified more than one SQL driver (only one is '
-                       'permitted): %(source)s.')
+    debug_message_format = _('The Keystone domain-specific configuration has '
+                             'specified more than one SQL driver (only one is '
+                             'permitted): %(source)s.')
 
 
 class MigrationNotProvided(Exception):
@@ -469,8 +474,8 @@ class MigrationNotProvided(Exception):
 
 
 class UnsupportedTokenVersionException(UnexpectedError):
-    message_format = _('Token version is unrecognizable or '
-                       'unsupported.')
+    debug_message_format = _('Token version is unrecognizable or '
+                             'unsupported.')
 
 
 class SAMLSigningError(UnexpectedError):
@@ -478,7 +483,6 @@ class SAMLSigningError(UnexpectedError):
                              'that this server does not have xmlsec1 '
                              'installed, or this is the result of '
                              'misconfiguration. Reason %(reason)s')
-    title = 'Error signing SAML assertion'
 
 
 class OAuthHeadersMissingError(UnexpectedError):
@@ -486,10 +490,19 @@ class OAuthHeadersMissingError(UnexpectedError):
                              'with OAuth related calls, if running under '
                              'HTTPd or Apache, ensure WSGIPassAuthorization '
                              'is set to On.')
-    title = 'Error retrieving OAuth headers'
 
 
 class TokenlessAuthConfigError(ValidationError):
     message_format = _('Could not determine Identity Provider ID. The '
                        'configuration option %(issuer_attribute)s '
                        'was not found in the request environment.')
+
+
+class MigrationMovedFailure(RuntimeError):
+    def __init__(self, extension):
+        self.extension = extension
+        msg = _("The %s extension has been moved into keystone core and as "
+                "such its migrations are maintained by the main keystone "
+                "database control. Use the command: keystone-manage "
+                "db_sync") % self.extension
+        super(MigrationMovedFailure, self).__init__(msg)

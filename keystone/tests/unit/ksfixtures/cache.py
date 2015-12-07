@@ -13,11 +13,17 @@
 
 import fixtures
 
+from keystone import catalog
 from keystone.common import cache
 
 
+CACHE_REGIONS = (cache.CACHE_REGION, catalog.COMPUTED_CATALOG_REGION)
+
+
 class Cache(fixtures.Fixture):
-    """A fixture for setting up and tearing down the cache between test cases.
+    """A fixture for setting up the cache between test cases.
+
+    This will also tear down an existing cache if one is already configured.
     """
 
     def setUp(self):
@@ -29,8 +35,9 @@ class Cache(fixtures.Fixture):
 
         # NOTE(morganfainberg):  The only way to reconfigure the CacheRegion
         # object on each setUp() call is to remove the .backend property.
-        if cache.REGION.is_configured:
-            del cache.REGION.backend
+        for region in CACHE_REGIONS:
+            if region.is_configured:
+                del region.backend
 
-        # ensure the cache region instance is setup
-        cache.configure_cache_region(cache.REGION)
+            # ensure the cache region instance is setup
+            cache.configure_cache(region=region)

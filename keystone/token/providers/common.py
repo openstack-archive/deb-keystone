@@ -14,7 +14,6 @@
 
 from oslo_config import cfg
 from oslo_log import log
-from oslo_log import versionutils
 from oslo_serialization import jsonutils
 import six
 from six.moves.urllib import parse
@@ -22,8 +21,8 @@ from six.moves.urllib import parse
 from keystone.common import controller as common_controller
 from keystone.common import dependency
 from keystone.common import utils
-from keystone.contrib.federation import constants as federation_constants
 from keystone import exception
+from keystone.federation import constants as federation_constants
 from keystone.i18n import _, _LE
 from keystone import token
 from keystone.token import provider
@@ -235,6 +234,7 @@ class V2TokenDataHelper(object):
                      'identity_api', 'resource_api', 'role_api', 'trust_api')
 class V3TokenDataHelper(object):
     """Token data helper."""
+
     def __init__(self):
         # Keep __init__ around to ensure dependency injection works.
         super(V3TokenDataHelper, self).__init__()
@@ -287,7 +287,7 @@ class V3TokenDataHelper(object):
         :domain_id: domain ID to scope to
         :user_id: user ID
 
-        :raises: exception.Unauthorized - when no roles were found for a
+        :raises keystone.exception.Unauthorized: when no roles were found for a
             (group_ids, project_id) or (group_ids, domain_id) pairs.
 
         """
@@ -458,20 +458,11 @@ class V3TokenDataHelper(object):
             LOG.error(msg)
             raise exception.UnexpectedError(msg)
 
-    def get_token_data(self, user_id, method_names, extras=None,
-                       domain_id=None, project_id=None, expires=None,
-                       trust=None, token=None, include_catalog=True,
-                       bind=None, access_token=None, issued_at=None,
-                       audit_info=None):
-        if extras is None:
-            extras = {}
-        if extras:
-            versionutils.deprecated(
-                what='passing token data with "extras"',
-                as_of=versionutils.deprecated.KILO,
-                in_favor_of='well-defined APIs')(lambda: None)()
-        token_data = {'methods': method_names,
-                      'extras': extras}
+    def get_token_data(self, user_id, method_names, domain_id=None,
+                       project_id=None, expires=None, trust=None, token=None,
+                       include_catalog=True, bind=None, access_token=None,
+                       issued_at=None, audit_info=None):
+        token_data = {'methods': method_names}
 
         # We've probably already written these to the token
         if token:
@@ -572,7 +563,6 @@ class BaseProvider(provider.Provider):
         token_data = self.v3_token_data_helper.get_token_data(
             user_id,
             method_names,
-            auth_context.get('extras') if auth_context else None,
             domain_id=domain_id,
             project_id=project_id,
             expires=expires_at,

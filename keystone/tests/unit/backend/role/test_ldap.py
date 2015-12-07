@@ -32,6 +32,7 @@ class LdapRoleCommon(core_ldap.BaseBackendLdapCommon, core_role.RoleTests):
     which should be run for all the various LDAP configurations we test.
 
     """
+
     pass
 
 
@@ -42,8 +43,9 @@ class LdapRole(LdapRoleCommon, core_ldap.BaseBackendLdap, unit.TestCase):
     which only need to be run in a basic LDAP configurations.
 
     """
+
     def test_configurable_allowed_role_actions(self):
-        role = {'id': u'fäké1', 'name': u'fäké1'}
+        role = unit.new_role_ref(id=u'fäké1', name=u'fäké1')
         self.role_api.create_role(u'fäké1', role)
         role_ref = self.role_api.get_role(u'fäké1')
         self.assertEqual(u'fäké1', role_ref['id'])
@@ -62,7 +64,7 @@ class LdapRole(LdapRoleCommon, core_ldap.BaseBackendLdap, unit.TestCase):
             role_allow_delete=False)
         self.load_backends()
 
-        role = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex}
+        role = unit.new_role_ref()
         self.assertRaises(exception.ForbiddenAction,
                           self.role_api.create_role,
                           role['id'],
@@ -80,7 +82,7 @@ class LdapRole(LdapRoleCommon, core_ldap.BaseBackendLdap, unit.TestCase):
 
     def test_role_filter(self):
         role_ref = self.role_api.get_role(self.role_member['id'])
-        self.assertDictEqual(role_ref, self.role_member)
+        self.assertDictEqual(self.role_member, role_ref)
 
         self.config_fixture.config(group='ldap',
                                    role_filter='(CN=DOES_NOT_MATCH)')
@@ -151,6 +153,7 @@ class LdapIdentitySqlEverythingElseRole(
     core_ldap.BaseBackendLdapIdentitySqlEverythingElse, LdapRoleCommon,
         unit.TestCase):
     """Test Identity in LDAP, Everything else in SQL."""
+
     pass
 
 
@@ -158,4 +161,5 @@ class LdapIdentitySqlEverythingElseWithMappingRole(
     LdapIdentitySqlEverythingElseRole,
         core_ldap.BaseBackendLdapIdentitySqlEverythingElseWithMapping):
     """Test ID mapping of default LDAP backend."""
+
     pass
