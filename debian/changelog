@@ -1,3 +1,10 @@
+keystone (1:9.0.0~b1-1) experimental
+
+  * New upstream release.
+  * Fixed (build-)depends for this release.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 07 Dec 2015 12:13:04 +0100
+
 keystone (1:8.0.0-4) unstable; urgency=medium
 
   * If the debconf prompt for creating Keystone endpoint was yes, check first
