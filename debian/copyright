@@ -10,7 +10,10 @@ Copyright: 2010 United States Government as represented by the Administrator of
 License: Apache-2
 
 Files: debian/*
-Copyright: 2011-2016, Thomas Goirand <zigo@debian.org>
+Copyright: (c) 2011-2016, Thomas Goirand <zigo@debian.org>
+           (c) 2012, Ghe Rivero <ghe@debian.org>
+           (c) 2012, Mehdi Abaakouk <sileht@sileht.net>
+           (c) 2011-2012, Julien Danjou <acid@debian.org>
 License: Apache-2
 
 License: Apache-2
