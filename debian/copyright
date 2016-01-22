@@ -2,15 +2,15 @@ Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: keystone
 Source: git://github.com/openstack/keystone.git
 
-Files: debian/*
-Copyright: 2011-2013, Thomas Goirand <zigo@debian.org>
-License: Apache-2
-
 Files: *
 Copyright: 2010 United States Government as represented by the Administrator of
             the National Aeronautics and Space Administration.
 	   2010-2011 OpenStack LLC
 	   Others (See individual files for more details)
+License: Apache-2
+
+Files: debian/*
+Copyright: 2011-2016, Thomas Goirand <zigo@debian.org>
 License: Apache-2
 
 License: Apache-2
