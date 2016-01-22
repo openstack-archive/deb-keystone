@@ -1,4 +1,4 @@
-keystone (1:9.0.0~b1-1) experimental; urgency=medium
+keystone (1:9.0.0~b2-1) experimental; urgency=medium
 
   * New upstream release.
   * Fixed (build-)depends for this release.
