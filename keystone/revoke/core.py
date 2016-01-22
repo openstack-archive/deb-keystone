@@ -16,7 +16,6 @@ import abc
 import datetime
 
 from oslo_config import cfg
-from oslo_log import log
 from oslo_log import versionutils
 from oslo_utils import timeutils
 import six
@@ -32,7 +31,6 @@ from keystone.revoke import model
 
 
 CONF = cfg.CONF
-LOG = log.getLogger(__name__)
 
 
 EXTENSION_DATA = {
@@ -46,9 +44,8 @@ EXTENSION_DATA = {
         {
             'rel': 'describedby',
             'type': 'text/html',
-            'href': ('https://github.com/openstack/identity-api/blob/master/'
-                     'openstack-identity-api/v3/src/markdown/'
-                     'identity-api-v3-os-revoke-ext.md'),
+            'href': 'http://specs.openstack.org/openstack/keystone-specs/api/'
+                    'v3/identity-api-v3-os-revoke-ext.html',
         }
     ]}
 extension.register_admin_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)

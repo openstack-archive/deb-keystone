@@ -73,7 +73,7 @@ services are configured to run in a single process.
 
 .. NOTE::
 
-    The separation into ``admin`` and ``main`` interfaces is an historical
+    The separation into ``admin`` and ``main`` interfaces is a historical
     anomaly. The new V3 API provides the same interface on both the admin and
     main interfaces (this can be configured in ``keystone-paste.ini``, but the
     default is to have both the same). The V2.0 API provides a limited public
@@ -113,8 +113,8 @@ The primary configuration file is organized into the following sections:
 * ``[cache]`` - Caching layer configuration
 * ``[catalog]`` - Service catalog driver configuration
 * ``[credential]`` - Credential system driver configuration
-* ``[endpoint_filter]`` - Endpoint filtering extension configuration
-* ``[endpoint_policy]`` - Endpoint policy extension configuration
+* ``[endpoint_filter]`` - Endpoint filtering configuration
+* ``[endpoint_policy]`` - Endpoint policy configuration
 * ``[eventlet_server]`` - Eventlet server configuration
 * ``[eventlet_server_ssl]`` - Eventlet server SSL configuration
 * ``[federation]`` - Federation driver configuration
@@ -897,6 +897,35 @@ Another such example is `available in devstack
 (files/default_catalog.templates)
 <https://git.openstack.org/cgit/openstack-dev/devstack/tree/files/default_catalog.templates>`_.
 
+Endpoint Filtering enables creation of ad-hoc catalogs for each project-scoped
+token request.
+
+Configure the endpoint filter catalog driver in the ``[catalog]`` section.
+For example:
+
+.. code-block:: ini
+
+    [catalog]
+    driver = catalog_sql
+
+In the ``[endpoint_filter]`` section, set ``return_all_endpoints_if_no_filter``
+to ``False`` to return an empty catalog if no associations are made.
+For example:
+
+.. code-block:: ini
+
+    [endpoint_filter]
+    return_all_endpoints_if_no_filter = False
+
+See `API Specification for Endpoint Filtering <http://specs.openstack.org/
+openstack/keystone-specs/api/v3/identity-api-v3-os-ep-filter-ext.html>`_ for
+the details of API definition.
+
+.. NOTE:: Support status for Endpoint Filtering
+
+   *Experimental* (Icehouse, Juno)
+   *Stable* (Kilo)
+
 Logging
 -------
 
@@ -1053,6 +1082,109 @@ including the following in ``keystone.conf``:
     [os_inherit]
     enabled = True
 
+See `API Specification for Inherit <http://specs.openstack.org/
+openstack/keystone-specs/api/v3/identity-api-v3-os-inherit-ext.html>`_
+for the details of API definition.
+
+
+.. NOTE:: Support status for Inherit Role Assignment
+
+   *Experimental* (Havava, Icehouse)
+   *Stable* (Juno)
+
+
+Endpoint Policy
+---------------
+
+The Endpoint Policy feature provides associations between service endpoints
+and policies that are already stored in the Identity server and referenced
+by a policy ID.
+
+Configure the endpoint policy backend driver in the ``[endpoint_policy]``
+section. For example:
+
+.. code-block:: ini
+
+    [endpoint_policy]
+    driver = sql
+
+See `API Specification for Endpoint Policy <http://specs.openstack.org/
+openstack/keystone-specs/api/v3/identity-api-v3-os-endpoint-policy.html>`_
+for the details of API definition.
+
+.. NOTE:: Support status for Endpoint Policy
+
+   *Experimental* (Juno)
+   *Stable* (Kilo)
+
+
+OAuth1 1.0a
+-----------
+
+The OAuth 1.0a feature provides the ability for Identity users to delegate
+roles to third party consumers via the OAuth 1.0a specification.
+
+To enable OAuth1:
+
+1. Add the oauth1 driver to the ``[oauth1]`` section in ``keystone.conf``.
+For example:
+
+.. code-block:: ini
+
+    [oauth1]
+    driver = sql
+
+2. Add the ``oauth1`` authentication method to the ``[auth]`` section in
+``keystone.conf``:
+
+.. code-block:: ini
+
+    [auth]
+    methods = external,password,token,oauth1
+
+3. Optionally, if deploying under an HTTPD server (i.e. Apache), set the
+`WSGIPassAuthorization` to allow the OAuth Authorization headers to pass
+through `mod_wsgi`. For example, add the following to the keystone virtual
+host file:
+
+.. code-block:: ini
+
+    WSGIPassAuthorization On
+
+See `API Specification for OAuth 1.0a <http://specs.openstack.org/openstack/
+keystone-specs/api/v3/identity-api-v3-os-oauth1-ext.html>`_ for the details of
+API definition.
+
+.. NOTE:: Support status for OAuth 1.0a
+
+   *Experimental* (Havana, Icehouse)
+   *Stable* (Juno)
+
+
+Revocation Events
+-----------------
+
+The Revocation Events feature provides a list of token revocations. Each event
+expresses a set of criteria which describes a set of tokens that are
+no longer valid.
+
+Add the revoke backend driver to the ``[revoke]`` section in
+``keystone.conf``. For example:
+
+.. code-block:: ini
+
+    [revoke]
+    driver = sql
+
+See `API Specification for Revocation Events <https://specs.openstack.org/
+openstack/keystone-specs/api/v3/identity-api-v3-os-revoke-ext.html>`_ for
+the details of API definition.
+
+.. NOTE:: Support status for Revocation Events
+
+   *Experimental* (Juno)
+   *Stable* (Kilo)
+
 
 Token Binding
 -------------
@@ -1113,6 +1245,39 @@ override this global value with a specific limit, for example:
 If a response to ``list_{entity}`` call has been truncated, then the response
 status code will still be 200 (OK), but the ``truncated`` attribute in the
 collection will be set to ``true``.
+
+
+Url safe naming of projects and domains
+---------------------------------------
+
+In the future, keystone may offer the ability to identify a project in a
+hierarchy via a url style of naming from the root of the hierarchy (for example
+specifying 'projectA/projectB/projectC' as the project name in an
+authentication request). In order to prepare for this, keystone supports the
+optional ability to ensure both projects and domains are named without
+including any of the reserverd characters specified in section 2.2 of
+`rfc3986 <http://tools.ietf.org/html/rfc3986>`_.
+
+The safety of the names of projects and domains can be controlled via two
+configuration options:
+
+.. code-block:: ini
+
+    [resource]
+    project_name_url_safe = off
+    domain_name_url_safe = off
+
+When set to ``off`` (which is the default), no checking is done on the url
+safeness of names. When set to ``new``, an attempt to create a new project or
+domain with an unsafe name (or update the name of a project or domain to be
+unsafe) will cause a status code of 400 (Bad Request) to be returned. Setting
+the configuration option to ``strict`` will, in addition to preventing the
+creation and updating of entities with unsafe names, cause an authentication
+attempt which specifies a project or domain name that is unsafe to return a
+status code of 401 (Unauthorized).
+
+It is recommended that installations take the steps necessary to where they
+can run with both options set to ``strict`` as soon as is practical.
 
 Sample Configuration Files
 --------------------------

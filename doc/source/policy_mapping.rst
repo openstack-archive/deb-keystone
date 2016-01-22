@@ -79,6 +79,7 @@ identity:create_grant                                      PUT `grant_resources`
 identity:revoke_grant                                      DELETE `grant_resources`_
 
 identity:list_role_assignments                             GET /v3/role_assignments
+identity:list_role_assignments_for_tree                    GET /v3/role_assignments?include_subtree
 
 identity:get_policy                                        GET /v3/policy/{policy_id}
 identity:list_policies                                     GET /v3/policy
@@ -185,7 +186,9 @@ identity:update_domain_config                              - PATCH /v3/domains/{
 identity:delete_domain_config                              - DELETE /v3/domains/{domain_id}/config
                                                            - DELETE /v3/domains/{domain_id}/config/{group}
                                                            - DELETE /v3/domains/{domain_id}/config/{group}/{option}
-
+identity:get_domain_config_default                         - GET /v3/domains/config/default
+                                                           - GET /v3/domains/config/{group}/default
+                                                           - GET /v3/domains/config/{group}/{option}/default
 =========================================================  ===
 
 .. _grant_resources:

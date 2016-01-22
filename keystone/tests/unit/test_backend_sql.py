@@ -44,7 +44,7 @@ class SqlTests(unit.SQLDriverOverrides, unit.TestCase):
 
     def setUp(self):
         super(SqlTests, self).setUp()
-        self.useFixture(database.Database())
+        self.useFixture(database.Database(self.sql_driver_version_overrides))
         self.load_backends()
 
         # populate the engine with tables & fixtures
@@ -219,10 +219,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # like LDAP.
 
         # create a ref with a lowercase name
-        ref = {
-            'id': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex.lower(),
-            'domain_id': DEFAULT_DOMAIN_ID}
+        ref = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
         self.resource_api.create_project(ref['id'], ref)
 
         # assign a new ID with the same name, but this time in uppercase
@@ -231,19 +228,18 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.resource_api.create_project(ref['id'], ref)
 
     def test_create_null_project_name(self):
-        tenant = {'id': uuid.uuid4().hex,
-                  'name': None,
-                  'domain_id': DEFAULT_DOMAIN_ID}
+        project = unit.new_project_ref(name=None,
+                                       domain_id=DEFAULT_DOMAIN_ID)
         self.assertRaises(exception.ValidationError,
                           self.resource_api.create_project,
-                          tenant['id'],
-                          tenant)
+                          project['id'],
+                          project)
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.get_project,
-                          tenant['id'])
+                          project['id'])
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.get_project_by_name,
-                          tenant['name'],
+                          project['name'],
                           DEFAULT_DOMAIN_ID)
 
     def test_delete_project_with_user_association(self):
@@ -265,20 +261,16 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         This behavior is specific to the SQL driver.
 
         """
-        tenant_id = uuid.uuid4().hex
         arbitrary_key = uuid.uuid4().hex
         arbitrary_value = uuid.uuid4().hex
-        tenant = {
-            'id': tenant_id,
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID,
-            arbitrary_key: arbitrary_value}
-        ref = self.resource_api.create_project(tenant_id, tenant)
+        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
+        project[arbitrary_key] = arbitrary_value
+        ref = self.resource_api.create_project(project['id'], project)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('extra'))
 
-        tenant['name'] = uuid.uuid4().hex
-        ref = self.resource_api.update_project(tenant_id, tenant)
+        project['name'] = uuid.uuid4().hex
+        ref = self.resource_api.update_project(project['id'], project)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
@@ -431,7 +423,8 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         # necessary.
 
         expected_query_args = (token_sql.TokenModel.id,
-                               token_sql.TokenModel.expires)
+                               token_sql.TokenModel.expires,
+                               token_sql.TokenModel.extra,)
 
         with mock.patch.object(token_sql, 'sql') as mock_sql:
             tok = token_sql.Token()
@@ -525,7 +518,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
     def test_catalog_ignored_malformed_urls(self):
         service = unit.new_service_ref()
-        self.catalog_api.create_service(service['id'], service.copy())
+        self.catalog_api.create_service(service['id'], service)
 
         malformed_url = "http://192.168.1.104:8774/v2/$(tenant)s"
         endpoint = unit.new_endpoint_ref(service_id=service['id'],
@@ -539,7 +532,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
     def test_get_catalog_with_empty_public_url(self):
         service = unit.new_service_ref()
-        self.catalog_api.create_service(service['id'], service.copy())
+        self.catalog_api.create_service(service['id'], service)
 
         endpoint = unit.new_endpoint_ref(url='', service_id=service['id'],
                                          region_id=None)
@@ -555,7 +548,7 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
 
     def test_create_endpoint_region_returns_not_found(self):
         service = unit.new_service_ref()
-        self.catalog_api.create_service(service['id'], service.copy())
+        self.catalog_api.create_service(service['id'], service)
 
         endpoint = unit.new_endpoint_ref(region_id=uuid.uuid4().hex,
                                          service_id=service['id'])
@@ -566,13 +559,11 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
                           endpoint.copy())
 
     def test_create_region_invalid_id(self):
-        region = unit.new_region_ref(id='0' * 256,
-                                     description='',
-                                     extra={})
+        region = unit.new_region_ref(id='0' * 256)
 
         self.assertRaises(exception.StringLengthExceeded,
                           self.catalog_api.create_region,
-                          region.copy())
+                          region)
 
     def test_create_region_invalid_parent_id(self):
         region = unit.new_region_ref(parent_region_id='0' * 256)
@@ -617,6 +608,10 @@ class SqlPolicy(SqlTests, test_backend.PolicyTests):
 
 
 class SqlInheritance(SqlTests, test_backend.InheritanceTests):
+    pass
+
+
+class SqlImpliedRoles(SqlTests, test_backend.ImpliedRoleTests):
     pass
 
 
@@ -755,17 +750,11 @@ class SqlModuleInitialization(unit.TestCase):
 class SqlCredential(SqlTests):
 
     def _create_credential_with_user_id(self, user_id=uuid.uuid4().hex):
-        credential_id = uuid.uuid4().hex
-        new_credential = {
-            'id': credential_id,
-            'user_id': user_id,
-            'project_id': uuid.uuid4().hex,
-            'blob': uuid.uuid4().hex,
-            'type': uuid.uuid4().hex,
-            'extra': uuid.uuid4().hex
-        }
-        self.credential_api.create_credential(credential_id, new_credential)
-        return new_credential
+        credential = unit.new_credential_ref(user_id=user_id,
+                                             extra=uuid.uuid4().hex,
+                                             type=uuid.uuid4().hex)
+        self.credential_api.create_credential(credential['id'], credential)
+        return credential
 
     def _validateCredentialList(self, retrieved_credentials,
                                 expected_credentials):
@@ -799,3 +788,9 @@ class SqlCredential(SqlTests):
         credentials = self.credential_api.list_credentials_for_user(
             self.user_foo['id'])
         self._validateCredentialList(credentials, self.user_credentials)
+
+    def test_list_credentials_for_user_and_type(self):
+        cred = self.user_credentials[0]
+        credentials = self.credential_api.list_credentials_for_user(
+            self.user_foo['id'], type=cred['type'])
+        self._validateCredentialList(credentials, [cred])

@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import credential
 from keystone import exception
@@ -41,7 +42,7 @@ class Credential(credential.CredentialDriverV8):
             session.add(ref)
         return ref.to_dict()
 
-    @sql.truncated
+    @driver_hints.truncated
     def list_credentials(self, hints):
         session = sql.get_session()
         credentials = session.query(CredentialModel)
@@ -49,10 +50,13 @@ class Credential(credential.CredentialDriverV8):
                                              credentials, hints)
         return [s.to_dict() for s in credentials]
 
-    def list_credentials_for_user(self, user_id):
+    def list_credentials_for_user(self, user_id, type=None):
         session = sql.get_session()
         query = session.query(CredentialModel)
-        refs = query.filter_by(user_id=user_id).all()
+        query = query.filter_by(user_id=user_id)
+        if type:
+            query = query.filter_by(type=type)
+        refs = query.all()
         return [ref.to_dict() for ref in refs]
 
     def _get_credential(self, session, credential_id):

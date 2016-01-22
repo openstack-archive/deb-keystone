@@ -16,6 +16,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
+import uuid
 
 from oslo_config import cfg
 from oslo_log import log
@@ -31,7 +32,7 @@ from keystone.common import utils
 from keystone import exception
 from keystone.federation import idp
 from keystone.federation import utils as mapping_engine
-from keystone.i18n import _, _LW
+from keystone.i18n import _, _LW, _LI
 from keystone.server import backends
 from keystone import token
 
@@ -49,6 +50,168 @@ class BaseApp(object):
         parser = subparsers.add_parser(cls.name, help=cls.__doc__)
         parser.set_defaults(cmd_class=cls)
         return parser
+
+
+class BootStrap(BaseApp):
+    """Perform the basic bootstrap process"""
+
+    name = "bootstrap"
+
+    def __init__(self):
+        self.load_backends()
+        self.tenant_id = uuid.uuid4().hex
+        self.role_id = uuid.uuid4().hex
+        self.username = None
+        self.project_name = None
+        self.role_name = None
+        self.password = None
+
+    @classmethod
+    def add_argument_parser(cls, subparsers):
+        parser = super(BootStrap, cls).add_argument_parser(subparsers)
+        parser.add_argument('--bootstrap-username', default='admin',
+                            metavar='OS_BOOTSTRAP_USERNAME',
+                            help=('The username of the initial keystone '
+                                  'user during bootstrap process.'))
+        # NOTE(morganfainberg): See below for ENV Variable that can be used
+        # in lieu of the command-line arguments.
+        parser.add_argument('--bootstrap-password', default=None,
+                            metavar='OS_BOOTSTRAP_PASSWORD',
+                            help='The bootstrap user password')
+        parser.add_argument('--bootstrap-project-name', default='admin',
+                            metavar='OS_BOOTSTRAP_PROJECT_NAME',
+                            help=('The initial project created during the '
+                                  'keystone bootstrap process.'))
+        parser.add_argument('--bootstrap-role-name', default='admin',
+                            metavar='OS_BOOTSTRAP_ROLE_NAME',
+                            help=('The initial role-name created during the '
+                                  'keystone bootstrap process.'))
+        return parser
+
+    def load_backends(self):
+        drivers = backends.load_backends()
+        self.resource_manager = drivers['resource_api']
+        self.identity_manager = drivers['identity_api']
+        self.assignment_manager = drivers['assignment_api']
+        self.role_manager = drivers['role_api']
+
+    def _get_config(self):
+        self.username = (
+            os.environ.get('OS_BOOTSTRAP_USERNAME') or
+            CONF.command.bootstrap_username)
+        self.project_name = (
+            os.environ.get('OS_BOOTSTRAP_PROJECT_NAME') or
+            CONF.command.bootstrap_project_name)
+        self.role_name = (
+            os.environ.get('OS_BOOTSTRAP_ROLE_NAME') or
+            CONF.command.bootstrap_role_name)
+        self.password = (
+            os.environ.get('OS_BOOTSTRAP_PASSWORD') or
+            CONF.command.bootstrap_password)
+
+    def do_bootstrap(self):
+        """Perform the bootstrap actions.
+
+        Create bootstrap user, project, and role so that CMS, humans, or
+        scripts can continue to perform initial setup (domains, projects,
+        services, endpoints, etc) of Keystone when standing up a new
+        deployment.
+        """
+        self._get_config()
+
+        if self.password is None:
+            print(_('Either --bootstrap-password argument or '
+                    'OS_BOOTSTRAP_PASSWORD must be set.'))
+            raise ValueError
+
+        # NOTE(morganfainberg): Ensure the default domain is in-fact created
+        default_domain = migration_helpers.get_default_domain()
+        try:
+            self.resource_manager.create_domain(
+                domain_id=default_domain['id'],
+                domain=default_domain)
+            LOG.info(_LI('Created domain %s'), default_domain['id'])
+        except exception.Conflict:
+            # NOTE(morganfainberg): Domain already exists, continue on.
+            LOG.info(_LI('Domain %s already exists, skipping creation.'),
+                     default_domain['id'])
+
+        try:
+            self.resource_manager.create_project(
+                tenant_id=self.tenant_id,
+                tenant={'enabled': True,
+                        'id': self.tenant_id,
+                        'domain_id': default_domain['id'],
+                        'description': 'Bootstrap project for initializing '
+                                       'the cloud.',
+                        'name': self.project_name}
+            )
+            LOG.info(_LI('Created project %s'), self.project_name)
+        except exception.Conflict:
+            LOG.info(_LI('Project %s already exists, skipping creation.'),
+                     self.project_name)
+            project = self.resource_manager.get_project_by_name(
+                self.project_name, default_domain['id'])
+            self.tenant_id = project['id']
+
+        # NOTE(morganfainberg): Do not create the user if it already exists.
+        try:
+            user = self.identity_manager.create_user(
+                user_ref={'name': self.username,
+                          'enabled': True,
+                          'domain_id': default_domain['id'],
+                          'password': self.password
+                          }
+            )
+            LOG.info(_LI('Created user %s'), self.username)
+        except exception.Conflict:
+            LOG.info(_LI('User %s already exists, skipping creation.'),
+                     self.username)
+            user = self.identity_manager.get_user_by_name(self.username,
+                                                          default_domain['id'])
+
+        # NOTE(morganfainberg): Do not create the role if it already exists.
+        try:
+            self.role_manager.create_role(
+                role_id=self.role_id,
+                role={'name': self.role_name,
+                      'id': self.role_id},
+            )
+            LOG.info(_LI('Created Role %s'), self.role_name)
+        except exception.Conflict:
+            LOG.info(_LI('Role %s exists, skipping creation.'), self.role_name)
+            # NOTE(davechen): There is no backend method to get the role
+            # by name, so build the hints to list the roles and filter by
+            # name instead.
+            hints = driver_hints.Hints()
+            hints.add_filter('name', self.role_name)
+            role = self.role_manager.list_roles(hints)
+            self.role_id = role[0]['id']
+
+        # NOTE(morganfainberg): Handle the case that the role assignment has
+        # already occured.
+        try:
+            self.assignment_manager.add_role_to_user_and_project(
+                user_id=user['id'],
+                tenant_id=self.tenant_id,
+                role_id=self.role_id
+            )
+            LOG.info(_LI('Granted %(role)s on %(project)s to user'
+                         ' %(username)s.'),
+                     {'role': self.role_name,
+                      'project': self.project_name,
+                      'username': self.username})
+        except exception.Conflict:
+            LOG.info(_LI('User %(username)s already has %(role)s on '
+                         '%(project)s.'),
+                     {'username': self.username,
+                      'role': self.role_name,
+                      'project': self.project_name})
+
+    @classmethod
+    def main(cls):
+        klass = cls()
+        klass.do_bootstrap()
 
 
 class DbSync(BaseApp):
@@ -157,8 +320,8 @@ class PKISetup(BaseCertificateSetup):
 
     @classmethod
     def main(cls):
-        LOG.warn(_LW('keystone-manage pki_setup is not recommended for '
-                     'production use.'))
+        LOG.warning(_LW('keystone-manage pki_setup is not recommended for '
+                        'production use.'))
         keystone_user_id, keystone_group_id = cls.get_user_group()
         conf_pki = openssl.ConfigurePKI(keystone_user_id, keystone_group_id,
                                         rebuild=CONF.command.rebuild)
@@ -176,8 +339,8 @@ class SSLSetup(BaseCertificateSetup):
 
     @classmethod
     def main(cls):
-        LOG.warn(_LW('keystone-manage ssl_setup is not recommended for '
-                     'production use.'))
+        LOG.warning(_LW('keystone-manage ssl_setup is not recommended for '
+                        'production use.'))
         keystone_user_id, keystone_group_id = cls.get_user_group()
         conf_ssl = openssl.ConfigureSSL(keystone_user_id, keystone_group_id,
                                         rebuild=CONF.command.rebuild)
@@ -201,7 +364,7 @@ class FernetSetup(BasePermissionsSetup):
 
         keystone_user_id, keystone_group_id = cls.get_user_group()
         fernet.create_key_directory(keystone_user_id, keystone_group_id)
-        if fernet.validate_key_repository():
+        if fernet.validate_key_repository(requires_write=True):
             fernet.initialize_key_repository(
                 keystone_user_id, keystone_group_id)
 
@@ -231,7 +394,7 @@ class FernetRotate(BasePermissionsSetup):
         from keystone.token.providers.fernet import utils as fernet
 
         keystone_user_id, keystone_group_id = cls.get_user_group()
-        if fernet.validate_key_repository():
+        if fernet.validate_key_repository(requires_write=True):
             fernet.rotate_keys(keystone_user_id, keystone_group_id)
 
 
@@ -481,8 +644,8 @@ class DomainConfigUploadFiles(object):
                             fname[len(DOMAIN_CONF_FHEAD):
                                   -len(DOMAIN_CONF_FTAIL)])
                     else:
-                        LOG.warn(_LW('Ignoring file (%s) while scanning '
-                                     'domain config directory'), fname)
+                        LOG.warning(_LW('Ignoring file (%s) while scanning '
+                                        'domain config directory'), fname)
 
     def run(self):
         # First off, let's just check we can talk to the domain database
@@ -641,6 +804,7 @@ class MappingEngineTester(BaseApp):
 
 
 CMDS = [
+    BootStrap,
     DbSync,
     DbVersion,
     DomainConfigUpload,

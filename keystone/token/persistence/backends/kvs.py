@@ -55,10 +55,10 @@ class Token(token.persistence.TokenDriverV8):
         if self.__class__ == Token:
             # NOTE(morganfainberg): Only warn if the base KVS implementation
             # is instantiated.
-            LOG.warn(_LW('It is recommended to only use the base '
-                         'key-value-store implementation for the token driver '
-                         "for testing purposes. Please use 'memcache' or "
-                         "'sql' instead."))
+            LOG.warning(_LW('It is recommended to only use the base '
+                            'key-value-store implementation for the token '
+                            'driver for testing purposes. Please use '
+                            "'memcache' or 'sql' instead."))
 
     def _prefix_token_id(self, token_id):
         return 'token-%s' % token_id.encode('utf-8')
@@ -209,6 +209,15 @@ class Token(token.persistence.TokenDriverV8):
         revoked_token_data['expires'] = utils.isotime(expires,
                                                       subsecond=True)
         revoked_token_data['id'] = data['id']
+
+        token_data = data['token_data']
+        if 'access' in token_data:
+            # It's a v2 token.
+            audit_ids = token_data['access']['token']['audit_ids']
+        else:
+            # It's a v3 token.
+            audit_ids = token_data['token']['audit_ids']
+        revoked_token_data['audit_id'] = audit_ids[0]
 
         token_list = self._get_key_or_default(self.revocation_key, default=[])
         if not isinstance(token_list, list):

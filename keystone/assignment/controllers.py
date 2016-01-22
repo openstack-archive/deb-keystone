@@ -40,7 +40,7 @@ LOG = log.getLogger(__name__)
 class TenantAssignment(controller.V2Controller):
     """The V2 Project APIs that are processing assignments."""
 
-    @controller.v2_deprecated
+    @controller.v2_auth_deprecated
     def get_projects_for_token(self, context, **kw):
         """Get valid tenants for token based on token used to authenticate.
 
@@ -514,8 +514,8 @@ class RoleAssignmentV3(controller.V3Controller):
         inherited_assignment = entity.get('inherited_to_projects')
 
         if 'project_id' in entity:
-            formatted_entity['scope'] = (
-                {'project': {'id': entity['project_id']}})
+            formatted_entity['scope'] = {
+                'project': {'id': entity['project_id']}}
 
             if 'domain_id' in entity.get('indirect', {}):
                 inherited_assignment = True
@@ -590,10 +590,7 @@ class RoleAssignmentV3(controller.V3Controller):
             msg = _('Specify a user or group, not both')
             raise exception.ValidationError(msg)
 
-    @controller.filterprotected('group.id', 'role.id',
-                                'scope.domain.id', 'scope.project.id',
-                                'scope.OS-INHERIT:inherited_to', 'user.id')
-    def list_role_assignments(self, context, filters):
+    def _list_role_assignments(self, context, filters, include_subtree=False):
         """List role assignments to user and groups on domains and projects.
 
         Return a list of all existing role assignments in the system, filtered
@@ -644,8 +641,58 @@ class RoleAssignmentV3(controller.V3Controller):
             group_id=params.get('group.id'),
             domain_id=params.get('scope.domain.id'),
             project_id=params.get('scope.project.id'),
+            include_subtree=include_subtree,
             inherited=inherited, effective=effective)
 
         formatted_refs = [self._format_entity(context, ref) for ref in refs]
 
         return self.wrap_collection(context, formatted_refs)
+
+    @controller.filterprotected('group.id', 'role.id',
+                                'scope.domain.id', 'scope.project.id',
+                                'scope.OS-INHERIT:inherited_to', 'user.id')
+    def list_role_assignments(self, context, filters):
+        return self._list_role_assignments(context, filters)
+
+    def _check_list_tree_protection(self, context, protection_info):
+        """Check protection for list assignment for tree API.
+
+        The policy rule might want to inspect the domain of any project filter
+        so if one is defined, then load the project ref and pass it to the
+        check protection method.
+
+        """
+        ref = {}
+        for filter, value in protection_info['filter_attr'].items():
+            if filter == 'scope.project.id' and value:
+                ref['project'] = self.resource_api.get_project(value)
+
+        self.check_protection(context, protection_info, ref)
+
+    @controller.filterprotected('group.id', 'role.id',
+                                'scope.domain.id', 'scope.project.id',
+                                'scope.OS-INHERIT:inherited_to', 'user.id',
+                                callback=_check_list_tree_protection)
+    def list_role_assignments_for_tree(self, context, filters):
+        if not context['query_string'].get('scope.project.id'):
+            msg = _('scope.project.id must be specified if include_subtree '
+                    'is also specified')
+            raise exception.ValidationError(message=msg)
+        return self._list_role_assignments(context, filters,
+                                           include_subtree=True)
+
+    def list_role_assignments_wrapper(self, context):
+        """Main entry point from router for list role assignments.
+
+        Since we want different policy file rules to be applicable based on
+        whether there the include_subtree query parameter is part of the API
+        call, this method checks for this and then calls the appropriate
+        protected entry point.
+
+        """
+        params = context['query_string']
+        if 'include_subtree' in params and (
+                self.query_filter_is_true(params['include_subtree'])):
+            return self.list_role_assignments_for_tree(context)
+        else:
+            return self.list_role_assignments(context)

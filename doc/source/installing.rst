@@ -49,7 +49,14 @@ Install the Keystone web service:
 
 .. code-block:: bash
 
-    $ python setup.py install
+    $ pip install .
+
+.. NOTE::
+
+    This step is guaranteed to fail if you do not have the proper binary
+    dependencies already installed on your development system. Maintaining a
+    list of platform-specific dependencies is outside the scope of this
+    documentation, but is within scope of `DevStack <http://devstack.org/>`_.
 
 You should have all the pieces you need to run Keystone installed on your
 system. The following commands should be available on the command-line path:
@@ -123,4 +130,4 @@ To install the packages:
 Once installed, you still need to initialize data in Keystone, which you can
 find described in :doc:`configuringservices`.
 
-.. _`OpenStack Install Guide`: http://docs.openstack.org/juno/install-guide/install/yum/content/keystone-install.html
+.. _`OpenStack Install Guide`: http://docs.openstack.org/liberty/install-guide-rdo/keystone-install.html

@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_log import log
 from oslo_serialization import jsonutils
 import webob
 
@@ -21,8 +20,6 @@ from keystone.common import json_home
 from keystone.common import wsgi
 from keystone import exception
 
-
-LOG = log.getLogger(__name__)
 
 MEDIA_TYPE_JSON = 'application/vnd.openstack.identity-%s+json'
 
@@ -146,9 +143,9 @@ class Version(wsgi.Application):
 
         if 'v3' in _VERSIONS:
             versions['v3'] = {
-                'id': 'v3.4',
+                'id': 'v3.5',
                 'status': 'stable',
-                'updated': '2015-03-30T00:00:00Z',
+                'updated': '2015-09-15T00:00:00Z',
                 'links': [
                     {
                         'rel': 'self',

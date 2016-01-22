@@ -13,7 +13,7 @@
 from __future__ import absolute_import
 
 from oslo_config import cfg
-from oslo_log import log
+from oslo_log import versionutils
 
 from keystone import assignment
 from keystone.common import ldap as common_ldap
@@ -24,11 +24,13 @@ from keystone.identity.backends import ldap as ldap_identity
 
 
 CONF = cfg.CONF
-LOG = log.getLogger(__name__)
 
 
-class Role(assignment.RoleDriverV8):
-
+class Role(assignment.RoleDriverV9):
+    @versionutils.deprecated(
+        versionutils.deprecated.MITAKA,
+        what='ldap role',
+        in_favor_of='sql role backend')
     def __init__(self):
         super(Role, self).__init__()
         self.LDAP_URL = CONF.ldap.url
@@ -94,8 +96,23 @@ class Role(assignment.RoleDriverV8):
         self.get_role(role_id)
         return self.role.update(role_id, role)
 
+    def create_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
 
-# NOTE(heny-nash): A mixin class to enable the sharing of the LDAP structure
+    def delete_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def list_implied_roles(self, prior_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def list_role_inference_rules(self):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def get_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+
+# NOTE(henry-nash): A mixin class to enable the sharing of the LDAP structure
 # between here and the assignment LDAP.
 class RoleLdapStructureMixin(object):
     DEFAULT_OU = 'ou=Roles'

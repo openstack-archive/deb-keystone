@@ -16,6 +16,7 @@ import datetime
 
 from oslo_config import cfg
 from oslo_utils import timeutils
+from six.moves import reload_module
 
 from keystone.common import dependency
 from keystone.common import utils
@@ -781,6 +782,12 @@ class TestTokenProvider(unit.TestCase):
         self.assertIsNone(
             self.token_provider_api._is_valid_token(create_v3_token()))
 
+    def test_no_token_raises_token_not_found(self):
+        self.assertRaises(
+            exception.TokenNotFound,
+            self.token_provider_api.validate_token,
+            None)
+
 
 # NOTE(ayoung): renamed to avoid automatic test detection
 class PKIProviderTests(object):
@@ -803,7 +810,8 @@ class PKIProviderTests(object):
         self.cms.subprocess = self.target_subprocess
         self.environment.subprocess = self.target_subprocess
 
-        reload(pki)  # force module reload so the imports get re-evaluated
+        # force module reload so the imports get re-evaluated
+        reload_module(pki)
 
     def test_get_token_id_error_handling(self):
         # cause command-line failure

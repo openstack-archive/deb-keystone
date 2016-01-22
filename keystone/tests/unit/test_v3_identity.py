@@ -40,14 +40,12 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.group = self.identity_api.create_group(self.group)
         self.group_id = self.group['id']
 
-        self.credential_id = uuid.uuid4().hex
-        self.credential = self.new_credential_ref(
+        self.credential = unit.new_credential_ref(
             user_id=self.user['id'],
             project_id=self.project_id)
-        self.credential['id'] = self.credential_id
-        self.credential_api.create_credential(
-            self.credential_id,
-            self.credential)
+
+        self.credential_api.create_credential(self.credential['id'],
+                                              self.credential)
 
     # user crud tests
 
@@ -107,6 +105,27 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         ref['domain_id'] = CONF.identity.default_domain_id
         return self.assertValidUserResponse(r, ref)
+
+    def test_create_user_with_admin_token_and_domain(self):
+        """Call ``POST /users`` with admin token and domain id."""
+        ref = unit.new_user_ref(domain_id=self.domain_id)
+        self.post('/users', body={'user': ref}, token=CONF.admin_token,
+                  expected_status=http_client.CREATED)
+
+    def test_create_user_with_admin_token_and_no_domain(self):
+        """Call ``POST /users`` with admin token but no domain id.
+
+        It should not be possible to use the admin token to create a user
+        while not explicitly passing the domain in the request body.
+
+        """
+        # Passing a valid domain id to new_user_ref() since domain_id is
+        # not an optional parameter.
+        ref = unit.new_user_ref(domain_id=self.domain_id)
+        # Delete the domain id before sending the request.
+        del ref['domain_id']
+        self.post('/users', body={'user': ref}, token=CONF.admin_token,
+                  expected_status=http_client.BAD_REQUEST)
 
     def test_create_user_bad_request(self):
         """Call ``POST /users``."""
@@ -336,15 +355,14 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.credential_api.get_credential(self.credential['id'])
         self.assertDictEqual(self.credential, r)
         # Create a second credential with a different user
+
         user2 = unit.new_user_ref(domain_id=self.domain['id'],
                                   project_id=self.project['id'])
         user2 = self.identity_api.create_user(user2)
-        self.credential2 = self.new_credential_ref(
-            user_id=user2['id'],
-            project_id=self.project['id'])
-        self.credential_api.create_credential(
-            self.credential2['id'],
-            self.credential2)
+        credential2 = unit.new_credential_ref(user_id=user2['id'],
+                                              project_id=self.project['id'])
+        self.credential_api.create_credential(credential2['id'], credential2)
+
         # Create a token for this user which we can check later
         # gets deleted
         auth_data = self.build_authentication_request(
@@ -371,8 +389,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             self.user['id'])
         self.assertEqual(0, len(tokens))
         # But the credential for user2 is unaffected
-        r = self.credential_api.get_credential(self.credential2['id'])
-        self.assertDictEqual(self.credential2, r)
+        r = self.credential_api.get_credential(credential2['id'])
+        self.assertDictEqual(credential2, r)
 
     # group crud tests
 

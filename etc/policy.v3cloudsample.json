@@ -1,6 +1,6 @@
 {
     "admin_required": "role:admin",
-    "cloud_admin": "rule:admin_required and domain_id:admin_domain_id",
+    "cloud_admin": "(role:admin and token.is_admin_project:True) or ( rule:admin_required and domain_id:admin_domain_id)",
     "service_role": "role:service",
     "service_or_admin": "rule:admin_required or rule:service_role",
     "owner" : "user_id:%(user_id)s or user_id:%(target.token.user_id)s",
@@ -37,7 +37,8 @@
 
     "admin_and_matching_target_project_domain_id": "rule:admin_required and domain_id:%(target.project.domain_id)s",
     "admin_and_matching_project_domain_id": "rule:admin_required and domain_id:%(project.domain_id)s",
-    "identity:get_project": "rule:cloud_admin or rule:admin_and_matching_target_project_domain_id",
+    "admin_and_matching_target_project_id": "rule:admin_required and project_id:%(target.project.id)s",
+    "identity:get_project": "rule:cloud_admin or rule:admin_and_matching_target_project_domain_id or rule:admin_and_matching_target_project_id",
     "identity:list_projects": "rule:cloud_admin or rule:admin_and_matching_domain_id",
     "identity:list_user_projects": "rule:owner or rule:admin_and_matching_domain_id",
     "identity:create_project": "rule:cloud_admin or rule:admin_and_matching_project_domain_id",
@@ -91,8 +92,9 @@
 
     "admin_on_domain_filter" : "rule:admin_required and domain_id:%(scope.domain.id)s",
     "admin_on_project_filter" : "rule:admin_required and project_id:%(scope.project.id)s",
+    "admin_on_domain_of_project_filter" : "rule:admin_required and domain_id:%(target.project.domain_id)s",
     "identity:list_role_assignments": "rule:cloud_admin or rule:admin_on_domain_filter or rule:admin_on_project_filter",
-
+    "identity:list_role_assignments_for_tree": "rule:cloud_admin or rule:admin_on_domain_of_project_filter",
     "identity:get_policy": "rule:cloud_admin",
     "identity:list_policies": "rule:cloud_admin",
     "identity:create_policy": "rule:cloud_admin",
@@ -191,5 +193,6 @@
     "identity:create_domain_config": "rule:cloud_admin",
     "identity:get_domain_config": "rule:cloud_admin",
     "identity:update_domain_config": "rule:cloud_admin",
-    "identity:delete_domain_config": "rule:cloud_admin"
+    "identity:delete_domain_config": "rule:cloud_admin",
+    "identity:get_domain_config_default": "rule:cloud_admin"
 }

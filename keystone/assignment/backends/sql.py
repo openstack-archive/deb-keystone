@@ -13,7 +13,6 @@
 # under the License.
 
 from oslo_config import cfg
-from oslo_log import log
 import sqlalchemy
 from sqlalchemy.sql.expression import false
 
@@ -24,7 +23,6 @@ from keystone.i18n import _
 
 
 CONF = cfg.CONF
-LOG = log.getLogger(__name__)
 
 
 class AssignmentType(object):
@@ -49,22 +47,13 @@ class AssignmentType(object):
         raise exception.AssignmentTypeCalculationError(**locals())
 
 
-class Assignment(keystone_assignment.AssignmentDriverV8):
+class Assignment(keystone_assignment.AssignmentDriverV9):
 
     def default_role_driver(self):
         return 'sql'
 
     def default_resource_driver(self):
         return 'sql'
-
-    def list_user_ids_for_project(self, tenant_id):
-        with sql.transaction() as session:
-            query = session.query(RoleAssignment.actor_id)
-            query = query.filter_by(type=AssignmentType.USER_PROJECT)
-            query = query.filter_by(target_id=tenant_id)
-            query = query.distinct('actor_id')
-            assignments = query.all()
-            return [assignment.actor_id for assignment in assignments]
 
     def create_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
@@ -152,41 +141,6 @@ class Assignment(keystone_assignment.AssignmentDriverV8):
                 sql_constraints).distinct()
 
         return [x.target_id for x in query.all()]
-
-    def list_project_ids_for_user(self, user_id, group_ids, hints,
-                                  inherited=False):
-        actor_list = [user_id]
-        if group_ids:
-            actor_list = actor_list + group_ids
-
-        return self._list_project_ids_for_actor(actor_list, hints, inherited)
-
-    def list_domain_ids_for_user(self, user_id, group_ids, hints,
-                                 inherited=False):
-        with sql.transaction() as session:
-            query = session.query(RoleAssignment.target_id)
-            filters = []
-
-            if user_id:
-                sql_constraints = sqlalchemy.and_(
-                    RoleAssignment.actor_id == user_id,
-                    RoleAssignment.inherited == inherited,
-                    RoleAssignment.type == AssignmentType.USER_DOMAIN)
-                filters.append(sql_constraints)
-
-            if group_ids:
-                sql_constraints = sqlalchemy.and_(
-                    RoleAssignment.actor_id.in_(group_ids),
-                    RoleAssignment.inherited == inherited,
-                    RoleAssignment.type == AssignmentType.GROUP_DOMAIN)
-                filters.append(sql_constraints)
-
-            if not filters:
-                return []
-
-            query = query.filter(sqlalchemy.or_(*filters)).distinct()
-
-            return [assignment.target_id for assignment in query.all()]
 
     def list_role_ids_for_groups_on_domain(self, group_ids, domain_id):
         if not group_ids:

@@ -49,19 +49,17 @@ class Auth(controller.V2Controller):
 
     @controller.v2_deprecated
     def ca_cert(self, context, auth=None):
-        ca_file = open(CONF.signing.ca_certs, 'r')
-        data = ca_file.read()
-        ca_file.close()
+        with open(CONF.signing.ca_certs, 'r') as ca_file:
+            data = ca_file.read()
         return data
 
     @controller.v2_deprecated
     def signing_cert(self, context, auth=None):
-        cert_file = open(CONF.signing.certfile, 'r')
-        data = cert_file.read()
-        cert_file.close()
+        with open(CONF.signing.certfile, 'r') as cert_file:
+            data = cert_file.read()
         return data
 
-    @controller.v2_deprecated
+    @controller.v2_auth_deprecated
     def authenticate(self, context, auth=None):
         """Authenticate credentials and return a token.
 
@@ -369,6 +367,10 @@ class Auth(controller.V2Controller):
                                                 size=CONF.max_param_size)
 
         if tenant_name:
+            if (CONF.resource.project_name_url_safe == 'strict' and
+                    utils.is_not_url_safe(tenant_name)):
+                msg = _('Tenant name cannot contain reserved characters.')
+                raise exception.Unauthorized(message=msg)
             try:
                 tenant_ref = self.resource_api.get_project_by_name(
                     tenant_name, CONF.identity.default_domain_id)

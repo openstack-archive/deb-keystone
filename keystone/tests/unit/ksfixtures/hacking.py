@@ -112,73 +112,6 @@ class HackingCode(fixtures.Fixture):
             (8, 8, 'K004'),
         ]}
 
-    assert_no_translations_for_debug_logging = {
-        'code': """
-            import logging
-            import logging as stlib_logging
-            from keystone.i18n import _
-            from keystone.i18n import _ as oslo_i18n
-            from oslo_log import log
-            from oslo_log import log as oslo_logging
-
-            # stdlib logging
-            L0 = logging.getLogger()
-            L0.debug(_('text'))
-            class C:
-                def __init__(self):
-                    L0.debug(oslo_i18n('text', {}))
-
-            # stdlib logging w/ alias and specifying a logger
-            class C:
-                def __init__(self):
-                    self.L1 = logging.getLogger(__name__)
-                def m(self):
-                    self.L1.debug(
-                        _('text'), {}
-                    )
-
-            # oslo logging and specifying a logger
-            L2 = logging.getLogger(__name__)
-            L2.debug(oslo_i18n('text'))
-
-            # oslo logging w/ alias
-            class C:
-                def __init__(self):
-                    self.L3 = oslo_logging.getLogger()
-                    self.L3.debug(_('text'))
-
-            # translation on a separate line
-            msg = _('text')
-            L2.debug(msg)
-
-            # this should not fail
-            if True:
-                msg = _('message %s') % X
-                L2.error(msg)
-                raise TypeError(msg)
-            if True:
-                msg = 'message'
-                L2.debug(msg)
-
-            # this should not fail
-            if True:
-                if True:
-                    msg = _('message')
-                else:
-                    msg = _('message')
-                L2.debug(msg)
-                raise Exception(msg)
-        """,
-        'expected_errors': [
-            (10, 9, 'K005'),
-            (13, 17, 'K005'),
-            (21, 12, 'K005'),
-            (26, 9, 'K005'),
-            (32, 22, 'K005'),
-            (36, 9, 'K005'),
-        ]
-    }
-
     dict_constructor = {
         'code': """
             lower_res = {k.lower(): v for k, v in six.iteritems(res[1])}
@@ -219,12 +152,12 @@ class HackingLogging(fixtures.Fixture):
                 LOG.info(_('text'))
                 class C:
                     def __init__(self):
-                        LOG.warn(oslo_i18n('text', {}))
-                        LOG.warn(_LW('text', {}))
+                        LOG.warning(oslo_i18n('text', {}))
+                        LOG.warning(_LW('text', {}))
             """,
             'expected_errors': [
                 (3, 9, 'K006'),
-                (6, 17, 'K006'),
+                (6, 20, 'K006'),
             ],
         },
         {
@@ -287,13 +220,13 @@ class HackingLogging(fixtures.Fixture):
                 LOG = logging.getLogger()
 
                 # ensure the correct helper is being used
-                LOG.warn(_LI('this should cause an error'))
+                LOG.warning(_LI('this should cause an error'))
 
                 # debug should not allow any helpers either
                 LOG.debug(_LI('this should cause an error'))
             """,
             'expected_errors': [
-                (4, 9, 'K006'),
+                (4, 12, 'K006'),
                 (7, 10, 'K005'),
             ],
         },
@@ -302,7 +235,7 @@ class HackingLogging(fixtures.Fixture):
                 # this should not be an error
                 L = log.getLogger(__name__)
                 msg = _('text')
-                L.warn(msg)
+                L.warning(msg)
                 raise Exception(msg)
             """,
             'expected_errors': [],
@@ -312,7 +245,7 @@ class HackingLogging(fixtures.Fixture):
                 L = log.getLogger(__name__)
                 def f():
                     msg = _('text')
-                    L2.warn(msg)
+                    L2.warning(msg)
                     something = True  # add an extra statement here
                     raise Exception(msg)
             """,
@@ -323,11 +256,11 @@ class HackingLogging(fixtures.Fixture):
                 LOG = log.getLogger(__name__)
                 def func():
                     msg = _('text')
-                    LOG.warn(msg)
+                    LOG.warning(msg)
                     raise Exception('some other message')
             """,
             'expected_errors': [
-                (4, 13, 'K006'),
+                (4, 16, 'K006'),
             ],
         },
         {
@@ -337,7 +270,7 @@ class HackingLogging(fixtures.Fixture):
                     msg = _('text')
                 else:
                     msg = _('text')
-                LOG.warn(msg)
+                LOG.warning(msg)
                 raise Exception(msg)
             """,
             'expected_errors': [
@@ -350,28 +283,28 @@ class HackingLogging(fixtures.Fixture):
                     msg = _('text')
                 else:
                     msg = _('text')
-                LOG.warn(msg)
+                LOG.warning(msg)
             """,
             'expected_errors': [
-                (6, 9, 'K006'),
+                (6, 12, 'K006'),
             ],
         },
         {
             'code': """
                 LOG = log.getLogger(__name__)
                 msg = _LW('text')
-                LOG.warn(msg)
+                LOG.warning(msg)
                 raise Exception(msg)
             """,
             'expected_errors': [
-                (3, 9, 'K007'),
+                (3, 12, 'K007'),
             ],
         },
         {
             'code': """
                 LOG = log.getLogger(__name__)
                 msg = _LW('text')
-                LOG.warn(msg)
+                LOG.warning(msg)
                 msg = _('something else')
                 raise Exception(msg)
             """,
@@ -381,18 +314,18 @@ class HackingLogging(fixtures.Fixture):
             'code': """
                 LOG = log.getLogger(__name__)
                 msg = _LW('hello %s') % 'world'
-                LOG.warn(msg)
+                LOG.warning(msg)
                 raise Exception(msg)
             """,
             'expected_errors': [
-                (3, 9, 'K007'),
+                (3, 12, 'K007'),
             ],
         },
         {
             'code': """
                 LOG = log.getLogger(__name__)
                 msg = _LW('hello %s') % 'world'
-                LOG.warn(msg)
+                LOG.warning(msg)
             """,
             'expected_errors': [],
         },
@@ -409,3 +342,76 @@ class HackingLogging(fixtures.Fixture):
             'expected_errors': [],
         },
     ]
+
+    assert_not_using_deprecated_warn = {
+        'code': """
+                # Logger.warn has been deprecated in Python3 in favor of
+                # Logger.warning
+                LOG = log.getLogger(__name__)
+                LOG.warn(_LW('text'))
+        """,
+        'expected_errors': [
+            (4, 9, 'K009'),
+        ],
+    }
+
+    assert_no_translations_for_debug_logging = {
+        'code': """
+                # stdlib logging
+                L0 = logging.getLogger()
+                L0.debug(_('text'))
+                class C:
+                    def __init__(self):
+                        L0.debug(oslo_i18n('text', {}))
+
+                # stdlib logging w/ alias and specifying a logger
+                class C:
+                    def __init__(self):
+                        self.L1 = logging.getLogger(__name__)
+                    def m(self):
+                        self.L1.debug(
+                            _('text'), {}
+                        )
+
+                # oslo logging and specifying a logger
+                L2 = logging.getLogger(__name__)
+                L2.debug(oslo_i18n('text'))
+
+                # oslo logging w/ alias
+                class C:
+                    def __init__(self):
+                        self.L3 = oslo_logging.getLogger()
+                        self.L3.debug(_('text'))
+
+                # translation on a separate line
+                msg = _('text')
+                L2.debug(msg)
+
+                # this should not fail
+                if True:
+                    msg = _('message %s') % X
+                    L2.error(msg)
+                    raise TypeError(msg)
+                if True:
+                    msg = 'message'
+                    L2.debug(msg)
+
+                # this should not fail
+                if True:
+                    if True:
+                        msg = _('message')
+                    else:
+                        msg = _('message')
+                    L2.debug(msg)
+                    raise Exception(msg)
+        """,
+        'expected_errors': [
+            (3, 9, 'K005'),
+            (6, 17, 'K005'),
+            (14, 12, 'K005'),
+            (19, 9, 'K005'),
+            (25, 22, 'K005'),
+            (29, 9, 'K005'),
+        ]
+    }
+

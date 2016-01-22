@@ -16,6 +16,8 @@ from __future__ import absolute_import
 import atexit
 import datetime
 import functools
+import hashlib
+import json
 import logging
 import os
 import re
@@ -61,7 +63,6 @@ from keystone.version import service
 
 config.configure()
 
-LOG = log.getLogger(__name__)
 PID = six.text_type(os.getpid())
 TESTSDIR = os.path.dirname(os.path.abspath(__file__))
 TESTCONF = os.path.join(TESTSDIR, 'config_files')
@@ -238,29 +239,25 @@ class UnexpectedExit(Exception):
     pass
 
 
-def new_ref():
-    """Populates a ref with attributes common to some API entities."""
-    return {
-        'id': uuid.uuid4().hex,
-        'name': uuid.uuid4().hex,
-        'description': uuid.uuid4().hex,
-        'enabled': True}
-
-
 def new_region_ref(parent_region_id=None, **kwargs):
-    ref = new_ref()
-    # Region doesn't have name or enabled.
-    del ref['name']
-    del ref['enabled']
-    ref['parent_region_id'] = parent_region_id
+    ref = {
+        'id': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'parent_region_id': parent_region_id}
+
     ref.update(kwargs)
     return ref
 
 
 def new_service_ref(**kwargs):
-    ref = new_ref()
-    ref['type'] = uuid.uuid4().hex
-    ref.update(**kwargs)
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'enabled': True,
+        'type': uuid.uuid4().hex,
+    }
+    ref.update(kwargs)
     return ref
 
 
@@ -269,11 +266,16 @@ NEEDS_REGION_ID = object()
 
 def new_endpoint_ref(service_id, interface='public',
                      region_id=NEEDS_REGION_ID, **kwargs):
-    ref = new_ref()
-    del ref['enabled']  # enabled is optional
-    ref['interface'] = interface
-    ref['service_id'] = service_id
-    ref['url'] = 'https://' + uuid.uuid4().hex + '.com'
+
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'interface': interface,
+        'service_id': service_id,
+        'url': 'https://' + uuid.uuid4().hex + '.com',
+    }
+
     if region_id is NEEDS_REGION_ID:
         ref['region_id'] = uuid.uuid4().hex
     elif region_id is None and kwargs.get('region', None) is not None:
@@ -298,88 +300,141 @@ def new_endpoint_ref_with_region(service_id, region, interface='public',
 
 
 def new_domain_ref(**kwargs):
-    ref = new_ref()
-    ref.update(**kwargs)
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'enabled': True
+    }
+    ref.update(kwargs)
     return ref
 
 
-def new_project_ref(domain_id=None, parent_id=None, is_domain=False):
-    ref = new_ref()
-    ref['domain_id'] = domain_id
-    ref['parent_id'] = parent_id
-    ref['is_domain'] = is_domain
+def new_project_ref(domain_id=None, parent_id=None, is_domain=False, **kwargs):
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'enabled': True,
+        'domain_id': domain_id,
+        'parent_id': parent_id,
+        'is_domain': is_domain,
+    }
+    ref.update(kwargs)
     return ref
 
 
 def new_user_ref(domain_id, project_id=None, **kwargs):
-    ref = new_ref()
-
-    # do not include by default, allow user to add with kwargs
-    del ref['description']
-
-    ref['domain_id'] = domain_id
-    ref['email'] = uuid.uuid4().hex
-    ref['password'] = uuid.uuid4().hex
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'enabled': True,
+        'domain_id': domain_id,
+        'email': uuid.uuid4().hex,
+        'password': uuid.uuid4().hex,
+    }
     if project_id:
         ref['default_project_id'] = project_id
-    ref.update(**kwargs)
+    ref.update(kwargs)
     return ref
 
 
 def new_group_ref(domain_id, **kwargs):
-    ref = new_ref()
-
-    # Group does not have enabled field
-    del ref['enabled']
-
-    ref['domain_id'] = domain_id
-    ref.update(**kwargs)
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'domain_id': domain_id
+    }
+    ref.update(kwargs)
     return ref
 
 
-def new_credential_ref(user_id, project_id=None, cred_type=None):
-    ref = dict()
-    ref['id'] = uuid.uuid4().hex
-    ref['user_id'] = user_id
-    if cred_type == 'ec2':
-        ref['type'] = 'ec2'
-        ref['blob'] = uuid.uuid4().hex
-    else:
-        ref['type'] = 'cert'
-        ref['blob'] = uuid.uuid4().hex
+def new_credential_ref(user_id, project_id=None, type='cert', **kwargs):
+    ref = {
+        'id': uuid.uuid4().hex,
+        'user_id': user_id,
+        'type': type,
+    }
+
     if project_id:
         ref['project_id'] = project_id
+    if 'blob' not in kwargs:
+        ref['blob'] = uuid.uuid4().hex
+
+    ref.update(kwargs)
     return ref
+
+
+def new_cert_credential(user_id, project_id=None, blob=None, **kwargs):
+    if blob is None:
+        blob = {'access': uuid.uuid4().hex, 'secret': uuid.uuid4().hex}
+
+    credential = new_credential_ref(user_id=user_id,
+                                    project_id=project_id,
+                                    blob=json.dumps(blob),
+                                    type='cert',
+                                    **kwargs)
+    return blob, credential
+
+
+def new_ec2_credential(user_id, project_id=None, blob=None, **kwargs):
+    if blob is None:
+        blob = {
+            'access': uuid.uuid4().hex,
+            'secret': uuid.uuid4().hex,
+            'trust_id': None
+        }
+
+    if 'id' not in kwargs:
+        access = blob['access'].encode('utf-8')
+        kwargs['id'] = hashlib.sha256(access).hexdigest()
+
+    credential = new_credential_ref(user_id=user_id,
+                                    project_id=project_id,
+                                    blob=json.dumps(blob),
+                                    type='ec2',
+                                    **kwargs)
+    return blob, credential
 
 
 def new_role_ref(**kwargs):
-    ref = new_ref()
-    # Roles don't have a description or the enabled flag
-    del ref['description']
-    del ref['enabled']
-    ref.update(**kwargs)
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+    }
+    ref.update(kwargs)
     return ref
 
 
-def new_policy_ref():
-    ref = new_ref()
-    ref['blob'] = uuid.uuid4().hex
-    ref['type'] = uuid.uuid4().hex
+def new_policy_ref(**kwargs):
+    ref = {
+        'id': uuid.uuid4().hex,
+        'name': uuid.uuid4().hex,
+        'description': uuid.uuid4().hex,
+        'enabled': True,
+        # Store serialized JSON data as the blob to mimic real world usage.
+        'blob': json.dumps({'data': uuid.uuid4().hex, }),
+        'type': uuid.uuid4().hex,
+    }
+
+    ref.update(kwargs)
     return ref
 
 
 def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
                   impersonation=None, expires=None, role_ids=None,
                   role_names=None, remaining_uses=None,
-                  allow_redelegation=False):
-    ref = dict()
-    ref['id'] = uuid.uuid4().hex
-    ref['trustor_user_id'] = trustor_user_id
-    ref['trustee_user_id'] = trustee_user_id
-    ref['impersonation'] = impersonation or False
-    ref['project_id'] = project_id
-    ref['remaining_uses'] = remaining_uses
-    ref['allow_redelegation'] = allow_redelegation
+                  allow_redelegation=False, **kwargs):
+    ref = {
+        'id': uuid.uuid4().hex,
+        'trustor_user_id': trustor_user_id,
+        'trustee_user_id': trustee_user_id,
+        'impersonation': impersonation or False,
+        'project_id': project_id,
+        'remaining_uses': remaining_uses,
+        'allow_redelegation': allow_redelegation,
+    }
 
     if isinstance(expires, six.string_types):
         ref['expires_at'] = expires
@@ -401,6 +456,7 @@ def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
         for role_name in role_names:
             ref['roles'].append({'name': role_name})
 
+    ref.update(kwargs)
     return ref
 
 
@@ -540,6 +596,7 @@ class TestCase(BaseTestCase):
             config, '_register_auth_plugin_opt',
             new=mocked_register_auth_plugin_opt))
 
+        self.sql_driver_version_overrides = {}
         self.config_overrides()
         # NOTE(morganfainberg): ensure config_overrides has been called.
         self.addCleanup(self._assert_config_overrides_called)
@@ -604,7 +661,7 @@ class TestCase(BaseTestCase):
         This is useful to load managers initialized by extensions. No extra
         backends are loaded by default.
 
-        :return: dict of name -> manager
+        :returns: dict of name -> manager
         """
         return {}
 
@@ -711,6 +768,10 @@ class TestCase(BaseTestCase):
 
         :param delta: Maximum allowable time delta, defined in seconds.
         """
+        if a == b:
+            # Short-circuit if the values are the same.
+            return
+
         msg = '%s != %s within %s delta' % (a, b, delta)
 
         self.assertTrue(abs(a - b).seconds <= delta, msg)
@@ -781,3 +842,20 @@ class SQLDriverOverrides(object):
         self.config_fixture.config(group='revoke', driver='sql')
         self.config_fixture.config(group='token', driver='sql')
         self.config_fixture.config(group='trust', driver='sql')
+
+    def use_specific_sql_driver_version(self, driver_path,
+                                        versionless_backend, version_suffix):
+        """Add this versioned driver to the list that will be loaded.
+
+        :param driver_path: The path to the drivers, e.g. 'keystone.assignment'
+        :param versionless_backend: The name of the versionless drivers, e.g.
+                                    'backends'
+        :param version_suffix: The suffix for the version , e.g. 'V8_'
+
+        This method assumes that versioned drivers are named:
+        <version_suffix><name of versionless driver>, e.g. 'V8_backends'.
+
+        """
+        self.sql_driver_version_overrides[driver_path] = {
+            'versionless_backend': versionless_backend,
+            'versioned_backend': version_suffix + versionless_backend}

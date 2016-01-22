@@ -55,7 +55,6 @@ class IdentityProvider(_ControllerBase):
     collection_name = 'identity_providers'
     member_name = 'identity_provider'
 
-    _mutable_parameters = frozenset(['description', 'enabled', 'remote_ids'])
     _public_parameters = frozenset(['id', 'enabled', 'description',
                                     'remote_ids', 'links'
                                     ])
@@ -78,7 +77,7 @@ class IdentityProvider(_ControllerBase):
 
     @classmethod
     def _add_self_referential_link(cls, context, ref):
-        id = ref.get('id')
+        id = ref['id']
         self_path = '/'.join([cls.base_url(context), id])
         ref.setdefault('links', {})
         ref['links']['self'] = self_path
@@ -91,19 +90,20 @@ class IdentityProvider(_ControllerBase):
         return {cls.member_name: ref}
 
     @controller.protected()
+    @validation.validated(schema.identity_provider_create, 'identity_provider')
     def create_identity_provider(self, context, idp_id, identity_provider):
         identity_provider = self._normalize_dict(identity_provider)
         identity_provider.setdefault('enabled', False)
-        IdentityProvider.check_immutable_params(identity_provider)
         idp_ref = self.federation_api.create_idp(idp_id, identity_provider)
         response = IdentityProvider.wrap_member(context, idp_ref)
         return wsgi.render_response(body=response, status=('201', 'Created'))
 
-    @controller.protected()
-    def list_identity_providers(self, context):
-        ref = self.federation_api.list_idps()
+    @controller.filterprotected('id', 'enabled')
+    def list_identity_providers(self, context, filters):
+        hints = self.build_driver_hints(context, filters)
+        ref = self.federation_api.list_idps(hints=hints)
         ref = [self.filter_params(x) for x in ref]
-        return IdentityProvider.wrap_collection(context, ref)
+        return IdentityProvider.wrap_collection(context, ref, hints=hints)
 
     @controller.protected()
     def get_identity_provider(self, context, idp_id):
@@ -115,9 +115,9 @@ class IdentityProvider(_ControllerBase):
         self.federation_api.delete_idp(idp_id)
 
     @controller.protected()
+    @validation.validated(schema.identity_provider_update, 'identity_provider')
     def update_identity_provider(self, context, idp_id, identity_provider):
         identity_provider = self._normalize_dict(identity_provider)
-        IdentityProvider.check_immutable_params(identity_provider)
         idp_ref = self.federation_api.update_idp(idp_id, identity_provider)
         return IdentityProvider.wrap_member(context, idp_ref)
 
@@ -126,8 +126,8 @@ class IdentityProvider(_ControllerBase):
 class FederationProtocol(_ControllerBase):
     """A federation protocol representation.
 
-    See IdentityProvider docstring for explanation on _mutable_parameters
-    and _public_parameters class attributes.
+    See keystone.common.controller.V3Controller docstring for explanation
+    on _public_parameters class attributes.
 
     """
 
@@ -135,7 +135,6 @@ class FederationProtocol(_ControllerBase):
     member_name = 'protocol'
 
     _public_parameters = frozenset(['id', 'mapping_id', 'links'])
-    _mutable_parameters = frozenset(['mapping_id'])
 
     @classmethod
     def _add_self_referential_link(cls, context, ref):
@@ -179,17 +178,17 @@ class FederationProtocol(_ControllerBase):
         return {cls.member_name: ref}
 
     @controller.protected()
+    @validation.validated(schema.federation_protocol_schema, 'protocol')
     def create_protocol(self, context, idp_id, protocol_id, protocol):
         ref = self._normalize_dict(protocol)
-        FederationProtocol.check_immutable_params(ref)
         ref = self.federation_api.create_protocol(idp_id, protocol_id, ref)
         response = FederationProtocol.wrap_member(context, ref)
         return wsgi.render_response(body=response, status=('201', 'Created'))
 
     @controller.protected()
+    @validation.validated(schema.federation_protocol_schema, 'protocol')
     def update_protocol(self, context, idp_id, protocol_id, protocol):
         ref = self._normalize_dict(protocol)
-        FederationProtocol.check_immutable_params(ref)
         ref = self.federation_api.update_protocol(idp_id, protocol_id,
                                                   protocol)
         return FederationProtocol.wrap_member(context, ref)
@@ -263,7 +262,7 @@ class Auth(auth_controllers.Auth):
 
         """
         if 'origin' in context['query_string']:
-            origin = context['query_string'].get('origin')
+            origin = context['query_string']['origin']
             host = urllib.parse.unquote_plus(origin)
         else:
             msg = _('Request must have an origin query parameter')
@@ -343,7 +342,7 @@ class Auth(auth_controllers.Auth):
         sp_id = auth['scope']['service_provider']['id']
         service_provider = self.federation_api.get_sp(sp_id)
         utils.assert_enabled_service_provider_object(service_provider)
-        sp_url = service_provider.get('sp_url')
+        sp_url = service_provider['sp_url']
 
         token_id = auth['identity']['token']['id']
         token_data = self.token_provider_api.validate_token(token_id)
@@ -397,7 +396,7 @@ class Auth(auth_controllers.Auth):
         """
         t = self._create_base_saml_assertion(context, auth)
         (saml_assertion, service_provider) = t
-        relay_state_prefix = service_provider.get('relay_state_prefix')
+        relay_state_prefix = service_provider['relay_state_prefix']
 
         generator = keystone_idp.ECPGenerator()
         ecp_assertion = generator.generate_ecp(saml_assertion,
@@ -462,8 +461,6 @@ class ServiceProvider(_ControllerBase):
     collection_name = 'service_providers'
     member_name = 'service_provider'
 
-    _mutable_parameters = frozenset(['auth_url', 'description', 'enabled',
-                                     'relay_state_prefix', 'sp_url'])
     _public_parameters = frozenset(['auth_url', 'id', 'enabled', 'description',
                                     'links', 'relay_state_prefix', 'sp_url'])
 
@@ -474,7 +471,6 @@ class ServiceProvider(_ControllerBase):
         service_provider.setdefault('enabled', False)
         service_provider.setdefault('relay_state_prefix',
                                     CONF.saml.relay_state_prefix)
-        ServiceProvider.check_immutable_params(service_provider)
         sp_ref = self.federation_api.create_sp(sp_id, service_provider)
         response = ServiceProvider.wrap_member(context, sp_ref)
         return wsgi.render_response(body=response, status=('201', 'Created'))
@@ -498,7 +494,6 @@ class ServiceProvider(_ControllerBase):
     @validation.validated(schema.service_provider_update, 'service_provider')
     def update_service_provider(self, context, sp_id, service_provider):
         service_provider = self._normalize_dict(service_provider)
-        ServiceProvider.check_immutable_params(service_provider)
         sp_ref = self.federation_api.update_sp(sp_id, service_provider)
         return ServiceProvider.wrap_member(context, sp_ref)
 

@@ -15,12 +15,14 @@
 import os
 import uuid
 
+import fixtures
 import mock
 from oslo_config import cfg
 from six.moves import range
 
 from keystone.cmd import cli
 from keystone.common import dependency
+from keystone.common.sql import migration_helpers
 from keystone.i18n import _
 from keystone import resource
 from keystone.tests import unit
@@ -40,6 +42,115 @@ class CliTestCase(unit.SQLDriverOverrides, unit.TestCase):
         self.useFixture(database.Database())
         self.load_backends()
         cli.TokenFlush.main()
+
+
+class CliBootStrapTestCase(unit.SQLDriverOverrides, unit.TestCase):
+
+    def setUp(self):
+        self.useFixture(database.Database())
+        super(CliBootStrapTestCase, self).setUp()
+
+    def config_files(self):
+        self.config_fixture.register_cli_opt(cli.command_opt)
+        config_files = super(CliBootStrapTestCase, self).config_files()
+        config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
+        return config_files
+
+    def config(self, config_files):
+        CONF(args=['bootstrap', '--bootstrap-password', uuid.uuid4().hex],
+             project='keystone',
+             default_config_files=config_files)
+
+    def test_bootstrap(self):
+        bootstrap = cli.BootStrap()
+        self._do_test_bootstrap(bootstrap)
+
+    def _do_test_bootstrap(self, bootstrap):
+        bootstrap.do_bootstrap()
+        project = bootstrap.resource_manager.get_project_by_name(
+            bootstrap.project_name,
+            'default')
+        user = bootstrap.identity_manager.get_user_by_name(
+            bootstrap.username,
+            'default')
+        role = bootstrap.role_manager.get_role(bootstrap.role_id)
+        role_list = (
+            bootstrap.assignment_manager.get_roles_for_user_and_project(
+                user['id'],
+                project['id']))
+        self.assertIs(len(role_list), 1)
+        self.assertEqual(role_list[0], role['id'])
+        # NOTE(morganfainberg): Pass an empty context, it isn't used by
+        # `authenticate` method.
+        bootstrap.identity_manager.authenticate(
+            {},
+            user['id'],
+            bootstrap.password)
+
+    def test_bootstrap_is_idempotent(self):
+        # NOTE(morganfainberg): Ensure we can run bootstrap multiple times
+        # without erroring.
+        bootstrap = cli.BootStrap()
+        self._do_test_bootstrap(bootstrap)
+        self._do_test_bootstrap(bootstrap)
+
+
+class CliBootStrapTestCaseWithEnvironment(CliBootStrapTestCase):
+
+    def config(self, config_files):
+        CONF(args=['bootstrap'], project='keystone',
+             default_config_files=config_files)
+
+    def setUp(self):
+        super(CliBootStrapTestCaseWithEnvironment, self).setUp()
+        self.password = uuid.uuid4().hex
+        self.username = uuid.uuid4().hex
+        self.project_name = uuid.uuid4().hex
+        self.role_name = uuid.uuid4().hex
+        self.default_domain = migration_helpers.get_default_domain()
+        self.useFixture(
+            fixtures.EnvironmentVariable('OS_BOOTSTRAP_PASSWORD',
+                                         newvalue=self.password))
+        self.useFixture(
+            fixtures.EnvironmentVariable('OS_BOOTSTRAP_USERNAME',
+                                         newvalue=self.username))
+        self.useFixture(
+            fixtures.EnvironmentVariable('OS_BOOTSTRAP_PROJECT_NAME',
+                                         newvalue=self.project_name))
+        self.useFixture(
+            fixtures.EnvironmentVariable('OS_BOOTSTRAP_ROLE_NAME',
+                                         newvalue=self.role_name))
+
+    def test_assignment_created_with_user_exists(self):
+        # test assignment can be created if user already exists.
+        bootstrap = cli.BootStrap()
+        bootstrap.resource_manager.create_domain(self.default_domain['id'],
+                                                 self.default_domain)
+        user_ref = unit.new_user_ref(self.default_domain['id'],
+                                     name=self.username,
+                                     password=self.password)
+        bootstrap.identity_manager.create_user(user_ref)
+        self._do_test_bootstrap(bootstrap)
+
+    def test_assignment_created_with_project_exists(self):
+        # test assignment can be created if project already exists.
+        bootstrap = cli.BootStrap()
+        bootstrap.resource_manager.create_domain(self.default_domain['id'],
+                                                 self.default_domain)
+        project_ref = unit.new_project_ref(self.default_domain['id'],
+                                           name=self.project_name)
+        bootstrap.resource_manager.create_project(project_ref['id'],
+                                                  project_ref)
+        self._do_test_bootstrap(bootstrap)
+
+    def test_assignment_created_with_role_exists(self):
+        # test assignment can be created if role already exists.
+        bootstrap = cli.BootStrap()
+        bootstrap.resource_manager.create_domain(self.default_domain['id'],
+                                                 self.default_domain)
+        role = unit.new_role_ref(name=self.role_name)
+        bootstrap.role_manager.create_role(role['id'], role)
+        self._do_test_bootstrap(bootstrap)
 
 
 class CliDomainConfigAllTestCase(unit.SQLDriverOverrides, unit.TestCase):
@@ -182,7 +293,7 @@ class CliDomainConfigSingleDomainTestCase(CliDomainConfigAllTestCase):
         # Now try and upload the settings in the configuration file for the
         # default domain
         dependency.reset()
-        with mock.patch('__builtin__.print') as mock_print:
+        with mock.patch('six.moves.builtins.print') as mock_print:
             self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
             file_name = ('keystone.%s.conf' %
                          resource.calc_default_domain()['name'])
@@ -208,7 +319,7 @@ class CliDomainConfigNoOptionsTestCase(CliDomainConfigAllTestCase):
 
     def test_config_upload(self):
         dependency.reset()
-        with mock.patch('__builtin__.print') as mock_print:
+        with mock.patch('six.moves.builtins.print') as mock_print:
             self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
             mock_print.assert_has_calls(
                 [mock.call(
@@ -225,7 +336,7 @@ class CliDomainConfigTooManyOptionsTestCase(CliDomainConfigAllTestCase):
 
     def test_config_upload(self):
         dependency.reset()
-        with mock.patch('__builtin__.print') as mock_print:
+        with mock.patch('six.moves.builtins.print') as mock_print:
             self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
             mock_print.assert_has_calls(
                 [mock.call(_('The --all option cannot be used with '
@@ -242,7 +353,7 @@ class CliDomainConfigInvalidDomainTestCase(CliDomainConfigAllTestCase):
 
     def test_config_upload(self):
         dependency.reset()
-        with mock.patch('__builtin__.print') as mock_print:
+        with mock.patch('six.moves.builtins.print') as mock_print:
             self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
             file_name = 'keystone.%s.conf' % self.invalid_domain_name
             error_msg = (_(

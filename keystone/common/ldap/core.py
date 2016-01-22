@@ -20,12 +20,14 @@ import re
 import sys
 import weakref
 
+import ldap.controls
 import ldap.filter
 import ldappool
 from oslo_log import log
 import six
 from six.moves import map, zip
 
+from keystone.common import driver_hints
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LW
@@ -956,7 +958,7 @@ class KeystoneLDAPHandler(LDAPHandler):
         if attrlist is not None:
             attrlist = [attr for attr in attrlist if attr is not None]
         LOG.debug('LDAP search_ext: base=%s scope=%s filterstr=%s '
-                  'attrs=%s attrsonly=%s'
+                  'attrs=%s attrsonly=%s '
                   'serverctrls=%s clientctrls=%s timeout=%s sizelimit=%s',
                   base, scope, filterstr, attrlist, attrsonly,
                   serverctrls, clientctrls, timeout, sizelimit)
@@ -1040,7 +1042,11 @@ class KeystoneLDAPHandler(LDAPHandler):
                   'resp_ctrl_classes=%s ldap_result=%s',
                   msgid, all, timeout, resp_ctrl_classes, ldap_result)
 
-        py_result = convert_ldap_result(ldap_result)
+        # ldap_result returned from result3 is a tuple of
+        # (rtype, rdata, rmsgid, serverctrls). We don't need use of these,
+        # except rdata.
+        rtype, rdata, rmsgid, serverctrls = ldap_result
+        py_result = convert_ldap_result(rdata)
         return py_result
 
     def modify_s(self, dn, modlist):
@@ -1220,7 +1226,7 @@ class BaseLdap(object):
             try:
                 ldap_attr, attr_map = item.split(':')
             except Exception:
-                LOG.warn(_LW(
+                LOG.warning(_LW(
                     'Invalid additional attribute mapping: "%s". '
                     'Format must be <ldap_attribute>:<keystone_attribute>'),
                     item)
@@ -1336,7 +1342,7 @@ class BaseLdap(object):
                           'as an ID. Will get the ID from DN instead') % (
                               {'id_attr': self.id_attr,
                                'dn': res[0]})
-            LOG.warn(message)
+            LOG.warning(message)
             id_val = self._dn_to_id(res[0])
         else:
             id_val = id_attrs[0]
@@ -1454,16 +1460,39 @@ class BaseLdap(object):
         except IndexError:
             return None
 
-    def _ldap_get_all(self, ldap_filter=None):
+    def _ldap_get_limited(self, base, scope, filterstr, attrlist, sizelimit):
+        with self.get_connection() as conn:
+            try:
+                control = ldap.controls.libldap.SimplePagedResultsControl(
+                    criticality=True,
+                    size=sizelimit,
+                    cookie='')
+                msgid = conn.search_ext(base, scope, filterstr, attrlist,
+                                        serverctrls=[control])
+                rdata = conn.result3(msgid)
+                return rdata
+            except ldap.NO_SUCH_OBJECT:
+                return []
+
+    @driver_hints.truncated
+    def _ldap_get_all(self, hints, ldap_filter=None):
         query = u'(&%s(objectClass=%s)(%s=*))' % (
             ldap_filter or self.ldap_filter or '',
             self.object_class,
             self.id_attr)
+        sizelimit = 0
+        attrs = list(set(([self.id_attr] +
+                          list(self.attribute_mapping.values()) +
+                          list(self.extra_attr_mapping.keys()))))
+        if hints.limit:
+            sizelimit = hints.limit['limit']
+            return self._ldap_get_limited(self.tree_dn,
+                                          self.LDAP_SCOPE,
+                                          query,
+                                          attrs,
+                                          sizelimit)
         with self.get_connection() as conn:
             try:
-                attrs = list(set(([self.id_attr] +
-                                  list(self.attribute_mapping.values()) +
-                                  list(self.extra_attr_mapping.keys()))))
                 return conn.search_s(self.tree_dn,
                                      self.LDAP_SCOPE,
                                      query,
@@ -1503,9 +1532,10 @@ class BaseLdap(object):
         except IndexError:
             raise self._not_found(name)
 
-    def get_all(self, ldap_filter=None):
+    def get_all(self, ldap_filter=None, hints=None):
+        hints = hints or driver_hints.Hints()
         return [self._ldap_res_to_model(x)
-                for x in self._ldap_get_all(ldap_filter)]
+                for x in self._ldap_get_all(hints, ldap_filter)]
 
     def update(self, object_id, values, old_obj=None):
         if old_obj is None:
@@ -1668,11 +1698,12 @@ class BaseLdap(object):
                         not_deleted_nodes.append(node_dn)
 
         if not_deleted_nodes:
-            LOG.warn(_LW("When deleting entries for %(search_base)s, could not"
-                         " delete nonexistent entries %(entries)s%(dots)s"),
-                     {'search_base': search_base,
-                      'entries': not_deleted_nodes[:3],
-                      'dots': '...' if len(not_deleted_nodes) > 3 else ''})
+            LOG.warning(_LW("When deleting entries for %(search_base)s, "
+                            "could not delete nonexistent entries "
+                            "%(entries)s%(dots)s"),
+                        {'search_base': search_base,
+                         'entries': not_deleted_nodes[:3],
+                         'dots': '...' if len(not_deleted_nodes) > 3 else ''})
 
     def filter_query(self, hints, query=None):
         """Applies filtering to a query.
@@ -1825,7 +1856,8 @@ class EnabledEmuMixIn(BaseLdap):
 
     def _get_enabled(self, object_id, conn):
         dn = self._id_to_dn(object_id)
-        query = '(%s=%s)' % (self.member_attribute, dn)
+        query = '(%s=%s)' % (self.member_attribute,
+                             ldap.filter.escape_filter_chars(dn))
         try:
             enabled_value = conn.search_s(self.enabled_emulation_dn,
                                           ldap.SCOPE_BASE,
@@ -1883,11 +1915,12 @@ class EnabledEmuMixIn(BaseLdap):
                 ref['enabled'] = self._get_enabled(object_id, conn)
             return ref
 
-    def get_all(self, ldap_filter=None):
+    def get_all(self, ldap_filter=None, hints=None):
+        hints = hints or driver_hints.Hints()
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:
             # had to copy BaseLdap.get_all here to ldap_filter by DN
             tenant_list = [self._ldap_res_to_model(x)
-                           for x in self._ldap_get_all(ldap_filter)
+                           for x in self._ldap_get_all(hints, ldap_filter)
                            if x[0] != self.enabled_emulation_dn]
             with self.get_connection() as conn:
                 for tenant_ref in tenant_list:
@@ -1895,7 +1928,7 @@ class EnabledEmuMixIn(BaseLdap):
                         tenant_ref['id'], conn)
             return tenant_list
         else:
-            return super(EnabledEmuMixIn, self).get_all(ldap_filter)
+            return super(EnabledEmuMixIn, self).get_all(ldap_filter, hints)
 
     def update(self, object_id, values, old_obj=None):
         if 'enabled' not in self.attribute_ignore and self.enabled_emulation:

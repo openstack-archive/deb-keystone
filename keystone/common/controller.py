@@ -36,21 +36,39 @@ CONF = cfg.CONF
 
 
 def v2_deprecated(f):
-    """No-op decorator in preparation for deprecating Identity API v2.
+    @six.wraps(f)
+    def wrapper(*args, **kwargs):
+        deprecated = versionutils.deprecated(
+            what=f.__name__ + ' of the v2 API',
+            as_of=versionutils.deprecated.MITAKA,
+            in_favor_of='a similar function in the v3 API',
+            remove_in=+4)
+        return deprecated(f)
+    return wrapper()
 
-    This is a placeholder for the pending deprecation of v2. The implementation
-    of this decorator can be replaced with::
 
-        from oslo_log import versionutils
+def v2_ec2_deprecated(f):
+    @six.wraps(f)
+    def wrapper(*args, **kwargs):
+        deprecated = versionutils.deprecated(
+            what=f.__name__ + ' of the v2 EC2 APIs',
+            as_of=versionutils.deprecated.MITAKA,
+            in_favor_of=('a similar function in the v3 Credential APIs'),
+            remove_in=0)
+        return deprecated(f)
+    return wrapper()
 
 
-        v2_deprecated = versionutils.deprecated(
-            what='v2 API',
-            as_of=versionutils.deprecated.JUNO,
-            in_favor_of='v3 API')
-
-    """
-    return f
+def v2_auth_deprecated(f):
+    @six.wraps(f)
+    def wrapper(*args, **kwargs):
+        deprecated = versionutils.deprecated(
+            what=f.__name__ + ' of the v2 Authentication APIs',
+            as_of=versionutils.deprecated.MITAKA,
+            in_favor_of=('a similar function in the v3 Authentication APIs'),
+            remove_in=0)
+        return deprecated(f)
+    return wrapper()
 
 
 def _build_policy_check_credentials(self, action, context, kwargs):
@@ -165,23 +183,32 @@ def protected(callback=None):
     return wrapper
 
 
-def filterprotected(*filters):
-    """Wraps filtered API calls with role based access controls (RBAC)."""
+def filterprotected(*filters, **callback):
+    """Wraps API list calls with role based access controls (RBAC).
+
+    This handles both the protection of the API parameters as well as any
+    filters supplied.
+
+    More complex API list calls (for example that need to examine the contents
+    of an entity referenced by one of the filters) should pass in a callback
+    function, that will be subsequently called to check protection for these
+    multiple entities. This callback function should gather the appropriate
+    entities needed and then call check_protection() in the V3Controller class.
+
+    """
     def _filterprotected(f):
         @functools.wraps(f)
         def wrapper(self, context, **kwargs):
             if not context['is_admin']:
-                action = 'identity:%s' % f.__name__
-                creds = _build_policy_check_credentials(self, action,
-                                                        context, kwargs)
-                # Now, build the target dict for policy check.  We include:
+                # The target dict for the policy check will include:
                 #
                 # - Any query filter parameters
                 # - Data from the main url (which will be in the kwargs
-                #   parameter) and would typically include the prime key
-                #   of a get/update/delete call
+                #   parameter), which although most of our APIs do not utilize,
+                #   in theory you could have.
                 #
-                # First  any query filter parameters
+
+                # First build the dict of filter parameters
                 target = dict()
                 if filters:
                     for item in filters:
@@ -192,15 +219,29 @@ def filterprotected(*filters):
                         ', '.join(['%s=%s' % (item, target[item])
                                   for item in target])))
 
-                # Now any formal url parameters
-                for key in kwargs:
-                    target[key] = kwargs[key]
+                if 'callback' in callback and callback['callback'] is not None:
+                    # A callback has been specified to load additional target
+                    # data, so pass it the formal url params as well as the
+                    # list of filters, so it can augment these and then call
+                    # the check_protection() method.
+                    prep_info = {'f_name': f.__name__,
+                                 'input_attr': kwargs,
+                                 'filter_attr': target}
+                    callback['callback'](self, context, prep_info, **kwargs)
+                else:
+                    # No callback, so we are going to check the protection here
+                    action = 'identity:%s' % f.__name__
+                    creds = _build_policy_check_credentials(self, action,
+                                                            context, kwargs)
+                    # Add in any formal url parameters
+                    for key in kwargs:
+                        target[key] = kwargs[key]
 
-                self.policy_api.enforce(creds,
-                                        action,
-                                        utils.flatten_dict(target))
+                    self.policy_api.enforce(creds,
+                                            action,
+                                            utils.flatten_dict(target))
 
-                LOG.debug('RBAC: Authorization granted')
+                    LOG.debug('RBAC: Authorization granted')
             else:
                 LOG.warning(_LW('RBAC: Bypassing authorization'))
             return f(self, context, filters, **kwargs)
@@ -224,27 +265,13 @@ class V2Controller(wsgi.Application):
     @staticmethod
     def filter_domain_id(ref):
         """Remove domain_id since v2 calls are not domain-aware."""
-        if 'domain_id' in ref:
-            if ref['domain_id'] != CONF.identity.default_domain_id:
-                raise exception.Unauthorized(
-                    _('Non-default domain is not supported'))
-            del ref['domain_id']
+        ref.pop('domain_id', None)
         return ref
 
     @staticmethod
     def filter_domain(ref):
-        """Remove domain since v2 calls are not domain-aware.
-
-        V3 Fernet tokens builds the users with a domain in the token data.
-        This method will ensure that users create in v3 belong to the default
-        domain.
-
-        """
-        if 'domain' in ref:
-            if ref['domain'].get('id') != CONF.identity.default_domain_id:
-                raise exception.Unauthorized(
-                    _('Non-default domain is not supported'))
-            del ref['domain']
+        """Remove domain since v2 calls are not domain-aware."""
+        ref.pop('domain', None)
         return ref
 
     @staticmethod
@@ -287,15 +314,9 @@ class V2Controller(wsgi.Application):
     def v3_to_v2_user(ref):
         """Convert a user_ref from v3 to v2 compatible.
 
-        - v2.0 users are not domain aware, and should have domain_id validated
-          to be the default domain, and then removed.
-
-        - v2.0 users expect the use of tenantId instead of default_project_id.
-
-        - v2.0 users have a username attribute.
-
-        This method should only be applied to user_refs being returned from the
-        v2.0 controller(s).
+        * v2.0 users are not domain aware, and should have domain_id removed
+        * v2.0 users expect the use of tenantId instead of default_project_id
+        * v2.0 users have a username attribute
 
         If ref is a list type, we will iterate through each element and do the
         conversion.
@@ -402,8 +423,6 @@ class V3Controller(wsgi.Application):
 
     Class parameters:
 
-    * `_mutable_parameters` - set of parameters that can be changed by users.
-                              Usually used by cls.check_immutable_params()
     * `_public_parameters` - set of parameters that are exposed to the user.
                              Usually used by cls.filter_params()
 
@@ -561,7 +580,7 @@ class V3Controller(wsgi.Application):
             :param filter: the filter in question
             :param ref: the dict to check
 
-            :returns True if there is a match
+            :returns: True if there is a match
 
             """
             comparator = filter['comparator']
@@ -722,7 +741,16 @@ class V3Controller(wsgi.Application):
         being used.
 
         """
-        token_ref = utils.get_token_ref(context)
+        try:
+            token_ref = utils.get_token_ref(context)
+        except exception.Unauthorized:
+            if context.get('is_admin'):
+                raise exception.ValidationError(
+                    _('You have tried to create a resource using the admin '
+                      'token. As this token is not within a domain you must '
+                      'explicitly include a domain for this resource to '
+                      'belong to.'))
+            raise
 
         if token_ref.domain_scoped:
             return token_ref.domain_id
@@ -781,43 +809,19 @@ class V3Controller(wsgi.Application):
             if target_attr:
                 policy_dict = {'target': target_attr}
             policy_dict.update(prep_info['input_attr'])
+            if 'filter_attr' in prep_info:
+                policy_dict.update(prep_info['filter_attr'])
             self.policy_api.enforce(creds,
                                     action,
                                     utils.flatten_dict(policy_dict))
             LOG.debug('RBAC: Authorization granted')
 
     @classmethod
-    def check_immutable_params(cls, ref):
-        """Raise exception when disallowed parameter is in ref.
-
-        Check whether the ref dictionary representing a request has only
-        mutable parameters included. If not, raise an exception. This method
-        checks only root-level keys from a ref dictionary.
-
-        :param ref: a dictionary representing deserialized request to be
-                    stored
-        :raises: :class:`keystone.exception.ImmutableAttributeError`
-
-        """
-        ref_keys = set(ref.keys())
-        blocked_keys = ref_keys.difference(cls._mutable_parameters)
-
-        if not blocked_keys:
-            # No immutable parameters changed
-            return
-
-        exception_args = {'target': cls.__name__,
-                          'attributes': ', '.join(blocked_keys)}
-        raise exception.ImmutableAttributeError(**exception_args)
-
-    @classmethod
     def filter_params(cls, ref):
         """Remove unspecified parameters from the dictionary.
 
-        This function removes unspecified parameters from the dictionary. See
-        check_immutable_parameters for corresponding function that raises
-        exceptions. This method checks only root-level keys from a ref
-        dictionary.
+        This function removes unspecified parameters from the dictionary.
+        This method checks only root-level keys from a ref dictionary.
 
         :param ref: a dictionary representing deserialized response to be
                     serialized

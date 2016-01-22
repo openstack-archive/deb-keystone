@@ -170,6 +170,18 @@ class ApplicationTest(BaseWSGITest):
         self.assertEqual('Some-Value', resp.headers.get('Custom-Header'))
         self.assertEqual('X-Auth-Token', resp.headers.get('Vary'))
 
+    def test_render_response_non_str_headers_converted(self):
+        resp = wsgi.render_response(
+            headers=[('Byte-Header', 'Byte-Value'),
+                     (u'Unicode-Header', u'Unicode-Value')])
+        # assert that all headers are identified.
+        self.assertThat(resp.headers, matchers.HasLength(4))
+        self.assertEqual('Unicode-Value', resp.headers.get('Unicode-Header'))
+        # assert that unicode value is converted, the expected type is str
+        # on both python2 and python3.
+        self.assertEqual(str,
+                         type(resp.headers.get('Unicode-Header')))
+
     def test_render_response_no_body(self):
         resp = wsgi.render_response()
         self.assertEqual('204 No Content', resp.status)
@@ -294,12 +306,13 @@ class MiddlewareTest(BaseWSGITest):
             self.assertEqual(exception.UnexpectedError.code, resp.status_int)
             return resp
 
-        # Exception data should not be in the message when debug is False
-        self.config_fixture.config(debug=False)
+        # Exception data should not be in the message when insecure_debug is
+        # False
+        self.config_fixture.config(debug=False, insecure_debug=False)
         self.assertNotIn(exception_str, do_request().body)
 
-        # Exception data should be in the message when debug is True
-        self.config_fixture.config(debug=True)
+        # Exception data should be in the message when insecure_debug is True
+        self.config_fixture.config(debug=True, insecure_debug=True)
         self.assertIn(exception_str, do_request().body)
 
 
@@ -448,12 +461,14 @@ class ServerTest(unit.TestCase):
         server.start()
         self.addCleanup(server.stop)
 
-        self.assertEqual(2, mock_sock_dup.setsockopt.call_count)
-
-        # Test the last set of call args i.e. for the keepidle
-        mock_sock_dup.setsockopt.assert_called_with(socket.IPPROTO_TCP,
-                                                    socket.TCP_KEEPIDLE,
-                                                    1)
+        if hasattr(socket, 'TCP_KEEPIDLE'):
+            self.assertEqual(2, mock_sock_dup.setsockopt.call_count)
+            # Test the last set of call args i.e. for the keepidle
+            mock_sock_dup.setsockopt.assert_called_with(socket.IPPROTO_TCP,
+                                                        socket.TCP_KEEPIDLE,
+                                                        1)
+        else:
+            self.assertEqual(1, mock_sock_dup.setsockopt.call_count)
 
         self.assertTrue(mock_listen.called)
 

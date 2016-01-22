@@ -19,6 +19,7 @@ import copy
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 import six
 
 from keystone.common import cache
@@ -66,6 +67,13 @@ class Manager(manager.Manager):
 
         super(Manager, self).__init__(assignment_driver)
 
+        # Make sure it is a driver version we support, and if it is a legacy
+        # driver, then wrap it.
+        if isinstance(self.driver, AssignmentDriverV8):
+            self.driver = V9AssignmentWrapperForV8Driver(self.driver)
+        elif not isinstance(self.driver, AssignmentDriverV9):
+            raise exception.UnsupportedDriverVersion(driver=assignment_driver)
+
     def _get_group_ids_for_user_id(self, user_id):
         # TODO(morganfainberg): Implement a way to get only group_ids
         # instead of the more expensive to_dict() call for each record.
@@ -74,7 +82,10 @@ class Manager(manager.Manager):
 
     def list_user_ids_for_project(self, tenant_id):
         self.resource_api.get_project(tenant_id)
-        return self.driver.list_user_ids_for_project(tenant_id)
+        assignment_list = self.list_role_assignments(
+            project_id=tenant_id, effective=True)
+        # Use set() to process the list to remove any duplicates
+        return list(set([x['user_id'] for x in assignment_list]))
 
     def _list_parent_ids_of_project(self, project_id):
         if CONF.os_inherit.enabled:
@@ -207,52 +218,21 @@ class Manager(manager.Manager):
     # TODO(henry-nash): We might want to consider list limiting this at some
     # point in the future.
     def list_projects_for_user(self, user_id, hints=None):
-        # NOTE(henry-nash): In order to get a complete list of user projects,
-        # the driver will need to look at group assignments.  To avoid cross
-        # calling between the assignment and identity driver we get the group
-        # list here and pass it in. The rest of the detailed logic of listing
-        # projects for a user is pushed down into the driver to enable
-        # optimization with the various backend technologies (SQL, LDAP etc.).
-
-        group_ids = self._get_group_ids_for_user_id(user_id)
-        project_ids = self.list_project_ids_for_user(
-            user_id, group_ids, hints or driver_hints.Hints())
-
-        if not CONF.os_inherit.enabled:
-            return self.resource_api.list_projects_from_ids(project_ids)
-
-        # Inherited roles are enabled, so check to see if this user has any
-        # inherited role (direct or group) on any parent project, in which
-        # case we must add in all the projects in that parent's subtree.
-        project_ids = set(project_ids)
-        project_ids_inherited = self.list_project_ids_for_user(
-            user_id, group_ids, hints or driver_hints.Hints(), inherited=True)
-        for proj_id in project_ids_inherited:
-            project_ids.update(
-                (x['id'] for x in
-                 self.resource_api.list_projects_in_subtree(proj_id)))
-
-        # Now do the same for any domain inherited roles
-        domain_ids = self.list_domain_ids_for_user(
-            user_id, group_ids, hints or driver_hints.Hints(),
-            inherited=True)
-        project_ids.update(
-            self.resource_api.list_project_ids_from_domain_ids(domain_ids))
-
+        assignment_list = self.list_role_assignments(
+            user_id=user_id, effective=True)
+        # Use set() to process the list to remove any duplicates
+        project_ids = list(set([x['project_id'] for x in assignment_list
+                                if x.get('project_id')]))
         return self.resource_api.list_projects_from_ids(list(project_ids))
 
     # TODO(henry-nash): We might want to consider list limiting this at some
     # point in the future.
     def list_domains_for_user(self, user_id, hints=None):
-        # NOTE(henry-nash): In order to get a complete list of user domains,
-        # the driver will need to look at group assignments.  To avoid cross
-        # calling between the assignment and identity driver we get the group
-        # list here and pass it in. The rest of the detailed logic of listing
-        # projects for a user is pushed down into the driver to enable
-        # optimization with the various backend technologies (SQL, LDAP etc.).
-        group_ids = self._get_group_ids_for_user_id(user_id)
-        domain_ids = self.list_domain_ids_for_user(
-            user_id, group_ids, hints or driver_hints.Hints())
+        assignment_list = self.list_role_assignments(
+            user_id=user_id, effective=True)
+        # Use set() to process the list to remove any duplicates
+        domain_ids = list(set([x['domain_id'] for x in assignment_list
+                               if x.get('domain_id')]))
         return self.resource_api.list_domains_from_ids(domain_ids)
 
     def list_domains_for_groups(self, group_ids):
@@ -614,6 +594,61 @@ class Manager(manager.Manager):
             return expand_group_assignment(ref, user_id)
         return [ref]
 
+    def _add_implied_roles(self, role_refs):
+        """Expand out implied roles.
+
+        The role_refs passed in have had all inheritance and group assignments
+        expanded out. We now need to look at the role_id in each ref and see
+        if it is a prior role for some implied roles. If it is, then we need to
+        duplicate that ref, one for each implied role. We store the prior role
+        in the indirect dict that is part of such a duplicated ref, so that a
+        caller can determine where the assignment came from.
+
+        """
+        def _make_implied_ref_copy(prior_ref, implied_role_id):
+            # Create a ref for an implied role from the ref of a prior role,
+            # setting the new role_id to be the implied role and the indirect
+            # role_id to be the prior role
+            implied_ref = copy.deepcopy(prior_ref)
+            implied_ref['role_id'] = implied_role_id
+            indirect = implied_ref.setdefault('indirect', {})
+            indirect['role_id'] = prior_ref['role_id']
+            return implied_ref
+
+        if not CONF.token.infer_roles:
+            return role_refs
+        try:
+            implied_roles_cache = {}
+            role_refs_to_check = list(role_refs)
+            ref_results = list(role_refs)
+            while(role_refs_to_check):
+                next_ref = role_refs_to_check.pop()
+                next_role_id = next_ref['role_id']
+                if next_role_id in implied_roles_cache:
+                    implied_roles = implied_roles_cache[next_role_id]
+                else:
+                    implied_roles = (
+                        self.role_api.list_implied_roles(next_role_id))
+                    implied_roles_cache[next_role_id] = implied_roles
+                for implied_role in implied_roles:
+                    implied_ref = (
+                        _make_implied_ref_copy(
+                            next_ref, implied_role['implied_role_id']))
+                    ref_results.append(implied_ref)
+                    role_refs_to_check.append(implied_ref)
+        except exception.NotImplemented:
+            LOG.debug('Role driver does not support implied roles.')
+
+        return ref_results
+
+    def _filter_by_role_id(self, role_id, ref_results):
+        # if we arrive here, we  need to filer by role_id.
+        filter_results = []
+        for ref in ref_results:
+            if ref['role_id'] == role_id:
+                filter_results.append(ref)
+        return filter_results
+
     def _list_effective_role_assignments(self, role_id, user_id, group_id,
                                          domain_id, project_id, subtree_ids,
                                          inherited):
@@ -737,19 +772,24 @@ class Manager(manager.Manager):
         # relevant, since domains don't inherit assignments
         inherited = False if domain_id else inherited
 
-        # List user assignments
+        # List user assignments.
+        # Due to the need to expand implied roles, this call will skip
+        # filtering by role_id and instead return the whole set of roles.
+        # Matching on the specified role is performed at the end.
+
         direct_refs = list_role_assignments_for_actor(
-            role_id=role_id, user_id=user_id, project_id=project_id,
+            role_id=None, user_id=user_id, project_id=project_id,
             subtree_ids=subtree_ids, domain_id=domain_id,
             inherited=inherited)
 
-        # And those from the user's groups
+        # And those from the user's groups. Again, role_id is not
+        # used to filter here
         group_refs = []
         if user_id:
             group_ids = self._get_group_ids_for_user_id(user_id)
             if group_ids:
                 group_refs = list_role_assignments_for_actor(
-                    role_id=role_id, project_id=project_id,
+                    role_id=None, project_id=project_id,
                     subtree_ids=subtree_ids, group_ids=group_ids,
                     domain_id=domain_id, inherited=inherited)
 
@@ -759,6 +799,10 @@ class Manager(manager.Manager):
             refs += self._expand_indirect_assignment(
                 ref=ref, user_id=user_id, project_id=project_id,
                 subtree_ids=subtree_ids)
+
+        refs = self._add_implied_roles(refs)
+        if role_id:
+            refs = self._filter_by_role_id(role_id, refs)
 
         return refs
 
@@ -903,20 +947,18 @@ class Manager(manager.Manager):
         pass
 
 
+# The AssignmentDriverBase class is the set of driver methods from earlier
+# drivers that we still support, that have not been removed or modified. This
+# class is then used to created the augmented V8 and V9 version abstract driver
+# classes, without having to duplicate a lot of abstract method signatures.
+# If you remove a method from V9, then move the abstact methods from this Base
+# class to the V8 class. Do not modify any of the method signatures in the Base
+# class - changes should only be made in the V8 and subsequent classes.
 @six.add_metaclass(abc.ABCMeta)
-class AssignmentDriverV8(object):
+class AssignmentDriverBase(object):
 
     def _get_list_limit(self):
         return CONF.assignment.list_limit or CONF.list_limit
-
-    @abc.abstractmethod
-    def list_user_ids_for_project(self, tenant_id):
-        """Lists all user IDs with a role assignment in the specified project.
-
-        :returns: a list of user_ids or an empty set.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
@@ -998,29 +1040,6 @@ class AssignmentDriverV8(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def list_project_ids_for_user(self, user_id, group_ids, hints,
-                                  inherited=False):
-        """List all project ids associated with a given user.
-
-        :param user_id: the user in question
-        :param group_ids: the groups this user is a member of.  This list is
-                          built in the Manager, so that the driver itself
-                          does not have to call across to identity.
-        :param hints: filter hints which the driver should
-                      implement if at all possible.
-        :param inherited: whether assignments marked as inherited should
-                          be included.
-
-        :returns: a list of project ids or an empty list.
-
-        This method should not try and expand any inherited assignments,
-        just report the projects that have the role for this user. The manager
-        method is responsible for expanding out inherited assignments.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
     def list_project_ids_for_groups(self, group_ids, hints,
                                     inherited=False):
         """List project ids accessible to specified groups.
@@ -1035,25 +1054,6 @@ class AssignmentDriverV8(object):
         This method should not try and expand any inherited assignments,
         just report the projects that have the role for this group. The manager
         method is responsible for expanding out inherited assignments.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_domain_ids_for_user(self, user_id, group_ids, hints,
-                                 inherited=False):
-        """List all domain ids associated with a given user.
-
-        :param user_id: the user in question
-        :param group_ids: the groups this user is a member of.  This list is
-                          built in the Manager, so that the driver itself
-                          does not have to call across to identity.
-        :param hints: filter hints which the driver should
-                      implement if at all possible.
-        :param inherited: whether to return domain_ids that have inherited
-                          assignments or not.
-
-        :returns: a list of domain ids or an empty list.
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -1138,6 +1138,195 @@ class AssignmentDriverV8(object):
         raise exception.NotImplemented()  # pragma: no cover
 
 
+class AssignmentDriverV8(AssignmentDriverBase):
+    """Removed or redefined methods from V8.
+
+    Move the abstract methods of any methods removed or modified in later
+    versions of the driver from AssignmentDriverBase to here. We maintain this
+    so that legacy drivers, which will be a subclass of AssignmentDriverV8, can
+    still reference them.
+
+    """
+
+    @abc.abstractmethod
+    def list_user_ids_for_project(self, tenant_id):
+        """Lists all user IDs with a role assignment in the specified project.
+
+        :returns: a list of user_ids or an empty set.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_project_ids_for_user(self, user_id, group_ids, hints,
+                                  inherited=False):
+        """List all project ids associated with a given user.
+
+        :param user_id: the user in question
+        :param group_ids: the groups this user is a member of.  This list is
+                          built in the Manager, so that the driver itself
+                          does not have to call across to identity.
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
+        :param inherited: whether assignments marked as inherited should
+                          be included.
+
+        :returns: a list of project ids or an empty list.
+
+        This method should not try and expand any inherited assignments,
+        just report the projects that have the role for this user. The manager
+        method is responsible for expanding out inherited assignments.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_domain_ids_for_user(self, user_id, group_ids, hints,
+                                 inherited=False):
+        """List all domain ids associated with a given user.
+
+        :param user_id: the user in question
+        :param group_ids: the groups this user is a member of.  This list is
+                          built in the Manager, so that the driver itself
+                          does not have to call across to identity.
+        :param hints: filter hints which the driver should
+                      implement if at all possible.
+        :param inherited: whether to return domain_ids that have inherited
+                          assignments or not.
+
+        :returns: a list of domain ids or an empty list.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+
+class AssignmentDriverV9(AssignmentDriverBase):
+    """New or redefined methods from V8.
+
+    Add any new V9 abstract methods (or those with modified signatures) to
+    this class.
+
+    """
+
+    pass
+
+
+class V9AssignmentWrapperForV8Driver(AssignmentDriverV9):
+    """Wrapper class to supported a V8 legacy driver.
+
+    In order to support legacy drivers without having to make the manager code
+    driver-version aware, we wrap legacy drivers so that they look like the
+    latest version. For the various changes made in a new driver, here are the
+    actions needed in this wrapper:
+
+    Method removed from new driver - remove the call-through method from this
+                                     class, since the manager will no longer be
+                                     calling it.
+    Method signature (or meaning) changed - wrap the old method in a new
+                                            signature here, and munge the input
+                                            and output parameters accordingly.
+    New method added to new driver - add a method to implement the new
+                                     functionality here if possible. If that is
+                                     not possible, then return NotImplemented,
+                                     since we do not guarantee to support new
+                                     functionality with legacy drivers.
+
+    """
+
+    @versionutils.deprecated(
+        as_of=versionutils.deprecated.MITAKA,
+        what='keystone.assignment.AssignmentDriverV8',
+        in_favor_of='keystone.assignment.AssignmentDriverV9',
+        remove_in=+2)
+    def __init__(self, wrapped_driver):
+        self.driver = wrapped_driver
+
+    def default_role_driver(self):
+        return self.driver.default_role_driver()
+
+    def default_resource_driver(self):
+        return self.driver.default_resource_driver()
+
+    def add_role_to_user_and_project(self, user_id, tenant_id, role_id):
+        self.driver.add_role_to_user_and_project(user_id, tenant_id, role_id)
+
+    def remove_role_from_user_and_project(self, user_id, tenant_id, role_id):
+        self.driver.remove_role_from_user_and_project(
+            user_id, tenant_id, role_id)
+
+    def create_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        self.driver.create_grant(
+            role_id, user_id=user_id, group_id=group_id,
+            domain_id=domain_id, project_id=project_id,
+            inherited_to_projects=inherited_to_projects)
+
+    def list_grant_role_ids(self, user_id=None, group_id=None,
+                            domain_id=None, project_id=None,
+                            inherited_to_projects=False):
+        return self.driver.list_grant_role_ids(
+            user_id=user_id, group_id=group_id,
+            domain_id=domain_id, project_id=project_id,
+            inherited_to_projects=inherited_to_projects)
+
+    def check_grant_role_id(self, role_id, user_id=None, group_id=None,
+                            domain_id=None, project_id=None,
+                            inherited_to_projects=False):
+        self.driver.check_grant_role_id(
+            role_id, user_id=user_id, group_id=group_id,
+            domain_id=domain_id, project_id=project_id,
+            inherited_to_projects=inherited_to_projects)
+
+    def delete_grant(self, role_id, user_id=None, group_id=None,
+                     domain_id=None, project_id=None,
+                     inherited_to_projects=False):
+        self.driver.delete_grant(
+            role_id, user_id=user_id, group_id=group_id,
+            domain_id=domain_id, project_id=project_id,
+            inherited_to_projects=inherited_to_projects)
+
+    def list_role_assignments(self, role_id=None,
+                              user_id=None, group_ids=None,
+                              domain_id=None, project_ids=None,
+                              inherited_to_projects=None):
+        return self.driver.list_role_assignments(
+            role_id=role_id,
+            user_id=user_id, group_ids=group_ids,
+            domain_id=domain_id, project_ids=project_ids,
+            inherited_to_projects=inherited_to_projects)
+
+    def list_project_ids_for_groups(self, group_ids, hints,
+                                    inherited=False):
+        return self.driver.list_project_ids_for_groups(
+            group_ids, hints, inherited=inherited)
+
+    def list_domain_ids_for_groups(self, group_ids, inherited=False):
+        return self.driver.list_domain_ids_for_groups(
+            group_ids, inherited=inherited)
+
+    def list_role_ids_for_groups_on_project(
+            self, group_ids, project_id, project_domain_id, project_parents):
+        return self.driver.list_role_ids_for_groups_on_project(
+            group_ids, project_id, project_domain_id, project_parents)
+
+    def list_role_ids_for_groups_on_domain(self, group_ids, domain_id):
+        return self.driver.list_role_ids_for_groups_on_domain(
+            group_ids, domain_id)
+
+    def delete_project_assignments(self, project_id):
+        self.driver.delete_project_assignments(project_id)
+
+    def delete_role_assignments(self, role_id):
+        self.driver.delete_role_assignments(role_id)
+
+    def delete_user_assignments(self, user_id):
+        self.driver.delete_user_assignments(user_id)
+
+    def delete_group_assignments(self, group_id):
+        self.driver.delete_group_assignments(group_id)
+
+
 Driver = manager.create_legacy_driver(AssignmentDriverV8)
 
 
@@ -1160,6 +1349,13 @@ class RoleManager(manager.Manager):
             role_driver = assignment_manager.default_role_driver()
 
         super(RoleManager, self).__init__(role_driver)
+
+        # Make sure it is a driver version we support, and if it is a legacy
+        # driver, then wrap it.
+        if isinstance(self.driver, RoleDriverV8):
+            self.driver = V9RoleWrapperForV8Driver(self.driver)
+        elif not isinstance(self.driver, RoleDriverV9):
+            raise exception.UnsupportedDriverVersion(driver=role_driver)
 
     @MEMOIZE
     def get_role(self, role_id):
@@ -1190,8 +1386,15 @@ class RoleManager(manager.Manager):
         self.get_role.invalidate(self, role_id)
 
 
+# The RoleDriverBase class is the set of driver methods from earlier
+# drivers that we still support, that have not been removed or modified. This
+# class is then used to created the augmented V8 and V9 version abstract driver
+# classes, without having to duplicate a lot of abstract method signatures.
+# If you remove a method from V9, then move the abstact methods from this Base
+# class to the V8 class. Do not modify any of the method signatures in the Base
+# class - changes should only be made in the V8 and subsequent classes.
 @six.add_metaclass(abc.ABCMeta)
-class RoleDriverV8(object):
+class RoleDriverBase(object):
 
     def _get_list_limit(self):
         return CONF.role.list_limit or CONF.list_limit
@@ -1260,5 +1463,124 @@ class RoleDriverV8(object):
         """
         raise exception.NotImplemented()  # pragma: no cover
 
+
+class RoleDriverV8(RoleDriverBase):
+    """Removed or redefined methods from V8.
+
+    Move the abstract methods of any methods removed or modified in later
+    versions of the driver from RoleDriverBase to here. We maintain this
+    so that legacy drivers, which will be a subclass of RoleDriverV8, can
+    still reference them.
+
+    """
+
+    pass
+
+
+class RoleDriverV9(RoleDriverBase):
+    """New or redefined methods from V8.
+
+    Add any new V9 abstract methods (or those with modified signatures) to
+    this class.
+
+    """
+
+    @abc.abstractmethod
+    def get_implied_role(self, prior_role_id, implied_role_id):
+        """Fetches a role inference rule
+
+        :raises keystone.exception.ImpliedRoleNotFound: If the implied role
+            doesn't exist.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def create_implied_role(self, prior_role_id, implied_role_id):
+        """Creates a role inference rule
+
+        :raises: keystone.exception.RoleNotFound: If the role doesn't exist.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def delete_implied_role(self, prior_role_id, implied_role_id):
+        """Deletes a role inference rule"""
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_role_inference_rules(self):
+        """Lists all the rules used to imply one role from another"""
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_implied_roles(self, prior_role_id):
+        """Lists roles implied from the prior role id"""
+        raise exception.NotImplemented()  # pragma: no cover
+
+
+class V9RoleWrapperForV8Driver(RoleDriverV9):
+    """Wrapper class to supported a V8 legacy driver.
+
+    In order to support legacy drivers without having to make the manager code
+    driver-version aware, we wrap legacy drivers so that they look like the
+    latest version. For the various changes made in a new driver, here are the
+    actions needed in this wrapper:
+
+    Method removed from new driver - remove the call-through method from this
+                                     class, since the manager will no longer be
+                                     calling it.
+    Method signature (or meaning) changed - wrap the old method in a new
+                                            signature here, and munge the input
+                                            and output parameters accordingly.
+    New method added to new driver - add a method to implement the new
+                                     functionality here if possible. If that is
+                                     not possible, then return NotImplemented,
+                                     since we do not guarantee to support new
+                                     functionality with legacy drivers.
+
+    """
+
+    @versionutils.deprecated(
+        as_of=versionutils.deprecated.MITAKA,
+        what='keystone.assignment.RoleDriverV8',
+        in_favor_of='keystone.assignment.RoleDriverV9',
+        remove_in=+2)
+    def __init__(self, wrapped_driver):
+        self.driver = wrapped_driver
+
+    def create_role(self, role_id, role):
+        return self.driver.create_role(role_id, role)
+
+    def list_roles(self, hints):
+        return self.driver.list_roles(hints)
+
+    def list_roles_from_ids(self, role_ids):
+        return self.driver.list_roles_from_ids(role_ids)
+
+    def get_role(self, role_id):
+        return self.driver.get_role(role_id)
+
+    def update_role(self, role_id, role):
+        return self.driver.update_role(role_id, role)
+
+    def delete_role(self, role_id):
+        self.driver.delete_role(role_id)
+
+    def get_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def create_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def delete_implied_role(self, prior_role_id, implied_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def list_implied_roles(self, prior_role_id):
+        raise exception.NotImplemented()  # pragma: no cover
+
+    def list_role_inference_rules(self):
+        raise exception.NotImplemented()  # pragma: no cover
 
 RoleDriver = manager.create_legacy_driver(RoleDriverV8)

@@ -223,6 +223,36 @@ class AuthBadRequests(AuthTest):
                           self.controller.authenticate,
                           {}, body_dict)
 
+    def test_authenticate_fails_if_project_unsafe(self):
+        """Verify authenticate to a project with unsafe name fails."""
+        # Start with url name restrictions off, so we can create the unsafe
+        # named project
+        self.config_fixture.config(group='resource',
+                                   project_name_url_safe='off')
+        unsafe_name = 'i am not / safe'
+        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID,
+                                       name=unsafe_name)
+        self.resource_api.create_project(project['id'], project)
+        self.assignment_api.add_role_to_user_and_project(
+            self.user_foo['id'], project['id'], self.role_member['id'])
+        no_context = {}
+
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_name=project['name'])
+
+        # Since name url restriction is off, we should be able to autenticate
+        self.controller.authenticate(no_context, body_dict)
+
+        # Set the name url restriction to strict and we should fail to
+        # authenticate
+        self.config_fixture.config(group='resource',
+                                   project_name_url_safe='strict')
+        self.assertRaises(exception.Unauthorized,
+                          self.controller.authenticate,
+                          no_context, body_dict)
+
 
 class AuthWithToken(AuthTest):
     def test_unscoped_token(self):
@@ -286,7 +316,7 @@ class AuthWithToken(AuthTest):
 
     def test_auth_scoped_token_bad_project_with_debug(self):
         """Authenticating with an invalid project fails."""
-        # Bug 1379952 reports poor user feedback, even in debug mode,
+        # Bug 1379952 reports poor user feedback, even in insecure_debug mode,
         # when the user accidentally passes a project name as an ID.
         # This test intentionally does exactly that.
         body_dict = _build_user_auth(
@@ -294,8 +324,8 @@ class AuthWithToken(AuthTest):
             password=self.user_foo['password'],
             tenant_id=self.tenant_bar['name'])
 
-        # with debug enabled, this produces a friendly exception.
-        self.config_fixture.config(debug=True)
+        # with insecure_debug enabled, this produces a friendly exception.
+        self.config_fixture.config(debug=True, insecure_debug=True)
         e = self.assertRaises(
             exception.Unauthorized,
             self.controller.authenticate,
@@ -308,7 +338,7 @@ class AuthWithToken(AuthTest):
 
     def test_auth_scoped_token_bad_project_without_debug(self):
         """Authenticating with an invalid project fails."""
-        # Bug 1379952 reports poor user feedback, even in debug mode,
+        # Bug 1379952 reports poor user feedback, even in insecure_debug mode,
         # when the user accidentally passes a project name as an ID.
         # This test intentionally does exactly that.
         body_dict = _build_user_auth(
@@ -316,8 +346,8 @@ class AuthWithToken(AuthTest):
             password=self.user_foo['password'],
             tenant_id=self.tenant_bar['name'])
 
-        # with debug disabled, authentication failure details are suppressed.
-        self.config_fixture.config(debug=False)
+        # with insecure_debug disabled (the default), authentication failure
+        # details are suppressed.
         e = self.assertRaises(
             exception.Unauthorized,
             self.controller.authenticate,
@@ -428,8 +458,7 @@ class AuthWithToken(AuthTest):
 
     def test_deleting_role_revokes_token(self):
         role_controller = assignment.controllers.Role()
-        project1 = {'id': 'Project1', 'name': uuid.uuid4().hex,
-                    'domain_id': DEFAULT_DOMAIN_ID}
+        project1 = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
         self.resource_api.create_project(project1['id'], project1)
         role_one = unit.new_role_ref(id='role_one')
         self.role_api.create_role(role_one['id'], role_one)
@@ -464,10 +493,7 @@ class AuthWithToken(AuthTest):
         no_context = {}
         admin_context = dict(is_admin=True, query_string={})
 
-        project = {
-            'id': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'domain_id': DEFAULT_DOMAIN_ID}
+        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
         self.resource_api.create_project(project['id'], project)
         role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
@@ -989,8 +1015,6 @@ class AuthWithTrust(AuthTest):
         auth_response = self.fetch_v2_token_from_trust(new_trust)
         token_user = auth_response['access']['user']
         self.assertEqual(token_user['id'], new_trust['trustee_user_id'])
-
-        # TODO(ayoung): Endpoints
 
     def test_create_trust_impersonation(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'])

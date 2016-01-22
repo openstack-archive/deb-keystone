@@ -21,6 +21,7 @@ from sqlalchemy.sql import true
 
 from keystone import catalog
 from keystone.catalog import core
+from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import exception
 from keystone.i18n import _
@@ -44,13 +45,6 @@ class Region(sql.ModelBase, sql.DictBase):
     #                 "left" and "right" and provide support for a nested set
     #                 model.
     parent_region_id = sql.Column(sql.String(255), nullable=True)
-
-    # TODO(jaypipes): I think it's absolutely stupid that every single model
-    #                 is required to have an "extra" column because of the
-    #                 DictBase in the keystone.common.sql.core module. Forcing
-    #                 tables to have pointless columns in the database is just
-    #                 bad. Remove all of this extra JSON blob stuff.
-    #                 See: https://bugs.launchpad.net/keystone/+bug/1265071
     extra = sql.Column(sql.JsonBlob())
     endpoints = sqlalchemy.orm.relationship("Endpoint", backref="region")
 
@@ -178,7 +172,7 @@ class Catalog(catalog.CatalogDriverV8):
         return ref.to_dict()
 
     # Services
-    @sql.truncated
+    @driver_hints.truncated
     def list_services(self, hints):
         session = sql.get_session()
         services = session.query(Service)
@@ -247,7 +241,7 @@ class Catalog(catalog.CatalogDriverV8):
         session = sql.get_session()
         return self._get_endpoint(session, endpoint_id).to_dict()
 
-    @sql.truncated
+    @driver_hints.truncated
     def list_endpoints(self, hints):
         session = sql.get_session()
         endpoints = session.query(Endpoint)

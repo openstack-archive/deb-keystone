@@ -7,9 +7,9 @@ Keystone Management Utility
 ---------------------------
 
 :Author: openstack@lists.openstack.org
-:Date:   2015-10-15
+:Date:   2016-4-7
 :Copyright: OpenStack Foundation
-:Version: 8.0.0
+:Version: 9.0.0
 :Manual section: 1
 :Manual group: cloud computing
 
@@ -40,6 +40,7 @@ Invoking ``keystone-manage`` by itself will give you some usage information.
 
 Available commands:
 
+* ``bootstrap``: Perform the basic bootstrap process.
 * ``db_sync``: Sync the database.
 * ``db_version``: Print the current migration version of the database.
 * ``domain_config_upload``: Upload domain configuration file.

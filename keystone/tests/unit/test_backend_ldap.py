@@ -20,6 +20,7 @@ import uuid
 import ldap
 import mock
 from oslo_config import cfg
+from oslotest import mockpatch
 import pkg_resources
 from six.moves import http_client
 from six.moves import range
@@ -38,6 +39,7 @@ from keystone.tests.unit import identity_mapping as mapping_sql
 from keystone.tests.unit.ksfixtures import database
 from keystone.tests.unit.ksfixtures import ldapdb
 from keystone.tests.unit import test_backend
+from keystone.tests.unit.utils import wip
 
 
 CONF = cfg.CONF
@@ -124,6 +126,7 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
 
         self.load_backends()
         self.load_fixtures(default_fixtures)
+        self.config_fixture.config(group='os_inherit', enabled=False)
 
     def _get_domain_fixture(self):
         """Domains in LDAP are read-only, so just return the static one."""
@@ -416,11 +419,9 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         group2 = unit.new_group_ref(domain_id=domain['id'])
         group2 = self.identity_api.create_group(group2)
 
-        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain['id']}
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
-        project2 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': domain['id']}
+        project2 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project2['id'], project2)
 
         self.identity_api.add_user_to_group(new_user['id'],
@@ -495,9 +496,7 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         new_user = self.identity_api.create_user(new_user)
         new_group = unit.new_group_ref(domain_id=new_domain['id'])
         new_group = self.identity_api.create_group(new_group)
-        new_project = {'id': uuid.uuid4().hex,
-                       'name': uuid.uuid4().hex,
-                       'domain_id': new_domain['id']}
+        new_project = unit.new_project_ref(domain_id=new_domain['id'])
         self.resource_api.create_project(new_project['id'], new_project)
 
         # First check how many role grant already exist
@@ -530,9 +529,7 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
         new_domain = self._get_domain_fixture()
         new_user = self.new_user_ref(domain_id=new_domain['id'])
         new_user = self.identity_api.create_user(new_user)
-        new_project = {'id': uuid.uuid4().hex,
-                       'name': uuid.uuid4().hex,
-                       'domain_id': new_domain['id']}
+        new_project = unit.new_project_ref(domain_id=new_domain['id'])
         self.resource_api.create_project(new_project['id'], new_project)
         self.assignment_api.create_grant(user_id=new_user['id'],
                                          project_id=new_project['id'],
@@ -963,26 +960,25 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
 
     def test_configurable_allowed_project_actions(self):
         domain = self._get_domain_fixture()
-        tenant = {'id': u'fäké1', 'name': u'fäké1', 'enabled': True,
-                  'domain_id': domain['id']}
-        self.resource_api.create_project(u'fäké1', tenant)
-        tenant_ref = self.resource_api.get_project(u'fäké1')
-        self.assertEqual(u'fäké1', tenant_ref['id'])
+        project = unit.new_project_ref(domain_id=domain['id'])
+        self.resource_api.create_project(project['id'], project)
+        project_ref = self.resource_api.get_project(project['id'])
+        self.assertEqual(project['id'], project_ref['id'])
 
-        tenant['enabled'] = False
-        self.resource_api.update_project(u'fäké1', tenant)
+        project['enabled'] = False
+        self.resource_api.update_project(project['id'], project)
 
-        self.resource_api.delete_project(u'fäké1')
+        self.resource_api.delete_project(project['id'])
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.get_project,
-                          u'fäké1')
+                          project['id'])
 
     def test_configurable_subtree_delete(self):
         self.config_fixture.config(group='ldap', allow_subtree_delete=True)
         self.load_backends()
 
-        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': CONF.identity.default_domain_id}
+        project1 = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         self.resource_api.create_project(project1['id'], project1)
 
         role1 = unit.new_role_ref()
@@ -1015,11 +1011,11 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.load_backends()
 
         domain = self._get_domain_fixture()
-        tenant = {'id': u'fäké1', 'name': u'fäké1', 'domain_id': domain['id']}
+        project = unit.new_project_ref(domain_id=domain['id'])
         self.assertRaises(exception.ForbiddenAction,
                           self.resource_api.create_project,
-                          u'fäké1',
-                          tenant)
+                          project['id'],
+                          project)
 
         self.tenant_bar['enabled'] = False
         self.assertRaises(exception.ForbiddenAction,
@@ -1489,9 +1485,6 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
                          'fake': 'invalid', 'invalid2': ''}
         self.assertDictEqual(expected_dict, mapping)
 
-# TODO(henry-nash): These need to be removed when the full LDAP implementation
-# is submitted - see Bugs 1092187, 1101287, 1101276, 1101289
-
     def test_domain_crud(self):
         domain = unit.new_domain_ref()
         self.assertRaises(exception.Forbidden,
@@ -1559,13 +1552,9 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # NOTE(topol): LDAP implementation does not currently support the
         #              updating of a project name so this method override
         #              provides a different update test
-        project = {'id': uuid.uuid4().hex,
-                   'name': uuid.uuid4().hex,
-                   'domain_id': CONF.identity.default_domain_id,
-                   'description': uuid.uuid4().hex,
-                   'enabled': True,
-                   'parent_id': None,
-                   'is_domain': False}
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+
         self.resource_api.create_project(project['id'], project)
         project_ref = self.resource_api.get_project(project['id'])
 
@@ -1586,9 +1575,8 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # NOTE(morganfainberg): LDAP implementation does not currently support
         # updating project names.  This method override provides a different
         # update test.
-        project = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                   'domain_id': CONF.identity.default_domain_id,
-                   'description': uuid.uuid4().hex}
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         project_id = project['id']
         # Create a project
         self.resource_api.create_project(project_id, project)
@@ -1638,24 +1626,13 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
     def _assert_create_hierarchy_not_allowed(self):
         domain = self._get_domain_fixture()
 
-        project1 = {'id': uuid.uuid4().hex,
-                    'name': uuid.uuid4().hex,
-                    'description': '',
-                    'domain_id': domain['id'],
-                    'enabled': True,
-                    'parent_id': None,
-                    'is_domain': False}
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
 
         # Creating project2 under project1. LDAP will not allow
         # the creation of a project with parent_id being set
-        project2 = {'id': uuid.uuid4().hex,
-                    'name': uuid.uuid4().hex,
-                    'description': '',
-                    'domain_id': domain['id'],
-                    'enabled': True,
-                    'parent_id': project1['id'],
-                    'is_domain': False}
+        project2 = unit.new_project_ref(domain_id=domain['id'],
+                                        parent_id=project1['id'])
 
         self.assertRaises(exception.InvalidParentProject,
                           self.resource_api.create_project,
@@ -1677,13 +1654,8 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         and the only domain it has (default) is immutable.
         """
         domain = self._get_domain_fixture()
-        project = {'id': uuid.uuid4().hex,
-                   'name': uuid.uuid4().hex,
-                   'description': '',
-                   'domain_id': domain['id'],
-                   'enabled': True,
-                   'parent_id': None,
-                   'is_domain': True}
+        project = unit.new_project_ref(domain_id=domain['id'],
+                                       is_domain=True)
 
         self.assertRaises(exception.ValidationError,
                           self.resource_api.create_project,
@@ -1691,13 +1663,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
 
     def test_update_is_domain_field(self):
         domain = self._get_domain_fixture()
-        project = {'id': uuid.uuid4().hex,
-                   'name': uuid.uuid4().hex,
-                   'description': '',
-                   'domain_id': domain['id'],
-                   'enabled': True,
-                   'parent_id': None,
-                   'is_domain': False}
+        project = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project['id'], project)
 
         # Try to update the is_domain field to True
@@ -1723,9 +1689,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
     def test_set_default_is_domain_project(self):
         # Tests the internal method _set_default_is_domain_project, which
         # allows either a project ref or a list of project refs
-        new_project_ref = {'id': uuid.uuid4().hex,
-                           'name': uuid.uuid4().hex,
-                           'description': uuid.uuid4().hex}
+        new_project_ref = unit.new_project_ref()
 
         # Calling it with a dict is valid
         updated_project_ref = (self.resource_api.driver.
@@ -1734,9 +1698,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.assertFalse(updated_project_ref['is_domain'])
 
         # So it is with a list of refs
-        another_new_project_ref = {'id': uuid.uuid4().hex,
-                                   'name': uuid.uuid4().hex,
-                                   'description': uuid.uuid4().hex}
+        another_new_project_ref = unit.new_project_ref()
         refs_list = [new_project_ref, another_new_project_ref]
         new_refs_list = (self.resource_api.driver.
                          _set_default_is_domain_project(refs_list))
@@ -1832,8 +1794,8 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
 
         user1 = self.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user1 = self.identity_api.create_user(user1)
-        project1 = {'id': uuid.uuid4().hex, 'name': uuid.uuid4().hex,
-                    'domain_id': CONF.identity.default_domain_id}
+        project1 = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         self.resource_api.create_project(project1['id'], project1)
 
         self.assignment_api.add_role_to_user_and_project(
@@ -2050,13 +2012,16 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.assertEqual('Foo Bar', user_ref['name'])
 
 
-class LDAPUserList(unit.TestCase):
-
+class LDAPLimitTests(unit.TestCase, test_backend.LimitTests):
     def setUp(self):
-        super(LDAPUserList, self).setUp()
-        self.ldapdb = self.useFixture(ldapdb.LDAPDatabase())
+        super(LDAPLimitTests, self).setUp()
 
+        self.useFixture(ldapdb.LDAPDatabase())
+        self.useFixture(database.Database())
         self.load_backends()
+
+        test_backend.LimitTests.setUp(self)
+
         self.load_fixtures(default_fixtures)
         _assert_backends(self,
                          assignment='ldap',
@@ -2064,22 +2029,18 @@ class LDAPUserList(unit.TestCase):
                          resource='ldap')
 
     def config_overrides(self):
-        super(LDAPUserList, self).config_overrides()
+        super(LDAPLimitTests, self).config_overrides()
         self.config_fixture.config(group='identity', driver='ldap')
         self.config_fixture.config(group='identity',
                                    list_limit=len(default_fixtures.USERS) - 1)
 
     def config_files(self):
-        config_files = super(LDAPUserList, self).config_files()
+        config_files = super(LDAPLimitTests, self).config_files()
         config_files.append(unit.dirs.tests_conf('backend_ldap.conf'))
         return config_files
 
-    def test_returned_list_size_is_limited(self):
-        users = self.identity_api.list_users()
-        # NOTE(amakarov): this exposes bug 1501698
-        # list_limit number of entries should be returned
-        self.assertNotEqual(CONF.identity.list_limit, len(users))
-        self.assertEqual(len(default_fixtures.USERS), len(users))
+    def test_list_projects_filtered_and_limited(self):
+        self.skipTest("ldap for storing projects is deprecated")
 
 
 class LDAPIdentityEnabledEmulation(LDAPIdentity):
@@ -2116,13 +2077,8 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
         # NOTE(topol): LDAPIdentityEnabledEmulation will create an
         #              enabled key in the project dictionary so this
         #              method override handles this side-effect
-        project = {
-            'id': uuid.uuid4().hex,
-            'name': uuid.uuid4().hex,
-            'domain_id': CONF.identity.default_domain_id,
-            'description': uuid.uuid4().hex,
-            'parent_id': None,
-            'is_domain': False}
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
 
         self.resource_api.create_project(project['id'], project)
         project_ref = self.resource_api.get_project(project['id'])
@@ -2275,6 +2231,37 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
         user_api = identity.backends.ldap.UserApi(CONF)
         user_ref = user_api.get('123456789')
         self.assertIs(False, user_ref['enabled'])
+
+    def test_escape_member_dn(self):
+        # The enabled member DN is properly escaped when querying for enabled
+        # user.
+
+        object_id = uuid.uuid4().hex
+        driver = self.identity_api._select_identity_driver(
+            CONF.identity.default_domain_id)
+
+        # driver.user is the EnabledEmuMixIn implementation used for this test.
+        mixin_impl = driver.user
+
+        # ) is a special char in a filter and must be escaped.
+        sample_dn = 'cn=foo)bar'
+        # LDAP requires ) is escaped by being replaced with "\29"
+        sample_dn_filter_esc = r'cn=foo\29bar'
+
+        # Override the tree_dn, it's used to build the enabled member filter
+        mixin_impl.tree_dn = sample_dn
+
+        # The filter that _get_enabled is going to build contains the
+        # tree_dn, which better be escaped in this case.
+        exp_filter = '(%s=%s=%s,%s)' % (
+            mixin_impl.member_attribute, mixin_impl.id_attr, object_id,
+            sample_dn_filter_esc)
+
+        with mixin_impl.get_connection() as conn:
+            m = self.useFixture(mockpatch.PatchObject(conn, 'search_s')).mock
+            mixin_impl._get_enabled(object_id, conn)
+            # The 3rd argument is the DN.
+            self.assertEqual(exp_filter, m.call_args[0][2])
 
 
 class LdapIdentitySqlAssignment(BaseLDAPIdentity, unit.SQLDriverOverrides,
@@ -2779,13 +2766,7 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
 
     def test_delete_domain_with_user_added(self):
         domain = unit.new_domain_ref()
-        project = {'id': uuid.uuid4().hex,
-                   'name': uuid.uuid4().hex,
-                   'domain_id': domain['id'],
-                   'description': uuid.uuid4().hex,
-                   'parent_id': None,
-                   'enabled': True,
-                   'is_domain': False}
+        project = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_domain(domain['id'], domain)
         self.resource_api.create_project(project['id'], project)
         project_ref = self.resource_api.get_project(project['id'])
@@ -3329,13 +3310,15 @@ class LdapFilterTests(test_backend.FilterTests, unit.TestCase):
         config_files.append(unit.dirs.tests_conf('backend_ldap.conf'))
         return config_files
 
-    def test_list_users_in_group_filtered(self):
+    @wip('Not supported by LDAP identity driver')
+    def test_list_users_in_group_inexact_filtered(self):
         # The LDAP identity driver currently does not support filtering on the
         # listing users for a given group, so will fail this test.
-        try:
-            super(LdapFilterTests, self).test_list_users_in_group_filtered()
-        except matchers.MismatchError:
-            return
-        # We shouldn't get here...if we do, it means someone has implemented
-        # filtering, so we can remove this test override.
-        self.assertTrue(False)
+        super(LdapFilterTests,
+              self).test_list_users_in_group_inexact_filtered()
+
+    @wip('Not supported by LDAP identity driver')
+    def test_list_users_in_group_exact_filtered(self):
+        # The LDAP identity driver currently does not support filtering on the
+        # listing users for a given group, so will fail this test.
+        super(LdapFilterTests, self).test_list_users_in_group_exact_filtered()

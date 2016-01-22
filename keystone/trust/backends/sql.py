@@ -14,7 +14,6 @@
 
 import time
 
-from oslo_log import log
 from oslo_utils import timeutils
 from six.moves import range
 
@@ -23,7 +22,6 @@ from keystone import exception
 from keystone import trust
 
 
-LOG = log.getLogger(__name__)
 # The maximum number of iterations that will be attempted for optimistic
 # locking on consuming a limited-use trust.
 MAXIMUM_CONSUME_ATTEMPTS = 10
@@ -45,6 +43,10 @@ class TrustModel(sql.ModelBase, sql.DictBase):
     expires_at = sql.Column(sql.DateTime)
     remaining_uses = sql.Column(sql.Integer, nullable=True)
     extra = sql.Column(sql.JsonBlob())
+    __table_args__ = (sql.UniqueConstraint(
+                      'trustor_user_id', 'trustee_user_id', 'project_id',
+                      'impersonation', 'expires_at',
+                      name='duplicate_trust_constraint'),)
 
 
 class TrustRole(sql.ModelBase):

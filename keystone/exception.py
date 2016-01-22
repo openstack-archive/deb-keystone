@@ -27,6 +27,22 @@ LOG = log.getLogger(__name__)
 _FATAL_EXCEPTION_FORMAT_ERRORS = False
 
 
+def _format_with_unicode_kwargs(msg_format, kwargs):
+    try:
+        return msg_format % kwargs
+    except UnicodeDecodeError:
+        try:
+            kwargs = {k: encodeutils.safe_decode(v)
+                      for k, v in kwargs.items()}
+        except UnicodeDecodeError:
+            # NOTE(jamielennox): This is the complete failure case
+            # at least by showing the template we have some idea
+            # of where the error is coming from
+            return msg_format
+
+        return msg_format % kwargs
+
+
 class Error(Exception):
     """Base error class.
 
@@ -58,22 +74,9 @@ class Error(Exception):
         :raises KeyError: given insufficient kwargs
 
         """
-        if not message:
-            try:
-                message = self.message_format % kwargs
-            except UnicodeDecodeError:
-                try:
-                    kwargs = {k: encodeutils.safe_decode(v)
-                              for k, v in kwargs.items()}
-                except UnicodeDecodeError:
-                    # NOTE(jamielennox): This is the complete failure case
-                    # at least by showing the template we have some idea
-                    # of where the error is coming from
-                    message = self.message_format
-                else:
-                    message = self.message_format % kwargs
-
-        return message
+        if message:
+            return message
+        return _format_with_unicode_kwargs(self.message_format, kwargs)
 
 
 class ValidationError(Error):
@@ -161,23 +164,25 @@ class PKITokenExpected(Error):
 
 
 class SecurityError(Error):
-    """Avoids exposing details of security failures, unless in debug mode."""
+    """Avoids exposing details of security failures, unless in insecure_debug
+    mode.
+    """
 
-    amendment = _('(Disable debug mode to suppress these details.)')
+    amendment = _('(Disable insecure_debug mode to suppress these details.)')
 
     def _build_message(self, message, **kwargs):
-        """Only returns detailed messages in debug mode."""
-        if message and CONF.debug:
+        """Only returns detailed messages in insecure_debug mode."""
+        if message and CONF.insecure_debug:
             if isinstance(message, six.string_types):
                 # Only do replacement if message is string. The message is
                 # sometimes a different exception or bytes, which would raise
                 # TypeError.
-                message = message % kwargs
+                message = _format_with_unicode_kwargs(message, kwargs)
             return _('%(message)s %(amendment)s') % {
                 'message': message,
                 'amendment': self.amendment}
-        else:
-            return self.message_format % kwargs
+
+        return _format_with_unicode_kwargs(self.message_format, kwargs)
 
 
 class Unauthorized(SecurityError):
@@ -278,6 +283,10 @@ class PolicyAssociationNotFound(NotFound):
 
 class RoleNotFound(NotFound):
     message_format = _("Could not find role: %(role_id)s")
+
+
+class ImpliedRoleNotFound(NotFound):
+    message_format = _("%(prior_role_id)s does not imply %(implied_role_id)s")
 
 
 class RoleAssignmentNotFound(NotFound):
@@ -381,7 +390,7 @@ class Conflict(Error):
 
 
 class UnexpectedError(SecurityError):
-    """Avoids exposing details of failures, unless in debug mode."""
+    """Avoids exposing details of failures, unless in insecure_debug mode."""
 
     message_format = _("An unexpected error prevented the server "
                        "from fulfilling your request.")
@@ -506,3 +515,7 @@ class MigrationMovedFailure(RuntimeError):
                 "database control. Use the command: keystone-manage "
                 "db_sync") % self.extension
         super(MigrationMovedFailure, self).__init__(msg)
+
+
+class UnsupportedDriverVersion(UnexpectedError):
+    debug_message_format = _('%(driver)s is not supported driver version')

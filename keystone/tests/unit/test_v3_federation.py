@@ -19,8 +19,8 @@ import fixtures
 from lxml import etree
 import mock
 from oslo_config import cfg
-from oslo_log import log
 from oslo_log import versionutils
+from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from oslotest import mockpatch
 import saml2
@@ -51,7 +51,6 @@ from keystone.token.providers import common as token_common
 subprocess = environment.subprocess
 
 CONF = cfg.CONF
-LOG = log.getLogger(__name__)
 ROOTDIR = os.path.dirname(os.path.abspath(__file__))
 XMLDIR = os.path.join(ROOTDIR, 'saml2/')
 
@@ -233,21 +232,21 @@ class FederatedSetupMixin(object):
                                         self.domainD)
 
         # Create and add projects
-        self.proj_employees = self.new_project_ref(
+        self.proj_employees = unit.new_project_ref(
             domain_id=self.domainA['id'])
         self.resource_api.create_project(self.proj_employees['id'],
                                          self.proj_employees)
-        self.proj_customers = self.new_project_ref(
+        self.proj_customers = unit.new_project_ref(
             domain_id=self.domainA['id'])
         self.resource_api.create_project(self.proj_customers['id'],
                                          self.proj_customers)
 
-        self.project_all = self.new_project_ref(
+        self.project_all = unit.new_project_ref(
             domain_id=self.domainA['id'])
         self.resource_api.create_project(self.project_all['id'],
                                          self.project_all)
 
-        self.project_inherited = self.new_project_ref(
+        self.project_inherited = unit.new_project_ref(
             domain_id=self.domainD['id'])
         self.resource_api.create_project(self.project_inherited['id'],
                                          self.project_inherited)
@@ -900,8 +899,12 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         url = self.base_url(suffix=uuid.uuid4().hex)
         body['remote_ids'] = [uuid.uuid4().hex,
                               repeated_remote_id]
-        self.put(url, body={'identity_provider': body},
-                 expected_status=http_client.CONFLICT)
+        resp = self.put(url, body={'identity_provider': body},
+                        expected_status=http_client.CONFLICT)
+
+        resp_data = jsonutils.loads(resp.body)
+        self.assertIn('Duplicate remote ID',
+                      resp_data.get('error', {}).get('message'))
 
     def test_create_idp_remote_empty(self):
         """Creates an IdP with empty remote_ids."""
@@ -1015,6 +1018,57 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         ids_intersection = entities_ids.intersection(ids)
         self.assertEqual(ids_intersection, ids)
 
+    def test_filter_list_idp_by_id(self):
+        def get_id(resp):
+            r = self._fetch_attribute_from_response(resp,
+                                                    'identity_provider')
+            return r.get('id')
+
+        idp1_id = get_id(self._create_default_idp())
+        idp2_id = get_id(self._create_default_idp())
+
+        # list the IdP, should get two IdP.
+        url = self.base_url()
+        resp = self.get(url)
+        entities = self._fetch_attribute_from_response(resp,
+                                                       'identity_providers')
+        entities_ids = [e['id'] for e in entities]
+        self.assertItemsEqual(entities_ids, [idp1_id, idp2_id])
+
+        # filter the IdP by ID.
+        url = self.base_url() + '?id=' + idp1_id
+        resp = self.get(url)
+        filtered_service_list = resp.json['identity_providers']
+        self.assertThat(filtered_service_list, matchers.HasLength(1))
+        self.assertEqual(idp1_id, filtered_service_list[0].get('id'))
+
+    def test_filter_list_idp_by_enabled(self):
+        def get_id(resp):
+            r = self._fetch_attribute_from_response(resp,
+                                                    'identity_provider')
+            return r.get('id')
+
+        idp1_id = get_id(self._create_default_idp())
+
+        body = self.default_body.copy()
+        body['enabled'] = False
+        idp2_id = get_id(self._create_default_idp(body=body))
+
+        # list the IdP, should get two IdP.
+        url = self.base_url()
+        resp = self.get(url)
+        entities = self._fetch_attribute_from_response(resp,
+                                                       'identity_providers')
+        entities_ids = [e['id'] for e in entities]
+        self.assertItemsEqual(entities_ids, [idp1_id, idp2_id])
+
+        # filter the IdP by 'enabled'.
+        url = self.base_url() + '?enabled=True'
+        resp = self.get(url)
+        filtered_service_list = resp.json['identity_providers']
+        self.assertThat(filtered_service_list, matchers.HasLength(1))
+        self.assertEqual(idp1_id, filtered_service_list[0].get('id'))
+
     def test_check_idp_uniqueness(self):
         """Add same IdP twice.
 
@@ -1025,8 +1079,12 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         body = self._http_idp_input()
         self.put(url, body={'identity_provider': body},
                  expected_status=http_client.CREATED)
-        self.put(url, body={'identity_provider': body},
-                 expected_status=http_client.CONFLICT)
+        resp = self.put(url, body={'identity_provider': body},
+                        expected_status=http_client.CONFLICT)
+
+        resp_data = jsonutils.loads(resp.body)
+        self.assertIn('Duplicate entry',
+                      resp_data.get('error', {}).get('message'))
 
     def test_get_idp(self):
         """Create and later fetch IdP."""
@@ -1141,7 +1199,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
     def test_update_idp_immutable_attributes(self):
         """Update IdP's immutable parameters.
 
-        Expect HTTP FORBIDDEN.
+        Expect HTTP BAD REQUEST.
 
         """
         default_resp = self._create_default_idp()
@@ -1156,7 +1214,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
 
         url = self.base_url(suffix=idp_id)
         self.patch(url, body={'identity_provider': body},
-                   expected_status=http_client.FORBIDDEN)
+                   expected_status=http_client.BAD_REQUEST)
 
     def test_update_nonexistent_idp(self):
         """Update nonexistent IdP
@@ -1819,7 +1877,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         self.config_fixture.config(group='os_inherit', enabled=True)
 
         # Create a subproject
-        subproject_inherited = self.new_project_ref(
+        subproject_inherited = unit.new_project_ref(
             domain_id=self.domainD['id'],
             parent_id=self.project_inherited['id'])
         self.resource_api.create_project(subproject_inherited['id'],

@@ -208,7 +208,7 @@ def auth_str_equal(provided, known):
     :params provided: the first string
     :params known: the second string
 
-    :return: True if the strings are equal.
+    :returns: True if the strings are equal.
 
     This function takes two strings and compares them.  It is intended to be
     used when doing a comparison for authentication purposes to help guard
@@ -273,7 +273,7 @@ def get_unix_user(user=None):
     :param object user: string, int or None specifying the user to
                         lookup.
 
-    :return: tuple of (uid, name)
+    :returns: tuple of (uid, name)
 
     """
     if isinstance(user, six.string_types):
@@ -329,7 +329,7 @@ def get_unix_group(group=None):
     :param object group: string, int or None specifying the group to
                          lookup.
 
-    :return: tuple of (gid, name)
+    :returns: tuple of (gid, name)
 
     """
     if isinstance(group, six.string_types):
@@ -523,3 +523,20 @@ def get_token_ref(context):
     except KeyError:
         LOG.warning(_LW("Couldn't find the auth context."))
         raise exception.Unauthorized()
+
+
+URL_RESERVED_CHARS = ":/?#[]@!$&'()*+,;="
+
+
+def is_not_url_safe(name):
+    """Check if a string contains any url reserved characters."""
+    return len(list_url_unsafe_chars(name)) > 0
+
+
+def list_url_unsafe_chars(name):
+    """Return a list of the reserved characters."""
+    reserved_chars = ''
+    for i in name:
+        if i in URL_RESERVED_CHARS:
+            reserved_chars += i
+    return reserved_chars

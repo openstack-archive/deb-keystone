@@ -144,6 +144,7 @@ class CheckForLoggingIssues(BaseASTChecker):
     DEBUG_CHECK_DESC = 'K005 Using translated string in debug logging'
     NONDEBUG_CHECK_DESC = 'K006 Not using translating helper for logging'
     EXCESS_HELPER_CHECK_DESC = 'K007 Using hints when _ is necessary'
+    USING_DEPRECATED_WARN = 'K009 Using the deprecated Logger.warn'
     LOG_MODULES = ('logging', 'oslo_log.log')
     I18N_MODULES = (
         'keystone.i18n._',
@@ -155,7 +156,6 @@ class CheckForLoggingIssues(BaseASTChecker):
     TRANS_HELPER_MAP = {
         'debug': None,
         'info': '_LI',
-        'warn': '_LW',
         'warning': '_LW',
         'error': '_LE',
         'exception': '_LE',
@@ -294,6 +294,11 @@ class CheckForLoggingIssues(BaseASTChecker):
             else:  # could be Subscript, Call or many more
                 return super(CheckForLoggingIssues, self).generic_visit(node)
 
+            # if dealing with a logger the method can't be "warn"
+            if obj_name in self.logger_names and method_name == 'warn':
+                msg = node.args[0]  # first arg to a logging method is the msg
+                self.add_error(msg, message=self.USING_DEPRECATED_WARN)
+
             # must be a logger instance and one of the support logging methods
             if (obj_name not in self.logger_names
                     or method_name not in self.TRANS_HELPER_MAP):
@@ -359,7 +364,7 @@ class CheckForLoggingIssues(BaseASTChecker):
             # because:
             # 1. We have code like this that we'll fix when dealing with the %:
             #       msg = _('....') % {}
-            #       LOG.warn(msg)
+            #       LOG.warning(msg)
             # 2. We also do LOG.exception(e) in several places. I'm not sure
             #    exactly what we should be doing about that.
             if msg.id not in self.assignments:
@@ -394,7 +399,7 @@ class CheckForLoggingIssues(BaseASTChecker):
                 else:
                     return False
             elif isinstance(peer, ast.Assign):
-                if name in (t.id for t in peer.targets):
+                if name in (t.id for t in peer.targets if hasattr(t, 'id')):
                     return False
 
 

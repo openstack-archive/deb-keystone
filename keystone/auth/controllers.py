@@ -29,6 +29,7 @@ from keystone.common import dependency
 from keystone.common import utils
 from keystone.common import wsgi
 from keystone import exception
+from keystone.federation import constants
 from keystone.i18n import _, _LI, _LW
 from keystone.resource import controllers as resource_controllers
 
@@ -44,8 +45,8 @@ AUTH_PLUGINS_LOADED = False
 
 def load_auth_method(method):
     plugin_name = CONF.auth.get(method) or 'default'
+    namespace = 'keystone.auth.%s' % method
     try:
-        namespace = 'keystone.auth.%s' % method
         driver_manager = stevedore.DriverManager(namespace, plugin_name,
                                                  invoke_on_load=True)
         return driver_manager.driver
@@ -54,13 +55,16 @@ def load_auth_method(method):
                   'attempt to load using import_object instead.',
                   method, plugin_name)
 
-    @versionutils.deprecated(as_of=versionutils.deprecated.LIBERTY,
-                             in_favor_of='entrypoints',
-                             what='direct import of driver')
-    def _load_using_import(plugin_name):
-        return importutils.import_object(plugin_name)
+    driver = importutils.import_object(plugin_name)
 
-    return _load_using_import(plugin_name)
+    msg = (_(
+        'Direct import of auth plugin %(name)r is deprecated as of Liberty in '
+        'favor of its entrypoint from %(namespace)r and may be removed in '
+        'N.') %
+        {'name': plugin_name, 'namespace': namespace})
+    versionutils.report_deprecated_feature(LOG, msg)
+
+    return driver
 
 
 def load_auth_methods():
@@ -173,6 +177,10 @@ class AuthInfo(object):
                                             target='domain')
         try:
             if domain_name:
+                if (CONF.resource.domain_name_url_safe == 'strict' and
+                        utils.is_not_url_safe(domain_name)):
+                    msg = _('Domain name cannot contain reserved characters.')
+                    raise exception.Unauthorized(message=msg)
                 domain_ref = self.resource_api.get_domain_by_name(
                     domain_name)
             else:
@@ -192,6 +200,10 @@ class AuthInfo(object):
                                             target='project')
         try:
             if project_name:
+                if (CONF.resource.project_name_url_safe == 'strict' and
+                        utils.is_not_url_safe(project_name)):
+                    msg = _('Project name cannot contain reserved characters.')
+                    raise exception.Unauthorized(message=msg)
                 if 'domain' not in project_info:
                     raise exception.ValidationError(attribute='domain',
                                                     target='project')
@@ -422,8 +434,7 @@ class Auth(controller.V3Controller):
             return
 
         # Skip scoping when unscoped federated token is being issued
-        # FIXME(stevemar): Use constants from keystone.federation.constants
-        if 'OS-FEDERATION:identity_provider' in auth_context:
+        if constants.IDENTITY_PROVIDER in auth_context:
             return
 
         # Do not scope if request is for explicitly unscoped token

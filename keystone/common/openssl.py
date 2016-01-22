@@ -65,41 +65,30 @@ class BaseCertificateConfigure(object):
         try:
             # OpenSSL 1.0 and newer support default_md = default,
             # older versions do not
-            openssl_ver = environment.subprocess.Popen(
-                ['openssl', 'version'],
-                stdout=environment.subprocess.PIPE).stdout.read()
+            openssl_ver = environment.subprocess.check_output(
+                ['openssl', 'version'])
             if "OpenSSL 0." in openssl_ver:
                 self.ssl_dictionary['default_md'] = 'sha1'
-        except OSError:
-            LOG.warn(_LW('Failed to invoke ``openssl version``, '
-                         'assuming is v1.0 or newer'))
+        except environment.subprocess.CalledProcessError:
+            LOG.warning(_LW('Failed to invoke ``openssl version``, '
+                            'assuming is v1.0 or newer'))
         self.ssl_dictionary.update(kwargs)
 
     def exec_command(self, command):
-        to_exec = []
-        for cmd_part in command:
-            to_exec.append(cmd_part % self.ssl_dictionary)
+        to_exec = [part % self.ssl_dictionary for part in command]
         LOG.info(_LI('Running command - %s'), ' '.join(to_exec))
-        # NOTE(Jeffrey4l): Redirect both stdout and stderr to pipe, so the
-        # output can be captured.
-        # NOTE(Jeffrey4l): check_output is not compatible with Python 2.6.
-        # So use Popen instead.
-        process = environment.subprocess.Popen(
-            to_exec,
-            stdout=environment.subprocess.PIPE,
-            stderr=environment.subprocess.STDOUT)
-        output = process.communicate()[0]
-        retcode = process.poll()
-        if retcode:
-            LOG.error(_LE('Command %(to_exec)s exited with %(retcode)s'
+        try:
+            # NOTE(shaleh): use check_output instead of the simpler
+            # `check_call()` in order to log any output from an error.
+            environment.subprocess.check_output(
+                to_exec,
+                stderr=environment.subprocess.STDOUT)
+        except environment.subprocess.CalledProcessError as e:
+            LOG.error(_LE('Command %(to_exec)s exited with %(retcode)s '
                           '- %(output)s'),
                       {'to_exec': to_exec,
-                       'retcode': retcode,
-                       'output': output})
-            e = environment.subprocess.CalledProcessError(retcode, to_exec[0])
-            # NOTE(Jeffrey4l): Python 2.6 compatibility:
-            # CalledProcessError did not have output keyword argument
-            e.output = output
+                       'retcode': e.returncode,
+                       'output': e.output})
             raise e
 
     def clean_up_existing_files(self):
@@ -135,9 +124,8 @@ class BaseCertificateConfigure(object):
                         user=self.use_keystone_user,
                         group=self.use_keystone_group, log=LOG)
         if not file_exists(self.ssl_config_file_name):
-            ssl_config_file = open(self.ssl_config_file_name, 'w')
-            ssl_config_file.write(self.sslconfig % self.ssl_dictionary)
-            ssl_config_file.close()
+            with open(self.ssl_config_file_name, 'w') as ssl_config_file:
+                ssl_config_file.write(self.sslconfig % self.ssl_dictionary)
         utils.set_permissions(self.ssl_config_file_name,
                               mode=PRIVATE_FILE_PERMS,
                               user=self.use_keystone_user,
@@ -145,9 +133,8 @@ class BaseCertificateConfigure(object):
 
         index_file_name = os.path.join(self.conf_dir, 'index.txt')
         if not file_exists(index_file_name):
-            index_file = open(index_file_name, 'w')
-            index_file.write('')
-            index_file.close()
+            with open(index_file_name, 'w') as index_file:
+                index_file.write('')
         utils.set_permissions(index_file_name,
                               mode=PRIVATE_FILE_PERMS,
                               user=self.use_keystone_user,
@@ -155,9 +142,8 @@ class BaseCertificateConfigure(object):
 
         serial_file_name = os.path.join(self.conf_dir, 'serial')
         if not file_exists(serial_file_name):
-            index_file = open(serial_file_name, 'w')
-            index_file.write('01')
-            index_file.close()
+            with open(serial_file_name, 'w') as index_file:
+                index_file.write('01')
         utils.set_permissions(serial_file_name,
                               mode=PRIVATE_FILE_PERMS,
                               user=self.use_keystone_user,

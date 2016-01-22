@@ -772,6 +772,13 @@ class SqlUpgradeTests(SqlMigrateBase):
                                  'enabled', 'domain_id', 'parent_id',
                                  'is_domain'])
 
+    def test_implied_roles_upgrade(self):
+        self.upgrade(87)
+        self.assertTableColumns('implied_role',
+                                ['prior_role_id', 'implied_role_id'])
+        self.assertTrue(self.does_fk_exist('implied_role', 'prior_role_id'))
+        self.assertTrue(self.does_fk_exist('implied_role', 'implied_role_id'))
+
     def test_add_config_registration(self):
         config_registration = 'config_register'
         self.upgrade(74)
@@ -807,6 +814,13 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableDoesNotExist('project_endpoint')
         self.assertTableDoesNotExist('endpoint_group')
         self.assertTableDoesNotExist('project_endpoint_group')
+
+    def test_add_trust_unique_constraint_upgrade(self):
+        self.upgrade(86)
+        inspector = reflection.Inspector.from_engine(self.engine)
+        constraints = inspector.get_unique_constraints('trust')
+        constraint_names = [constraint['name'] for constraint in constraints]
+        self.assertIn('duplicate_trust_constraint', constraint_names)
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):

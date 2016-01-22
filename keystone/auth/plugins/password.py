@@ -12,8 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_log import log
-
 from keystone import auth
 from keystone.auth import plugins as auth_plugins
 from keystone.common import dependency
@@ -23,8 +21,6 @@ from keystone.i18n import _
 
 METHOD_NAME = 'password'
 
-LOG = log.getLogger(__name__)
-
 
 @dependency.requires('identity_api')
 class Password(auth.AuthMethodHandler):
@@ -33,8 +29,6 @@ class Password(auth.AuthMethodHandler):
         """Try to authenticate against the identity backend."""
         user_info = auth_plugins.UserAuthInfo.create(auth_payload, METHOD_NAME)
 
-        # FIXME(gyee): identity.authenticate() can use some refactoring since
-        # all we care is password matches
         try:
             self.identity_api.authenticate(
                 context,

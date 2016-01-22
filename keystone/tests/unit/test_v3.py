@@ -20,6 +20,7 @@ from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 from six.moves import http_client
 from testtools import matchers
+import webtest
 
 from keystone import auth
 from keystone.common import authorization
@@ -196,10 +197,8 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.domain_id = self.domain['id']
         self.resource_api.create_domain(self.domain_id, self.domain)
 
-        self.project_id = uuid.uuid4().hex
-        self.project = self.new_project_ref(
-            domain_id=self.domain_id)
-        self.project['id'] = self.project_id
+        self.project = unit.new_project_ref(domain_id=self.domain_id)
+        self.project_id = self.project['id']
         self.resource_api.create_project(self.project_id, self.project)
 
         self.user = unit.create_user(self.identity_api,
@@ -207,7 +206,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.user_id = self.user['id']
 
         self.default_domain_project_id = uuid.uuid4().hex
-        self.default_domain_project = self.new_project_ref(
+        self.default_domain_project = unit.new_project_ref(
             domain_id=DEFAULT_DOMAIN_ID)
         self.default_domain_project['id'] = self.default_domain_project_id
         self.resource_api.create_project(self.default_domain_project_id,
@@ -233,7 +232,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
 
         self.region = unit.new_region_ref()
         self.region_id = self.region['id']
-        self.catalog_api.create_region(self.region.copy())
+        self.catalog_api.create_region(self.region)
 
         self.service = unit.new_service_ref()
         self.service_id = self.service['id']
@@ -248,35 +247,9 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         # The server adds 'enabled' and defaults to True.
         self.endpoint['enabled'] = True
 
-    def new_ref(self):
-        """Populates a ref with attributes common to some API entities."""
-        return unit.new_ref()
-
-    def new_project_ref(self, domain_id=None, parent_id=None, is_domain=False):
-        return unit.new_project_ref(domain_id=domain_id, parent_id=parent_id,
-                                    is_domain=is_domain)
-
-    def new_credential_ref(self, user_id, project_id=None, cred_type=None):
-        return unit.new_credential_ref(user_id, project_id=project_id,
-                                       cred_type=cred_type)
-
-    def new_policy_ref(self):
-        return unit.new_policy_ref()
-
-    def new_trust_ref(self, trustor_user_id, trustee_user_id, project_id=None,
-                      impersonation=None, expires=None, role_ids=None,
-                      role_names=None, remaining_uses=None,
-                      allow_redelegation=False):
-        return unit.new_trust_ref(
-            trustor_user_id, trustee_user_id, project_id=project_id,
-            impersonation=impersonation, expires=expires, role_ids=role_ids,
-            role_names=role_names, remaining_uses=remaining_uses,
-            allow_redelegation=allow_redelegation)
-
     def create_new_default_project_for_user(self, user_id, domain_id,
                                             enable_project=True):
-        ref = self.new_project_ref(domain_id=domain_id)
-        ref['enabled'] = enable_project
+        ref = unit.new_project_ref(domain_id=domain_id, enabled=enable_project)
         r = self.post('/projects', body={'project': ref})
         project = self.assertValidProjectResponse(r, ref)
         # set the user's preferred project
@@ -572,6 +545,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         require_catalog = kwargs.pop('require_catalog', True)
         endpoint_filter = kwargs.pop('endpoint_filter', False)
         ep_filter_assoc = kwargs.pop('ep_filter_assoc', 0)
+        is_admin_project = kwargs.pop('is_admin_project', False)
         token = self.assertValidTokenResponse(r, *args, **kwargs)
 
         if require_catalog:
@@ -598,6 +572,12 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         for role in token['roles']:
             self.assertIn('id', role)
             self.assertIn('name', role)
+
+        if is_admin_project:
+            # NOTE(samueldmq): We want to explicitly test for boolean
+            self.assertIs(True, token['is_admin_project'])
+        else:
+            self.assertNotIn('is_admin_project', token)
 
         return token
 
@@ -1138,21 +1118,27 @@ class VersionTestCase(RestfulTestCase):
 # NOTE(gyee): test AuthContextMiddleware here instead of test_middleware.py
 # because we need the token
 class AuthContextMiddlewareTestCase(RestfulTestCase):
-    def _mock_request_object(self, token_id):
 
-        class fake_req(object):
-            headers = {middleware.AUTH_TOKEN_HEADER: token_id}
-            environ = {}
+    def _middleware_request(self, token, extra_environ=None):
 
-        return fake_req()
+        def application(environ, start_response):
+            body = 'body'
+            headers = [('Content-Type', 'text/html; charset=utf8'),
+                       ('Content-Length', str(len(body)))]
+            start_response('200 OK', headers)
+            return [body]
+
+        app = webtest.TestApp(middleware.AuthContextMiddleware(application),
+                              extra_environ=extra_environ)
+        resp = app.get('/', headers={middleware.AUTH_TOKEN_HEADER: token})
+        self.assertEqual('body', resp.text)  # just to make sure it worked
+        return resp.request
 
     def test_auth_context_build_by_middleware(self):
         # test to make sure AuthContextMiddleware successful build the auth
         # context from the incoming auth token
         admin_token = self.get_scoped_token()
-        req = self._mock_request_object(admin_token)
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
+        req = self._middleware_request(admin_token)
         self.assertEqual(
             self.user['id'],
             req.environ.get(authorization.AUTH_CONTEXT_ENV)['user_id'])
@@ -1161,10 +1147,9 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         overridden_context = 'OVERRIDDEN_CONTEXT'
         # this token should not be used
         token = uuid.uuid4().hex
-        req = self._mock_request_object(token)
-        req.environ[authorization.AUTH_CONTEXT_ENV] = overridden_context
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
+
+        extra_environ = {authorization.AUTH_CONTEXT_ENV: overridden_context}
+        req = self._middleware_request(token, extra_environ=extra_environ)
         # make sure overridden context take precedence
         self.assertEqual(overridden_context,
                          req.environ.get(authorization.AUTH_CONTEXT_ENV))
@@ -1172,17 +1157,13 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
     def test_admin_token_auth_context(self):
         # test to make sure AuthContextMiddleware does not attempt to build
         # auth context if the incoming auth token is the special admin token
-        req = self._mock_request_object(CONF.admin_token)
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
-        self.assertDictEqual({}, req.environ.get(
-            authorization.AUTH_CONTEXT_ENV))
+        req = self._middleware_request(CONF.admin_token)
+        auth_context = req.environ.get(authorization.AUTH_CONTEXT_ENV)
+        self.assertDictEqual({}, auth_context)
 
     def test_unscoped_token_auth_context(self):
         unscoped_token = self.get_unscoped_token()
-        req = self._mock_request_object(unscoped_token)
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
+        req = self._middleware_request(unscoped_token)
         for key in ['project_id', 'domain_id', 'domain_name']:
             self.assertNotIn(
                 key,
@@ -1190,9 +1171,7 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
 
     def test_project_scoped_token_auth_context(self):
         project_scoped_token = self.get_scoped_token()
-        req = self._mock_request_object(project_scoped_token)
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
+        req = self._middleware_request(project_scoped_token)
         self.assertEqual(
             self.project['id'],
             req.environ.get(authorization.AUTH_CONTEXT_ENV)['project_id'])
@@ -1204,9 +1183,7 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
         self.put(path=path)
 
         domain_scoped_token = self.get_domain_scoped_token()
-        req = self._mock_request_object(domain_scoped_token)
-        application = None
-        middleware.AuthContextMiddleware(application).process_request(req)
+        req = self._middleware_request(domain_scoped_token)
         self.assertEqual(
             self.domain['id'],
             req.environ.get(authorization.AUTH_CONTEXT_ENV)['domain_id'])
@@ -1222,12 +1199,11 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
 
         # Use a scoped token so more fields can be set.
         token = self.get_scoped_token()
-        req = self._mock_request_object(token)
 
         # oslo_middleware RequestId middleware sets openstack.request_id.
         request_id = uuid.uuid4().hex
-        req.environ['openstack.request_id'] = request_id
-        middleware.AuthContextMiddleware(application=None).process_request(req)
+        environ = {'openstack.request_id': request_id}
+        self._middleware_request(token, extra_environ=environ)
 
         req_context = oslo_context.context.get_current()
         self.assertEqual(request_id, req_context.request_id)

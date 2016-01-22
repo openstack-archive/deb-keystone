@@ -15,7 +15,6 @@ from __future__ import absolute_import
 
 import ldap.filter
 from oslo_config import cfg
-from oslo_log import log
 from oslo_log import versionutils
 
 from keystone import assignment
@@ -28,10 +27,9 @@ from keystone.identity.backends import ldap as ldap_identity
 
 
 CONF = cfg.CONF
-LOG = log.getLogger(__name__)
 
 
-class Assignment(assignment.AssignmentDriverV8):
+class Assignment(assignment.AssignmentDriverV9):
     @versionutils.deprecated(
         versionutils.deprecated.KILO,
         remove_in=+2,
@@ -70,24 +68,6 @@ class Assignment(assignment.AssignmentDriverV8):
         # logic.
         return role_list
 
-    def list_project_ids_for_user(self, user_id, group_ids, hints,
-                                  inherited=False):
-        # TODO(henry-nash): The ldap driver does not support inherited
-        # assignments, so the inherited parameter is unused.
-        # See bug #1404273.
-        user_dn = self.user._id_to_dn(user_id)
-        associations = (self.role.list_project_roles_for_user
-                        (user_dn, self.project.tree_dn))
-
-        for group_id in group_ids:
-            group_dn = self.group._id_to_dn(group_id)
-            for group_role in self.role.list_project_roles_for_group(
-                    group_dn, self.project.tree_dn):
-                associations.append(group_role)
-
-        return list(set(
-            [self.project._dn_to_id(x.project_dn) for x in associations]))
-
     def list_role_ids_for_groups_on_domain(self, group_ids, domain_id):
         raise exception.NotImplemented()
 
@@ -95,17 +75,8 @@ class Assignment(assignment.AssignmentDriverV8):
                                     inherited=False):
         raise exception.NotImplemented()
 
-    def list_domain_ids_for_user(self, user_id, group_ids, hints):
-        raise exception.NotImplemented()
-
     def list_domain_ids_for_groups(self, group_ids, inherited=False):
         raise exception.NotImplemented()
-
-    def list_user_ids_for_project(self, tenant_id):
-        tenant_dn = self.project._id_to_dn(tenant_id)
-        rolegrants = self.role.get_role_assignments(tenant_dn)
-        return [self.user._dn_to_id(user_dn) for user_dn in
-                self.project.get_user_dns(tenant_id, rolegrants)]
 
     def _subrole_id_to_dn(self, role_id, tenant_id):
         if tenant_id is None:

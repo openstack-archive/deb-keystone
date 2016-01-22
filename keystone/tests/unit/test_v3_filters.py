@@ -13,8 +13,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import uuid
-
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 from six.moves import range
@@ -334,7 +332,7 @@ class IdentityTestListLimitCase(IdentityTestFilteredCase):
         self.service_list = []
         self.addCleanup(self.clean_up_service)
         for _ in range(10):
-            new_entity = {'id': uuid.uuid4().hex, 'type': uuid.uuid4().hex}
+            new_entity = unit.new_service_ref()
             service = self.catalog_api.create_service(new_entity['id'],
                                                       new_entity)
             self.service_list.append(service)
@@ -342,8 +340,7 @@ class IdentityTestListLimitCase(IdentityTestFilteredCase):
         self.policy_list = []
         self.addCleanup(self.clean_up_policy)
         for _ in range(10):
-            new_entity = {'id': uuid.uuid4().hex, 'type': uuid.uuid4().hex,
-                          'blob': uuid.uuid4().hex}
+            new_entity = unit.new_policy_ref()
             policy = self.policy_api.create_policy(new_entity['id'],
                                                    new_entity)
             self.policy_list.append(policy)

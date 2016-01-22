@@ -16,9 +16,8 @@ import uuid
 from oslo_config import cfg
 from six.moves import http_client
 from six.moves import range
+from testtools import matchers
 
-from keystone.common import controller
-from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
@@ -28,7 +27,7 @@ CONF = cfg.CONF
 
 class AssignmentTestCase(test_v3.RestfulTestCase,
                          test_v3.AssignmentTestMixin):
-    """Test domains, projects, roles and role assignments."""
+    """Test roles and role assignments."""
 
     def setUp(self):
         super(AssignmentTestCase, self).setUp()
@@ -36,1046 +35,6 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.group = unit.new_group_ref(domain_id=self.domain_id)
         self.group = self.identity_api.create_group(self.group)
         self.group_id = self.group['id']
-
-        self.credential_id = uuid.uuid4().hex
-        self.credential = self.new_credential_ref(
-            user_id=self.user['id'],
-            project_id=self.project_id)
-        self.credential['id'] = self.credential_id
-        self.credential_api.create_credential(
-            self.credential_id,
-            self.credential)
-
-    # Domain CRUD tests
-
-    def test_create_domain(self):
-        """Call ``POST /domains``."""
-        ref = unit.new_domain_ref()
-        r = self.post(
-            '/domains',
-            body={'domain': ref})
-        return self.assertValidDomainResponse(r, ref)
-
-    def test_create_domain_case_sensitivity(self):
-        """Call `POST /domains`` twice with upper() and lower() cased name."""
-        ref = unit.new_domain_ref()
-
-        # ensure the name is lowercase
-        ref['name'] = ref['name'].lower()
-        r = self.post(
-            '/domains',
-            body={'domain': ref})
-        self.assertValidDomainResponse(r, ref)
-
-        # ensure the name is uppercase
-        ref['name'] = ref['name'].upper()
-        r = self.post(
-            '/domains',
-            body={'domain': ref})
-        self.assertValidDomainResponse(r, ref)
-
-    def test_create_domain_bad_request(self):
-        """Call ``POST /domains``."""
-        self.post('/domains', body={'domain': {}},
-                  expected_status=http_client.BAD_REQUEST)
-
-    def test_list_domains(self):
-        """Call ``GET /domains``."""
-        resource_url = '/domains'
-        r = self.get(resource_url)
-        self.assertValidDomainListResponse(r, ref=self.domain,
-                                           resource_url=resource_url)
-
-    def test_get_domain(self):
-        """Call ``GET /domains/{domain_id}``."""
-        r = self.get('/domains/%(domain_id)s' % {
-            'domain_id': self.domain_id})
-        self.assertValidDomainResponse(r, self.domain)
-
-    def test_update_domain(self):
-        """Call ``PATCH /domains/{domain_id}``."""
-        ref = unit.new_domain_ref()
-        del ref['id']
-        r = self.patch('/domains/%(domain_id)s' % {
-            'domain_id': self.domain_id},
-            body={'domain': ref})
-        self.assertValidDomainResponse(r, ref)
-
-    def test_disable_domain(self):
-        """Call ``PATCH /domains/{domain_id}`` (set enabled=False)."""
-        # Create a 2nd set of entities in a 2nd domain
-        self.domain2 = unit.new_domain_ref()
-        self.resource_api.create_domain(self.domain2['id'], self.domain2)
-
-        self.project2 = self.new_project_ref(
-            domain_id=self.domain2['id'])
-        self.resource_api.create_project(self.project2['id'], self.project2)
-
-        user2 = unit.create_user(self.identity_api,
-                                 domain_id=self.domain2['id'],
-                                 project_id=self.project2['id'])
-
-        self.assignment_api.add_user_to_project(self.project2['id'],
-                                                user2['id'])
-
-        # First check a user in that domain can authenticate. The v2 user
-        # cannot authenticate because they exist outside the default domain.
-        body = {
-            'auth': {
-                'passwordCredentials': {
-                    'userId': user2['id'],
-                    'password': user2['password']
-                },
-                'tenantId': self.project2['id']
-            }
-        }
-        self.admin_request(
-            path='/v2.0/tokens', method='POST', body=body,
-            expected_status=http_client.UNAUTHORIZED)
-
-        auth_data = self.build_authentication_request(
-            user_id=user2['id'],
-            password=user2['password'],
-            project_id=self.project2['id'])
-        self.v3_create_token(auth_data)
-
-        # Now disable the domain
-        self.domain2['enabled'] = False
-        r = self.patch('/domains/%(domain_id)s' % {
-            'domain_id': self.domain2['id']},
-            body={'domain': {'enabled': False}})
-        self.assertValidDomainResponse(r, self.domain2)
-
-        # Make sure the user can no longer authenticate, via
-        # either API
-        body = {
-            'auth': {
-                'passwordCredentials': {
-                    'userId': user2['id'],
-                    'password': user2['password']
-                },
-                'tenantId': self.project2['id']
-            }
-        }
-        self.admin_request(
-            path='/v2.0/tokens', method='POST', body=body,
-            expected_status=http_client.UNAUTHORIZED)
-
-        # Try looking up in v3 by name and id
-        auth_data = self.build_authentication_request(
-            user_id=user2['id'],
-            password=user2['password'],
-            project_id=self.project2['id'])
-        self.v3_create_token(auth_data,
-                             expected_status=http_client.UNAUTHORIZED)
-
-        auth_data = self.build_authentication_request(
-            username=user2['name'],
-            user_domain_id=self.domain2['id'],
-            password=user2['password'],
-            project_id=self.project2['id'])
-        self.v3_create_token(auth_data,
-                             expected_status=http_client.UNAUTHORIZED)
-
-    def test_delete_enabled_domain_fails(self):
-        """Call ``DELETE /domains/{domain_id}`` (when domain enabled)."""
-        # Try deleting an enabled domain, which should fail
-        self.delete('/domains/%(domain_id)s' % {
-            'domain_id': self.domain['id']},
-            expected_status=exception.ForbiddenAction.code)
-
-    def test_delete_domain(self):
-        """Call ``DELETE /domains/{domain_id}``.
-
-        The sample data set up already has a user, group, project
-        and credential that is part of self.domain. Since the user
-        we will authenticate with is in this domain, we create a
-        another set of entities in a second domain.  Deleting this
-        second domain should delete all these new entities. In addition,
-        all the entities in the regular self.domain should be unaffected
-        by the delete.
-
-        Test Plan:
-
-        - Create domain2 and a 2nd set of entities
-        - Disable domain2
-        - Delete domain2
-        - Check entities in domain2 have been deleted
-        - Check entities in self.domain are unaffected
-
-        """
-        # Create a 2nd set of entities in a 2nd domain
-        self.domain2 = unit.new_domain_ref()
-        self.resource_api.create_domain(self.domain2['id'], self.domain2)
-
-        self.project2 = self.new_project_ref(
-            domain_id=self.domain2['id'])
-        self.resource_api.create_project(self.project2['id'], self.project2)
-
-        user2 = unit.new_user_ref(domain_id=self.domain2['id'],
-                                  project_id=self.project2['id'])
-        user2 = self.identity_api.create_user(user2)
-
-        group2 = unit.new_group_ref(domain_id=self.domain2['id'])
-        group2 = self.identity_api.create_group(group2)
-
-        self.credential2 = self.new_credential_ref(
-            user_id=user2['id'],
-            project_id=self.project2['id'])
-        self.credential_api.create_credential(
-            self.credential2['id'],
-            self.credential2)
-
-        # Now disable the new domain and delete it
-        self.domain2['enabled'] = False
-        r = self.patch('/domains/%(domain_id)s' % {
-            'domain_id': self.domain2['id']},
-            body={'domain': {'enabled': False}})
-        self.assertValidDomainResponse(r, self.domain2)
-        self.delete('/domains/%(domain_id)s' % {
-            'domain_id': self.domain2['id']})
-
-        # Check all the domain2 relevant entities are gone
-        self.assertRaises(exception.DomainNotFound,
-                          self.resource_api.get_domain,
-                          self.domain2['id'])
-        self.assertRaises(exception.ProjectNotFound,
-                          self.resource_api.get_project,
-                          self.project2['id'])
-        self.assertRaises(exception.GroupNotFound,
-                          self.identity_api.get_group,
-                          group2['id'])
-        self.assertRaises(exception.UserNotFound,
-                          self.identity_api.get_user,
-                          user2['id'])
-        self.assertRaises(exception.CredentialNotFound,
-                          self.credential_api.get_credential,
-                          self.credential2['id'])
-
-        # ...and that all self.domain entities are still here
-        r = self.resource_api.get_domain(self.domain['id'])
-        self.assertDictEqual(self.domain, r)
-        r = self.resource_api.get_project(self.project['id'])
-        self.assertDictEqual(self.project, r)
-        r = self.identity_api.get_group(self.group['id'])
-        self.assertDictEqual(self.group, r)
-        r = self.identity_api.get_user(self.user['id'])
-        self.user.pop('password')
-        self.assertDictEqual(self.user, r)
-        r = self.credential_api.get_credential(self.credential['id'])
-        self.assertDictEqual(self.credential, r)
-
-    def test_delete_default_domain_fails(self):
-        # Attempting to delete the default domain results in 403 Forbidden.
-
-        # Need to disable it first.
-        self.patch('/domains/%(domain_id)s' % {
-            'domain_id': CONF.identity.default_domain_id},
-            body={'domain': {'enabled': False}})
-
-        self.delete('/domains/%(domain_id)s' % {
-            'domain_id': CONF.identity.default_domain_id},
-            expected_status=exception.ForbiddenAction.code)
-
-    def test_delete_new_default_domain_fails(self):
-        # If change the default domain ID, deleting the new default domain
-        # results in a 403 Forbidden.
-
-        # Create a new domain that's not the default
-        new_domain = unit.new_domain_ref()
-        new_domain_id = new_domain['id']
-        self.resource_api.create_domain(new_domain_id, new_domain)
-
-        # Disable the new domain so can delete it later.
-        self.patch('/domains/%(domain_id)s' % {
-            'domain_id': new_domain_id},
-            body={'domain': {'enabled': False}})
-
-        # Change the default domain
-        self.config_fixture.config(group='identity',
-                                   default_domain_id=new_domain_id)
-
-        # Attempt to delete the new domain
-
-        self.delete('/domains/%(domain_id)s' % {'domain_id': new_domain_id},
-                    expected_status=exception.ForbiddenAction.code)
-
-    def test_delete_old_default_domain(self):
-        # If change the default domain ID, deleting the old default domain
-        # works.
-
-        # Create a new domain that's not the default
-        new_domain = unit.new_domain_ref()
-        new_domain_id = new_domain['id']
-        self.resource_api.create_domain(new_domain_id, new_domain)
-
-        old_default_domain_id = CONF.identity.default_domain_id
-
-        # Disable the default domain so we can delete it later.
-        self.patch('/domains/%(domain_id)s' % {
-            'domain_id': old_default_domain_id},
-            body={'domain': {'enabled': False}})
-
-        # Change the default domain
-        self.config_fixture.config(group='identity',
-                                   default_domain_id=new_domain_id)
-
-        # Delete the old default domain
-
-        self.delete(
-            '/domains/%(domain_id)s' % {'domain_id': old_default_domain_id})
-
-    def test_token_revoked_once_domain_disabled(self):
-        """Test token from a disabled domain has been invalidated.
-
-        Test that a token that was valid for an enabled domain
-        becomes invalid once that domain is disabled.
-
-        """
-        self.domain = unit.new_domain_ref()
-        self.resource_api.create_domain(self.domain['id'], self.domain)
-
-        user2 = unit.create_user(self.identity_api,
-                                 domain_id=self.domain['id'])
-
-        # build a request body
-        auth_body = self.build_authentication_request(
-            user_id=user2['id'],
-            password=user2['password'])
-
-        # sends a request for the user's token
-        token_resp = self.post('/auth/tokens', body=auth_body)
-
-        subject_token = token_resp.headers.get('x-subject-token')
-
-        # validates the returned token and it should be valid.
-        self.head('/auth/tokens',
-                  headers={'x-subject-token': subject_token},
-                  expected_status=http_client.OK)
-
-        # now disable the domain
-        self.domain['enabled'] = False
-        url = "/domains/%(domain_id)s" % {'domain_id': self.domain['id']}
-        self.patch(url,
-                   body={'domain': {'enabled': False}})
-
-        # validates the same token again and it should be 'not found'
-        # as the domain has already been disabled.
-        self.head('/auth/tokens',
-                  headers={'x-subject-token': subject_token},
-                  expected_status=http_client.NOT_FOUND)
-
-    def test_delete_domain_hierarchy(self):
-        """Call ``DELETE /domains/{domain_id}``."""
-        domain = unit.new_domain_ref()
-        self.resource_api.create_domain(domain['id'], domain)
-
-        root_project = self.new_project_ref(
-            domain_id=domain['id'])
-        self.resource_api.create_project(root_project['id'], root_project)
-
-        leaf_project = self.new_project_ref(
-            domain_id=domain['id'],
-            parent_id=root_project['id'])
-        self.resource_api.create_project(leaf_project['id'], leaf_project)
-
-        # Need to disable it first.
-        self.patch('/domains/%(domain_id)s' % {
-            'domain_id': domain['id']},
-            body={'domain': {'enabled': False}})
-
-        self.delete(
-            '/domains/%(domain_id)s' % {
-                'domain_id': domain['id']})
-
-        self.assertRaises(exception.DomainNotFound,
-                          self.resource_api.get_domain,
-                          domain['id'])
-
-        self.assertRaises(exception.ProjectNotFound,
-                          self.resource_api.get_project,
-                          root_project['id'])
-
-        self.assertRaises(exception.ProjectNotFound,
-                          self.resource_api.get_project,
-                          leaf_project['id'])
-
-    def test_forbid_operations_on_federated_domain(self):
-        """Make sure one cannot operate on federated domain.
-
-        This includes operations like create, update, delete
-        on domain identified by id and name where difference variations of
-        id 'Federated' are used.
-
-        """
-        def create_domains():
-            for variation in ('Federated', 'FEDERATED',
-                              'federated', 'fEderated'):
-                domain = unit.new_domain_ref()
-                domain['id'] = variation
-                yield domain
-
-        for domain in create_domains():
-            self.assertRaises(
-                AssertionError, self.resource_api.create_domain,
-                domain['id'], domain)
-            self.assertRaises(
-                AssertionError, self.resource_api.update_domain,
-                domain['id'], domain)
-            self.assertRaises(
-                exception.DomainNotFound, self.resource_api.delete_domain,
-                domain['id'])
-
-            # swap 'name' with 'id' and try again, expecting the request to
-            # gracefully fail
-            domain['id'], domain['name'] = domain['name'], domain['id']
-            self.assertRaises(
-                AssertionError, self.resource_api.create_domain,
-                domain['id'], domain)
-            self.assertRaises(
-                AssertionError, self.resource_api.update_domain,
-                domain['id'], domain)
-            self.assertRaises(
-                exception.DomainNotFound, self.resource_api.delete_domain,
-                domain['id'])
-
-    def test_forbid_operations_on_defined_federated_domain(self):
-        """Make sure one cannot operate on a user-defined federated domain.
-
-        This includes operations like create, update, delete.
-
-        """
-        non_default_name = 'beta_federated_domain'
-        self.config_fixture.config(group='federation',
-                                   federated_domain_name=non_default_name)
-        domain = unit.new_domain_ref(name=non_default_name)
-        self.assertRaises(AssertionError,
-                          self.resource_api.create_domain,
-                          domain['id'], domain)
-        self.assertRaises(exception.DomainNotFound,
-                          self.resource_api.delete_domain,
-                          domain['id'])
-        self.assertRaises(AssertionError,
-                          self.resource_api.update_domain,
-                          domain['id'], domain)
-
-    # Project CRUD tests
-
-    def test_list_projects(self):
-        """Call ``GET /projects``."""
-        resource_url = '/projects'
-        r = self.get(resource_url)
-        self.assertValidProjectListResponse(r, ref=self.project,
-                                            resource_url=resource_url)
-
-    def test_create_project(self):
-        """Call ``POST /projects``."""
-        ref = self.new_project_ref(domain_id=self.domain_id)
-        r = self.post(
-            '/projects',
-            body={'project': ref})
-        self.assertValidProjectResponse(r, ref)
-
-    def test_create_project_bad_request(self):
-        """Call ``POST /projects``."""
-        self.post('/projects', body={'project': {}},
-                  expected_status=http_client.BAD_REQUEST)
-
-    def test_create_project_invalid_domain_id(self):
-        """Call ``POST /projects``."""
-        ref = self.new_project_ref(domain_id=uuid.uuid4().hex)
-        self.post('/projects', body={'project': ref},
-                  expected_status=http_client.BAD_REQUEST)
-
-    def test_create_project_is_domain_not_allowed(self):
-        """Call ``POST /projects``.
-
-        Setting is_domain=True is not supported yet and should raise
-        NotImplemented.
-
-        """
-        ref = self.new_project_ref(domain_id=self.domain_id, is_domain=True)
-        self.post('/projects',
-                  body={'project': ref},
-                  expected_status=http_client.NOT_IMPLEMENTED)
-
-    def test_create_project_with_parent_id_none_and_domain_id_none(self):
-        """Call ``POST /projects``."""
-        # Grant a domain role for the user
-        collection_url = (
-            '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
-                'domain_id': self.domain_id,
-                'user_id': self.user['id']})
-        member_url = '%(collection_url)s/%(role_id)s' % {
-            'collection_url': collection_url,
-            'role_id': self.role_id}
-        self.put(member_url)
-
-        # Create an authentication request for a domain scoped token
-        auth = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'],
-            domain_id=self.domain_id)
-
-        # Without parent_id and domain_id passed as None, the domain_id should
-        # be normalized to the domain on the token, when using a domain
-        # scoped token.
-        ref = self.new_project_ref()
-        r = self.post(
-            '/projects',
-            auth=auth,
-            body={'project': ref})
-        ref['domain_id'] = self.domain['id']
-        self.assertValidProjectResponse(r, ref)
-
-    def test_create_project_without_parent_id_and_without_domain_id(self):
-        """Call ``POST /projects``."""
-        # Grant a domain role for the user
-        collection_url = (
-            '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
-                'domain_id': self.domain_id,
-                'user_id': self.user['id']})
-        member_url = '%(collection_url)s/%(role_id)s' % {
-            'collection_url': collection_url,
-            'role_id': self.role_id}
-        self.put(member_url)
-
-        # Create an authentication request for a domain scoped token
-        auth = self.build_authentication_request(
-            user_id=self.user['id'],
-            password=self.user['password'],
-            domain_id=self.domain_id)
-
-        # Without domain_id and parent_id, the domain_id should be
-        # normalized to the domain on the token, when using a domain
-        # scoped token.
-        ref = self.new_project_ref()
-        ref.pop('domain_id')
-        ref.pop('parent_id')
-        r = self.post(
-            '/projects',
-            auth=auth,
-            body={'project': ref})
-        ref['domain_id'] = self.domain['id']
-        self.assertValidProjectResponse(r, ref)
-
-    def test_create_project_with_parent_id_and_no_domain_id(self):
-        """Call ``POST /projects``."""
-        # With only the parent_id, the domain_id should be
-        # normalized to the parent's domain_id
-        ref_child = self.new_project_ref(parent_id=self.project['id'])
-
-        r = self.post(
-            '/projects',
-            body={'project': ref_child})
-        self.assertEqual(r.result['project']['domain_id'],
-                         self.project['domain_id'])
-        ref_child['domain_id'] = self.domain['id']
-        self.assertValidProjectResponse(r, ref_child)
-
-    def _create_projects_hierarchy(self, hierarchy_size=1):
-        """Creates a single-branched project hierarchy with the specified size.
-
-        :param hierarchy_size: the desired hierarchy size, default is 1 -
-                               a project with one child.
-
-        :returns projects: a list of the projects in the created hierarchy.
-
-        """
-        new_ref = self.new_project_ref(domain_id=self.domain_id)
-        resp = self.post('/projects', body={'project': new_ref})
-
-        projects = [resp.result]
-
-        for i in range(hierarchy_size):
-            new_ref = self.new_project_ref(
-                domain_id=self.domain_id,
-                parent_id=projects[i]['project']['id'])
-            resp = self.post('/projects',
-                             body={'project': new_ref})
-            self.assertValidProjectResponse(resp, new_ref)
-
-            projects.append(resp.result)
-
-        return projects
-
-    def test_list_projects_filtering_by_parent_id(self):
-        """Call ``GET /projects?parent_id={project_id}``."""
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
-
-        # Add another child to projects[1] - it will be projects[3]
-        new_ref = self.new_project_ref(
-            domain_id=self.domain_id,
-            parent_id=projects[1]['project']['id'])
-        resp = self.post('/projects',
-                         body={'project': new_ref})
-        self.assertValidProjectResponse(resp, new_ref)
-
-        projects.append(resp.result)
-
-        # Query for projects[0] immediate children - it will
-        # be only projects[1]
-        r = self.get(
-            '/projects?parent_id=%(project_id)s' % {
-                'project_id': projects[0]['project']['id']})
-        self.assertValidProjectListResponse(r)
-
-        projects_result = r.result['projects']
-        expected_list = [projects[1]['project']]
-
-        # projects[0] has projects[1] as child
-        self.assertEqual(expected_list, projects_result)
-
-        # Query for projects[1] immediate children - it will
-        # be projects[2] and projects[3]
-        r = self.get(
-            '/projects?parent_id=%(project_id)s' % {
-                'project_id': projects[1]['project']['id']})
-        self.assertValidProjectListResponse(r)
-
-        projects_result = r.result['projects']
-        expected_list = [projects[2]['project'], projects[3]['project']]
-
-        # projects[1] has projects[2] and projects[3] as children
-        self.assertEqual(expected_list, projects_result)
-
-        # Query for projects[2] immediate children - it will be an empty list
-        r = self.get(
-            '/projects?parent_id=%(project_id)s' % {
-                'project_id': projects[2]['project']['id']})
-        self.assertValidProjectListResponse(r)
-
-        projects_result = r.result['projects']
-        expected_list = []
-
-        # projects[2] has no child, projects_result must be an empty list
-        self.assertEqual(expected_list, projects_result)
-
-    def test_create_hierarchical_project(self):
-        """Call ``POST /projects``."""
-        self._create_projects_hierarchy()
-
-    def test_get_project(self):
-        """Call ``GET /projects/{project_id}``."""
-        r = self.get(
-            '/projects/%(project_id)s' % {
-                'project_id': self.project_id})
-        self.assertValidProjectResponse(r, self.project)
-
-    def test_get_project_with_parents_as_list_with_invalid_id(self):
-        """Call ``GET /projects/{project_id}?parents_as_list``."""
-        self.get('/projects/%(project_id)s?parents_as_list' % {
-                 'project_id': None}, expected_status=http_client.NOT_FOUND)
-
-        self.get('/projects/%(project_id)s?parents_as_list' % {
-                 'project_id': uuid.uuid4().hex},
-                 expected_status=http_client.NOT_FOUND)
-
-    def test_get_project_with_subtree_as_list_with_invalid_id(self):
-        """Call ``GET /projects/{project_id}?subtree_as_list``."""
-        self.get('/projects/%(project_id)s?subtree_as_list' % {
-                 'project_id': None}, expected_status=http_client.NOT_FOUND)
-
-        self.get('/projects/%(project_id)s?subtree_as_list' % {
-                 'project_id': uuid.uuid4().hex},
-                 expected_status=http_client.NOT_FOUND)
-
-    def test_get_project_with_parents_as_ids(self):
-        """Call ``GET /projects/{project_id}?parents_as_ids``."""
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
-
-        # Query for projects[2] parents_as_ids
-        r = self.get(
-            '/projects/%(project_id)s?parents_as_ids' % {
-                'project_id': projects[2]['project']['id']})
-
-        self.assertValidProjectResponse(r, projects[2]['project'])
-        parents_as_ids = r.result['project']['parents']
-
-        # Assert parents_as_ids is a structured dictionary correctly
-        # representing the hierarchy. The request was made using projects[2]
-        # id, hence its parents should be projects[1] and projects[0]. It
-        # should have the following structure:
-        # {
-        #   projects[1]: {
-        #       projects[0]: None
-        #   }
-        # }
-        expected_dict = {
-            projects[1]['project']['id']: {
-                projects[0]['project']['id']: None
-            }
-        }
-        self.assertDictEqual(expected_dict, parents_as_ids)
-
-        # Query for projects[0] parents_as_ids
-        r = self.get(
-            '/projects/%(project_id)s?parents_as_ids' % {
-                'project_id': projects[0]['project']['id']})
-
-        self.assertValidProjectResponse(r, projects[0]['project'])
-        parents_as_ids = r.result['project']['parents']
-
-        # projects[0] has no parents, parents_as_ids must be None
-        self.assertIsNone(parents_as_ids)
-
-    def test_get_project_with_parents_as_list_with_full_access(self):
-        """``GET /projects/{project_id}?parents_as_list`` with full access.
-
-        Test plan:
-
-        - Create 'parent', 'project' and 'subproject' projects;
-        - Assign a user a role on each one of those projects;
-        - Check that calling parents_as_list on 'subproject' returns both
-          'project' and 'parent'.
-
-        """
-        # Create the project hierarchy
-        parent, project, subproject = self._create_projects_hierarchy(2)
-
-        # Assign a role for the user on all the created projects
-        for proj in (parent, project, subproject):
-            self.put(self.build_role_assignment_link(
-                role_id=self.role_id, user_id=self.user_id,
-                project_id=proj['project']['id']))
-
-        # Make the API call
-        r = self.get('/projects/%(project_id)s?parents_as_list' %
-                     {'project_id': subproject['project']['id']})
-        self.assertValidProjectResponse(r, subproject['project'])
-
-        # Assert only 'project' and 'parent' are in the parents list
-        self.assertIn(project, r.result['project']['parents'])
-        self.assertIn(parent, r.result['project']['parents'])
-        self.assertEqual(2, len(r.result['project']['parents']))
-
-    def test_get_project_with_parents_as_list_with_partial_access(self):
-        """``GET /projects/{project_id}?parents_as_list`` with partial access.
-
-        Test plan:
-
-        - Create 'parent', 'project' and 'subproject' projects;
-        - Assign a user a role on 'parent' and 'subproject';
-        - Check that calling parents_as_list on 'subproject' only returns
-          'parent'.
-
-        """
-        # Create the project hierarchy
-        parent, project, subproject = self._create_projects_hierarchy(2)
-
-        # Assign a role for the user on parent and subproject
-        for proj in (parent, subproject):
-            self.put(self.build_role_assignment_link(
-                role_id=self.role_id, user_id=self.user_id,
-                project_id=proj['project']['id']))
-
-        # Make the API call
-        r = self.get('/projects/%(project_id)s?parents_as_list' %
-                     {'project_id': subproject['project']['id']})
-        self.assertValidProjectResponse(r, subproject['project'])
-
-        # Assert only 'parent' is in the parents list
-        self.assertIn(parent, r.result['project']['parents'])
-        self.assertEqual(1, len(r.result['project']['parents']))
-
-    def test_get_project_with_parents_as_list_and_parents_as_ids(self):
-        """Attempt to list a project's parents as both a list and as IDs.
-
-        This uses ``GET /projects/{project_id}?parents_as_list&parents_as_ids``
-        which should fail with a Bad Request due to the conflicting query
-        strings.
-
-        """
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
-
-        self.get(
-            '/projects/%(project_id)s?parents_as_list&parents_as_ids' % {
-                'project_id': projects[1]['project']['id']},
-            expected_status=http_client.BAD_REQUEST)
-
-    def test_get_project_with_subtree_as_ids(self):
-        """Call ``GET /projects/{project_id}?subtree_as_ids``.
-
-        This test creates a more complex hierarchy to test if the structured
-        dictionary returned by using the ``subtree_as_ids`` query param
-        correctly represents the hierarchy.
-
-        The hierarchy contains 5 projects with the following structure::
-
-                                  +--A--+
-                                  |     |
-                               +--B--+  C
-                               |     |
-                               D     E
-
-
-        """
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
-
-        # Add another child to projects[0] - it will be projects[3]
-        new_ref = self.new_project_ref(
-            domain_id=self.domain_id,
-            parent_id=projects[0]['project']['id'])
-        resp = self.post('/projects',
-                         body={'project': new_ref})
-        self.assertValidProjectResponse(resp, new_ref)
-        projects.append(resp.result)
-
-        # Add another child to projects[1] - it will be projects[4]
-        new_ref = self.new_project_ref(
-            domain_id=self.domain_id,
-            parent_id=projects[1]['project']['id'])
-        resp = self.post('/projects',
-                         body={'project': new_ref})
-        self.assertValidProjectResponse(resp, new_ref)
-        projects.append(resp.result)
-
-        # Query for projects[0] subtree_as_ids
-        r = self.get(
-            '/projects/%(project_id)s?subtree_as_ids' % {
-                'project_id': projects[0]['project']['id']})
-        self.assertValidProjectResponse(r, projects[0]['project'])
-        subtree_as_ids = r.result['project']['subtree']
-
-        # The subtree hierarchy from projects[0] should have the following
-        # structure:
-        # {
-        #   projects[1]: {
-        #       projects[2]: None,
-        #       projects[4]: None
-        #   },
-        #   projects[3]: None
-        # }
-        expected_dict = {
-            projects[1]['project']['id']: {
-                projects[2]['project']['id']: None,
-                projects[4]['project']['id']: None
-            },
-            projects[3]['project']['id']: None
-        }
-        self.assertDictEqual(expected_dict, subtree_as_ids)
-
-        # Now query for projects[1] subtree_as_ids
-        r = self.get(
-            '/projects/%(project_id)s?subtree_as_ids' % {
-                'project_id': projects[1]['project']['id']})
-        self.assertValidProjectResponse(r, projects[1]['project'])
-        subtree_as_ids = r.result['project']['subtree']
-
-        # The subtree hierarchy from projects[1] should have the following
-        # structure:
-        # {
-        #   projects[2]: None,
-        #   projects[4]: None
-        # }
-        expected_dict = {
-            projects[2]['project']['id']: None,
-            projects[4]['project']['id']: None
-        }
-        self.assertDictEqual(expected_dict, subtree_as_ids)
-
-        # Now query for projects[3] subtree_as_ids
-        r = self.get(
-            '/projects/%(project_id)s?subtree_as_ids' % {
-                'project_id': projects[3]['project']['id']})
-        self.assertValidProjectResponse(r, projects[3]['project'])
-        subtree_as_ids = r.result['project']['subtree']
-
-        # projects[3] has no subtree, subtree_as_ids must be None
-        self.assertIsNone(subtree_as_ids)
-
-    def test_get_project_with_subtree_as_list_with_full_access(self):
-        """``GET /projects/{project_id}?subtree_as_list`` with full access.
-
-        Test plan:
-
-        - Create 'parent', 'project' and 'subproject' projects;
-        - Assign a user a role on each one of those projects;
-        - Check that calling subtree_as_list on 'parent' returns both 'parent'
-          and 'subproject'.
-
-        """
-        # Create the project hierarchy
-        parent, project, subproject = self._create_projects_hierarchy(2)
-
-        # Assign a role for the user on all the created projects
-        for proj in (parent, project, subproject):
-            self.put(self.build_role_assignment_link(
-                role_id=self.role_id, user_id=self.user_id,
-                project_id=proj['project']['id']))
-
-        # Make the API call
-        r = self.get('/projects/%(project_id)s?subtree_as_list' %
-                     {'project_id': parent['project']['id']})
-        self.assertValidProjectResponse(r, parent['project'])
-
-        # Assert only 'project' and 'subproject' are in the subtree
-        self.assertIn(project, r.result['project']['subtree'])
-        self.assertIn(subproject, r.result['project']['subtree'])
-        self.assertEqual(2, len(r.result['project']['subtree']))
-
-    def test_get_project_with_subtree_as_list_with_partial_access(self):
-        """``GET /projects/{project_id}?subtree_as_list`` with partial access.
-
-        Test plan:
-
-        - Create 'parent', 'project' and 'subproject' projects;
-        - Assign a user a role on 'parent' and 'subproject';
-        - Check that calling subtree_as_list on 'parent' returns 'subproject'.
-
-        """
-        # Create the project hierarchy
-        parent, project, subproject = self._create_projects_hierarchy(2)
-
-        # Assign a role for the user on parent and subproject
-        for proj in (parent, subproject):
-            self.put(self.build_role_assignment_link(
-                role_id=self.role_id, user_id=self.user_id,
-                project_id=proj['project']['id']))
-
-        # Make the API call
-        r = self.get('/projects/%(project_id)s?subtree_as_list' %
-                     {'project_id': parent['project']['id']})
-        self.assertValidProjectResponse(r, parent['project'])
-
-        # Assert only 'subproject' is in the subtree
-        self.assertIn(subproject, r.result['project']['subtree'])
-        self.assertEqual(1, len(r.result['project']['subtree']))
-
-    def test_get_project_with_subtree_as_list_and_subtree_as_ids(self):
-        """Attempt to get a project subtree as both a list and as IDs.
-
-        This uses ``GET /projects/{project_id}?subtree_as_list&subtree_as_ids``
-        which should fail with a bad request due to the conflicting query
-        strings.
-
-        """
-        projects = self._create_projects_hierarchy(hierarchy_size=2)
-
-        self.get(
-            '/projects/%(project_id)s?subtree_as_list&subtree_as_ids' % {
-                'project_id': projects[1]['project']['id']},
-            expected_status=http_client.BAD_REQUEST)
-
-    def test_update_project(self):
-        """Call ``PATCH /projects/{project_id}``."""
-        ref = self.new_project_ref(domain_id=self.domain_id)
-        del ref['id']
-        r = self.patch(
-            '/projects/%(project_id)s' % {
-                'project_id': self.project_id},
-            body={'project': ref})
-        self.assertValidProjectResponse(r, ref)
-
-    def test_update_project_domain_id(self):
-        """Call ``PATCH /projects/{project_id}`` with domain_id."""
-        project = self.new_project_ref(domain_id=self.domain['id'])
-        self.resource_api.create_project(project['id'], project)
-        project['domain_id'] = CONF.identity.default_domain_id
-        r = self.patch('/projects/%(project_id)s' % {
-            'project_id': project['id']},
-            body={'project': project},
-            expected_status=exception.ValidationError.code)
-        self.config_fixture.config(domain_id_immutable=False)
-        project['domain_id'] = self.domain['id']
-        r = self.patch('/projects/%(project_id)s' % {
-            'project_id': project['id']},
-            body={'project': project})
-        self.assertValidProjectResponse(r, project)
-
-    def test_update_project_parent_id(self):
-        """Call ``PATCH /projects/{project_id}``."""
-        projects = self._create_projects_hierarchy()
-        leaf_project = projects[1]['project']
-        leaf_project['parent_id'] = None
-        self.patch(
-            '/projects/%(project_id)s' % {
-                'project_id': leaf_project['id']},
-            body={'project': leaf_project},
-            expected_status=http_client.FORBIDDEN)
-
-    def test_update_project_is_domain_not_allowed(self):
-        """Call ``PATCH /projects/{project_id}`` with is_domain.
-
-        The is_domain flag is immutable.
-        """
-        project = self.new_project_ref(domain_id=self.domain['id'])
-        resp = self.post('/projects',
-                         body={'project': project})
-        self.assertFalse(resp.result['project']['is_domain'])
-
-        project['is_domain'] = True
-        self.patch('/projects/%(project_id)s' % {
-            'project_id': resp.result['project']['id']},
-            body={'project': project},
-            expected_status=http_client.BAD_REQUEST)
-
-    def test_disable_leaf_project(self):
-        """Call ``PATCH /projects/{project_id}``."""
-        projects = self._create_projects_hierarchy()
-        leaf_project = projects[1]['project']
-        leaf_project['enabled'] = False
-        r = self.patch(
-            '/projects/%(project_id)s' % {
-                'project_id': leaf_project['id']},
-            body={'project': leaf_project})
-        self.assertEqual(
-            leaf_project['enabled'], r.result['project']['enabled'])
-
-    def test_disable_not_leaf_project(self):
-        """Call ``PATCH /projects/{project_id}``."""
-        projects = self._create_projects_hierarchy()
-        root_project = projects[0]['project']
-        root_project['enabled'] = False
-        self.patch(
-            '/projects/%(project_id)s' % {
-                'project_id': root_project['id']},
-            body={'project': root_project},
-            expected_status=http_client.FORBIDDEN)
-
-    def test_delete_project(self):
-        """Call ``DELETE /projects/{project_id}``
-
-        As well as making sure the delete succeeds, we ensure
-        that any credentials that reference this projects are
-        also deleted, while other credentials are unaffected.
-
-        """
-        # First check the credential for this project is present
-        r = self.credential_api.get_credential(self.credential['id'])
-        self.assertDictEqual(self.credential, r)
-        # Create a second credential with a different project
-        self.project2 = self.new_project_ref(
-            domain_id=self.domain['id'])
-        self.resource_api.create_project(self.project2['id'], self.project2)
-        self.credential2 = self.new_credential_ref(
-            user_id=self.user['id'],
-            project_id=self.project2['id'])
-        self.credential_api.create_credential(
-            self.credential2['id'],
-            self.credential2)
-
-        # Now delete the project
-        self.delete(
-            '/projects/%(project_id)s' % {
-                'project_id': self.project_id})
-
-        # Deleting the project should have deleted any credentials
-        # that reference this project
-        self.assertRaises(exception.CredentialNotFound,
-                          self.credential_api.get_credential,
-                          credential_id=self.credential['id'])
-        # But the credential for project2 is unaffected
-        r = self.credential_api.get_credential(self.credential2['id'])
-        self.assertDictEqual(self.credential2, r)
-
-    def test_delete_not_leaf_project(self):
-        """Call ``DELETE /projects/{project_id}``."""
-        projects = self._create_projects_hierarchy()
-        self.delete(
-            '/projects/%(project_id)s' % {
-                'project_id': projects[0]['project']['id']},
-            expected_status=http_client.FORBIDDEN)
 
     # Role CRUD tests
 
@@ -1134,26 +93,33 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
     # Role Grants tests
 
     def test_crud_user_project_role_grants(self):
+        role = unit.new_role_ref()
+        self.role_api.create_role(role['id'], role)
+
         collection_url = (
             '/projects/%(project_id)s/users/%(user_id)s/roles' % {
                 'project_id': self.project['id'],
                 'user_id': self.user['id']})
         member_url = '%(collection_url)s/%(role_id)s' % {
             'collection_url': collection_url,
-            'role_id': self.role_id}
+            'role_id': role['id']}
+
+        # There is a role assignment for self.user on self.project
+        r = self.get(collection_url)
+        self.assertValidRoleListResponse(r, ref=self.role,
+                                         expected_length=1)
 
         self.put(member_url)
         self.head(member_url)
         r = self.get(collection_url)
-        self.assertValidRoleListResponse(r, ref=self.role,
-                                         resource_url=collection_url)
+        self.assertValidRoleListResponse(r, ref=role,
+                                         resource_url=collection_url,
+                                         expected_length=2)
 
-        # FIXME(gyee): this test is no longer valid as user
-        # have no role in the project. Can't get a scoped token
-        # self.delete(member_url)
-        # r = self.get(collection_url)
-        # self.assertValidRoleListResponse(r, expected_length=0)
-        # self.assertIn(collection_url, r.result['links']['self'])
+        self.delete(member_url)
+        r = self.get(collection_url)
+        self.assertValidRoleListResponse(r, ref=self.role, expected_length=1)
+        self.assertIn(collection_url, r.result['links']['self'])
 
     def test_crud_user_project_role_grants_no_user(self):
         """Grant role on a project to a user that doesn't exist.
@@ -1646,9 +612,8 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         group1 = self.identity_api.create_group(group1)
         self.identity_api.add_user_to_group(user1['id'], group1['id'])
         self.identity_api.add_user_to_group(user2['id'], group1['id'])
-        self.project1 = self.new_project_ref(
-            domain_id=self.domain['id'])
-        self.resource_api.create_project(self.project1['id'], self.project1)
+        project1 = unit.new_project_ref(domain_id=self.domain['id'])
+        self.resource_api.create_project(project1['id'], project1)
         self.role1 = unit.new_role_ref()
         self.role_api.create_role(self.role1['id'], self.role1)
         self.role2 = unit.new_role_ref()
@@ -1667,19 +632,21 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.put(ud_entity['links']['assignment'])
 
         gp_entity = self.build_role_assignment_entity(
-            project_id=self.project1['id'], group_id=group1['id'],
+            project_id=project1['id'],
+            group_id=group1['id'],
             role_id=self.role1['id'])
         self.put(gp_entity['links']['assignment'])
 
         up_entity = self.build_role_assignment_entity(
-            project_id=self.project1['id'], user_id=user1['id'],
+            project_id=project1['id'],
+            user_id=user1['id'],
             role_id=self.role2['id'])
         self.put(up_entity['links']['assignment'])
 
         # Now list by various filters to make sure we get back the right ones
 
         collection_url = ('/role_assignments?scope.project.id=%s' %
-                          self.project1['id'])
+                          project1['id'])
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=2,
@@ -1726,7 +693,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
             '/role_assignments?user.id=%(user_id)s'
             '&scope.project.id=%(project_id)s' % {
                 'user_id': user1['id'],
-                'project_id': self.project1['id']})
+                'project_id': project1['id']})
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=1,
@@ -1748,14 +715,15 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, ud_entity)
         # ...and the two via group membership...
         gp1_link = self.build_role_assignment_link(
-            project_id=self.project1['id'], group_id=group1['id'],
+            project_id=project1['id'],
+            group_id=group1['id'],
             role_id=self.role1['id'])
         gd1_link = self.build_role_assignment_link(domain_id=self.domain_id,
                                                    group_id=group1['id'],
                                                    role_id=self.role1['id'])
 
         up1_entity = self.build_role_assignment_entity(
-            link=gp1_link, project_id=self.project1['id'],
+            link=gp1_link, project_id=project1['id'],
             user_id=user1['id'], role_id=self.role1['id'])
         ud1_entity = self.build_role_assignment_entity(
             link=gd1_link, domain_id=self.domain_id, user_id=user1['id'],
@@ -1771,7 +739,7 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
             '/role_assignments?effective&user.id=%(user_id)s'
             '&scope.project.id=%(project_id)s' % {
                 'user_id': user1['id'],
-                'project_id': self.project1['id']})
+                'project_id': project1['id']})
         r = self.get(collection_url)
         self.assertValidRoleAssignmentListResponse(r,
                                                    expected_length=2,
@@ -1804,7 +772,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
 
             subprojects = []
             for i in range(breadth):
-                subprojects.append(self.new_project_ref(
+                subprojects.append(unit.new_project_ref(
                     domain_id=self.domain_id, parent_id=parent_id))
                 self.resource_api.create_project(subprojects[-1]['id'],
                                                  subprojects[-1])
@@ -1820,7 +788,7 @@ class RoleAssignmentBaseTestCase(test_v3.RestfulTestCase,
         self.resource_api.create_domain(self.domain_id, self.domain)
 
         # Create a project hierarchy
-        self.project = self.new_project_ref(domain_id=self.domain_id)
+        self.project = unit.new_project_ref(domain_id=self.domain_id)
         self.project_id = self.project['id']
         self.resource_api.create_project(self.project_id, self.project)
 
@@ -2400,11 +1368,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
         user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
-        project1 = self.new_project_ref(
-            domain_id=domain['id'])
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
-        project2 = self.new_project_ref(
-            domain_id=domain['id'])
+        project2 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project2['id'], project2)
         # Add some roles to the project
         self.assignment_api.add_role_to_user_and_project(
@@ -2492,11 +1458,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
         user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
-        project1 = self.new_project_ref(
-            domain_id=domain['id'])
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
-        project2 = self.new_project_ref(
-            domain_id=domain['id'])
+        project2 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project2['id'], project2)
         # Add some roles to the project
         self.assignment_api.add_role_to_user_and_project(
@@ -2587,11 +1551,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
                                             group1['id'])
         self.identity_api.add_user_to_group(user2['id'],
                                             group1['id'])
-        project1 = self.new_project_ref(
-            domain_id=domain['id'])
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
-        project2 = self.new_project_ref(
-            domain_id=domain['id'])
+        project2 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project2['id'], project2)
         # Add some roles to the project
         self.assignment_api.add_role_to_user_and_project(
@@ -2679,11 +1641,9 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         user1 = unit.create_user(self.identity_api, domain_id=domain['id'])
         group1 = unit.new_group_ref(domain_id=domain['id'])
         group1 = self.identity_api.create_group(group1)
-        project1 = self.new_project_ref(
-            domain_id=domain['id'])
+        project1 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project1['id'], project1)
-        project2 = self.new_project_ref(
-            domain_id=domain['id'])
+        project2 = unit.new_project_ref(domain_id=domain['id'])
         self.resource_api.create_project(project2['id'], project2)
         # Add some spoiler roles to the projects
         self.assignment_api.add_role_to_user_and_project(
@@ -2751,8 +1711,8 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
 
         """
         # Create project hierarchy
-        root = self.new_project_ref(domain_id=self.domain['id'])
-        leaf = self.new_project_ref(domain_id=self.domain['id'],
+        root = unit.new_project_ref(domain_id=self.domain['id'])
+        leaf = unit.new_project_ref(domain_id=self.domain['id'],
                                     parent_id=root['id'])
 
         self.resource_api.create_project(root['id'], root)
@@ -2989,6 +1949,154 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         inher_up_entity['scope']['project']['id'] = leaf_id
         self.assertRoleAssignmentInListResponse(r, inher_up_entity)
 
+    def test_project_id_specified_if_include_subtree_specified(self):
+        """When using include_subtree, you must specify a project ID."""
+        self.get('/role_assignments?include_subtree=True',
+                 expected_status=http_client.BAD_REQUEST)
+        self.get('/role_assignments?scope.project.id&'
+                 'include_subtree=True',
+                 expected_status=http_client.BAD_REQUEST)
+
+    def test_get_role_assignments_for_project_tree(self):
+        """Get role_assignment?scope.project.id=X?include_subtree``.
+
+        Test Plan:
+
+        - Create 2 roles and a hierarchy of projects with one root and one leaf
+        - Issue the URL to add a non-inherited user role to the root project
+          and the leaf project
+        - Issue the URL to get role assignments for the root project but
+          not the subtree - this should return just the root assignment
+        - Issue the URL to get role assignments for the root project and
+          it's subtree - this should return both assignments
+        - Check that explicitly setting include_subtree to False is the
+          equivalent to not including it at all in the query.
+
+        """
+        # Create default scenario
+        root_id, leaf_id, non_inherited_role_id, unused_role_id = (
+            self._setup_hierarchical_projects_scenario())
+
+        # Grant non-inherited role to root and leaf projects
+        non_inher_entity_root = self.build_role_assignment_entity(
+            project_id=root_id, user_id=self.user['id'],
+            role_id=non_inherited_role_id)
+        self.put(non_inher_entity_root['links']['assignment'])
+        non_inher_entity_leaf = self.build_role_assignment_entity(
+            project_id=leaf_id, user_id=self.user['id'],
+            role_id=non_inherited_role_id)
+        self.put(non_inher_entity_leaf['links']['assignment'])
+
+        # Without the subtree, we should get the one assignment on the
+        # root project
+        collection_url = (
+            '/role_assignments?scope.project.id=%(project)s' % {
+                'project': root_id})
+        r = self.get(collection_url)
+        self.assertValidRoleAssignmentListResponse(
+            r, resource_url=collection_url)
+
+        self.assertThat(r.result['role_assignments'], matchers.HasLength(1))
+        self.assertRoleAssignmentInListResponse(r, non_inher_entity_root)
+
+        # With the subtree, we should get both assignments
+        collection_url = (
+            '/role_assignments?scope.project.id=%(project)s'
+            '&include_subtree=True' % {
+                'project': root_id})
+        r = self.get(collection_url)
+        self.assertValidRoleAssignmentListResponse(
+            r, resource_url=collection_url)
+
+        self.assertThat(r.result['role_assignments'], matchers.HasLength(2))
+        self.assertRoleAssignmentInListResponse(r, non_inher_entity_root)
+        self.assertRoleAssignmentInListResponse(r, non_inher_entity_leaf)
+
+        # With subtree=0, we should also only get the one assignment on the
+        # root project
+        collection_url = (
+            '/role_assignments?scope.project.id=%(project)s'
+            '&include_subtree=0' % {
+                'project': root_id})
+        r = self.get(collection_url)
+        self.assertValidRoleAssignmentListResponse(
+            r, resource_url=collection_url)
+
+        self.assertThat(r.result['role_assignments'], matchers.HasLength(1))
+        self.assertRoleAssignmentInListResponse(r, non_inher_entity_root)
+
+    def test_get_effective_role_assignments_for_project_tree(self):
+        """Get role_assignment ?project_id=X?include_subtree=True?effective``.
+
+        Test Plan:
+
+        - Create 2 roles and a hierarchy of projects with one root and 4 levels
+          of child project
+        - Issue the URL to add a non-inherited user role to the root project
+          and a level 1 project
+        - Issue the URL to add an inherited user role on the level 2 project
+        - Issue the URL to get effective role assignments for the level 1
+          project and it's subtree - this should return a role (non-inherited)
+          on the level 1 project and roles (inherited) on each of the level
+          2, 3 and 4 projects
+
+        """
+        # Create default scenario
+        root_id, leaf_id, non_inherited_role_id, inherited_role_id = (
+            self._setup_hierarchical_projects_scenario())
+
+        # Add some extra projects to the project hierarchy
+        level2 = unit.new_project_ref(domain_id=self.domain['id'],
+                                      parent_id=leaf_id)
+        level3 = unit.new_project_ref(domain_id=self.domain['id'],
+                                      parent_id=level2['id'])
+        level4 = unit.new_project_ref(domain_id=self.domain['id'],
+                                      parent_id=level3['id'])
+        self.resource_api.create_project(level2['id'], level2)
+        self.resource_api.create_project(level3['id'], level3)
+        self.resource_api.create_project(level4['id'], level4)
+
+        # Grant non-inherited role to root (as a spoiler) and to
+        # the level 1 (leaf) project
+        non_inher_entity_root = self.build_role_assignment_entity(
+            project_id=root_id, user_id=self.user['id'],
+            role_id=non_inherited_role_id)
+        self.put(non_inher_entity_root['links']['assignment'])
+        non_inher_entity_leaf = self.build_role_assignment_entity(
+            project_id=leaf_id, user_id=self.user['id'],
+            role_id=non_inherited_role_id)
+        self.put(non_inher_entity_leaf['links']['assignment'])
+
+        # Grant inherited role to level 2
+        inher_entity = self.build_role_assignment_entity(
+            project_id=level2['id'], user_id=self.user['id'],
+            role_id=inherited_role_id, inherited_to_projects=True)
+        self.put(inher_entity['links']['assignment'])
+
+        # Get effective role assignments
+        collection_url = (
+            '/role_assignments?scope.project.id=%(project)s'
+            '&include_subtree=True&effective' % {
+                'project': leaf_id})
+        r = self.get(collection_url)
+        self.assertValidRoleAssignmentListResponse(
+            r, resource_url=collection_url)
+
+        # There should be three assignments returned in total
+        self.assertThat(r.result['role_assignments'], matchers.HasLength(3))
+
+        # Assert that the user does not non-inherited role on root project
+        self.assertRoleAssignmentNotInListResponse(r, non_inher_entity_root)
+
+        # Assert that the user does have non-inherited role on leaf project
+        self.assertRoleAssignmentInListResponse(r, non_inher_entity_leaf)
+
+        # Assert that the user has inherited role on levels 3 and 4
+        inher_entity['scope']['project']['id'] = level3['id']
+        self.assertRoleAssignmentInListResponse(r, inher_entity)
+        inher_entity['scope']['project']['id'] = level4['id']
+        self.assertRoleAssignmentInListResponse(r, inher_entity)
+
     def test_get_inherited_role_assignments_for_project_hierarchy(self):
         """Call ``GET /role_assignments?scope.OS-INHERIT:inherited_to``.
 
@@ -3066,121 +2174,3 @@ class AssignmentInheritanceDisabledTestCase(test_v3.RestfulTestCase):
         self.head(member_url, expected_status=http_client.NOT_FOUND)
         self.get(collection_url, expected_status=http_client.NOT_FOUND)
         self.delete(member_url, expected_status=http_client.NOT_FOUND)
-
-
-class AssignmentV3toV2MethodsTestCase(unit.TestCase):
-    """Test domain V3 to V2 conversion methods."""
-
-    def _setup_initial_projects(self):
-        self.project_id = uuid.uuid4().hex
-        self.domain_id = CONF.identity.default_domain_id
-        self.parent_id = uuid.uuid4().hex
-        # Project with only domain_id in ref
-        self.project1 = {'id': self.project_id,
-                         'name': self.project_id,
-                         'domain_id': self.domain_id}
-        # Project with both domain_id and parent_id in ref
-        self.project2 = {'id': self.project_id,
-                         'name': self.project_id,
-                         'domain_id': self.domain_id,
-                         'parent_id': self.parent_id}
-        # Project with no domain_id and parent_id in ref
-        self.project3 = {'id': self.project_id,
-                         'name': self.project_id,
-                         'domain_id': self.domain_id,
-                         'parent_id': self.parent_id}
-        # Expected result with no domain_id and parent_id
-        self.expected_project = {'id': self.project_id,
-                                 'name': self.project_id}
-
-    def test_v2controller_filter_domain_id(self):
-        # V2.0 is not domain aware, ensure domain_id is popped off the ref.
-        other_data = uuid.uuid4().hex
-        domain_id = CONF.identity.default_domain_id
-        ref = {'domain_id': domain_id,
-               'other_data': other_data}
-
-        ref_no_domain = {'other_data': other_data}
-        expected_ref = ref_no_domain.copy()
-
-        updated_ref = controller.V2Controller.filter_domain_id(ref)
-        self.assertIs(ref, updated_ref)
-        self.assertDictEqual(expected_ref, ref)
-        # Make sure we don't error/muck up data if domain_id isn't present
-        updated_ref = controller.V2Controller.filter_domain_id(ref_no_domain)
-        self.assertIs(ref_no_domain, updated_ref)
-        self.assertDictEqual(expected_ref, ref_no_domain)
-
-    def test_v3controller_filter_domain_id(self):
-        # No data should be filtered out in this case.
-        other_data = uuid.uuid4().hex
-        domain_id = uuid.uuid4().hex
-        ref = {'domain_id': domain_id,
-               'other_data': other_data}
-
-        expected_ref = ref.copy()
-        updated_ref = controller.V3Controller.filter_domain_id(ref)
-        self.assertIs(ref, updated_ref)
-        self.assertDictEqual(expected_ref, ref)
-
-    def test_v2controller_filter_domain(self):
-        other_data = uuid.uuid4().hex
-        domain_id = uuid.uuid4().hex
-        non_default_domain_ref = {'domain': {'id': domain_id},
-                                  'other_data': other_data}
-        default_domain_ref = {'domain': {'id': 'default'},
-                              'other_data': other_data}
-        updated_ref = controller.V2Controller.filter_domain(default_domain_ref)
-        self.assertNotIn('domain', updated_ref)
-        self.assertRaises(exception.Unauthorized,
-                          controller.V2Controller.filter_domain,
-                          non_default_domain_ref)
-
-    def test_v2controller_filter_project_parent_id(self):
-        # V2.0 is not project hierarchy aware, ensure parent_id is popped off.
-        other_data = uuid.uuid4().hex
-        parent_id = uuid.uuid4().hex
-        ref = {'parent_id': parent_id,
-               'other_data': other_data}
-
-        ref_no_parent = {'other_data': other_data}
-        expected_ref = ref_no_parent.copy()
-
-        updated_ref = controller.V2Controller.filter_project_parent_id(ref)
-        self.assertIs(ref, updated_ref)
-        self.assertDictEqual(expected_ref, ref)
-        # Make sure we don't error/muck up data if parent_id isn't present
-        updated_ref = controller.V2Controller.filter_project_parent_id(
-            ref_no_parent)
-        self.assertIs(ref_no_parent, updated_ref)
-        self.assertDictEqual(expected_ref, ref_no_parent)
-
-    def test_v3_to_v2_project_method(self):
-        self._setup_initial_projects()
-        updated_project1 = controller.V2Controller.v3_to_v2_project(
-            self.project1)
-        self.assertIs(self.project1, updated_project1)
-        self.assertDictEqual(self.expected_project, self.project1)
-        updated_project2 = controller.V2Controller.v3_to_v2_project(
-            self.project2)
-        self.assertIs(self.project2, updated_project2)
-        self.assertDictEqual(self.expected_project, self.project2)
-        updated_project3 = controller.V2Controller.v3_to_v2_project(
-            self.project3)
-        self.assertIs(self.project3, updated_project3)
-        self.assertDictEqual(self.expected_project, self.project2)
-
-    def test_v3_to_v2_project_method_list(self):
-        self._setup_initial_projects()
-        project_list = [self.project1, self.project2, self.project3]
-        updated_list = controller.V2Controller.v3_to_v2_project(project_list)
-
-        self.assertEqual(len(updated_list), len(project_list))
-
-        for i, ref in enumerate(updated_list):
-            # Order should not change.
-            self.assertIs(ref, project_list[i])
-
-        self.assertDictEqual(self.expected_project, self.project1)
-        self.assertDictEqual(self.expected_project, self.project2)
-        self.assertDictEqual(self.expected_project, self.project3)
