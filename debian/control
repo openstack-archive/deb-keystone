@@ -68,7 +68,7 @@ Build-Depends-Indep: python-bashate,
                      python-webtest,
                      subunit,
                      testrepository,
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Homepage: http://keystone.openstack.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/keystone.git;a=summary
 Vcs-Git: git://anonscm.debian.org/openstack/keystone.git
