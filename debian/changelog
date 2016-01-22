@@ -4,6 +4,7 @@ keystone (1:9.0.0~b2-1) experimental; urgency=medium
   * Fixed (build-)depends for this release.
   * Fixed debian/copyright ordering.
   * Standards-Version is now 3.9.6 (no change).
+  * Fix syntax error on an old debian/changelog entry.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 07 Dec 2015 12:32:48 +0100
 
@@ -247,8 +248,7 @@ keystone (2013.2.2-1) unstable; urgency=medium
   * New upstream point release.
   * Refreshed patches.
   * Remove patches applied upstream:
-
-Limit_calls_to_memcache_backend_as_user_token_index_increases_in_size.patch
+    Limit_calls_to_memcache_backend_as_user_token_index_increases_in_size.patch
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 14 Feb 2014 09:57:43 +0800
 
