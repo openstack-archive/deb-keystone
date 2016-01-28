@@ -137,13 +137,12 @@ Package: keystone
 Architecture: all
 Depends: adduser,
          dbconfig-common,
-         init-system-helpers (>= 1.18~),
+         init-system-helpers,
          python-keystone (= ${source:Version}),
          q-text-as-data,
          sqlite3,
          ssl-cert (>= 1.0.12),
          ${misc:Depends},
-         ${ostack-init-system-helpers},
          ${ostack-lsb-base},
          ${python:Depends}
 Suggests: apparmor
