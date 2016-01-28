@@ -143,6 +143,7 @@ Depends: adduser,
          sqlite3,
          ssl-cert (>= 1.0.12),
          ${misc:Depends},
+         ${ostack-init-system-helpers},
          ${ostack-lsb-base},
          ${python:Depends}
 Suggests: apparmor
