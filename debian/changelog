@@ -1,3 +1,10 @@
+keystone (2:9.0.0~b2-3) experimental; urgency=medium
+
+  * Added auto-creation of the Member and ResellerAdmin roles as this is
+    needed for Swift auto-account-creation to work.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 08 Feb 2016 08:11:14 +0000
+
 keystone (2:9.0.0~b2-2) experimental; urgency=medium
 
   * Added git as build-depends.

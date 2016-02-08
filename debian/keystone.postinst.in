@@ -22,7 +22,9 @@ keystone_create_admin_tenant () {
 	openstack ${OSTACKCLI_PARAMS} project create --or-show service --domain default --description "Default Debian service project" >/dev/null
 	openstack ${OSTACKCLI_PARAMS} user create --or-show --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME --domain default --description "Default Debian admin user" >/dev/null
 
-	for i in admin KeystoneAdmin KeystoneServiceAdmin heat_stack_owner ; do
+	# Note: heat_stack_owner is needed for heat to work, and Member ResellerAdmin
+	# are needed for swift auto account creation.
+	for i in admin KeystoneAdmin KeystoneServiceAdmin heat_stack_owner Member ResellerAdmin ; do
 		openstack ${OSTACKCLI_PARAMS} role create --or-show ${i} >/dev/null
 		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i} >/dev/null
 	done
