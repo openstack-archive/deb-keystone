@@ -7,6 +7,7 @@ keystone (2:9.0.0~b3-1) experimental; urgency=medium
   * New upstream release.
   * Fixed (build-)depends for this release.
   * Standards-Version: 3.9.7 (no change).
+  * Rebased / refresh all patches.
 
  -- Thomas Goirand <zigo@debian.org>  Thu, 03 Mar 2016 20:00:57 +0800
 

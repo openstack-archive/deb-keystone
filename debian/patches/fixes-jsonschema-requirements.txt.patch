@@ -8,9 +8,9 @@ Index: keystone/requirements.txt
 ===================================================================
 --- keystone.orig/requirements.txt
 +++ keystone/requirements.txt
-@@ -34,6 +34,6 @@ oslo.utils>=2.8.0 # Apache-2.0
+@@ -34,6 +34,6 @@ oslo.utils>=3.5.0 # Apache-2.0
  oauthlib>=0.6 # BSD
- pysaml2>=2.4.0 # Apache-2.0
+ pysaml2<4.0.3,>=2.4.0 # Apache-2.0
  dogpile.cache>=0.5.4 # BSD
 -jsonschema!=2.5.0,<3.0.0,>=2.0.0 # MIT
 +jsonschema
