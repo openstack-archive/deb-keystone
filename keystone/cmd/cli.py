@@ -16,10 +16,12 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
+import sys
 import uuid
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 from oslo_serialization import jsonutils
 import pbr.version
 
@@ -59,7 +61,7 @@ class BootStrap(BaseApp):
 
     def __init__(self):
         self.load_backends()
-        self.tenant_id = uuid.uuid4().hex
+        self.project_id = uuid.uuid4().hex
         self.role_id = uuid.uuid4().hex
         self.username = None
         self.project_name = None
@@ -125,7 +127,12 @@ class BootStrap(BaseApp):
             raise ValueError
 
         # NOTE(morganfainberg): Ensure the default domain is in-fact created
-        default_domain = migration_helpers.get_default_domain()
+        default_domain = {
+            'id': CONF.identity.default_domain_id,
+            'name': 'Default',
+            'enabled': True,
+            'description': 'The default domain'
+        }
         try:
             self.resource_manager.create_domain(
                 domain_id=default_domain['id'],
@@ -138,13 +145,13 @@ class BootStrap(BaseApp):
 
         try:
             self.resource_manager.create_project(
-                tenant_id=self.tenant_id,
-                tenant={'enabled': True,
-                        'id': self.tenant_id,
-                        'domain_id': default_domain['id'],
-                        'description': 'Bootstrap project for initializing '
-                                       'the cloud.',
-                        'name': self.project_name}
+                project_id=self.project_id,
+                project={'enabled': True,
+                         'id': self.project_id,
+                         'domain_id': default_domain['id'],
+                         'description': 'Bootstrap project for initializing '
+                                        'the cloud.',
+                         'name': self.project_name}
             )
             LOG.info(_LI('Created project %s'), self.project_name)
         except exception.Conflict:
@@ -152,7 +159,7 @@ class BootStrap(BaseApp):
                      self.project_name)
             project = self.resource_manager.get_project_by_name(
                 self.project_name, default_domain['id'])
-            self.tenant_id = project['id']
+            self.project_id = project['id']
 
         # NOTE(morganfainberg): Do not create the user if it already exists.
         try:
@@ -189,11 +196,11 @@ class BootStrap(BaseApp):
             self.role_id = role[0]['id']
 
         # NOTE(morganfainberg): Handle the case that the role assignment has
-        # already occured.
+        # already occurred.
         try:
             self.assignment_manager.add_role_to_user_and_project(
                 user_id=user['id'],
-                tenant_id=self.tenant_id,
+                tenant_id=self.project_id,
                 role_id=self.role_id
             )
             LOG.info(_LI('Granted %(role)s on %(project)s to user'
@@ -313,13 +320,19 @@ class PKISetup(BaseCertificateSetup):
     """Set up Key pairs and certificates for token signing and verification.
 
     This is NOT intended for production use, see Keystone Configuration
-    documentation for details.
+    documentation for details. As of the Mitaka release, this command has
+    been DEPRECATED and may be removed in the 'O' release.
     """
 
     name = 'pki_setup'
 
     @classmethod
     def main(cls):
+        versionutils.report_deprecated_feature(
+            LOG,
+            _LW("keystone-manage pki_setup is deprecated as of Mitaka in "
+                "favor of not using PKI tokens and may be removed in 'O' "
+                "release."))
         LOG.warning(_LW('keystone-manage pki_setup is not recommended for '
                         'production use.'))
         keystone_user_id, keystone_group_id = cls.get_user_group()
@@ -493,11 +506,35 @@ DOMAIN_CONF_FHEAD = 'keystone.'
 DOMAIN_CONF_FTAIL = '.conf'
 
 
+def _domain_config_finder(conf_dir):
+    """Return a generator of all domain config files found in a directory.
+
+    Donmain configs match the filename pattern of
+    'keystone.<domain_name>.conf'.
+
+    :returns: generator yeilding (filename, domain_name) tuples
+    """
+    LOG.info(_LI('Scanning %r for domain config files'), conf_dir)
+    for r, d, f in os.walk(conf_dir):
+        for fname in f:
+            if (fname.startswith(DOMAIN_CONF_FHEAD) and
+                    fname.endswith(DOMAIN_CONF_FTAIL)):
+                if fname.count('.') >= 2:
+                    domain_name = fname[len(DOMAIN_CONF_FHEAD):
+                                        -len(DOMAIN_CONF_FTAIL)]
+                    yield (os.path.join(r, fname), domain_name)
+                    continue
+
+            LOG.warning(_LW('Ignoring file (%s) while scanning '
+                            'domain config directory'), fname)
+
+
 class DomainConfigUploadFiles(object):
 
-    def __init__(self):
+    def __init__(self, domain_config_finder=_domain_config_finder):
         super(DomainConfigUploadFiles, self).__init__()
         self.load_backends()
+        self._domain_config_finder = domain_config_finder
 
     def load_backends(self):
         drivers = backends.load_backends()
@@ -631,21 +668,8 @@ class DomainConfigUploadFiles(object):
                 os.path.join(conf_dir, fname), domain_name)
             return
 
-        # Request is to transfer all config files, so let's read all the
-        # files in the config directory, and transfer those that match the
-        # filename pattern of 'keystone.<domain_name>.conf'
-        for r, d, f in os.walk(conf_dir):
-            for fname in f:
-                if (fname.startswith(DOMAIN_CONF_FHEAD) and
-                        fname.endswith(DOMAIN_CONF_FTAIL)):
-                    if fname.count('.') >= 2:
-                        self.upload_configs_to_database(
-                            os.path.join(r, fname),
-                            fname[len(DOMAIN_CONF_FHEAD):
-                                  -len(DOMAIN_CONF_FTAIL)])
-                    else:
-                        LOG.warning(_LW('Ignoring file (%s) while scanning '
-                                        'domain config directory'), fname)
+        for filename, domain_name in self._domain_config_finder(conf_dir):
+            self.upload_configs_to_database(filename, domain_name)
 
     def run(self):
         # First off, let's just check we can talk to the domain database
@@ -692,7 +716,7 @@ class DomainConfigUpload(BaseApp):
         dcu = DomainConfigUploadFiles()
         status = dcu.run()
         if status is not None:
-            exit(status)
+            sys.exit(status)
 
 
 class SamlIdentityProviderMetadata(BaseApp):

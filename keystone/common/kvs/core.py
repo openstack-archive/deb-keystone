@@ -25,6 +25,7 @@ from dogpile.core import nameregistry
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import importutils
+from oslo_utils import reflection
 
 from keystone import exception
 from keystone.i18n import _
@@ -147,12 +148,16 @@ class KeyValueStore(object):
                 if issubclass(pxy, proxy.ProxyBackend):
                     proxies.append(pxy)
                 else:
+                    pxy_cls_name = reflection.get_class_name(
+                        pxy, fully_qualified=False)
                     LOG.warning(_LW('%s is not a dogpile.proxy.ProxyBackend'),
-                                pxy.__name__)
+                                pxy_cls_name)
 
             for proxy_cls in reversed(proxies):
+                proxy_cls_name = reflection.get_class_name(
+                    proxy_cls, fully_qualified=False)
                 LOG.info(_LI('Adding proxy \'%(proxy)s\' to KVS %(name)s.'),
-                         {'proxy': proxy_cls.__name__,
+                         {'proxy': proxy_cls_name,
                           'name': self._region.name})
                 self._region.wrap(proxy_cls)
 
@@ -357,8 +362,9 @@ class KeyValueStore(object):
 
     @contextlib.contextmanager
     def _action_with_lock(self, key, lock=None):
-        """Wrapper context manager to validate and handle the lock and lock
-        timeout if passed in.
+        """Wrapper context manager.
+
+        Validates and handles the lock and lock timeout if passed in.
         """
         if not isinstance(lock, KeyValueStoreLock):
             # NOTE(morganfainberg): Locking only matters if a lock is passed in
@@ -380,10 +386,11 @@ class KeyValueStore(object):
 
 
 class KeyValueStoreLock(object):
-    """Basic KeyValueStoreLock context manager that hooks into the
-    dogpile.cache backend mutex allowing for distributed locking on resources.
+    """Basic KeyValueStoreLock context manager.
 
-    This is only a write lock, and will not prevent reads from occurring.
+    Hooks into the dogpile.cache backend mutex allowing for distributed locking
+    on resources. This is only a write lock, and will not prevent reads from
+    occurring.
     """
 
     def __init__(self, mutex, key, locking_enabled=True, lock_timeout=0):
@@ -426,7 +433,9 @@ class KeyValueStoreLock(object):
 
 
 def get_key_value_store(name, kvs_region=None):
-    """Instantiate a new :class:`.KeyValueStore` or return a previous
+    """Retrieve key value store.
+
+    Instantiate a new :class:`.KeyValueStore` or return a previous
     instantiation that has the same name.
     """
     global KEY_VALUE_STORE_REGISTRY

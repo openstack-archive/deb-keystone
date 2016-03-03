@@ -224,7 +224,10 @@ class CredentialTestCase(CredentialBaseTestCase):
                                  json.loads(r['blob']))
 
     def test_create_non_ec2_credential(self):
-        """Call ``POST /credentials`` for creating non-ec2 credential."""
+        """Test creating non-ec2 credential.
+
+        Call ``POST /credentials``.
+        """
         blob, ref = unit.new_cert_credential(user_id=self.user['id'])
 
         r = self.post('/credentials', body={'credential': ref})
@@ -236,8 +239,9 @@ class CredentialTestCase(CredentialBaseTestCase):
                             r.result['credential']['id'])
 
     def test_create_ec2_credential_with_missing_project_id(self):
-        """Call ``POST /credentials`` for creating ec2 credential with missing
-        project_id.
+        """Test Creating ec2 credential with missing project_id.
+
+        Call ``POST /credentials``.
         """
         _, ref = unit.new_ec2_credential(user_id=self.user['id'],
                                          project_id=None)
@@ -247,8 +251,9 @@ class CredentialTestCase(CredentialBaseTestCase):
             body={'credential': ref}, expected_status=http_client.BAD_REQUEST)
 
     def test_create_ec2_credential_with_invalid_blob(self):
-        """Call ``POST /credentials`` for creating ec2 credential with invalid
-        blob.
+        """Test creating ec2 credential with invalid blob.
+
+        Call ``POST /credentials``.
         """
         ref = unit.new_credential_ref(user_id=self.user['id'],
                                       project_id=self.project_id,
@@ -266,7 +271,7 @@ class CredentialTestCase(CredentialBaseTestCase):
         r = self.post(
             '/credentials',
             body={'credential': ref},
-            token=CONF.admin_token)
+            token=self.get_admin_token())
         self.assertValidCredentialResponse(r, ref)
 
 
@@ -287,7 +292,10 @@ class TestCredentialTrustScoped(test_v3.RestfulTestCase):
         self.config_fixture.config(group='trust', enabled=True)
 
     def test_trust_scoped_ec2_credential(self):
-        """Call ``POST /credentials`` for creating ec2 credential."""
+        """Test creating trust scoped ec2 credential.
+
+        Call ``POST /credentials``.
+        """
         # Create the trust
         ref = unit.new_trust_ref(
             trustor_user_id=self.user_id,
@@ -306,7 +314,7 @@ class TestCredentialTrustScoped(test_v3.RestfulTestCase):
             password=self.trustee_user['password'],
             trust_id=trust['id'])
         r = self.v3_create_token(auth_data)
-        self.assertValidProjectTrustScopedTokenResponse(r, self.user)
+        self.assertValidProjectScopedTokenResponse(r, self.user)
         trust_id = r.result['token']['OS-TRUST:trust']['id']
         token_id = r.headers.get('X-Subject-Token')
 

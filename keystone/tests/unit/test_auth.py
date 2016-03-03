@@ -14,6 +14,8 @@
 
 import copy
 import datetime
+import random
+import string
 import uuid
 
 import mock
@@ -39,9 +41,10 @@ from keystone import trust
 
 CONF = cfg.CONF
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
-HOST_URL = 'http://keystone:5001'
+HOST = ''.join(random.choice(string.ascii_lowercase) for x in range(
+    random.randint(5, 15)))
+HOST_URL = 'http://%s' % (HOST)
 
 
 def _build_user_auth(token=None, user_id=None, username=None,
@@ -127,9 +130,7 @@ class AuthBadRequests(AuthTest):
             context={}, auth={})
 
     def test_empty_remote_user(self):
-        """Verify that _authenticate_external() raises exception if
-        REMOTE_USER is set as the empty string.
-        """
+        """Verify exception is raised when REMOTE_USER is an empty string."""
         context = {'environment': {'REMOTE_USER': ''}}
         self.assertRaises(
             token.controllers.ExternalAuthNotApplicable,
@@ -230,8 +231,8 @@ class AuthBadRequests(AuthTest):
         self.config_fixture.config(group='resource',
                                    project_name_url_safe='off')
         unsafe_name = 'i am not / safe'
-        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID,
-                                       name=unsafe_name)
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id, name=unsafe_name)
         self.resource_api.create_project(project['id'], project)
         self.assignment_api.add_role_to_user_and_project(
             self.user_foo['id'], project['id'], self.role_member['id'])
@@ -458,7 +459,8 @@ class AuthWithToken(AuthTest):
 
     def test_deleting_role_revokes_token(self):
         role_controller = assignment.controllers.Role()
-        project1 = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
+        project1 = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         self.resource_api.create_project(project1['id'], project1)
         role_one = unit.new_role_ref(id='role_one')
         self.role_api.create_role(role_one['id'], role_one)
@@ -493,7 +495,8 @@ class AuthWithToken(AuthTest):
         no_context = {}
         admin_context = dict(is_admin=True, query_string={})
 
-        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         self.resource_api.create_project(project['id'], project)
         role = unit.new_role_ref()
         self.role_api.create_role(role['id'], role)
@@ -871,7 +874,16 @@ class AuthWithTrust(AuthTest):
             token_id=token_id,
             token_data=self.token_provider_api.validate_token(token_id))
         auth_context = authorization.token_to_auth_context(token_ref)
-        return {'environment': {authorization.AUTH_CONTEXT_ENV: auth_context},
+        # NOTE(gyee): if public_endpoint and admin_endpoint are not set, which
+        # is the default, the base url will be constructed from the environment
+        # variables wsgi.url_scheme, SERVER_NAME, SERVER_PORT, and SCRIPT_NAME.
+        # We have to set them in the context so the base url can be constructed
+        # accordingly.
+        return {'environment': {authorization.AUTH_CONTEXT_ENV: auth_context,
+                                'wsgi.url_scheme': 'http',
+                                'SCRIPT_NAME': '/v3',
+                                'SERVER_PORT': '80',
+                                'SERVER_NAME': HOST},
                 'token_id': token_id,
                 'host_url': HOST_URL}
 
@@ -960,8 +972,9 @@ class AuthWithTrust(AuthTest):
                           expires_at="2010-06-04T08:44:31.999999Z")
 
     def test_create_trust_without_project_id(self):
-        """Verify that trust can be created without project id and
-        token can be generated with that trust.
+        """Verify that trust can be created without project id.
+
+        Also, token can be generated with that trust.
         """
         unscoped_token = self.get_unscoped_token(self.trustor['name'])
         context = self._create_auth_context(
@@ -992,9 +1005,7 @@ class AuthWithTrust(AuthTest):
             self.assertIn(role['id'], role_ids)
 
     def test_get_trust_without_auth_context(self):
-        """Verify that a trust cannot be retrieved when the auth context is
-        missing.
-        """
+        """Verify a trust cannot be retrieved if auth context is missing."""
         unscoped_token = self.get_unscoped_token(self.trustor['name'])
         context = self._create_auth_context(
             unscoped_token['access']['token']['id'])
@@ -1144,7 +1155,7 @@ class AuthWithTrust(AuthTest):
         request_body = _build_user_auth(token={'id': trust_token_id},
                                         tenant_id=self.tenant_bar['id'])
         self.assertRaises(
-            exception.Forbidden,
+            exception.Unauthorized,
             self.controller.authenticate, {}, request_body)
 
     def test_delete_trust_revokes_token(self):
@@ -1223,35 +1234,6 @@ class AuthWithTrust(AuthTest):
         trust = self.trust_controller.get_trust(context,
                                                 new_trust['id'])['trust']
         self.assertEqual(3, trust['remaining_uses'])
-
-    def test_v2_trust_token_contains_trustor_user_id_and_impersonation(self):
-        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
-        auth_response = self.fetch_v2_token_from_trust(new_trust)
-
-        self.assertEqual(new_trust['trustee_user_id'],
-                         auth_response['access']['trust']['trustee_user_id'])
-        self.assertEqual(new_trust['trustor_user_id'],
-                         auth_response['access']['trust']['trustor_user_id'])
-        self.assertEqual(new_trust['impersonation'],
-                         auth_response['access']['trust']['impersonation'])
-        self.assertEqual(new_trust['id'],
-                         auth_response['access']['trust']['id'])
-
-        validate_response = self.controller.validate_token(
-            context=dict(is_admin=True, query_string={}),
-            token_id=auth_response['access']['token']['id'])
-        self.assertEqual(
-            new_trust['trustee_user_id'],
-            validate_response['access']['trust']['trustee_user_id'])
-        self.assertEqual(
-            new_trust['trustor_user_id'],
-            validate_response['access']['trust']['trustor_user_id'])
-        self.assertEqual(
-            new_trust['impersonation'],
-            validate_response['access']['trust']['impersonation'])
-        self.assertEqual(
-            new_trust['id'],
-            validate_response['access']['trust']['id'])
 
     def disable_user(self, user):
         user['enabled'] = False

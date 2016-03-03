@@ -26,7 +26,11 @@ CONF = cfg.CONF
 class EndpointFilterCatalog(sql.Catalog):
     def get_v3_catalog(self, user_id, project_id):
         substitutions = dict(CONF.items())
-        substitutions.update({'tenant_id': project_id, 'user_id': user_id})
+        substitutions.update({
+            'tenant_id': project_id,
+            'project_id': project_id,
+            'user_id': user_id,
+        })
 
         services = {}
 
@@ -50,6 +54,8 @@ class EndpointFilterCatalog(sql.Catalog):
             del endpoint['service_id']
             del endpoint['enabled']
             del endpoint['legacy_endpoint_id']
+            # Include deprecated region for backwards compatibility
+            endpoint['region'] = endpoint['region_id']
             endpoint['url'] = catalog_core.format_url(
                 endpoint['url'], substitutions)
             # populate filtered endpoints
@@ -64,6 +70,7 @@ class EndpointFilterCatalog(sql.Catalog):
             formatted_service = {}
             formatted_service['id'] = service['id']
             formatted_service['type'] = service['type']
+            formatted_service['name'] = service['name']
             formatted_service['endpoints'] = service['endpoints']
             catalog.append(formatted_service)
 

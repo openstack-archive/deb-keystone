@@ -13,14 +13,16 @@
 # under the License.
 
 from oslo_config import cfg
+from oslo_log import log
 from oslo_serialization import jsonutils
 
 from keystone.common import wsgi
 from keystone import exception
+from keystone.i18n import _LW
 
 
 CONF = cfg.CONF
-
+LOG = log.getLogger(__name__)
 
 # Header used to transmit the auth token
 AUTH_TOKEN_HEADER = 'X-Auth-Token'
@@ -56,32 +58,19 @@ class AdminTokenAuthMiddleware(wsgi.Middleware):
 
     """
 
+    def __init__(self, application):
+        super(AdminTokenAuthMiddleware, self).__init__(application)
+        LOG.warning(_LW("The admin_token_auth middleware presents a security "
+                        "risk and should be removed from the "
+                        "[pipeline:api_v3], [pipeline:admin_api], and "
+                        "[pipeline:public_api] sections of your paste ini "
+                        "file."))
+
     def process_request(self, request):
         token = request.headers.get(AUTH_TOKEN_HEADER)
         context = request.environ.get(CONTEXT_ENV, {})
-        context['is_admin'] = (token == CONF.admin_token)
+        context['is_admin'] = CONF.admin_token and (token == CONF.admin_token)
         request.environ[CONTEXT_ENV] = context
-
-
-class PostParamsMiddleware(wsgi.Middleware):
-    """Middleware to allow method arguments to be passed as POST parameters.
-
-    Filters out the parameters `self`, `context` and anything beginning with
-    an underscore.
-
-    """
-
-    def process_request(self, request):
-        params_parsed = request.params
-        params = {}
-        for k, v in params_parsed.items():
-            if k in ('self', 'context'):
-                continue
-            if k.startswith('_'):
-                continue
-            params[k] = v
-
-        request.environ[PARAMS_ENV] = params
 
 
 class JsonBodyMiddleware(wsgi.Middleware):

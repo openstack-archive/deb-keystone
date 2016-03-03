@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
@@ -463,6 +465,30 @@ MAPPING_TESTER_REGEX = {
     ]
 }
 
+
+MAPPING_DIRECT_MAPPING_THROUGH_KEYWORD = {
+    "rules": [
+        {
+            "local": [
+                {
+                    "user": "{0}"
+                },
+                {
+                    "group": TESTER_GROUP_ID
+                }
+            ],
+            "remote": [
+                {
+                    "type": "UserName",
+                    "any_one_of": [
+                        "bwilliams"
+                    ]
+                }
+            ]
+        }
+    ]
+}
+
 MAPPING_DEVELOPER_REGEX = {
     "rules": [
         {
@@ -760,7 +786,7 @@ MAPPING_GROUPS_BLACKLIST = {
     ]
 }
 
-# Excercise all possibilities of user identitfication. Values are hardcoded on
+# Exercise all possibilities of user identification. Values are hardcoded on
 # purpose.
 MAPPING_USER_IDS = {
     "rules": [
@@ -1256,6 +1282,27 @@ MAPPING_GROUPS_WHITELIST_PASS_THROUGH = {
     ]
 }
 
+MAPPING_BAD_LOCAL_SETUP = {
+    "rules": [
+        {
+            "local": [
+                {
+                    "user": {
+                        "name": "{0}",
+                        "domain": {"id": "default"}
+                    },
+                    "whatisthis": "local"
+                }
+            ],
+            "remote": [
+                {
+                    "type": "UserName"
+                }
+            ]
+        }
+    ]
+}
+
 EMPLOYEE_ASSERTION = {
     'Email': 'tim@example.com',
     'UserName': 'tbo',
@@ -1392,4 +1439,48 @@ GROUP_IDS_ASSERTION_ONLY_ONE_GROUP = {
     'name': 'opilotte',
     'group_ids': '321cba',
     'group': '210mlk'
+}
+
+UNICODE_NAME_ASSERTION = {
+    'PFX_Email': 'jon@example.com',
+    'PFX_UserName': 'jonkare',
+    'PFX_FirstName': 'Jon Kåre',
+    'PFX_LastName': 'Hellån',
+    'PFX_orgPersonType': 'Admin;Chief'
+}
+
+MAPPING_UNICODE = {
+    "rules": [
+        {
+            "local": [
+                {
+                    "user": {
+                        "name": "{0} {1}",
+                        "email": "{2}"
+                    },
+                    "group": {
+                        "id": EMPLOYEE_GROUP_ID
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "PFX_FirstName"
+                },
+                {
+                    "type": "PFX_LastName"
+                },
+                {
+                    "type": "PFX_Email"
+                },
+                {
+                    "type": "PFX_orgPersonType",
+                    "any_one_of": [
+                        "Admin",
+                        "Big Cheese"
+                    ]
+                }
+            ]
+        },
+    ],
 }

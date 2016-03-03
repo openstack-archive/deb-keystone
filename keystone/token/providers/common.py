@@ -32,14 +32,34 @@ LOG = log.getLogger(__name__)
 CONF = cfg.CONF
 
 
-@dependency.requires('catalog_api', 'resource_api')
+@dependency.requires('catalog_api', 'resource_api', 'assignment_api')
 class V2TokenDataHelper(object):
     """Creates V2 token data."""
 
     def v3_to_v2_token(self, v3_token_data):
+        """Convert v3 token data into v2.0 token data.
+
+        This method expects a dictionary generated from
+        V3TokenDataHelper.get_token_data() and converts it to look like a v2.0
+        token dictionary.
+
+        :param v3_token_data: dictionary formatted for v3 tokens
+        :returns: dictionary formatted for v2 tokens
+        :raises keystone.exception.Unauthorized: If a specific token type is
+            not supported in v2.
+
+        """
         token_data = {}
         # Build v2 token
         v3_token = v3_token_data['token']
+
+        # NOTE(lbragstad): Version 2.0 tokens don't know about any domain other
+        # than the default domain specified in the configuration.
+        domain_id = v3_token.get('domain', {}).get('id')
+        if domain_id and CONF.identity.default_domain_id != domain_id:
+            msg = ('Unable to validate domain-scoped tokens outside of the '
+                   'default domain')
+            raise exception.Unauthorized(msg)
 
         token = {}
         token['expires'] = v3_token.get('expires_at')
@@ -59,15 +79,15 @@ class V2TokenDataHelper(object):
 
         user = common_controller.V2Controller.v3_to_v2_user(v3_user)
 
-        # Maintain Trust Data
         if 'OS-TRUST:trust' in v3_token:
-            v3_trust_data = v3_token['OS-TRUST:trust']
-            token_data['trust'] = {
-                'trustee_user_id': v3_trust_data['trustee_user']['id'],
-                'id': v3_trust_data['id'],
-                'trustor_user_id': v3_trust_data['trustor_user']['id'],
-                'impersonation': v3_trust_data['impersonation']
-            }
+            msg = ('Unable to validate trust-scoped tokens using version v2.0 '
+                   'API.')
+            raise exception.Unauthorized(msg)
+
+        if 'OS-OAUTH1' in v3_token:
+            msg = ('Unable to validate Oauth tokens using the version v2.0 '
+                   'API.')
+            raise exception.Unauthorized(msg)
 
         # Set user roles
         user['roles'] = []
@@ -160,7 +180,8 @@ class V2TokenDataHelper(object):
 
     @classmethod
     def format_catalog(cls, catalog_ref):
-        """Munge catalogs from internal to output format
+        """Munge catalogs from internal to output format.
+
         Internal catalogs look like::
 
           {$REGION: {
@@ -223,8 +244,12 @@ class V3TokenDataHelper(object):
         filtered_project = {
             'id': project_ref['id'],
             'name': project_ref['name']}
-        filtered_project['domain'] = self._get_filtered_domain(
-            project_ref['domain_id'])
+        if project_ref['domain_id'] is not None:
+            filtered_project['domain'] = (
+                self._get_filtered_domain(project_ref['domain_id']))
+        else:
+            # Projects acting as a domain do not have a domain_id attribute
+            filtered_project['domain'] = None
         return filtered_project
 
     def _populate_scope(self, token_data, domain_id, project_id):
@@ -269,10 +294,10 @@ class V3TokenDataHelper(object):
         place.
 
         :param token_data: a dictionary used for building token response
-        :group_ids: list of group IDs a user is a member of
-        :project_id: project ID to scope to
-        :domain_id: domain ID to scope to
-        :user_id: user ID
+        :param group_ids: list of group IDs a user is a member of
+        :param project_id: project ID to scope to
+        :param domain_id: domain ID to scope to
+        :param user_id: user ID
 
         :raises keystone.exception.Unauthorized: when no roles were found for a
             (group_ids, project_id) or (group_ids, domain_id) pairs.
@@ -357,7 +382,16 @@ class V3TokenDataHelper(object):
             return
 
         if CONF.trust.enabled and trust:
-            token_user_id = trust['trustor_user_id']
+            # If redelegated_trust_id is set, then we must traverse the
+            # trust_chain in order to determine who the original trustor is. We
+            # need to do this because the user ID of the original trustor helps
+            # us determine scope in the redelegated context.
+            if trust.get('redelegated_trust_id'):
+                trust_chain = self.trust_api.get_trust_pedigree(trust['id'])
+                token_user_id = trust_chain[-1]['trustor_user_id']
+            else:
+                token_user_id = trust['trustor_user_id']
+
             token_project_id = trust['project_id']
             # trusts do not support domains yet
             token_domain_id = None
@@ -367,21 +401,39 @@ class V3TokenDataHelper(object):
             token_domain_id = domain_id
 
         if token_domain_id or token_project_id:
-            roles = self._get_roles_for_user(token_user_id,
-                                             token_domain_id,
-                                             token_project_id)
             filtered_roles = []
             if CONF.trust.enabled and trust:
-                for trust_role in trust['roles']:
-                    match_roles = [x for x in roles
-                                   if x['id'] == trust_role['id']]
+                # First expand out any roles that were in the trust to include
+                # any implied roles, whether global or domain specific
+                refs = [{'role_id': role['id']} for role in trust['roles']]
+                effective_trust_roles = (
+                    self.assignment_api.add_implied_roles(refs))
+                # Now get the current role assignments for the trustor,
+                # including any domain specific roles.
+                assignment_list = self.assignment_api.list_role_assignments(
+                    user_id=token_user_id,
+                    project_id=token_project_id,
+                    effective=True, strip_domain_roles=False)
+                current_effective_trustor_roles = (
+                    list(set([x['role_id'] for x in assignment_list])))
+                # Go through each of the effective trust roles, making sure the
+                # trustor still has them, if any have been removed, then we
+                # will treat the trust as invalid
+                for trust_role in effective_trust_roles:
+
+                    match_roles = [x for x in current_effective_trustor_roles
+                                   if x == trust_role['role_id']]
                     if match_roles:
-                        filtered_roles.append(match_roles[0])
+                        role = self.role_api.get_role(match_roles[0])
+                        if role['domain_id'] is None:
+                            filtered_roles.append(role)
                     else:
                         raise exception.Forbidden(
                             _('Trustee has no delegated roles.'))
             else:
-                for role in roles:
+                for role in self._get_roles_for_user(token_user_id,
+                                                     token_domain_id,
+                                                     token_project_id):
                     filtered_roles.append({'id': role['id'],
                                            'name': role['name']})
 
@@ -502,6 +554,11 @@ class BaseProvider(provider.Provider):
 
     def issue_v2_token(self, token_ref, roles_ref=None,
                        catalog_ref=None):
+        if token_ref.get('bind') and not self._supports_bind_authentication:
+            msg = _('The configured token provider does not support bind '
+                    'authentication.')
+            raise exception.NotImplemented(message=msg)
+
         metadata_ref = token_ref['metadata']
         trust_ref = None
         if CONF.trust.enabled and metadata_ref and 'trust_id' in metadata_ref:
@@ -660,14 +717,57 @@ class BaseProvider(provider.Provider):
 
             trust_id = token_data['access'].get('trust', {}).get('id')
             if trust_id:
-                # token trust validation
-                self.trust_api.get_trust(trust_id)
+                msg = ('Unable to validate trust-scoped tokens using version '
+                       'v2.0 API.')
+                raise exception.Unauthorized(msg)
 
             return token_data
         except exception.ValidationError:
             LOG.exception(_LE('Failed to validate token'))
             token_id = token_ref['token_data']['access']['token']['id']
             raise exception.TokenNotFound(token_id=token_id)
+
+    def validate_non_persistent_token(self, token_id):
+        try:
+            (user_id, methods, audit_ids, domain_id, project_id, trust_id,
+                federated_info, access_token_id, created_at, expires_at) = (
+                    self.token_formatter.validate_token(token_id))
+        except exception.ValidationError as e:
+            raise exception.TokenNotFound(e)
+
+        token_dict = None
+        trust_ref = None
+        if federated_info:
+            # NOTE(lbragstad): We need to rebuild information about the
+            # federated token as well as the federated token roles. This is
+            # because when we validate a non-persistent token, we don't have a
+            # token reference to pull the federated token information out of.
+            # As a result, we have to extract it from the token itself and
+            # rebuild the federated context. These private methods currently
+            # live in the keystone.token.providers.fernet.Provider() class.
+            token_dict = self._rebuild_federated_info(federated_info, user_id)
+            if project_id or domain_id:
+                self._rebuild_federated_token_roles(token_dict, federated_info,
+                                                    user_id, project_id,
+                                                    domain_id)
+        if trust_id:
+            trust_ref = self.trust_api.get_trust(trust_id)
+
+        access_token = None
+        if access_token_id:
+            access_token = self.oauth_api.get_access_token(access_token_id)
+
+        return self.v3_token_data_helper.get_token_data(
+            user_id,
+            method_names=methods,
+            domain_id=domain_id,
+            project_id=project_id,
+            issued_at=created_at,
+            expires=expires_at,
+            trust=trust_ref,
+            token=token_dict,
+            access_token=access_token,
+            audit_info=audit_ids)
 
     def validate_v3_token(self, token_ref):
         # FIXME(gyee): performance or correctness? Should we return the

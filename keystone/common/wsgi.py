@@ -20,6 +20,7 @@
 
 import copy
 import itertools
+import re
 import wsgiref.util
 
 from oslo_config import cfg
@@ -112,8 +113,10 @@ def validate_token_bind(context, token_ref):
 
 
 def best_match_language(req):
-    """Determines the best available locale from the Accept-Language
-    HTTP header passed in the request.
+    """Determines the best available locale.
+
+    This returns best available locale based on the Accept-Language HTTP
+    header passed in the request.
     """
     if not req.accept_language:
         return None
@@ -207,8 +210,7 @@ class Application(BaseApplication):
 
         context['headers'] = dict(req.headers.items())
         context['path'] = req.environ['PATH_INFO']
-        scheme = (None if not CONF.secure_proxy_ssl_header
-                  else req.environ.get(CONF.secure_proxy_ssl_header))
+        scheme = req.environ.get(CONF.secure_proxy_ssl_header)
         if scheme:
             # NOTE(andrey-mp): "wsgi.url_scheme" contains the protocol used
             # before the proxy removed it ('https' usually). So if
@@ -327,9 +329,7 @@ class Application(BaseApplication):
             self.policy_api.enforce(creds, 'admin_required', {})
 
     def _attribute_is_empty(self, ref, attribute):
-        """Returns true if the attribute in the given ref (which is a
-        dict) is empty or None.
-        """
+        """Determine if the attribute in ref is empty or None."""
         return ref.get(attribute) is None or ref.get(attribute) == ''
 
     def _require_attribute(self, ref, attribute):
@@ -376,13 +376,19 @@ class Application(BaseApplication):
                 itertools.chain(CONF.items(), CONF.eventlet_server.items()))
 
             url = url % substitutions
+        elif 'environment' in context:
+            url = wsgiref.util.application_uri(context['environment'])
+            # remove version from the URL as it may be part of SCRIPT_NAME but
+            # it should not be part of base URL
+            url = re.sub(r'/v(3|(2\.0))/*$', '', url)
+
+            # now remove the standard port
+            url = utils.remove_standard_port(url)
         else:
-            # NOTE(jamielennox): If url is not set via the config file we
-            # should set it relative to the url that the user used to get here
-            # so as not to mess with version discovery. This is not perfect.
-            # host_url omits the path prefix, but there isn't another good
-            # solution that will work for all urls.
-            url = context['host_url']
+            # if we don't have enough information to come up with a base URL,
+            # then fall back to localhost. This should never happen in
+            # production environment.
+            url = 'http://localhost:%d' % CONF.eventlet_server.public_port
 
         return url.rstrip('/')
 
@@ -714,8 +720,8 @@ class V3ExtensionRouter(ExtensionRouter, RoutersBase):
 
         response_data = jsonutils.loads(response.body)
         self._update_version_response(response_data)
-        response.body = jsonutils.dumps(response_data,
-                                        cls=utils.SmarterEncoder)
+        response.body = jsonutils.dump_as_bytes(response_data,
+                                                cls=utils.SmarterEncoder)
         return response
 
 
@@ -728,7 +734,7 @@ def render_response(body=None, status=None, headers=None, method=None):
     headers.append(('Vary', 'X-Auth-Token'))
 
     if body is None:
-        body = ''
+        body = b''
         status = status or (204, 'No Content')
     else:
         content_types = [v for h, v in headers if h == 'Content-Type']
@@ -738,7 +744,7 @@ def render_response(body=None, status=None, headers=None, method=None):
             content_type = None
 
         if content_type is None or content_type in JSON_ENCODE_CONTENT_TYPES:
-            body = jsonutils.dumps(body, cls=utils.SmarterEncoder)
+            body = jsonutils.dump_as_bytes(body, cls=utils.SmarterEncoder)
             if content_type is None:
                 headers.append(('Content-Type', 'application/json'))
         status = status or (200, 'OK')
@@ -812,18 +818,15 @@ def render_exception(error, context=None, request=None, user_locale=None):
     if isinstance(error, exception.AuthPluginException):
         body['error']['identity'] = error.authentication
     elif isinstance(error, exception.Unauthorized):
-        url = CONF.public_endpoint
-        if not url:
-            if request:
-                context = {'host_url': request.host_url}
-            if context:
-                url = Application.base_url(context, 'public')
-            else:
-                url = 'http://localhost:%d' % CONF.eventlet_server.public_port
-        else:
-            substitutions = dict(
-                itertools.chain(CONF.items(), CONF.eventlet_server.items()))
-            url = url % substitutions
+        # NOTE(gyee): we only care about the request environment in the
+        # context. Also, its OK to pass the environemt as it is read-only in
+        # Application.base_url()
+        local_context = {}
+        if request:
+            local_context = {'environment': request.environ}
+        elif context and 'environment' in context:
+            local_context = {'environment': context['environment']}
+        url = Application.base_url(local_context, 'public')
 
         headers.append(('WWW-Authenticate', 'Keystone uri="%s"' % url))
     return render_response(status=(error.code, error.title),

@@ -71,7 +71,43 @@ class Routers(wsgi.RoutersBase):
 
         routers.append(
             router.Router(controllers.RoleV3(), 'roles', 'role',
-                          resource_descriptions=self.v3_resources))
+                          resource_descriptions=self.v3_resources,
+                          method_template='%s_wrapper'))
+
+        implied_roles_controller = controllers.ImpliedRolesV3()
+        self._add_resource(
+            mapper, implied_roles_controller,
+            path='/roles/{prior_role_id}/implies',
+            rel=json_home.build_v3_resource_relation('implied_roles'),
+            get_action='list_implied_roles',
+            status=json_home.Status.EXPERIMENTAL,
+            path_vars={
+                'prior_role_id': json_home.Parameters.ROLE_ID,
+            }
+        )
+
+        self._add_resource(
+            mapper, implied_roles_controller,
+            path='/roles/{prior_role_id}/implies/{implied_role_id}',
+            put_action='create_implied_role',
+            delete_action='delete_implied_role',
+            head_action='check_implied_role',
+            get_action='get_implied_role',
+            rel=json_home.build_v3_resource_relation('implied_role'),
+            status=json_home.Status.EXPERIMENTAL,
+            path_vars={
+                'prior_role_id': json_home.Parameters.ROLE_ID,
+                'implied_role_id': json_home.Parameters.ROLE_ID
+            }
+        )
+        self._add_resource(
+            mapper, implied_roles_controller,
+            path='/role_inferences',
+            get_action='list_role_inference_rules',
+            rel=json_home.build_v3_resource_relation('role_inferences'),
+            status=json_home.Status.EXPERIMENTAL,
+            path_vars={}
+        )
 
         grant_controller = controllers.GrantAssignmentV3()
         self._add_resource(

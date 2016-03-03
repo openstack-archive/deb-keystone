@@ -1,3 +1,4 @@
+# encoding: utf-8
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
@@ -16,6 +17,7 @@ import uuid
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 from oslo_serialization import jsonutils
+import six
 
 from keystone.common import utils as common_utils
 from keystone import exception
@@ -35,6 +37,38 @@ class UtilsTestCase(unit.BaseTestCase):
     def setUp(self):
         super(UtilsTestCase, self).setUp()
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
+
+    def test_resource_uuid(self):
+        uuid_str = '536e28c2017e405e89b25a1ed777b952'
+        self.assertEqual(uuid_str, common_utils.resource_uuid(uuid_str))
+
+        # Exact 64 length string.
+        uuid_str = ('536e28c2017e405e89b25a1ed777b952'
+                    'f13de678ac714bb1b7d1e9a007c10db5')
+        resource_id_namespace = common_utils.RESOURCE_ID_NAMESPACE
+        transformed_id = uuid.uuid5(resource_id_namespace, uuid_str).hex
+        self.assertEqual(transformed_id, common_utils.resource_uuid(uuid_str))
+
+        # Non-ASCII character test.
+        non_ascii_ = 'ß' * 32
+        transformed_id = uuid.uuid5(resource_id_namespace, non_ascii_).hex
+        self.assertEqual(transformed_id,
+                         common_utils.resource_uuid(non_ascii_))
+
+        # This input is invalid because it's length is more than 64.
+        invalid_input = 'x' * 65
+        self.assertRaises(ValueError, common_utils.resource_uuid,
+                          invalid_input)
+
+        # 64 length unicode string, to mimic what is returned from mapping_id
+        # backend.
+        uuid_str = six.text_type('536e28c2017e405e89b25a1ed777b952'
+                                 'f13de678ac714bb1b7d1e9a007c10db5')
+        resource_id_namespace = common_utils.RESOURCE_ID_NAMESPACE
+        if six.PY2:
+            uuid_str = uuid_str.encode('utf-8')
+        transformed_id = uuid.uuid5(resource_id_namespace, uuid_str).hex
+        self.assertEqual(transformed_id, common_utils.resource_uuid(uuid_str))
 
     def test_hash(self):
         password = 'right'

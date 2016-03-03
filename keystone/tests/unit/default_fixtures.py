@@ -24,7 +24,7 @@ TENANTS = [
         'domain_id': DEFAULT_DOMAIN_ID,
         'description': 'description',
         'enabled': True,
-        'parent_id': None,
+        'parent_id': DEFAULT_DOMAIN_ID,
         'is_domain': False,
     }, {
         'id': 'baz',
@@ -32,7 +32,7 @@ TENANTS = [
         'domain_id': DEFAULT_DOMAIN_ID,
         'description': 'description',
         'enabled': True,
-        'parent_id': None,
+        'parent_id': DEFAULT_DOMAIN_ID,
         'is_domain': False,
     }, {
         'id': 'mtu',
@@ -40,7 +40,7 @@ TENANTS = [
         'description': 'description',
         'enabled': True,
         'domain_id': DEFAULT_DOMAIN_ID,
-        'parent_id': None,
+        'parent_id': DEFAULT_DOMAIN_ID,
         'is_domain': False,
     }, {
         'id': 'service',
@@ -48,13 +48,22 @@ TENANTS = [
         'description': 'description',
         'enabled': True,
         'domain_id': DEFAULT_DOMAIN_ID,
-        'parent_id': None,
+        'parent_id': DEFAULT_DOMAIN_ID,
         'is_domain': False,
     }
 ]
 
 # NOTE(ja): a role of keystone_admin is done in setUp
 USERS = [
+    # NOTE(morganfainberg): Admin user for replacing admin_token_auth
+    {
+        'id': 'reqadmin',
+        'name': 'REQ_ADMIN',
+        'domain_id': DEFAULT_DOMAIN_ID,
+        'password': 'password',
+        'tenants': [],
+        'enabled': True
+    },
     {
         'id': 'foo',
         'name': 'FOO',
@@ -96,30 +105,45 @@ ROLES = [
     {
         'id': 'admin',
         'name': 'admin',
+        'domain_id': None,
     }, {
         'id': 'member',
         'name': 'Member',
+        'domain_id': None,
     }, {
         'id': '9fe2ff9ee4384b1894a90878d3e92bab',
         'name': '_member_',
+        'domain_id': None,
     }, {
         'id': 'other',
         'name': 'Other',
+        'domain_id': None,
     }, {
         'id': 'browser',
         'name': 'Browser',
+        'domain_id': None,
     }, {
         'id': 'writer',
         'name': 'Writer',
+        'domain_id': None,
     }, {
         'id': 'service',
         'name': 'Service',
+        'domain_id': None,
     }
 ]
 
+# NOTE(morganfainberg): Admin assignment for replacing admin_token_auth
+ROLE_ASSIGNMENTS = [
+    {
+        'user': 'reqadmin',
+        'tenant_id': 'service',
+        'role_id': 'admin'
+    },
+]
+
 DOMAINS = [{'description':
-            (u'Owns users and tenants (i.e. projects)'
-                ' available on Identity API v2.'),
+            (u'The default domain'),
             'enabled': True,
             'id': DEFAULT_DOMAIN_ID,
             'name': u'Default'}]

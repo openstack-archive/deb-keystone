@@ -88,7 +88,9 @@ class TestTemplatedCatalog(unit.TestCase, test_backend.CatalogTests):
         self.skipTest("Templated backend doesn't have disabled endpoints")
 
     def assert_catalogs_equal(self, expected, observed):
-        for e, o in zip(sorted(expected), sorted(observed)):
+        sort_key = lambda d: d['id']
+        for e, o in zip(sorted(expected, key=sort_key),
+                        sorted(observed, key=sort_key)):
             expected_endpoints = e.pop('endpoints')
             observed_endpoints = o.pop('endpoints')
             self.assertDictEqual(e, o)
@@ -232,11 +234,11 @@ class TestTemplatedCatalog(unit.TestCase, test_backend.CatalogTests):
         self.skipTest(BROKEN_WRITE_FUNCTIONALITY_MSG)
 
     def test_list_endpoints(self):
-        # NOTE(dstanek): a future commit will fix this functionality and
-        # this test
-        expected_ids = set()
+        expected_urls = set(['http://localhost:$(public_port)s/v2.0',
+                             'http://localhost:$(admin_port)s/v2.0',
+                             'http://localhost:8774/v1.1/$(tenant_id)s'])
         endpoints = self.catalog_api.list_endpoints()
-        self.assertEqual(expected_ids, set(e['id'] for e in endpoints))
+        self.assertEqual(expected_urls, set(e['url'] for e in endpoints))
 
     @unit.skip_if_cache_disabled('catalog')
     def test_invalidate_cache_when_updating_endpoint(self):

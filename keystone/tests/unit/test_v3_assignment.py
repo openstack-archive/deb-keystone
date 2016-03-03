@@ -335,6 +335,126 @@ class AssignmentTestCase(test_v3.RestfulTestCase,
                   headers={'x-subject-token': token},
                   expected_status=http_client.NOT_FOUND)
 
+    @unit.skip_if_cache_disabled('assignment')
+    def test_delete_grant_from_user_and_project_invalidate_cache(self):
+        # create a new project
+        new_project = unit.new_project_ref(domain_id=self.domain_id)
+        self.resource_api.create_project(new_project['id'], new_project)
+
+        collection_url = (
+            '/projects/%(project_id)s/users/%(user_id)s/roles' % {
+                'project_id': new_project['id'],
+                'user_id': self.user['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+
+        # create the user a grant on the new project
+        self.put(member_url)
+
+        # check the grant that was just created
+        self.head(member_url)
+        resp = self.get(collection_url)
+        self.assertValidRoleListResponse(resp, ref=self.role,
+                                         resource_url=collection_url)
+
+        # delete the grant
+        self.delete(member_url)
+
+        # get the collection and ensure there are no roles on the project
+        resp = self.get(collection_url)
+        self.assertListEqual(resp.json_body['roles'], [])
+
+    @unit.skip_if_cache_disabled('assignment')
+    def test_delete_grant_from_user_and_domain_invalidates_cache(self):
+        # create a new domain
+        new_domain = unit.new_domain_ref()
+        self.resource_api.create_domain(new_domain['id'], new_domain)
+
+        collection_url = (
+            '/domains/%(domain_id)s/users/%(user_id)s/roles' % {
+                'domain_id': new_domain['id'],
+                'user_id': self.user['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+
+        # create the user a grant on the new domain
+        self.put(member_url)
+
+        # check the grant that was just created
+        self.head(member_url)
+        resp = self.get(collection_url)
+        self.assertValidRoleListResponse(resp, ref=self.role,
+                                         resource_url=collection_url)
+
+        # delete the grant
+        self.delete(member_url)
+
+        # get the collection and ensure there are no roles on the domain
+        resp = self.get(collection_url)
+        self.assertListEqual(resp.json_body['roles'], [])
+
+    @unit.skip_if_cache_disabled('assignment')
+    def test_delete_grant_from_group_and_project_invalidates_cache(self):
+        # create a new project
+        new_project = unit.new_project_ref(domain_id=self.domain_id)
+        self.resource_api.create_project(new_project['id'], new_project)
+
+        collection_url = (
+            '/projects/%(project_id)s/groups/%(group_id)s/roles' % {
+                'project_id': new_project['id'],
+                'group_id': self.group['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+
+        # create the group a grant on the new project
+        self.put(member_url)
+
+        # check the grant that was just created
+        self.head(member_url)
+        resp = self.get(collection_url)
+        self.assertValidRoleListResponse(resp, ref=self.role,
+                                         resource_url=collection_url)
+
+        # delete the grant
+        self.delete(member_url)
+
+        # get the collection and ensure there are no roles on the project
+        resp = self.get(collection_url)
+        self.assertListEqual(resp.json_body['roles'], [])
+
+    @unit.skip_if_cache_disabled('assignment')
+    def test_delete_grant_from_group_and_domain_invalidates_cache(self):
+        # create a new domain
+        new_domain = unit.new_domain_ref()
+        self.resource_api.create_domain(new_domain['id'], new_domain)
+
+        collection_url = (
+            '/domains/%(domain_id)s/groups/%(group_id)s/roles' % {
+                'domain_id': new_domain['id'],
+                'group_id': self.group['id']})
+        member_url = '%(collection_url)s/%(role_id)s' % {
+            'collection_url': collection_url,
+            'role_id': self.role_id}
+
+        # create the group a grant on the new domain
+        self.put(member_url)
+
+        # check the grant that was just created
+        self.head(member_url)
+        resp = self.get(collection_url)
+        self.assertValidRoleListResponse(resp, ref=self.role,
+                                         resource_url=collection_url)
+
+        # delete the grant
+        self.delete(member_url)
+
+        # get the collection and ensure there are no roles on the domain
+        resp = self.get(collection_url)
+        self.assertListEqual(resp.json_body['roles'], [])
+
     # Role Assignments tests
 
     def test_get_role_assignments(self):
@@ -1436,6 +1556,98 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
             inherited_to_projects=True)
         self.assertRoleAssignmentInListResponse(r, up_entity)
 
+    def test_list_role_assignments_include_names(self):
+        """Call ``GET /role_assignments with include names``.
+
+        Test Plan:
+
+        - Create a domain with a group and a user
+        - Create a project with a group and a user
+
+        """
+        role1 = unit.new_role_ref()
+        self.role_api.create_role(role1['id'], role1)
+        user1 = unit.create_user(self.identity_api, domain_id=self.domain_id)
+        group = unit.new_group_ref(domain_id=self.domain_id)
+        group = self.identity_api.create_group(group)
+        project1 = unit.new_project_ref(domain_id=self.domain_id)
+        self.resource_api.create_project(project1['id'], project1)
+
+        expected_entity1 = self.build_role_assignment_entity_include_names(
+            role_ref=role1,
+            project_ref=project1,
+            user_ref=user1)
+        self.put(expected_entity1['links']['assignment'])
+        expected_entity2 = self.build_role_assignment_entity_include_names(
+            role_ref=role1,
+            domain_ref=self.domain,
+            group_ref=group)
+        self.put(expected_entity2['links']['assignment'])
+        expected_entity3 = self.build_role_assignment_entity_include_names(
+            role_ref=role1,
+            domain_ref=self.domain,
+            user_ref=user1)
+        self.put(expected_entity3['links']['assignment'])
+        expected_entity4 = self.build_role_assignment_entity_include_names(
+            role_ref=role1,
+            project_ref=project1,
+            group_ref=group)
+        self.put(expected_entity4['links']['assignment'])
+
+        collection_url_domain = (
+            '/role_assignments?include_names&scope.domain.id=%(domain_id)s' % {
+                'domain_id': self.domain_id})
+        rs_domain = self.get(collection_url_domain)
+        collection_url_project = (
+            '/role_assignments?include_names&'
+            'scope.project.id=%(project_id)s' % {
+                'project_id': project1['id']})
+        rs_project = self.get(collection_url_project)
+        collection_url_group = (
+            '/role_assignments?include_names&group.id=%(group_id)s' % {
+                'group_id': group['id']})
+        rs_group = self.get(collection_url_group)
+        collection_url_user = (
+            '/role_assignments?include_names&user.id=%(user_id)s' % {
+                'user_id': user1['id']})
+        rs_user = self.get(collection_url_user)
+        collection_url_role = (
+            '/role_assignments?include_names&role.id=%(role_id)s' % {
+                'role_id': role1['id']})
+        rs_role = self.get(collection_url_role)
+        # Make sure all entities were created successfully
+        self.assertEqual(rs_domain.status_int, http_client.OK)
+        self.assertEqual(rs_project.status_int, http_client.OK)
+        self.assertEqual(rs_group.status_int, http_client.OK)
+        self.assertEqual(rs_user.status_int, http_client.OK)
+        # Make sure we can get back the correct number of entities
+        self.assertValidRoleAssignmentListResponse(
+            rs_domain,
+            expected_length=2,
+            resource_url=collection_url_domain)
+        self.assertValidRoleAssignmentListResponse(
+            rs_project,
+            expected_length=2,
+            resource_url=collection_url_project)
+        self.assertValidRoleAssignmentListResponse(
+            rs_group,
+            expected_length=2,
+            resource_url=collection_url_group)
+        self.assertValidRoleAssignmentListResponse(
+            rs_user,
+            expected_length=2,
+            resource_url=collection_url_user)
+        self.assertValidRoleAssignmentListResponse(
+            rs_role,
+            expected_length=4,
+            resource_url=collection_url_role)
+        # Verify all types of entities have the correct format
+        self.assertRoleAssignmentInListResponse(rs_domain, expected_entity2)
+        self.assertRoleAssignmentInListResponse(rs_project, expected_entity1)
+        self.assertRoleAssignmentInListResponse(rs_group, expected_entity4)
+        self.assertRoleAssignmentInListResponse(rs_user, expected_entity3)
+        self.assertRoleAssignmentInListResponse(rs_role, expected_entity1)
+
     def test_list_role_assignments_for_disabled_inheritance_extension(self):
         """Call ``GET /role_assignments with inherited domain grants``.
 
@@ -2174,3 +2386,376 @@ class AssignmentInheritanceDisabledTestCase(test_v3.RestfulTestCase):
         self.head(member_url, expected_status=http_client.NOT_FOUND)
         self.get(collection_url, expected_status=http_client.NOT_FOUND)
         self.delete(member_url, expected_status=http_client.NOT_FOUND)
+
+
+class ImpliedRolesTests(test_v3.RestfulTestCase, test_v3.AssignmentTestMixin,
+                        unit.TestCase):
+    def _create_role(self):
+        """Call ``POST /roles``."""
+        ref = unit.new_role_ref()
+        r = self.post('/roles', body={'role': ref})
+        return self.assertValidRoleResponse(r, ref)
+
+    def test_list_implied_roles_none(self):
+        self.prior = self._create_role()
+        url = '/roles/%s/implies' % (self.prior['id'])
+        response = self.get(url).json["role_inference"]
+        self.assertEqual(self.prior['id'], response['prior_role']['id'])
+        self.assertEqual(0, len(response['implies']))
+
+    def _create_implied_role(self, prior, implied):
+        self.put('/roles/%s/implies/%s' % (prior['id'], implied['id']),
+                 expected_status=http_client.CREATED)
+
+    def _delete_implied_role(self, prior, implied):
+        self.delete('/roles/%s/implies/%s' % (prior['id'], implied['id']))
+
+    def _setup_prior_two_implied(self):
+        self.prior = self._create_role()
+        self.implied1 = self._create_role()
+        self._create_implied_role(self.prior, self.implied1)
+        self.implied2 = self._create_role()
+        self._create_implied_role(self.prior, self.implied2)
+
+    def _assert_expected_implied_role_response(
+            self, expected_prior_id, expected_implied_ids):
+        r = self.get('/roles/%s/implies' % expected_prior_id)
+        response = r.json["role_inference"]
+        self.assertEqual(expected_prior_id, response['prior_role']['id'])
+
+        actual_implied_ids = [implied['id'] for implied in response['implies']]
+
+        for expected_id in expected_implied_ids:
+            self.assertIn(expected_id, actual_implied_ids)
+        self.assertEqual(len(expected_implied_ids), len(response['implies']))
+
+        self.assertIsNotNone(response['prior_role']['links']['self'])
+        for implied in response['implies']:
+            self.assertIsNotNone(implied['links']['self'])
+
+    def _assert_two_roles_implied(self):
+        self._assert_expected_implied_role_response(
+            self.prior['id'], [self.implied1['id'], self.implied2['id']])
+
+    def _assert_one_role_implied(self):
+        self._assert_expected_implied_role_response(
+            self.prior['id'], [self.implied1['id']])
+
+        self.get('/roles/%s/implies/%s' %
+                 (self.prior['id'], self.implied2['id']),
+                 expected_status=http_client.NOT_FOUND)
+
+    def _assert_two_rules_defined(self):
+        r = self.get('/role_inferences/')
+
+        rules = r.result['role_inferences']
+
+        self.assertEqual(self.prior['id'], rules[0]['prior_role']['id'])
+        self.assertEqual(2, len(rules[0]['implies']))
+        implied_ids = [implied['id'] for implied in rules[0]['implies']]
+        implied_names = [implied['name'] for implied in rules[0]['implies']]
+
+        self.assertIn(self.implied1['id'], implied_ids)
+        self.assertIn(self.implied2['id'], implied_ids)
+        self.assertIn(self.implied1['name'], implied_names)
+        self.assertIn(self.implied2['name'], implied_names)
+
+    def _assert_one_rule_defined(self):
+        r = self.get('/role_inferences/')
+        rules = r.result['role_inferences']
+        self.assertEqual(self.prior['id'], rules[0]['prior_role']['id'])
+        self.assertEqual(self.implied1['id'], rules[0]['implies'][0]['id'])
+        self.assertEqual(self.implied1['name'], rules[0]['implies'][0]['name'])
+        self.assertEqual(1, len(rules[0]['implies']))
+
+    def test_list_all_rules(self):
+        self._setup_prior_two_implied()
+        self._assert_two_rules_defined()
+
+        self._delete_implied_role(self.prior, self.implied2)
+        self._assert_one_rule_defined()
+
+    def test_CRD_implied_roles(self):
+
+        self._setup_prior_two_implied()
+        self._assert_two_roles_implied()
+
+        self._delete_implied_role(self.prior, self.implied2)
+        self._assert_one_role_implied()
+
+    def _create_three_roles(self):
+        self.role_list = []
+        for _ in range(3):
+            role = unit.new_role_ref()
+            self.role_api.create_role(role['id'], role)
+            self.role_list.append(role)
+
+    def _create_test_domain_user_project(self):
+        domain = unit.new_domain_ref()
+        self.resource_api.create_domain(domain['id'], domain)
+        user = unit.create_user(self.identity_api, domain_id=domain['id'])
+        project = unit.new_project_ref(domain_id=domain['id'])
+        self.resource_api.create_project(project['id'], project)
+        return domain, user, project
+
+    def _assign_top_role_to_user_on_project(self, user, project):
+        self.assignment_api.add_role_to_user_and_project(
+            user['id'], project['id'], self.role_list[0]['id'])
+
+    def _build_effective_role_assignments_url(self, user):
+        return '/role_assignments?effective&user.id=%(user_id)s' % {
+            'user_id': user['id']}
+
+    def _assert_all_roles_in_assignment(self, response, user):
+        # Now use the list role assignments api to check that all three roles
+        # appear in the collection
+        self.assertValidRoleAssignmentListResponse(
+            response,
+            expected_length=len(self.role_list),
+            resource_url=self._build_effective_role_assignments_url(user))
+
+    def _assert_initial_assignment_in_effective(self, response, user, project):
+        # The initial assignment should be there (the link url will be
+        # generated and checked automatically since it matches the assignment)
+        entity = self.build_role_assignment_entity(
+            project_id=project['id'],
+            user_id=user['id'], role_id=self.role_list[0]['id'])
+        self.assertRoleAssignmentInListResponse(response, entity)
+
+    def _assert_effective_role_for_implied_has_prior_in_links(
+            self, response, user, project, prior_index, implied_index):
+        # An effective role for an implied role will have the prior role
+        # assignment in the links
+        prior_link = '/prior_roles/%(prior)s/implies/%(implied)s' % {
+            'prior': self.role_list[prior_index]['id'],
+            'implied': self.role_list[implied_index]['id']}
+        link = self.build_role_assignment_link(
+            project_id=project['id'], user_id=user['id'],
+            role_id=self.role_list[prior_index]['id'])
+        entity = self.build_role_assignment_entity(
+            link=link, project_id=project['id'],
+            user_id=user['id'], role_id=self.role_list[implied_index]['id'],
+            prior_link=prior_link)
+        self.assertRoleAssignmentInListResponse(response, entity)
+
+    def test_list_role_assignments_with_implied_roles(self):
+        """Call ``GET /role_assignments`` with implied role grant.
+
+        Test Plan:
+
+        - Create a domain with a user and a project
+        - Create 3 roles
+        - Role 0 implies role 1 and role 1 implies role 2
+        - Assign the top role to the project
+        - Issue the URL to check effective roles on project - this
+          should return all 3 roles.
+        - Check the links of the 3 roles indicate the prior role where
+          appropriate
+
+        """
+        (domain, user, project) = self._create_test_domain_user_project()
+        self._create_three_roles()
+        self._create_implied_role(self.role_list[0], self.role_list[1])
+        self._create_implied_role(self.role_list[1], self.role_list[2])
+        self._assign_top_role_to_user_on_project(user, project)
+
+        response = self.get(self._build_effective_role_assignments_url(user))
+        r = response
+
+        self._assert_all_roles_in_assignment(r, user)
+        self._assert_initial_assignment_in_effective(response, user, project)
+        self._assert_effective_role_for_implied_has_prior_in_links(
+            response, user, project, 0, 1)
+        self._assert_effective_role_for_implied_has_prior_in_links(
+            response, user, project, 1, 2)
+
+    def _create_named_role(self, name):
+        role = unit.new_role_ref()
+        role['name'] = name
+        self.role_api.create_role(role['id'], role)
+        return role
+
+    def test_root_role_as_implied_role_forbidden(self):
+        """Test root role is forbidden to be set as an implied role.
+
+        Create 2 roles that are prohibited from being an implied role.
+        Create 1 additional role which should be accepted as an implied
+        role. Assure the prohibited role names cannot be set as an implied
+        role. Assure the accepted role name which is not a member of the
+        prohibited implied role list can be successfully set an implied
+        role.
+        """
+        prohibited_name1 = 'root1'
+        prohibited_name2 = 'root2'
+        accepted_name1 = 'implied1'
+
+        prohibited_names = [prohibited_name1, prohibited_name2]
+        self.config_fixture.config(group='assignment',
+                                   prohibited_implied_role=prohibited_names)
+
+        prior_role = self._create_role()
+
+        prohibited_role1 = self._create_named_role(prohibited_name1)
+        url = '/roles/{prior_role_id}/implies/{implied_role_id}'.format(
+            prior_role_id=prior_role['id'],
+            implied_role_id=prohibited_role1['id'])
+        self.put(url, expected_status=http_client.FORBIDDEN)
+
+        prohibited_role2 = self._create_named_role(prohibited_name2)
+        url = '/roles/{prior_role_id}/implies/{implied_role_id}'.format(
+            prior_role_id=prior_role['id'],
+            implied_role_id=prohibited_role2['id'])
+        self.put(url, expected_status=http_client.FORBIDDEN)
+
+        accepted_role1 = self._create_named_role(accepted_name1)
+        url = '/roles/{prior_role_id}/implies/{implied_role_id}'.format(
+            prior_role_id=prior_role['id'],
+            implied_role_id=accepted_role1['id'])
+        self.put(url, expected_status=http_client.CREATED)
+
+    def test_trusts_from_implied_role(self):
+        self._create_three_roles()
+        self._create_implied_role(self.role_list[0], self.role_list[1])
+        self._create_implied_role(self.role_list[1], self.role_list[2])
+        self._assign_top_role_to_user_on_project(self.user, self.project)
+
+        # Create a trustee and assign the prior role to her
+        trustee = unit.create_user(self.identity_api, domain_id=self.domain_id)
+        ref = unit.new_trust_ref(
+            trustor_user_id=self.user['id'],
+            trustee_user_id=trustee['id'],
+            project_id=self.project['id'],
+            role_ids=[self.role_list[0]['id']])
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = r.result['trust']
+
+        # Only the role that was specified is in the trust, NOT implied roles
+        self.assertEqual(self.role_list[0]['id'], trust['roles'][0]['id'])
+        self.assertThat(trust['roles'], matchers.HasLength(1))
+
+        # Authenticate as the trustee
+        auth_data = self.build_authentication_request(
+            user_id=trustee['id'],
+            password=trustee['password'],
+            trust_id=trust['id'])
+        r = self.v3_create_token(auth_data)
+        token = r.result['token']
+        self.assertThat(token['roles'],
+                        matchers.HasLength(len(self.role_list)))
+        for role in token['roles']:
+            self.assertIn(role, self.role_list)
+        for role in self.role_list:
+            self.assertIn(role, token['roles'])
+
+    def test_trusts_from_domain_specific_implied_role(self):
+        self._create_three_roles()
+        # Overwrite the first role with a domain specific role
+        role = unit.new_role_ref(domain_id=self.domain_id)
+        self.role_list[0] = self.role_api.create_role(role['id'], role)
+        self._create_implied_role(self.role_list[0], self.role_list[1])
+        self._create_implied_role(self.role_list[1], self.role_list[2])
+        self._assign_top_role_to_user_on_project(self.user, self.project)
+
+        # Create a trustee and assign the prior role to her
+        trustee = unit.create_user(self.identity_api, domain_id=self.domain_id)
+        ref = unit.new_trust_ref(
+            trustor_user_id=self.user['id'],
+            trustee_user_id=trustee['id'],
+            project_id=self.project['id'],
+            role_ids=[self.role_list[0]['id']])
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = r.result['trust']
+
+        # Only the role that was specified is in the trust, NOT implied roles
+        self.assertEqual(self.role_list[0]['id'], trust['roles'][0]['id'])
+        self.assertThat(trust['roles'], matchers.HasLength(1))
+
+        # Authenticate as the trustee
+        auth_data = self.build_authentication_request(
+            user_id=trustee['id'],
+            password=trustee['password'],
+            trust_id=trust['id'])
+        r = self.v3_create_token(auth_data)
+        token = r.result['token']
+
+        # The token should have the roles implies by the domain specific role,
+        # but not the domain specific role itself.
+        self.assertThat(token['roles'],
+                        matchers.HasLength(len(self.role_list) - 1))
+        for role in token['roles']:
+            self.assertIn(role, self.role_list)
+        for role in [self.role_list[1], self.role_list[2]]:
+            self.assertIn(role, token['roles'])
+        self.assertNotIn(self.role_list[0], token['roles'])
+
+
+class DomainSpecificRoleTests(test_v3.RestfulTestCase, unit.TestCase):
+    def setUp(self):
+        def create_role(domain_id=None):
+            """Call ``POST /roles``."""
+            ref = unit.new_role_ref(domain_id=domain_id)
+            r = self.post(
+                '/roles',
+                body={'role': ref})
+            return self.assertValidRoleResponse(r, ref)
+
+        super(DomainSpecificRoleTests, self).setUp()
+        self.domainA = unit.new_domain_ref()
+        self.resource_api.create_domain(self.domainA['id'], self.domainA)
+        self.domainB = unit.new_domain_ref()
+        self.resource_api.create_domain(self.domainB['id'], self.domainB)
+
+        self.global_role1 = create_role()
+        self.global_role2 = create_role()
+        # Since there maybe other global roles already created, let's count
+        # them, so we can ensure we can check subsequent list responses
+        # are correct
+        r = self.get('/roles')
+        self.existing_global_roles = len(r.result['roles'])
+
+        # And now create some domain specific roles
+        self.domainA_role1 = create_role(domain_id=self.domainA['id'])
+        self.domainA_role2 = create_role(domain_id=self.domainA['id'])
+        self.domainB_role = create_role(domain_id=self.domainB['id'])
+
+    def test_get_and_list_domain_specific_roles(self):
+        # Check we can get a domain specific role
+        r = self.get('/roles/%s' % self.domainA_role1['id'])
+        self.assertValidRoleResponse(r, self.domainA_role1)
+
+        # If we list without specifying a domain, we should only get global
+        # roles back.
+        r = self.get('/roles')
+        self.assertValidRoleListResponse(
+            r, expected_length=self.existing_global_roles)
+        self.assertRoleInListResponse(r, self.global_role1)
+        self.assertRoleInListResponse(r, self.global_role2)
+        self.assertRoleNotInListResponse(r, self.domainA_role1)
+        self.assertRoleNotInListResponse(r, self.domainA_role2)
+        self.assertRoleNotInListResponse(r, self.domainB_role)
+
+        # Now list those in domainA, making sure that's all we get back
+        r = self.get('/roles?domain_id=%s' % self.domainA['id'])
+        self.assertValidRoleListResponse(r, expected_length=2)
+        self.assertRoleInListResponse(r, self.domainA_role1)
+        self.assertRoleInListResponse(r, self.domainA_role2)
+
+    def test_update_domain_specific_roles(self):
+        self.domainA_role1['name'] = uuid.uuid4().hex
+        self.patch('/roles/%(role_id)s' % {
+            'role_id': self.domainA_role1['id']},
+            body={'role': self.domainA_role1})
+        r = self.get('/roles/%s' % self.domainA_role1['id'])
+        self.assertValidRoleResponse(r, self.domainA_role1)
+
+    def test_delete_domain_specific_roles(self):
+        # Check delete only removes that one domain role
+        self.delete('/roles/%(role_id)s' % {
+            'role_id': self.domainA_role1['id']})
+
+        self.get('/roles/%s' % self.domainA_role1['id'],
+                 expected_status=http_client.NOT_FOUND)
+        # Now re-list those in domainA, making sure there's only one left
+        r = self.get('/roles?domain_id=%s' % self.domainA['id'])
+        self.assertValidRoleListResponse(r, expected_length=1)
+        self.assertRoleInListResponse(r, self.domainA_role2)

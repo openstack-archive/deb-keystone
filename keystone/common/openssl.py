@@ -65,9 +65,10 @@ class BaseCertificateConfigure(object):
         try:
             # OpenSSL 1.0 and newer support default_md = default,
             # older versions do not
-            openssl_ver = environment.subprocess.check_output(
+            openssl_ver = environment.subprocess.check_output(  # the arguments
+                # are hardcoded and just check the openssl version
                 ['openssl', 'version'])
-            if "OpenSSL 0." in openssl_ver:
+            if b'OpenSSL 0.' in openssl_ver:
                 self.ssl_dictionary['default_md'] = 'sha1'
         except environment.subprocess.CalledProcessError:
             LOG.warning(_LW('Failed to invoke ``openssl version``, '
@@ -80,7 +81,9 @@ class BaseCertificateConfigure(object):
         try:
             # NOTE(shaleh): use check_output instead of the simpler
             # `check_call()` in order to log any output from an error.
-            environment.subprocess.check_output(
+            environment.subprocess.check_output(  # the arguments being passed
+                # in are defined in this file and trusted to build CAs, keys
+                # and certs
                 to_exec,
                 stderr=environment.subprocess.STDOUT)
         except environment.subprocess.CalledProcessError as e:

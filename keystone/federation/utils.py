@@ -42,7 +42,52 @@ MAPPING_SCHEMA = {
                 "additionalProperties": False,
                 "properties": {
                     "local": {
-                        "type": "array"
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "user": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "email": {"type": "string"},
+                                        "domain": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"}
+                                            },
+                                            "additionalProperties": False,
+                                        }
+                                    },
+                                    "additionalProperties": False
+                                },
+                                "group": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"}
+                                    },
+                                    "additionalProperties": False,
+                                },
+                                "groups": {
+                                    "type": "string"
+                                },
+                                "group_ids": {
+                                    "type": "string"
+                                },
+                                "domain": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"}
+                                    },
+                                    "additionalProperties": False
+                                }
+                            }
+                        }
                     },
                     "remote": {
                         "minItems": 1,
@@ -357,8 +402,14 @@ def get_assertion_params_from_env(context):
     LOG.debug('Environment variables: %s', context['environment'])
     prefix = CONF.federation.assertion_prefix
     for k, v in list(context['environment'].items()):
-        if k.startswith(prefix):
-            yield (k, v)
+        if not k.startswith(prefix):
+            continue
+        # These bytes may be decodable as ISO-8859-1 according to Section
+        # 3.2.4 of RFC 7230. Let's assume that our web server plugins are
+        # correctly encoding the data.
+        if not isinstance(v, six.text_type) and getattr(v, 'decode', False):
+            v = v.decode('ISO-8859-1')
+        yield (k, v)
 
 
 class UserType(object):
@@ -379,20 +430,25 @@ class RuleProcessor(object):
         BLACKLIST = 'blacklist'
         WHITELIST = 'whitelist'
 
-    def __init__(self, rules):
+    def __init__(self, mapping_id, rules):
         """Initialize RuleProcessor.
 
         Example rules can be found at:
         :class:`keystone.tests.mapping_fixtures`
 
+        :param mapping_id: id for the mapping
+        :type mapping_id: string
         :param rules: rules from a mapping
         :type rules: dict
 
         """
+        self.mapping_id = mapping_id
         self.rules = rules
 
     def process(self, assertion_data):
-        """Transform assertion to a dictionary of user name and group ids
+        """Transform assertion to a dictionary.
+
+        The dictionary contains mapping of user name and group ids
         based on mapping rules.
 
         This function will iterate through the mapping rules to find
@@ -614,6 +670,9 @@ class RuleProcessor(object):
 
             {'user': {'name': 'Bob Thompson', 'email': 'bob@example.org'}}
 
+        :raises keystone.exception.DirectMappingError: when referring to a
+            remote match from a local section of a rule
+
         """
         LOG.debug('direct_maps: %s', direct_maps)
         LOG.debug('local: %s', local)
@@ -622,13 +681,17 @@ class RuleProcessor(object):
             if isinstance(v, dict):
                 new_value = self._update_local_mapping(v, direct_maps)
             else:
-                new_value = v.format(*direct_maps)
+                try:
+                    new_value = v.format(*direct_maps)
+                except IndexError:
+                    raise exception.DirectMappingError(
+                        mapping_id=self.mapping_id)
+
             new[k] = new_value
         return new
 
     def _verify_all_requirements(self, requirements, assertion):
-        """Go through the remote requirements of a rule, and compare against
-        the assertion.
+        """Compare remote requirements of a rule against the assertion.
 
         If a value of ``None`` is returned, the rule with this assertion
         doesn't apply.

@@ -30,6 +30,41 @@ from keystone.tests.unit import test_v3
 CONF = cfg.CONF
 
 
+# NOTE(morganfainberg): To be removed when admin_token_auth middleware is
+# removed. This was moved to it's own testcase so it can setup the
+# admin_token_auth pipeline without impacting other tests.
+class IdentityTestCaseStaticAdminToken(test_v3.RestfulTestCase):
+    EXTENSION_TO_ADD = 'admin_token_auth'
+
+    def config_overrides(self):
+        super(IdentityTestCaseStaticAdminToken, self).config_overrides()
+        self.config_fixture.config(
+            admin_token='ADMIN')
+
+    def test_list_users_with_static_admin_token_and_multiple_backends(self):
+        # domain-specific operations with the bootstrap ADMIN token is
+        # disallowed when domain-specific drivers are enabled
+        self.config_fixture.config(group='identity',
+                                   domain_specific_drivers_enabled=True)
+        self.get('/users', token=CONF.admin_token,
+                 expected_status=exception.Unauthorized.code)
+
+    def test_create_user_with_admin_token_and_no_domain(self):
+        """Call ``POST /users`` with admin token but no domain id.
+
+        It should not be possible to use the admin token to create a user
+        while not explicitly passing the domain in the request body.
+
+        """
+        # Passing a valid domain id to new_user_ref() since domain_id is
+        # not an optional parameter.
+        ref = unit.new_user_ref(domain_id=self.domain_id)
+        # Delete the domain id before sending the request.
+        del ref['domain_id']
+        self.post('/users', body={'user': ref}, token=CONF.admin_token,
+                  expected_status=http_client.BAD_REQUEST)
+
+
 class IdentityTestCase(test_v3.RestfulTestCase):
     """Test users and groups."""
 
@@ -109,23 +144,75 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_create_user_with_admin_token_and_domain(self):
         """Call ``POST /users`` with admin token and domain id."""
         ref = unit.new_user_ref(domain_id=self.domain_id)
-        self.post('/users', body={'user': ref}, token=CONF.admin_token,
+        self.post('/users', body={'user': ref}, token=self.get_admin_token(),
                   expected_status=http_client.CREATED)
 
-    def test_create_user_with_admin_token_and_no_domain(self):
-        """Call ``POST /users`` with admin token but no domain id.
+    def test_user_management_normalized_keys(self):
+        """Illustrate the inconsistent handling of hyphens in keys.
 
-        It should not be possible to use the admin token to create a user
-        while not explicitly passing the domain in the request body.
+        To quote Morgan in bug 1526244:
+
+            the reason this is converted from "domain-id" to "domain_id" is
+            because of how we process/normalize data. The way we have to handle
+            specific data types for known columns requires avoiding "-" in the
+            actual python code since "-" is not valid for attributes in python
+            w/o significant use of "getattr" etc.
+
+            In short, historically we handle some things in conversions. The
+            use of "extras" has long been a poor design choice that leads to
+            odd/strange inconsistent behaviors because of other choices made in
+            handling data from within the body. (In many cases we convert from
+            "-" to "_" throughout openstack)
+
+        Source: https://bugs.launchpad.net/keystone/+bug/1526244/comments/9
 
         """
-        # Passing a valid domain id to new_user_ref() since domain_id is
-        # not an optional parameter.
-        ref = unit.new_user_ref(domain_id=self.domain_id)
-        # Delete the domain id before sending the request.
-        del ref['domain_id']
-        self.post('/users', body={'user': ref}, token=CONF.admin_token,
-                  expected_status=http_client.BAD_REQUEST)
+        # Create two domains to work with.
+        domain1 = unit.new_domain_ref()
+        self.resource_api.create_domain(domain1['id'], domain1)
+        domain2 = unit.new_domain_ref()
+        self.resource_api.create_domain(domain2['id'], domain2)
+
+        # We can successfully create a normal user without any surprises.
+        user = unit.new_user_ref(domain_id=domain1['id'])
+        r = self.post(
+            '/users',
+            body={'user': user})
+        self.assertValidUserResponse(r, user)
+        user['id'] = r.json['user']['id']
+
+        # Query strings are not normalized: so we get all users back (like
+        # self.user), not just the ones in the specified domain.
+        r = self.get(
+            '/users?domain-id=%s' % domain1['id'])
+        self.assertValidUserListResponse(r, ref=self.user)
+        self.assertNotEqual(domain1['id'], self.user['domain_id'])
+
+        # When creating a new user, if we move the 'domain_id' into the
+        # 'domain-id' attribute, the server will normalize the request
+        # attribute, and effectively "move it back" for us.
+        user = unit.new_user_ref(domain_id=domain1['id'])
+        user['domain-id'] = user.pop('domain_id')
+        r = self.post(
+            '/users',
+            body={'user': user})
+        self.assertNotIn('domain-id', r.json['user'])
+        self.assertEqual(domain1['id'], r.json['user']['domain_id'])
+        # (move this attribute back so we can use assertValidUserResponse)
+        user['domain_id'] = user.pop('domain-id')
+        self.assertValidUserResponse(r, user)
+        user['id'] = r.json['user']['id']
+
+        # If we try updating the user's 'domain_id' by specifying a
+        # 'domain-id', then it'll be stored into extras rather than normalized,
+        # and the user's actual 'domain_id' is not affected.
+        r = self.patch(
+            '/users/%s' % user['id'],
+            body={'user': {'domain-id': domain2['id']}})
+        self.assertEqual(domain2['id'], r.json['user']['domain-id'])
+        self.assertEqual(user['domain_id'], r.json['user']['domain_id'])
+        self.assertNotEqual(domain2['id'], user['domain_id'])
+        self.assertValidUserResponse(r, user)
 
     def test_create_user_bad_request(self):
         """Call ``POST /users``."""
@@ -149,26 +236,42 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.config_fixture.config(group='identity',
                                    domain_specific_drivers_enabled=True)
 
-        # Create a user with a role on the domain so we can get a
-        # domain scoped token
+        # Create a new domain with a new project and user
         domain = unit.new_domain_ref()
         self.resource_api.create_domain(domain['id'], domain)
+
+        project = unit.new_project_ref(domain_id=domain['id'])
+        self.resource_api.create_project(project['id'], project)
+
         user = unit.create_user(self.identity_api, domain_id=domain['id'])
+
+        # Create both project and domain role grants for the user so we
+        # can get both project and domain scoped tokens
         self.assignment_api.create_grant(
             role_id=self.role_id, user_id=user['id'],
             domain_id=domain['id'])
+        self.assignment_api.create_grant(
+            role_id=self.role_id, user_id=user['id'],
+            project_id=project['id'])
 
-        ref = unit.new_user_ref(domain_id=domain['id'])
-        ref_nd = ref.copy()
-        ref_nd.pop('domain_id')
-        auth = self.build_authentication_request(
+        dom_auth = self.build_authentication_request(
             user_id=user['id'],
             password=user['password'],
             domain_id=domain['id'])
+        project_auth = self.build_authentication_request(
+            user_id=user['id'],
+            password=user['password'],
+            project_id=project['id'])
 
         # First try using a domain scoped token
         resource_url = '/users'
-        r = self.get(resource_url, auth=auth)
+        r = self.get(resource_url, auth=dom_auth)
+        self.assertValidUserListResponse(r, ref=user,
+                                         resource_url=resource_url)
+
+        # Now try using a project scoped token
+        resource_url = '/users'
+        r = self.get(resource_url, auth=project_auth)
         self.assertValidUserListResponse(r, ref=user,
                                          resource_url=resource_url)
 
@@ -178,18 +281,6 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get(resource_url)
         self.assertValidUserListResponse(r, ref=user,
                                          resource_url=resource_url)
-
-        # Now try the same thing without a domain token or filter,
-        # which should fail
-        r = self.get('/users', expected_status=exception.Unauthorized.code)
-
-    def test_list_users_with_static_admin_token_and_multiple_backends(self):
-        # domain-specific operations with the bootstrap ADMIN token is
-        # disallowed when domain-specific drivers are enabled
-        self.config_fixture.config(group='identity',
-                                   domain_specific_drivers_enabled=True)
-        self.get('/users', token=CONF.admin_token,
-                 expected_status=exception.Unauthorized.code)
 
     def test_list_users_no_default_project(self):
         """Call ``GET /users`` making sure no default_project_id."""
@@ -391,6 +482,22 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # But the credential for user2 is unaffected
         r = self.credential_api.get_credential(credential2['id'])
         self.assertDictEqual(credential2, r)
+
+    # shadow user tests
+    def test_shadow_federated_user(self):
+        fed_user = unit.new_federated_user_ref()
+        user = (
+            self.identity_api.shadow_federated_user(fed_user["idp_id"],
+                                                    fed_user["protocol_id"],
+                                                    fed_user["unique_id"],
+                                                    fed_user["display_name"])
+        )
+        self.assertIsNotNone(user["id"])
+        self.assertEqual(len(user.keys()), 4)
+        self.assertIsNotNone(user['id'])
+        self.assertIsNotNone(user['name'])
+        self.assertIsNone(user['domain_id'])
+        self.assertEqual(user['enabled'], True)
 
     # group crud tests
 

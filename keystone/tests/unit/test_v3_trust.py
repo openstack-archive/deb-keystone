@@ -13,13 +13,10 @@
 import datetime
 import uuid
 
-from oslo_config import cfg
 from six.moves import http_client
 
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
-
-CONF = cfg.CONF
 
 
 class TestTrustOperations(test_v3.RestfulTestCase):
@@ -106,7 +103,7 @@ class TestTrustOperations(test_v3.RestfulTestCase):
             role_ids=[self.role_id])
         for i in range(3):
             ref['expires_at'] = datetime.datetime.utcnow().replace(
-                year=2031).strftime(unit.TIME_FORMAT)
+                year=2032).strftime(unit.TIME_FORMAT)
             r = self.post('/OS-TRUST/trusts', body={'trust': ref})
             self.assertValidTrustResponse(r, ref)
 
@@ -261,14 +258,14 @@ class TestTrustOperations(test_v3.RestfulTestCase):
             password=self.default_domain_user['password'],
             trust_id=trust['id'])
         r = self.v3_create_token(auth_data)
-        self.assertValidProjectTrustScopedTokenResponse(
+        self.assertValidProjectScopedTokenResponse(
             r, self.default_domain_user)
         token = r.headers.get('X-Subject-Token')
 
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token=CONF.admin_token,
+            path=path, token=self.get_admin_token(),
             method='GET', expected_status=http_client.UNAUTHORIZED)
 
     def test_v3_v2_intermix_trustor_not_in_default_domain_failed(self):
@@ -296,14 +293,14 @@ class TestTrustOperations(test_v3.RestfulTestCase):
             password=self.trustee_user['password'],
             trust_id=trust['id'])
         r = self.v3_create_token(auth_data)
-        self.assertValidProjectTrustScopedTokenResponse(
+        self.assertValidProjectScopedTokenResponse(
             r, self.trustee_user)
         token = r.headers.get('X-Subject-Token')
 
         # now validate the v3 token with v2 API
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token=CONF.admin_token,
+            path=path, token=self.get_admin_token(),
             method='GET', expected_status=http_client.UNAUTHORIZED)
 
     def test_v3_v2_intermix_project_not_in_default_domain_failed(self):
@@ -337,13 +334,13 @@ class TestTrustOperations(test_v3.RestfulTestCase):
             password=trustee_user['password'],
             trust_id=trust['id'])
         r = self.v3_create_token(auth_data)
-        self.assertValidProjectTrustScopedTokenResponse(r, trustee_user)
+        self.assertValidProjectScopedTokenResponse(r, trustee_user)
         token = r.headers.get('X-Subject-Token')
 
         # ensure the token is invalid against v2
         path = '/v2.0/tokens/%s' % (token)
         self.admin_request(
-            path=path, token=CONF.admin_token,
+            path=path, token=self.get_admin_token(),
             method='GET', expected_status=http_client.UNAUTHORIZED)
 
     def test_exercise_trust_scoped_token_without_impersonation(self):
@@ -366,8 +363,8 @@ class TestTrustOperations(test_v3.RestfulTestCase):
         resp = self.v3_create_token(auth_data)
         resp_body = resp.json_body['token']
 
-        self.assertValidProjectTrustScopedTokenResponse(resp,
-                                                        self.trustee_user)
+        self.assertValidProjectScopedTokenResponse(resp,
+                                                   self.trustee_user)
         self.assertEqual(self.trustee_user['id'], resp_body['user']['id'])
         self.assertEqual(self.trustee_user['name'], resp_body['user']['name'])
         self.assertEqual(self.domain['id'], resp_body['user']['domain']['id'])
@@ -396,7 +393,7 @@ class TestTrustOperations(test_v3.RestfulTestCase):
         resp = self.v3_create_token(auth_data)
         resp_body = resp.json_body['token']
 
-        self.assertValidProjectTrustScopedTokenResponse(resp, self.user)
+        self.assertValidProjectScopedTokenResponse(resp, self.user)
         self.assertEqual(self.user['id'], resp_body['user']['id'])
         self.assertEqual(self.user['name'], resp_body['user']['name'])
         self.assertEqual(self.domain['id'], resp_body['user']['domain']['id'])

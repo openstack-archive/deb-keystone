@@ -25,6 +25,7 @@ from keystone.credential import schema as credential_schema
 from keystone import exception
 from keystone.federation import schema as federation_schema
 from keystone.identity import schema as identity_schema
+from keystone.oauth1 import schema as oauth1_schema
 from keystone.policy import schema as policy_schema
 from keystone.resource import schema as resource_schema
 from keystone.tests import unit
@@ -66,6 +67,12 @@ entity_create = {
     'additionalProperties': True,
 }
 
+entity_create_optional_body = {
+    'type': 'object',
+    'properties': _entity_properties,
+    'additionalProperties': True,
+}
+
 entity_update = {
     'type': 'object',
     'properties': _entity_properties,
@@ -76,6 +83,8 @@ entity_update = {
 _VALID_ENABLED_FORMATS = [True, False]
 
 _INVALID_ENABLED_FORMATS = ['some string', 1, 0, 'True', 'False']
+
+_INVALID_DESC_FORMATS = [False, 1, 2.0]
 
 _VALID_URLS = ['https://example.com', 'http://EXAMPLE.com/v3',
                'http://localhost', 'http://127.0.0.1:5000',
@@ -98,6 +107,17 @@ _VALID_FILTERS = [{'interface': 'admin'},
 _INVALID_FILTERS = ['some string', 1, 0, True, False]
 
 
+def expected_validation_failure(msg):
+    def wrapper(f):
+        def wrapped(self, *args, **kwargs):
+            args = (self,) + args
+            e = self.assertRaises(exception.ValidationError, f,
+                                  *args, **kwargs)
+            self.assertIn(msg, six.text_type(e))
+        return wrapped
+    return wrapper
+
+
 class ValidatedDecoratorTests(unit.BaseTestCase):
 
     entity_schema = {
@@ -112,42 +132,51 @@ class ValidatedDecoratorTests(unit.BaseTestCase):
         'name': uuid.uuid4().hex,
     }
 
-    invalid_entity = {}
-
-    @validation.validated(entity_schema, 'entity')
-    def do_something(self, entity):
-        pass
+    invalid_entity = {
+        'name': 1.0,  # NOTE(dstanek): this is the incorrect type for name
+    }
 
     @validation.validated(entity_create, 'entity')
     def create_entity(self, entity):
-        pass
+        """Used to test cases where validated param is the only param."""
+
+    @validation.validated(entity_create_optional_body, 'entity')
+    def create_entity_optional_body(self, entity):
+        """Used to test cases where there is an optional body."""
 
     @validation.validated(entity_update, 'entity')
     def update_entity(self, entity_id, entity):
-        pass
+        """Used to test cases where validated param is not the only param."""
 
-    def _assert_call_entity_method_fails(self, method, *args, **kwargs):
-        e = self.assertRaises(exception.ValidationError, method,
-                              *args, **kwargs)
+    def test_calling_create_with_valid_entity_kwarg_succeeds(self):
+        self.create_entity(entity=self.valid_entity)
 
-        self.assertIn('Expecting to find entity in request body',
-                      six.text_type(e))
+    def test_calling_create_with_empty_entity_kwarg_succeeds(self):
+        """Test the case when client passing in an empty kwarg reference."""
+        self.create_entity_optional_body(entity={})
 
-    def test_calling_with_valid_entity_kwarg_succeeds(self):
-        self.do_something(entity=self.valid_entity)
+    @expected_validation_failure('Expecting to find entity in request body')
+    def test_calling_create_with_kwarg_as_None_fails(self):
+        self.create_entity(entity=None)
 
-    def test_calling_with_invalid_entity_kwarg_fails(self):
-        self.assertRaises(exception.ValidationError,
-                          self.do_something,
-                          entity=self.invalid_entity)
+    def test_calling_create_with_valid_entity_arg_succeeds(self):
+        self.create_entity(self.valid_entity)
 
-    def test_calling_with_valid_entity_arg_succeeds(self):
-        self.do_something(self.valid_entity)
+    def test_calling_create_with_empty_entity_arg_succeeds(self):
+        """Test the case when client passing in an empty entity reference."""
+        self.create_entity_optional_body({})
 
-    def test_calling_with_invalid_entity_arg_fails(self):
-        self.assertRaises(exception.ValidationError,
-                          self.do_something,
-                          self.invalid_entity)
+    @expected_validation_failure("Invalid input for field 'name'")
+    def test_calling_create_with_invalid_entity_fails(self):
+        self.create_entity(self.invalid_entity)
+
+    @expected_validation_failure('Expecting to find entity in request body')
+    def test_calling_create_with_entity_arg_as_None_fails(self):
+        self.create_entity(None)
+
+    @expected_validation_failure('Expecting to find entity in request body')
+    def test_calling_create_without_an_entity_fails(self):
+        self.create_entity()
 
     def test_using_the_wrong_name_with_the_decorator_fails(self):
         with testtools.ExpectedException(TypeError):
@@ -155,24 +184,26 @@ class ValidatedDecoratorTests(unit.BaseTestCase):
             def function(entity):
                 pass
 
-    def test_create_entity_no_request_body_with_decorator(self):
-        """Test the case when request body is not provided."""
-        self._assert_call_entity_method_fails(self.create_entity)
+    # NOTE(dstanek): below are the test cases for making sure the validation
+    # works when the validated param is not the only param. Since all of the
+    # actual validation cases are tested above these test are for a sanity
+    # check.
 
-    def test_create_entity_empty_request_body_with_decorator(self):
+    def test_calling_update_with_valid_entity_succeeds(self):
+        self.update_entity(uuid.uuid4().hex, self.valid_entity)
+
+    @expected_validation_failure("Invalid input for field 'name'")
+    def test_calling_update_with_invalid_entity_fails(self):
+        self.update_entity(uuid.uuid4().hex, self.invalid_entity)
+
+    def test_calling_update_with_empty_entity_kwarg_succeeds(self):
         """Test the case when client passing in an empty entity reference."""
-        self._assert_call_entity_method_fails(self.create_entity, entity={})
-
-    def test_update_entity_no_request_body_with_decorator(self):
-        """Test the case when request body is not provided."""
-        self._assert_call_entity_method_fails(self.update_entity,
-                                              uuid.uuid4().hex)
-
-    def test_update_entity_empty_request_body_with_decorator(self):
-        """Test the case when client passing in an empty entity reference."""
-        self._assert_call_entity_method_fails(self.update_entity,
-                                              uuid.uuid4().hex,
-                                              entity={})
+        global entity_update
+        original_entity_update = entity_update.copy()
+        # pop 'minProperties' from schema so that empty body is allowed.
+        entity_update.pop('minProperties')
+        self.update_entity(uuid.uuid4().hex, entity={})
+        entity_update = original_entity_update
 
 
 class EntityValidationTestCase(unit.BaseTestCase):
@@ -507,7 +538,7 @@ class ProjectValidationTestCase(unit.BaseTestCase):
             self.create_project_validator.validate(request_to_validate)
 
     def test_validate_project_request_with_invalid_domain_id_fails(self):
-        """Exception is raised when `domain_id` as a non-id value."""
+        """Exception is raised when `domain_id` is a non-id value."""
         for domain_id in [False, 'fake_project']:
             request_to_validate = {'name': self.project_name,
                                    'domain_id': domain_id}
@@ -905,6 +936,11 @@ class RegionValidationTestCase(unit.BaseTestCase):
     def test_validate_region_create_succeeds_with_extra_parameters(self):
         """Validate create region request with extra values."""
         request_to_validate = {'other_attr': uuid.uuid4().hex}
+        self.create_region_validator.validate(request_to_validate)
+
+    def test_validate_region_create_succeeds_with_no_parameters(self):
+        """Validate create region request with no parameters."""
+        request_to_validate = {}
         self.create_region_validator.validate(request_to_validate)
 
     def test_validate_region_update_succeeds(self):
@@ -1998,6 +2034,11 @@ class FederationProtocolValidationTestCase(unit.BaseTestCase):
         request_to_validate = {'mapping_id': uuid.uuid4().hex}
         self.protocol_validator.validate(request_to_validate)
 
+    def test_validate_protocol_request_succeeds_with_nonuuid_mapping_id(self):
+        """Test that we allow underscore in mapping_id value."""
+        request_to_validate = {'mapping_id': 'my_mapping_id'}
+        self.protocol_validator.validate(request_to_validate)
+
     def test_validate_protocol_request_fails_with_invalid_params(self):
         """Exception raised when unknown parameter is found."""
         request_to_validate = {'bogus': uuid.uuid4().hex}
@@ -2019,3 +2060,56 @@ class FederationProtocolValidationTestCase(unit.BaseTestCase):
         self.assertRaises(exception.SchemaValidationError,
                           self.protocol_validator.validate,
                           request_to_validate)
+
+
+class OAuth1ValidationTestCase(unit.BaseTestCase):
+    """Test for V3 Identity OAuth1 API validation."""
+
+    def setUp(self):
+        super(OAuth1ValidationTestCase, self).setUp()
+
+        create = oauth1_schema.consumer_create
+        update = oauth1_schema.consumer_update
+        self.create_consumer_validator = validators.SchemaValidator(create)
+        self.update_consumer_validator = validators.SchemaValidator(update)
+
+    def test_validate_consumer_request_succeeds(self):
+        """Test that we validate a consumer request successfully."""
+        request_to_validate = {'description': uuid.uuid4().hex,
+                               'name': uuid.uuid4().hex}
+        self.create_consumer_validator.validate(request_to_validate)
+        self.update_consumer_validator.validate(request_to_validate)
+
+    def test_validate_consumer_request_with_no_parameters(self):
+        """Test that schema validation with empty request body."""
+        request_to_validate = {}
+        self.create_consumer_validator.validate(request_to_validate)
+        # At least one property should be given.
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_consumer_validator.validate,
+                          request_to_validate)
+
+    def test_validate_consumer_request_with_invalid_description_fails(self):
+        """Exception is raised when `description` as a non-string value."""
+        for invalid_desc in _INVALID_DESC_FORMATS:
+            request_to_validate = {'description': invalid_desc}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_consumer_validator.validate,
+                              request_to_validate)
+
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_consumer_validator.validate,
+                              request_to_validate)
+
+    def test_validate_update_consumer_request_fails_with_secret(self):
+        """Exception raised when secret is given."""
+        request_to_validate = {'secret': uuid.uuid4().hex}
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_consumer_validator.validate,
+                          request_to_validate)
+
+    def test_validate_consumer_request_with_none_desc(self):
+        """Test that schema validation with None desc."""
+        request_to_validate = {'description': None}
+        self.create_consumer_validator.validate(request_to_validate)
+        self.update_consumer_validator.validate(request_to_validate)

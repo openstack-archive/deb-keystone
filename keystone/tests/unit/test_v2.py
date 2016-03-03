@@ -23,6 +23,7 @@ from six.moves import http_client
 from testtools import matchers
 
 from keystone.common import extension as keystone_extension
+from keystone.tests import unit
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import rest
 
@@ -987,6 +988,14 @@ class RestfulTestCase(rest.RestfulTestCase):
 
 
 class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
+
+    def config_overrides(self):
+        super(V2TestCase, self).config_overrides()
+        self.config_fixture.config(
+            group='catalog',
+            driver='templated',
+            template_file=unit.dirs.tests('default_catalog.templates'))
+
     def _get_user_id(self, r):
         return r['user']['id']
 
@@ -1250,7 +1259,9 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
         return (data, token2)
 
     def test_fetch_revocation_list_md5(self):
-        """If the server is configured for md5, then the revocation list has
+        """Hash for tokens in revocation list and server config should match.
+
+        If the server is configured for md5, then the revocation list has
         tokens hashed with MD5.
         """
         # The default hash algorithm is md5.
@@ -1261,8 +1272,10 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
         self.assertThat(token_hash, matchers.Equals(data['revoked'][0]['id']))
 
     def test_fetch_revocation_list_sha256(self):
-        """If the server is configured for sha256, then the revocation list has
-        tokens hashed with SHA256
+        """Hash for tokens in revocation list and server config should match.
+
+        If the server is configured for sha256, then the revocation list has
+        tokens hashed with SHA256.
         """
         hash_algorithm = 'sha256'
         self.config_fixture.config(group='token',
@@ -1386,7 +1399,6 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
 class RevokeApiTestCase(V2TestCase):
     def config_overrides(self):
         super(RevokeApiTestCase, self).config_overrides()
-        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='token',
             provider='pki',
@@ -1505,7 +1517,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
         self.admin_request(
             method='GET',
             path=path,
-            token=CONF.admin_token,
+            token=self.get_admin_token(),
             expected_status=http_client.OK)
 
     def test_rescoped_tokens_maintain_original_expiration(self):

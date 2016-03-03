@@ -161,6 +161,8 @@ class Manager(manager.Manager):
         super(Manager, self).__init__(CONF.oauth1.driver)
 
     def create_consumer(self, consumer_ref, initiator=None):
+        consumer_ref = consumer_ref.copy()
+        consumer_ref['secret'] = uuid.uuid4().hex
         ret = self.driver.create_consumer(consumer_ref)
         notifications.Audit.created(self._CONSUMER, ret['id'], initiator)
         return ret
@@ -236,8 +238,7 @@ class Oauth1DriverV8(object):
 
     @abc.abstractmethod
     def get_consumer(self, consumer_id):
-        """Get consumer, returns the consumer id (key)
-        and description.
+        """Get consumer, returns the consumer id (key) and description.
 
         :param consumer_id: id of consumer to get
         :type consumer_id: string
@@ -248,15 +249,15 @@ class Oauth1DriverV8(object):
 
     @abc.abstractmethod
     def get_consumer_with_secret(self, consumer_id):
-        """Like get_consumer() but returned consumer_ref includes
-        the consumer secret.
+        """Like get_consumer(), but also returns consumer secret.
 
+        Returned dictionary consumer_ref includes consumer secret.
         Secrets should only be shared upon consumer creation; the
         consumer secret is required to verify incoming OAuth requests.
 
         :param consumer_id: id of consumer to get
         :type consumer_id: string
-        :returns: consumer_ref
+        :returns: consumer_ref containing consumer secret
 
         """
         raise exception.NotImplemented()  # pragma: no cover
@@ -335,11 +336,11 @@ class Oauth1DriverV8(object):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
-    def authorize_request_token(self, request_id, user_id, role_ids):
+    def authorize_request_token(self, request_token_id, user_id, role_ids):
         """Authorize request token.
 
-        :param request_id: the id of the request token, to be authorized
-        :type request_id: string
+        :param request_token_id: the id of the request token, to be authorized
+        :type request_token_id: string
         :param user_id: the id of the authorizing user
         :type user_id: string
         :param role_ids: list of role ids to authorize

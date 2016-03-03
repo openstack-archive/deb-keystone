@@ -19,6 +19,7 @@ from oslo_cache import core as cache
 from oslo_config import cfg
 from oslo_log import log
 import oslo_messaging
+from oslo_middleware import cors
 import passlib.utils
 
 from keystone import exception
@@ -29,13 +30,30 @@ _CERTFILE = '/etc/keystone/ssl/certs/signing_cert.pem'
 _KEYFILE = '/etc/keystone/ssl/private/signing_key.pem'
 _SSO_CALLBACK = '/etc/keystone/sso_callback_template.html'
 
+_DEPRECATE_PKI_MSG = ('PKI token support has been deprecated in the M '
+                      'release and will be removed in the O release. Fernet '
+                      'or UUID tokens are recommended.')
+
+_DEPRECATE_INHERIT_MSG = ('The option to enable the OS-INHERIT extension has '
+                          'been deprecated in the M release and will be '
+                          'removed in the O release. The OS-INHERIT extension '
+                          'will be enabled by default.')
+
+_DEPRECATE_EP_MSG = ('The option to enable the OS-ENDPOINT-POLICY extension '
+                     'has been deprecated in the M release and will be '
+                     'removed in the O release. The OS-ENDPOINT-POLICY '
+                     'extension will be enabled by default.')
+
 
 FILE_OPTIONS = {
     None: [
-        cfg.StrOpt('admin_token', secret=True, default='ADMIN',
+        cfg.StrOpt('admin_token', secret=True, default=None,
                    help='A "shared secret" that can be used to bootstrap '
                         'Keystone. This "token" does not represent a user, '
-                        'and carries no explicit authorization. To disable '
+                        'and carries no explicit authorization. If set '
+                        'to `None`, the value is ignored and the '
+                        '`admin_token` log in mechanism is effectively '
+                        'disabled. To completely disable `admin_token` '
                         'in production (highly recommended), remove '
                         'AdminTokenAuthMiddleware from your paste '
                         'application pipelines (for example, in '
@@ -61,9 +79,10 @@ FILE_OPTIONS = {
                         '(e.g. /prefix/v3) or the endpoint should be found '
                         'on a different server.'),
         cfg.IntOpt('max_project_tree_depth', default=5,
-                   help='Maximum depth of the project hierarchy. WARNING: '
-                        'setting it to a large value may adversely impact '
-                        'performance.'),
+                   help='Maximum depth of the project hierarchy, excluding '
+                        'the project acting as a domain at the top of the '
+                        'hierarchy. WARNING: setting it to a large value may '
+                        'adversely impact  performance.'),
         cfg.IntOpt('max_param_size', default=64,
                    help='Limit the sizes of user & project ID/names.'),
         # we allow tokens to be a bit larger to accommodate PKI
@@ -103,7 +122,10 @@ FILE_OPTIONS = {
                          'domain_id. Allowing such movement is not '
                          'recommended if the scope of a domain admin is being '
                          'restricted by use of an appropriate policy file '
-                         '(see policy.v3cloudsample as an example).'),
+                         '(see policy.v3cloudsample as an example). This '
+                         'ability is deprecated and will be removed in a '
+                         'future release.',
+                    deprecated_for_removal=True),
         cfg.BoolOpt('strict_password_check', default=False,
                     help='If set to true, strict password length checking is '
                          'performed for password manipulation. If a password '
@@ -111,11 +133,10 @@ FILE_OPTIONS = {
                          'with an HTTP 403 Forbidden error. If set to false, '
                          'passwords are automatically truncated to the '
                          'maximum length.'),
-        cfg.StrOpt('secure_proxy_ssl_header',
+        cfg.StrOpt('secure_proxy_ssl_header', default='HTTP_X_FORWARDED_PROTO',
                    help='The HTTP header used to determine the scheme for the '
                         'original request, even if it was removed by an SSL '
-                        'terminating proxy. Typical value is '
-                        '"HTTP_X_FORWARDED_PROTO".'),
+                        'terminating proxy.'),
         cfg.BoolOpt('insecure_debug', default=False,
                     help='If set to true the server will return information '
                          'in the response that may allow an unauthenticated '
@@ -215,6 +236,12 @@ FILE_OPTIONS = {
                          'value to False is when configuring a fresh '
                          'installation.'),
     ],
+    'shadow_users': [
+        cfg.StrOpt('driver',
+                   default='sql',
+                   help='Entrypoint for the shadow users backend driver '
+                        'in the keystone.identity.shadow_users namespace.'),
+    ],
     'trust': [
         cfg.BoolOpt('enabled', default=True,
                     help='Delegation and impersonation features can be '
@@ -230,6 +257,7 @@ FILE_OPTIONS = {
     'os_inherit': [
         cfg.BoolOpt('enabled', default=True,
                     deprecated_for_removal=True,
+                    deprecated_reason=_DEPRECATE_INHERIT_MSG,
                     help='role-assignment inheritance to projects from '
                          'owning domain or from projects higher in the '
                          'hierarchy can be optionally disabled. In the '
@@ -295,6 +323,8 @@ FILE_OPTIONS = {
                     'allow_rescoped_scoped_token to false prevents a user '
                     'from exchanging a scoped token for any other token.'),
         cfg.StrOpt('hash_algorithm', default='md5',
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='The hash algorithm to use for PKI tokens. This can '
                         'be set to any algorithm that hashlib supports. '
                         'WARNING: Before changing this value, the auth_token '
@@ -303,7 +333,7 @@ FILE_OPTIONS = {
                         'not be processed correctly.'),
         cfg.BoolOpt('infer_roles', default=True,
                     help='Add roles to token that are not explicitly added, '
-                    'but that are linked implicitly to other roles.'),
+                         'but that are linked implicitly to other roles.'),
     ],
     'revoke': [
         cfg.StrOpt('driver',
@@ -343,26 +373,40 @@ FILE_OPTIONS = {
     'signing': [
         cfg.StrOpt('certfile',
                    default=_CERTFILE,
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='Path of the certfile for token signing. For '
                         'non-production environments, you may be interested '
                         'in using `keystone-manage pki_setup` to generate '
                         'self-signed certificates.'),
         cfg.StrOpt('keyfile',
                    default=_KEYFILE,
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='Path of the keyfile for token signing.'),
         cfg.StrOpt('ca_certs',
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    default='/etc/keystone/ssl/certs/ca.pem',
                    help='Path of the CA for token signing.'),
         cfg.StrOpt('ca_key',
                    default='/etc/keystone/ssl/private/cakey.pem',
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='Path of the CA key for token signing.'),
         cfg.IntOpt('key_size', default=2048, min=1024,
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='Key size (in bits) for token signing cert '
                         '(auto generated certificate).'),
         cfg.IntOpt('valid_days', default=3650,
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    help='Days the token signing cert is valid for '
                         '(auto generated certificate).'),
         cfg.StrOpt('cert_subject',
+                   deprecated_for_removal=True,
+                   deprecated_reason=_DEPRECATE_PKI_MSG,
                    default=('/C=US/ST=Unset/L=Unset/O=Unset/'
                             'CN=www.example.com'),
                    help='Certificate subject (auto generated certificate) for '
@@ -371,16 +415,21 @@ FILE_OPTIONS = {
     'assignment': [
         cfg.StrOpt('driver',
                    help='Entrypoint for the assignment backend driver in the '
-                        'keystone.assignment namespace. Supplied drivers are '
-                        'ldap and sql. If an assignment driver is not '
+                        'keystone.assignment namespace. Only an SQL driver is '
+                        'supplied. If an assignment driver is not '
                         'specified, the identity driver will choose the '
-                        'assignment driver.'),
+                        'assignment driver (driver selection based on '
+                        '`[identity]/driver` option is deprecated and will be '
+                        'removed in the "O" release).'),
+        cfg.ListOpt('prohibited_implied_role', default=['admin'],
+                    help='A list of role names which are prohibited from '
+                         'being an implied role.'),
     ],
     'resource': [
         cfg.StrOpt('driver',
                    help='Entrypoint for the resource backend driver in the '
-                        'keystone.resource namespace. Supplied drivers are '
-                        'ldap and sql. If a resource driver is not specified, '
+                        'keystone.resource namespace. Only an SQL driver is '
+                        'supplied. If a resource driver is not specified, '
                         'the assignment driver will choose the resource '
                         'driver.'),
         cfg.BoolOpt('caching', default=True,
@@ -526,6 +575,7 @@ FILE_OPTIONS = {
         cfg.BoolOpt('enabled',
                     default=True,
                     deprecated_for_removal=True,
+                    deprecated_reason=_DEPRECATE_EP_MSG,
                     help='Enable endpoint_policy functionality.'),
         cfg.StrOpt('driver',
                    default='sql',
@@ -534,7 +584,10 @@ FILE_OPTIONS = {
     ],
     'ldap': [
         cfg.StrOpt('url', default='ldap://localhost',
-                   help='URL for connecting to the LDAP server.'),
+                   help='URL(s) for connecting to the LDAP server. Multiple '
+                        'LDAP URLs may be specified as a comma separated '
+                        'string. The first URL to successfully bind is used '
+                        'for the connection.'),
         cfg.StrOpt('user',
                    help='User BindDN to query the LDAP server.'),
         cfg.StrOpt('password', secret=True,
@@ -586,6 +639,8 @@ FILE_OPTIONS = {
                         'WARNING: must not be a multivalued attribute.'),
         cfg.StrOpt('user_name_attribute', default='sn',
                    help='LDAP attribute mapped to user name.'),
+        cfg.StrOpt('user_description_attribute', default='description',
+                   help='LDAP attribute mapped to user description.'),
         cfg.StrOpt('user_mail_attribute', default='mail',
                    help='LDAP attribute mapped to user email.'),
         cfg.StrOpt('user_pass_attribute', default='userPassword',
@@ -623,10 +678,25 @@ FILE_OPTIONS = {
                    help='LDAP attribute mapped to default_project_id for '
                         'users.'),
         cfg.BoolOpt('user_allow_create', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow user creation in LDAP backend.'),
         cfg.BoolOpt('user_allow_update', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow user updates in LDAP backend.'),
         cfg.BoolOpt('user_allow_delete', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow user deletion in LDAP backend.'),
         cfg.BoolOpt('user_enabled_emulation', default=False,
                     help='If true, Keystone uses an alternative method to '
@@ -647,146 +717,6 @@ FILE_OPTIONS = {
                          'mapping format is <ldap_attr>:<user_attr>, where '
                          'ldap_attr is the attribute in the LDAP entry and '
                          'user_attr is the Identity API attribute.'),
-
-        cfg.StrOpt('project_tree_dn',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_tree_dn', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='Search base for projects. '
-                        'Defaults to the suffix value.'),
-        cfg.StrOpt('project_filter',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_filter', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP search filter for projects.'),
-        cfg.StrOpt('project_objectclass', default='groupOfNames',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_objectclass', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP objectclass for projects.'),
-        cfg.StrOpt('project_id_attribute', default='cn',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_id_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to project id.'),
-        cfg.StrOpt('project_member_attribute', default='member',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_member_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to project membership for '
-                        'user.'),
-        cfg.StrOpt('project_name_attribute', default='ou',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_name_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to project name.'),
-        cfg.StrOpt('project_desc_attribute', default='description',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_desc_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to project description.'),
-        cfg.StrOpt('project_enabled_attribute', default='enabled',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_enabled_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to project enabled.'),
-        cfg.StrOpt('project_domain_id_attribute',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_domain_id_attribute', group='ldap')],
-                   deprecated_for_removal=True,
-                   default='businessCategory',
-                   help='LDAP attribute mapped to project domain_id.'),
-        cfg.ListOpt('project_attribute_ignore', default=[],
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_attribute_ignore', group='ldap')],
-                    deprecated_for_removal=True,
-                    help='List of attributes stripped off the project on '
-                         'update.'),
-        cfg.BoolOpt('project_allow_create', default=True,
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_allow_create', group='ldap')],
-                    deprecated_for_removal=True,
-                    help='Allow project creation in LDAP backend.'),
-        cfg.BoolOpt('project_allow_update', default=True,
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_allow_update', group='ldap')],
-                    deprecated_for_removal=True,
-                    help='Allow project update in LDAP backend.'),
-        cfg.BoolOpt('project_allow_delete', default=True,
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_allow_delete', group='ldap')],
-                    deprecated_for_removal=True,
-                    help='Allow project deletion in LDAP backend.'),
-        cfg.BoolOpt('project_enabled_emulation', default=False,
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_enabled_emulation', group='ldap')],
-                    deprecated_for_removal=True,
-                    help='If true, Keystone uses an alternative method to '
-                         'determine if a project is enabled or not by '
-                         'checking if they are a member of the '
-                         '"project_enabled_emulation_dn" group.'),
-        cfg.StrOpt('project_enabled_emulation_dn',
-                   deprecated_opts=[cfg.DeprecatedOpt(
-                       'tenant_enabled_emulation_dn', group='ldap')],
-                   deprecated_for_removal=True,
-                   help='DN of the group entry to hold enabled projects when '
-                        'using enabled emulation.'),
-        cfg.BoolOpt('project_enabled_emulation_use_group_config',
-                    default=False,
-                    help='Use the "group_member_attribute" and '
-                         '"group_objectclass" settings to determine '
-                         'membership in the emulated enabled group.'),
-        cfg.ListOpt('project_additional_attribute_mapping',
-                    deprecated_opts=[cfg.DeprecatedOpt(
-                        'tenant_additional_attribute_mapping', group='ldap')],
-                    deprecated_for_removal=True,
-                    default=[],
-                    help='Additional attribute mappings for projects. '
-                         'Attribute mapping format is '
-                         '<ldap_attr>:<user_attr>, where ldap_attr is the '
-                         'attribute in the LDAP entry and user_attr is the '
-                         'Identity API attribute.'),
-
-        cfg.StrOpt('role_tree_dn',
-                   deprecated_for_removal=True,
-                   help='Search base for roles. '
-                        'Defaults to the suffix value.'),
-        cfg.StrOpt('role_filter',
-                   deprecated_for_removal=True,
-                   help='LDAP search filter for roles.'),
-        cfg.StrOpt('role_objectclass', default='organizationalRole',
-                   deprecated_for_removal=True,
-                   help='LDAP objectclass for roles.'),
-        cfg.StrOpt('role_id_attribute', default='cn',
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to role id.'),
-        cfg.StrOpt('role_name_attribute', default='ou',
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to role name.'),
-        cfg.StrOpt('role_member_attribute', default='roleOccupant',
-                   deprecated_for_removal=True,
-                   help='LDAP attribute mapped to role membership.'),
-        cfg.ListOpt('role_attribute_ignore', default=[],
-                    deprecated_for_removal=True,
-                    help='List of attributes stripped off the role on '
-                         'update.'),
-        cfg.BoolOpt('role_allow_create', default=True,
-                    deprecated_for_removal=True,
-                    help='Allow role creation in LDAP backend.'),
-        cfg.BoolOpt('role_allow_update', default=True,
-                    deprecated_for_removal=True,
-                    help='Allow role update in LDAP backend.'),
-        cfg.BoolOpt('role_allow_delete', default=True,
-                    deprecated_for_removal=True,
-                    help='Allow role deletion in LDAP backend.'),
-        cfg.ListOpt('role_additional_attribute_mapping',
-                    deprecated_for_removal=True,
-                    default=[],
-                    help='Additional attribute mappings for roles. Attribute '
-                         'mapping format is <ldap_attr>:<user_attr>, where '
-                         'ldap_attr is the attribute in the LDAP entry and '
-                         'user_attr is the Identity API attribute.'),
-
         cfg.StrOpt('group_tree_dn',
                    help='Search base for groups. '
                         'Defaults to the suffix value.'),
@@ -806,10 +736,25 @@ FILE_OPTIONS = {
                     help='List of attributes stripped off the group on '
                          'update.'),
         cfg.BoolOpt('group_allow_create', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow group creation in LDAP backend.'),
         cfg.BoolOpt('group_allow_update', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow group update in LDAP backend.'),
         cfg.BoolOpt('group_allow_delete', default=True,
+                    deprecated_for_removal=True,
+                    deprecated_reason="Write support for Identity LDAP "
+                                      "backends has been deprecated in the M "
+                                      "release and will be removed in the O "
+                                      "release.",
                     help='Allow group deletion in LDAP backend.'),
         cfg.ListOpt('group_additional_attribute_mapping',
                     default=[],
@@ -830,7 +775,7 @@ FILE_OPTIONS = {
                    choices=['demand', 'never', 'allow'],
                    help='Specifies what checks to perform on client '
                         'certificates in an incoming TLS session.'),
-        cfg.BoolOpt('use_pool', default=False,
+        cfg.BoolOpt('use_pool', default=True,
                     help='Enable LDAP connection pooling.'),
         cfg.IntOpt('pool_size', default=10,
                    help='Connection pool size.'),
@@ -844,7 +789,7 @@ FILE_OPTIONS = {
                         'indefinite wait for response.'),
         cfg.IntOpt('pool_connection_lifetime', default=600,
                    help='Connection lifetime in seconds.'),
-        cfg.BoolOpt('use_auth_pool', default=False,
+        cfg.BoolOpt('use_auth_pool', default=True,
                     help='Enable LDAP connection pooling for end user '
                          'authentication. If use_pool is disabled, then this '
                          'setting is meaningless and is not used at all.'),
@@ -852,6 +797,11 @@ FILE_OPTIONS = {
                    help='End user auth connection pool size.'),
         cfg.IntOpt('auth_pool_connection_lifetime', default=60,
                    help='End user auth connection lifetime in seconds.'),
+        cfg.BoolOpt('group_members_are_ids', default=False,
+                    help='If the members of the group objectclass are user '
+                         'IDs rather than DNs, set this to true. This is the '
+                         'case when using posixGroup as the group '
+                         'objectclass and OpenDirectory.'),
     ],
     'auth': [
         cfg.ListOpt('methods', default=_DEFAULT_AUTH_METHODS,
@@ -1179,12 +1129,11 @@ def set_default_for_default_log_levels():
     extra_log_level_defaults = [
         'dogpile=INFO',
         'routes=INFO',
-        'keystone.common._memcache_pool=INFO',
     ]
 
     log.register_options(CONF)
-    CONF.set_default('default_log_levels',
-                     CONF.default_log_levels + extra_log_level_defaults)
+    log.set_defaults(default_log_levels=log.get_default_log_levels() +
+                     extra_log_level_defaults)
 
 
 def setup_logging():
@@ -1277,3 +1226,28 @@ def list_opts():
     :returns: a list of (group_name, opts) tuples
     """
     return list(FILE_OPTIONS.items())
+
+
+def set_middleware_defaults():
+    """Update default configuration options for oslo.middleware."""
+    # CORS Defaults
+    # TODO(krotscheck): Update with https://review.openstack.org/#/c/285368/
+    cfg.set_defaults(cors.CORS_OPTS,
+                     allow_headers=['X-Auth-Token',
+                                    'X-Openstack-Request-Id',
+                                    'X-Subject-Token',
+                                    'X-Project-Id',
+                                    'X-Project-Name',
+                                    'X-Project-Domain-Id',
+                                    'X-Project-Domain-Name',
+                                    'X-Domain-Id',
+                                    'X-Domain-Name'],
+                     expose_headers=['X-Auth-Token',
+                                     'X-Openstack-Request-Id',
+                                     'X-Subject-Token'],
+                     allow_methods=['GET',
+                                    'PUT',
+                                    'POST',
+                                    'DELETE',
+                                    'PATCH']
+                     )

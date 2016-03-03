@@ -34,7 +34,7 @@
     "identity:update_domain": "rule:admin_required",
     "identity:delete_domain": "rule:admin_required",
 
-    "identity:get_project": "rule:admin_required",
+    "identity:get_project": "rule:admin_required or project_id:%(target.project.id)s",
     "identity:list_projects": "rule:admin_required",
     "identity:list_user_projects": "rule:admin_or_owner",
     "identity:create_project": "rule:admin_required",
@@ -75,6 +75,18 @@
     "identity:create_role": "rule:admin_required",
     "identity:update_role": "rule:admin_required",
     "identity:delete_role": "rule:admin_required",
+    "identity:get_domain_role": "rule:admin_required",
+    "identity:list_domain_roles": "rule:admin_required",
+    "identity:create_domain_role": "rule:admin_required",
+    "identity:update_domain_role": "rule:admin_required",
+    "identity:delete_domain_role": "rule:admin_required",
+
+    "identity:get_implied_role": "rule:admin_required ",
+    "identity:list_implied_roles": "rule:admin_required",
+    "identity:create_implied_role": "rule:admin_required",
+    "identity:delete_implied_role": "rule:admin_required",
+    "identity:list_role_inference_rules": "rule:admin_required",
+    "identity:check_implied_role": "rule:admin_required",
 
     "identity:check_grant": "rule:admin_required",
     "identity:list_grants": "rule:admin_required",

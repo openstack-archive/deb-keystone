@@ -33,8 +33,11 @@ from keystone.oauth1 import routers as oauth1_routers
 from keystone.policy import routers as policy_routers
 from keystone.resource import routers as resource_routers
 from keystone.revoke import routers as revoke_routers
+from keystone.token import _simple_cert as simple_cert_ext
 from keystone.token import routers as token_routers
 from keystone.trust import routers as trust_routers
+from keystone.v2_crud import admin_crud
+from keystone.v2_crud import user_crud
 from keystone.version import controllers
 from keystone.version import routers
 
@@ -84,6 +87,7 @@ def public_app_factory(global_conf, **local_conf):
     return wsgi.ComposingRouter(routes.Mapper(),
                                 [assignment_routers.Public(),
                                  token_routers.Router(),
+                                 user_crud.Router(),
                                  routers.VersionV2('public'),
                                  routers.Extension(False)])
 
@@ -97,6 +101,7 @@ def admin_app_factory(global_conf, **local_conf):
                                  assignment_routers.Admin(),
                                  token_routers.Router(),
                                  resource_routers.Admin(),
+                                 admin_crud.Router(),
                                  routers.VersionV2('admin'),
                                  routers.Extension()])
 
@@ -135,7 +140,10 @@ def v3_app_factory(global_conf, **local_conf):
                        resource_routers,
                        revoke_routers,
                        federation_routers,
-                       oauth1_routers]
+                       oauth1_routers,
+                       # TODO(morganfainberg): Remove the simple_cert router
+                       # when PKI and PKIZ tokens are removed.
+                       simple_cert_ext]
 
     if CONF.trust.enabled:
         all_api_routers.append(trust_routers)

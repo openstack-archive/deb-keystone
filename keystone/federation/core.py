@@ -94,7 +94,7 @@ class Manager(manager.Manager):
     def evaluate(self, idp_id, protocol_id, assertion_data):
         mapping = self.get_mapping_from_idp_and_protocol(idp_id, protocol_id)
         rules = mapping['rules']
-        rule_processor = utils.RuleProcessor(rules)
+        rule_processor = utils.RuleProcessor(mapping['id'], rules)
         mapped_properties = rule_processor.process(assertion_data)
         return mapped_properties, mapping['id']
 
@@ -103,7 +103,7 @@ class Manager(manager.Manager):
 # drivers that we still support, that have not been removed or modified. This
 # class is then used to created the augmented V8 and V9 version abstract driver
 # classes, without having to duplicate a lot of abstract method signatures.
-# If you remove a method from V9, then move the abstact methods from this Base
+# If you remove a method from V9, then move the abstract methods from this Base
 # class to the V8 class. Do not modify any of the method signatures in the Base
 # class - changes should only be made in the V8 and subsequent classes.
 
@@ -317,8 +317,7 @@ class FederationDriverBase(object):
 
     @abc.abstractmethod
     def get_mapping(self, mapping_id):
-        """Get a mapping, returns the mapping based
-        on mapping_id.
+        """Get a mapping, returns the mapping based on mapping_id.
 
         :param mapping_id: id of mapping to get
         :type mapping_ref: string

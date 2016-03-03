@@ -45,6 +45,7 @@ from keystone.tests.unit import federation_fixtures
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import mapping_fixtures
 from keystone.tests.unit import test_v3
+from keystone.tests.unit import utils
 from keystone.token.providers import common as token_common
 
 
@@ -1235,8 +1236,10 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         self._assign_protocol_to_idp(expected_status=http_client.CREATED)
 
     def test_protocol_composite_pk(self):
-        """Test whether Keystone let's add two entities with identical
-        names, however attached to different IdPs.
+        """Test that Keystone can add two entities.
+
+        The entities have identical names, however, attached to different
+        IdPs.
 
         1. Add IdP and assign it protocol with predefined name
         2. Add another IdP and assign it a protocol with same name.
@@ -1932,6 +1935,9 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
                 self.assertEqual(domains_ref, domains,
                                  'match failed for url %s' % url)
 
+    @utils.wip('This will fail because of bug #1501032. The returned method'
+               'list should contain "saml2". This is documented in bug '
+               '1501032.')
     def test_full_workflow(self):
         """Test 'standard' workflow for granting access tokens.
 
@@ -1942,6 +1948,8 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         """
         r = self._issue_unscoped_token()
         token_resp = r.json_body['token']
+        # NOTE(lbragstad): Ensure only 'saml2' is in the method list.
+        self.assertListEqual(['saml2'], token_resp['methods'])
         self.assertValidMappedUser(token_resp)
         employee_unscoped_token_id = r.headers.get('X-Subject-Token')
         r = self.get('/auth/projects', token=employee_unscoped_token_id)
@@ -1954,6 +1962,10 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
 
         r = self.v3_create_token(v3_scope_request)
         token_resp = r.result['token']
+        # FIXME(lbragstad): 'token' should be in the list of methods returned
+        # but it isn't. This is documented in bug 1501032.
+        self.assertIn('token', token_resp['methods'])
+        self.assertIn('saml2', token_resp['methods'])
         self._check_project_scoped_token_attributes(token_resp, project['id'])
 
     def test_workflow_with_groups_deletion(self):
@@ -2504,6 +2516,65 @@ class FederatedTokenTestsMethodToken(FederatedTokenTests):
         super(FederatedTokenTests,
               self).auth_plugin_config_override(methods)
 
+    @utils.wip('This will fail because of bug #1501032. The returned method'
+               'list should contain "saml2". This is documented in bug '
+               '1501032.')
+    def test_full_workflow(self):
+        """Test 'standard' workflow for granting access tokens.
+
+        * Issue unscoped token
+        * List available projects based on groups
+        * Scope token to one of available projects
+
+        """
+        r = self._issue_unscoped_token()
+        token_resp = r.json_body['token']
+        # NOTE(lbragstad): Ensure only 'saml2' is in the method list.
+        self.assertListEqual(['saml2'], token_resp['methods'])
+        self.assertValidMappedUser(token_resp)
+        employee_unscoped_token_id = r.headers.get('X-Subject-Token')
+        r = self.get('/auth/projects', token=employee_unscoped_token_id)
+        projects = r.result['projects']
+        random_project = random.randint(0, len(projects)) - 1
+        project = projects[random_project]
+
+        v3_scope_request = self._scope_request(employee_unscoped_token_id,
+                                               'project', project['id'])
+
+        r = self.v3_authenticate_token(v3_scope_request)
+        token_resp = r.result['token']
+        self.assertIn('token', token_resp['methods'])
+        self.assertIn('saml2', token_resp['methods'])
+        self._check_project_scoped_token_attributes(token_resp, project['id'])
+
+
+class FederatedUserTests(test_v3.RestfulTestCase, FederatedSetupMixin):
+    """Tests for federated users
+
+    Tests new shadow users functionality
+
+    """
+
+    def auth_plugin_config_override(self):
+        methods = ['saml2']
+        super(FederatedUserTests, self).auth_plugin_config_override(methods)
+
+    def setUp(self):
+        super(FederatedUserTests, self).setUp()
+
+    def load_fixtures(self, fixtures):
+        super(FederatedUserTests, self).load_fixtures(fixtures)
+        self.load_federation_sample_data()
+
+    def test_user_id_persistense(self):
+        """Ensure user_id is persistend for multiple federated authn calls."""
+        r = self._issue_unscoped_token()
+        user_id = r.json_body['token']['user']['id']
+
+        r = self._issue_unscoped_token()
+        user_id2 = r.json_body['token']['user']['id']
+        self.assertEqual(user_id, user_id2)
+
 
 class JsonHomeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
     JSON_HOME_DATA = {
@@ -2714,7 +2785,7 @@ class SAMLGenerationTests(test_v3.RestfulTestCase):
 
         """
         if not _is_xmlsec1_installed():
-            self.skip('xmlsec1 is not installed')
+            self.skipTest('xmlsec1 is not installed')
 
         generator = keystone_idp.SAMLGenerator()
         response = generator.samlize_token(self.ISSUER, self.RECIPIENT,
@@ -3348,6 +3419,21 @@ class WebSSOTests(FederatedTokenTests):
         self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
         resp = self.api.federated_sso_auth(context, self.PROTOCOL)
         self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
+
+    def test_get_sso_origin_host_case_insensitive(self):
+        # test lowercase hostname in trusted_dashboard
+        context = {
+            'query_string': {
+                'origin': "http://horizon.com",
+            },
+        }
+        host = self.api._get_sso_origin_host(context)
+        self.assertEqual("http://horizon.com", host)
+        # test uppercase hostname in trusted_dashboard
+        self.config_fixture.config(group='federation',
+                                   trusted_dashboard=['http://Horizon.com'])
+        host = self.api._get_sso_origin_host(context)
+        self.assertEqual("http://horizon.com", host)
 
     def test_federated_sso_auth_with_protocol_specific_remote_id(self):
         self.config_fixture.config(

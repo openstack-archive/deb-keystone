@@ -18,6 +18,9 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
+	# TODO: Use keystone-manage bootstrap instead of the admin_token_auth.
+	#export OS_BOOTSTRAP_PASSWORD=${ADMIN_USER_PW}
+	#keystone-manage bootstrap  --bootstrap-username ${ADMIN_USER_NAME} --bootstrap-project-name ${ADMIN_TENANT_NAME}
 	openstack ${OSTACKCLI_PARAMS} project create --or-show $ADMIN_TENANT_NAME --domain default --description "Default Debian admin project" >/dev/null
 	openstack ${OSTACKCLI_PARAMS} project create --or-show service --domain default --description "Default Debian service project" >/dev/null
 	openstack ${OSTACKCLI_PARAMS} user create --or-show --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME --domain default --description "Default Debian admin user" >/dev/null

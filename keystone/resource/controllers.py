@@ -43,8 +43,13 @@ class Tenant(controller.V2Controller):
         if 'name' in context['query_string']:
             return self._get_project_by_name(context['query_string']['name'])
 
-        tenant_refs = self.resource_api.list_projects_in_domain(
-            CONF.identity.default_domain_id)
+        try:
+            tenant_refs = self.resource_api.list_projects_in_domain(
+                CONF.identity.default_domain_id)
+        except exception.DomainNotFound:
+            # If the default domain doesn't exist then there are no V2
+            # projects.
+            tenant_refs = []
         tenant_refs = [self.v3_to_v2_project(tenant_ref)
                        for tenant_ref in tenant_refs
                        if not tenant_ref.get('is_domain')]
@@ -85,7 +90,15 @@ class Tenant(controller.V2Controller):
             msg = _('Name field is required and cannot be empty')
             raise exception.ValidationError(message=msg)
 
+        if 'is_domain' in tenant_ref:
+            msg = _('The creation of projects acting as domains is not '
+                    'allowed in v2.')
+            raise exception.ValidationError(message=msg)
+
         self.assert_admin(context)
+
+        self.resource_api.ensure_default_domain_exists()
+
         tenant_ref['id'] = tenant_ref.get('id', uuid.uuid4().hex)
         initiator = notifications._get_request_audit_info(context)
         tenant = self.resource_api.create_project(
@@ -226,26 +239,30 @@ class ProjectV3(controller.V3Controller):
     def create_project(self, context, project):
         ref = self._assign_unique_id(self._normalize_dict(project))
 
-        if not ref.get('parent_id') and not ref.get('domain_id'):
+        if not ref.get('is_domain'):
             ref = self._normalize_domain_id(context, ref)
-
-        if ref.get('is_domain'):
-            msg = _('The creation of projects acting as domains is not '
-                    'allowed yet.')
-            raise exception.NotImplemented(msg)
+        # Our API requires that you specify the location in the hierarchy
+        # unambiguously. This could be by parent_id or, if it is a top level
+        # project, just by providing a domain_id.
+        if not ref.get('parent_id'):
+            ref['parent_id'] = ref.get('domain_id')
 
         initiator = notifications._get_request_audit_info(context)
         try:
             ref = self.resource_api.create_project(ref['id'], ref,
                                                    initiator=initiator)
-        except exception.DomainNotFound as e:
+        except (exception.DomainNotFound, exception.ProjectNotFound) as e:
             raise exception.ValidationError(e)
         return ProjectV3.wrap_member(context, ref)
 
     @controller.filterprotected('domain_id', 'enabled', 'name',
-                                'parent_id')
+                                'parent_id', 'is_domain')
     def list_projects(self, context, filters):
         hints = ProjectV3.build_driver_hints(context, filters)
+        # If 'is_domain' has not been included as a query, we default it to
+        # False (which in query terms means '0'
+        if 'is_domain' not in context['query_string']:
+            hints.add_filter('is_domain', '0')
         refs = self.resource_api.list_projects(hints=hints)
         return ProjectV3.wrap_collection(context, refs, hints=hints)
 

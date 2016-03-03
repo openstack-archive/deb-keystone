@@ -22,10 +22,12 @@ import grp
 import hashlib
 import os
 import pwd
+import uuid
 
 from oslo_config import cfg
 from oslo_log import log
 from oslo_serialization import jsonutils
+from oslo_utils import reflection
 from oslo_utils import strutils
 from oslo_utils import timeutils
 import passlib.hash
@@ -40,6 +42,26 @@ from keystone.i18n import _, _LE, _LW
 CONF = cfg.CONF
 
 LOG = log.getLogger(__name__)
+
+
+# NOTE(stevermar): This UUID must stay the same, forever, across
+# all of keystone to preserve its value as a URN namespace, which is
+# used for ID transformation.
+RESOURCE_ID_NAMESPACE = uuid.UUID('4332ecab-770b-4288-a680-b9aca3b1b153')
+
+
+def resource_uuid(value):
+    """Converts input to valid UUID hex digits."""
+    try:
+        uuid.UUID(value)
+        return value
+    except ValueError:
+        if len(value) <= 64:
+            if six.PY2 and isinstance(value, six.text_type):
+                value = value.encode('utf-8')
+            return uuid.uuid5(RESOURCE_ID_NAMESPACE, value).hex
+        raise ValueError(_('Length of transformable resource id > 64, '
+                         'which is max allowed characters'))
 
 
 def flatten_dict(d, parent_key=''):
@@ -115,6 +137,8 @@ def verify_length_and_trunc_password(password):
 
 def hash_access_key(access):
     hash_ = hashlib.sha256()
+    if not isinstance(access, six.binary_type):
+        access = access.encode('utf-8')
     hash_.update(access)
     return hash_.hexdigest()
 
@@ -296,8 +320,10 @@ def get_unix_user(user=None):
     elif user is None:
         user_info = pwd.getpwuid(os.geteuid())
     else:
+        user_cls_name = reflection.get_class_name(user,
+                                                  fully_qualified=False)
         raise TypeError('user must be string, int or None; not %s (%r)' %
-                        (user.__class__.__name__, user))
+                        (user_cls_name, user))
 
     return user_info.pw_uid, user_info.pw_name
 
@@ -354,8 +380,10 @@ def get_unix_group(group=None):
     elif group is None:
         group_info = grp.getgrgid(os.getegid())
     else:
+        group_cls_name = reflection.get_class_name(group,
+                                                   fully_qualified=False)
         raise TypeError('group must be string, int or None; not %s (%r)' %
-                        (group.__class__.__name__, group))
+                        (group_cls_name, group))
 
     return group_info.gr_gid, group_info.gr_name
 
@@ -540,3 +568,31 @@ def list_url_unsafe_chars(name):
         if i in URL_RESERVED_CHARS:
             reserved_chars += i
     return reserved_chars
+
+
+def lower_case_hostname(url):
+    """Change the URL's hostname to lowercase"""
+    # NOTE(gyee): according to
+    # https://www.w3.org/TR/WD-html40-970708/htmlweb.html, the netloc portion
+    # of the URL is case-insensitive
+    parsed = moves.urllib.parse.urlparse(url)
+    # Note: _replace method for named tuples is public and defined in docs
+    replaced = parsed._replace(netloc=parsed.netloc.lower())
+    return moves.urllib.parse.urlunparse(replaced)
+
+
+def remove_standard_port(url):
+    # remove the default ports specified in RFC2616 and 2818
+    o = moves.urllib.parse.urlparse(url)
+    separator = ':'
+    (host, separator, port) = o.netloc.partition(':')
+    if o.scheme.lower() == 'http' and port == '80':
+        # NOTE(gyee): _replace() is not a private method. It has an
+        # an underscore prefix to prevent conflict with field names.
+        # See https://docs.python.org/2/library/collections.html#
+        # collections.namedtuple
+        o = o._replace(netloc=host)
+    if o.scheme.lower() == 'https' and port == '443':
+        o = o._replace(netloc=host)
+
+    return moves.urllib.parse.urlunparse(o)

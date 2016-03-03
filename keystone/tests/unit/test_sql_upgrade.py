@@ -29,7 +29,6 @@ WARNING::
     all data will be lost.
 """
 
-import copy
 import json
 import uuid
 
@@ -42,6 +41,7 @@ from oslo_db.sqlalchemy import session as db_session
 from sqlalchemy.engine import reflection
 import sqlalchemy.exc
 from sqlalchemy import schema
+from testtools import matchers
 
 from keystone.common import sql
 from keystone.common.sql import migrate_repo
@@ -53,7 +53,6 @@ from keystone.tests.unit.ksfixtures import database
 
 
 CONF = cfg.CONF
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 # NOTE(morganfainberg): This should be updated when each DB migration collapse
 # is done to mirror the expected structure of the DB in the format of
@@ -66,8 +65,8 @@ INITIAL_TABLE_STRUCTURE = {
         'id', 'name', 'enabled', 'extra',
     ],
     'endpoint': [
-        'id', 'legacy_endpoint_id', 'interface', 'region', 'service_id', 'url',
-        'enabled', 'extra',
+        'id', 'legacy_endpoint_id', 'interface', 'region_id', 'service_id',
+        'url', 'enabled', 'extra',
     ],
     'group': [
         'id', 'domain_id', 'name', 'description', 'extra',
@@ -77,6 +76,7 @@ INITIAL_TABLE_STRUCTURE = {
     ],
     'project': [
         'id', 'name', 'extra', 'description', 'enabled', 'domain_id',
+        'parent_id',
     ],
     'role': [
         'id', 'name', 'extra',
@@ -107,6 +107,15 @@ INITIAL_TABLE_STRUCTURE = {
     'assignment': [
         'type', 'actor_id', 'target_id', 'role_id', 'inherited',
     ],
+    'id_mapping': [
+        'public_id', 'domain_id', 'local_id', 'entity_type',
+    ],
+    'whitelisted_config': [
+        'domain_id', 'group', 'option', 'value',
+    ],
+    'sensitive_config': [
+        'domain_id', 'group', 'option', 'value',
+    ],
 }
 
 
@@ -125,6 +134,7 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
 
     def setUp(self):
         super(SqlMigrateBase, self).setUp()
+        self.load_backends()
         database.initialize_sql_session()
         conn_str = CONF.database.connection
         if (conn_str != unit.IN_MEM_DB_CONN_STRING and
@@ -141,7 +151,9 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
                 connection='sqlite:///%s' % db_file)
 
         # create and share a single sqlalchemy engine for testing
-        self.engine = sql.get_engine()
+        with sql.session_for_write() as session:
+            self.engine = session.get_bind()
+            self.addCleanup(self.cleanup_instance('engine'))
         self.Session = db_session.get_maker(self.engine, autocommit=False)
         self.addCleanup(sqlalchemy.orm.session.Session.close_all)
 
@@ -150,7 +162,8 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
             self.repo_package())
         self.schema = versioning_api.ControlledSchema.create(
             self.engine,
-            self.repo_path, self.initial_db_version)
+            self.repo_path,
+            self.initial_db_version)
 
         # auto-detect the highest available schema version in the migrate_repo
         self.max_version = self.schema.repository.version().version
@@ -215,6 +228,23 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
         else:
             raise AssertionError('Table "%s" already exists' % table_name)
 
+    def assertTableCountsMatch(self, table1_name, table2_name):
+        try:
+            table1 = self.select_table(table1_name)
+        except sqlalchemy.exc.NoSuchTableError:
+            raise AssertionError('Table "%s" does not exist' % table1_name)
+        try:
+            table2 = self.select_table(table2_name)
+        except sqlalchemy.exc.NoSuchTableError:
+            raise AssertionError('Table "%s" does not exist' % table2_name)
+        session = self.Session()
+        table1_count = session.execute(table1.count()).scalar()
+        table2_count = session.execute(table2.count()).scalar()
+        if table1_count != table2_count:
+            raise AssertionError('Table counts do not match: {0} ({1}), {2} '
+                                 '({3})'.format(table1_name, table1_count,
+                                                table2_name, table2_count))
+
     def upgrade(self, *args, **kwargs):
         self._migrate(*args, **kwargs)
 
@@ -256,8 +286,9 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableDoesNotExist('user')
 
     def test_start_version_db_init_version(self):
-        version = migration.db_version(sql.get_engine(), self.repo_path,
-                                       migrate_repo.DB_INIT_VERSION)
+        with sql.session_for_write() as session:
+            version = migration.db_version(session.get_bind(), self.repo_path,
+                                           migrate_repo.DB_INIT_VERSION)
         self.assertEqual(
             migrate_repo.DB_INIT_VERSION,
             version,
@@ -271,22 +302,6 @@ class SqlUpgradeTests(SqlMigrateBase):
         for table in INITIAL_TABLE_STRUCTURE:
             self.assertTableColumns(table, INITIAL_TABLE_STRUCTURE[table])
 
-        # Ensure the default domain was properly created.
-        default_domain = migration_helpers.get_default_domain()
-
-        meta = sqlalchemy.MetaData()
-        meta.bind = self.engine
-
-        domain_table = sqlalchemy.Table('domain', meta, autoload=True)
-
-        session = self.Session()
-        q = session.query(domain_table)
-        refs = q.all()
-
-        self.assertEqual(1, len(refs))
-        for k in default_domain.keys():
-            self.assertEqual(default_domain[k], getattr(refs[0], k))
-
     def insert_dict(self, session, table_name, d, table=None):
         """Naively inserts key-value pairs into a table, given a dictionary."""
         if table is None:
@@ -298,129 +313,43 @@ class SqlUpgradeTests(SqlMigrateBase):
         session.execute(insert)
         session.commit()
 
-    def test_id_mapping(self):
-        self.upgrade(50)
-        self.assertTableDoesNotExist('id_mapping')
-        self.upgrade(51)
-        self.assertTableExists('id_mapping')
+    def test_kilo_squash(self):
+        self.upgrade(67)
 
-    def test_region_url_upgrade(self):
-        self.upgrade(52)
-        self.assertTableColumns('region',
-                                ['id', 'description', 'parent_region_id',
-                                 'extra', 'url'])
+        # In 053 the size of ID and parent region ID columns were changed
+        table = sqlalchemy.Table('region', self.metadata, autoload=True)
+        self.assertEqual(255, table.c.id.type.length)
+        self.assertEqual(255, table.c.parent_region_id.type.length)
+        table = sqlalchemy.Table('endpoint', self.metadata, autoload=True)
+        self.assertEqual(255, table.c.region_id.type.length)
 
-    def test_endpoint_region_upgrade_columns(self):
-        self.upgrade(53)
-        self.assertTableColumns('endpoint',
-                                ['id', 'legacy_endpoint_id', 'interface',
-                                 'service_id', 'url', 'extra', 'enabled',
-                                 'region_id'])
-        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
-        self.assertEqual(255, region_table.c.id.type.length)
-        self.assertEqual(255, region_table.c.parent_region_id.type.length)
-        endpoint_table = sqlalchemy.Table('endpoint',
-                                          self.metadata,
-                                          autoload=True)
-        self.assertEqual(255, endpoint_table.c.region_id.type.length)
-
-    def test_endpoint_region_migration(self):
-        self.upgrade(52)
-        session = self.Session()
-        _small_region_name = '0' * 30
-        _long_region_name = '0' * 255
-        _clashing_region_name = '0' * 70
-
-        def add_service():
-            service_id = uuid.uuid4().hex
-            # Older style service ref, must create by hand
-            service = {
-                'id': service_id,
-                'type': uuid.uuid4().hex
-            }
-
-            self.insert_dict(session, 'service', service)
-
-            return service_id
-
-        def add_endpoint(service_id, region):
-            endpoint_id = uuid.uuid4().hex
-
-            # Can't use new_endpoint_ref to make the older style endpoint
-            # so make it by hand.
-            endpoint = {
-                'id': endpoint_id,
-                'interface': uuid.uuid4().hex[:8],
-                'service_id': service_id,
-                'url': uuid.uuid4().hex,
-                'region': region
-            }
-            self.insert_dict(session, 'endpoint', endpoint)
-
-            return endpoint_id
-
-        _service_id_ = add_service()
-        add_endpoint(_service_id_, region=_long_region_name)
-        add_endpoint(_service_id_, region=_long_region_name)
-        add_endpoint(_service_id_, region=_clashing_region_name)
-        add_endpoint(_service_id_, region=_small_region_name)
-        add_endpoint(_service_id_, region=None)
-
-        # upgrade to 53
-        session.close()
-        self.upgrade(53)
-        session = self.Session()
-        self.metadata.clear()
-
-        region_table = sqlalchemy.Table('region', self.metadata, autoload=True)
-        self.assertEqual(1, session.query(region_table).
-                         filter_by(id=_long_region_name).count())
-        self.assertEqual(1, session.query(region_table).
-                         filter_by(id=_clashing_region_name).count())
-        self.assertEqual(1, session.query(region_table).
-                         filter_by(id=_small_region_name).count())
-
-        endpoint_table = sqlalchemy.Table('endpoint',
-                                          self.metadata,
-                                          autoload=True)
-        self.assertEqual(5, session.query(endpoint_table).count())
-        self.assertEqual(2, session.query(endpoint_table).
-                         filter_by(region_id=_long_region_name).count())
-        self.assertEqual(1, session.query(endpoint_table).
-                         filter_by(region_id=_clashing_region_name).count())
-        self.assertEqual(1, session.query(endpoint_table).
-                         filter_by(region_id=_small_region_name).count())
-
-    def test_add_actor_id_index(self):
-        self.upgrade(53)
-        self.upgrade(54)
+        # In 054 an index was created for the actor_id of the assignment table
         table = sqlalchemy.Table('assignment', self.metadata, autoload=True)
         index_data = [(idx.name, list(idx.columns.keys()))
                       for idx in table.indexes]
         self.assertIn(('ix_actor_id', ['actor_id']), index_data)
 
-    def test_token_user_id_and_trust_id_index_upgrade(self):
-        self.upgrade(54)
-        self.upgrade(55)
+        # In 055 indexes were created for user and trust IDs in the token table
         table = sqlalchemy.Table('token', self.metadata, autoload=True)
         index_data = [(idx.name, list(idx.columns.keys()))
                       for idx in table.indexes]
         self.assertIn(('ix_token_user_id', ['user_id']), index_data)
         self.assertIn(('ix_token_trust_id', ['trust_id']), index_data)
 
-    def test_project_parent_id_upgrade(self):
-        self.upgrade(61)
-        self.assertTableColumns('project',
-                                ['id', 'name', 'extra', 'description',
-                                 'enabled', 'domain_id', 'parent_id'])
-
-    def test_drop_assignment_role_fk(self):
-        self.upgrade(61)
-        self.assertTrue(self.does_fk_exist('assignment', 'role_id'))
-        self.upgrade(62)
-        if self.engine.name != 'sqlite':
-            # SQLite does not support FK deletions (or enforcement)
+        # In 062 the role ID foreign key was removed from the assignment table
+        if self.engine.name == "mysql":
             self.assertFalse(self.does_fk_exist('assignment', 'role_id'))
+
+        # In 064 the domain ID FK was removed from the group and user tables
+        if self.engine.name != 'sqlite':
+            # sqlite does not support FK deletions (or enforcement)
+            self.assertFalse(self.does_fk_exist('group', 'domain_id'))
+            self.assertFalse(self.does_fk_exist('user', 'domain_id'))
+
+        # In 067 the role ID index was removed from the assignment table
+        if self.engine.name == "mysql":
+            self.assertFalse(self._does_index_exist('assignment',
+                                                    'assignment_role_id_fkey'))
 
     def test_insert_assignment_inherited_pk(self):
         ASSIGNMENT_TABLE_NAME = 'assignment'
@@ -502,33 +431,10 @@ class SqlUpgradeTests(SqlMigrateBase):
                 return True
         return False
 
-    def test_drop_region_url_upgrade(self):
-        self.upgrade(63)
-        self.assertTableColumns('region',
-                                ['id', 'description', 'parent_region_id',
-                                 'extra'])
-
-    def test_domain_fk(self):
-        self.upgrade(63)
-        self.assertTrue(self.does_fk_exist('group', 'domain_id'))
-        self.assertTrue(self.does_fk_exist('user', 'domain_id'))
-        self.upgrade(64)
-        if self.engine.name != 'sqlite':
-            # sqlite does not support FK deletions (or enforcement)
-            self.assertFalse(self.does_fk_exist('group', 'domain_id'))
-            self.assertFalse(self.does_fk_exist('user', 'domain_id'))
-
-    def test_add_domain_config(self):
-        whitelisted_table = 'whitelisted_config'
-        sensitive_table = 'sensitive_config'
-        self.upgrade(64)
-        self.assertTableDoesNotExist(whitelisted_table)
-        self.assertTableDoesNotExist(sensitive_table)
-        self.upgrade(65)
-        self.assertTableColumns(whitelisted_table,
-                                ['domain_id', 'group', 'option', 'value'])
-        self.assertTableColumns(sensitive_table,
-                                ['domain_id', 'group', 'option', 'value'])
+    def does_index_exist(self, table_name, index_name):
+        meta = sqlalchemy.MetaData(bind=self.engine)
+        table = sqlalchemy.Table(table_name, meta, autoload=True)
+        return index_name in [idx.name for idx in table.indexes]
 
     def test_endpoint_policy_upgrade(self):
         self.assertTableDoesNotExist('policy_association')
@@ -679,92 +585,6 @@ class SqlUpgradeTests(SqlMigrateBase):
         # that 084 did not create the table.
         self.assertTableDoesNotExist('revocation_event')
 
-    def test_fixup_service_name_value_upgrade(self):
-        """Update service name data from `extra` to empty string."""
-        def add_service(**extra_data):
-            service_id = uuid.uuid4().hex
-            # Older style service ref, must create by hand
-            service = {
-                'id': service_id,
-                'type': uuid.uuid4().hex,
-                'extra': json.dumps(extra_data),
-            }
-
-            self.insert_dict(session, 'service', service)
-
-            return service_id
-
-        self.upgrade(65)
-        session = self.Session()
-
-        # Services with extra values having a random attribute and
-        # different combinations of name
-        random_attr_name = uuid.uuid4().hex
-        random_attr_value = uuid.uuid4().hex
-        random_attr_str = "%s='%s'" % (random_attr_name, random_attr_value)
-        random_attr_no_name = {random_attr_name: random_attr_value}
-        random_attr_no_name_str = "%s='%s'" % (random_attr_name,
-                                               random_attr_value)
-        random_attr_name_value = {random_attr_name: random_attr_value,
-                                  'name': 'myname'}
-        random_attr_name_value_str = 'name=myname,%s' % random_attr_str
-        random_attr_name_empty = {random_attr_name: random_attr_value,
-                                  'name': ''}
-        random_attr_name_empty_str = 'name=,%s' % random_attr_str
-        random_attr_name_none = {random_attr_name: random_attr_value,
-                                 'name': None}
-        random_attr_name_none_str = 'name=None,%s' % random_attr_str
-
-        services = [
-            (add_service(**random_attr_no_name),
-             random_attr_name_empty, random_attr_no_name_str),
-            (add_service(**random_attr_name_value),
-             random_attr_name_value, random_attr_name_value_str),
-            (add_service(**random_attr_name_empty),
-             random_attr_name_empty, random_attr_name_empty_str),
-            (add_service(**random_attr_name_none),
-             random_attr_name_empty, random_attr_name_none_str),
-        ]
-
-        # NOTE(viktors): Add a service with empty extra field
-        self.insert_dict(session, 'service',
-                         {'id': uuid.uuid4().hex, 'type': uuid.uuid4().hex})
-
-        session.close()
-        self.upgrade(66)
-        session = self.Session()
-
-        # Verify that the services have the expected values.
-        self.metadata.clear()
-        service_table = sqlalchemy.Table('service', self.metadata,
-                                         autoload=True)
-
-        def fetch_service_extra(service_id):
-            cols = [service_table.c.extra]
-            f = service_table.c.id == service_id
-            s = sqlalchemy.select(cols).where(f)
-            service = session.execute(s).fetchone()
-            return json.loads(service.extra)
-
-        for service_id, exp_extra, msg in services:
-            extra = fetch_service_extra(service_id)
-            self.assertDictEqual(exp_extra, extra, msg)
-
-    def _does_index_exist(self, table_name, index_name):
-        meta = sqlalchemy.MetaData(bind=self.engine)
-        table = sqlalchemy.Table('assignment', meta, autoload=True)
-        return index_name in [idx.name for idx in table.indexes]
-
-    def test_drop_assignment_role_id_index_mysql(self):
-        self.upgrade(66)
-        if self.engine.name == "mysql":
-            self.assertTrue(self._does_index_exist('assignment',
-                                                   'assignment_role_id_fkey'))
-        self.upgrade(67)
-        if self.engine.name == "mysql":
-            self.assertFalse(self._does_index_exist('assignment',
-                                                    'assignment_role_id_fkey'))
-
     def test_project_is_domain_upgrade(self):
         self.upgrade(74)
         self.assertTableColumns('project',
@@ -822,126 +642,348 @@ class SqlUpgradeTests(SqlMigrateBase):
         constraint_names = [constraint['name'] for constraint in constraints]
         self.assertIn('duplicate_trust_constraint', constraint_names)
 
-    def populate_user_table(self, with_pass_enab=False,
-                            with_pass_enab_domain=False):
-        # Populate the appropriate fields in the user
-        # table, depending on the parameters:
-        #
-        # Default: id, name, extra
-        # pass_enab: Add password, enabled as well
-        # pass_enab_domain: Add password, enabled and domain as well
-        #
-        this_table = sqlalchemy.Table("user",
-                                      self.metadata,
-                                      autoload=True)
-        for user in default_fixtures.USERS:
-            extra = copy.deepcopy(user)
-            extra.pop('id')
-            extra.pop('name')
+    def test_add_domain_specific_roles(self):
+        """Check database upgraded successfully for domain specific roles.
 
-            if with_pass_enab:
-                password = extra.pop('password', None)
-                enabled = extra.pop('enabled', True)
-                ins = this_table.insert().values(
+        The following items need to be checked:
+
+        - The domain_id column has been added
+        - That it has been added to the uniqueness constraints
+        - Existing roles have their domain_id columns set to the specific
+          string of '<<null>>'
+
+        """
+        NULL_DOMAIN_ID = '<<null>>'
+
+        self.upgrade(87)
+        session = self.Session()
+        role_table = sqlalchemy.Table('role', self.metadata, autoload=True)
+        # Add a role before we upgrade, so we can check that its new domain_id
+        # attribute is handled correctly
+        role_id = uuid.uuid4().hex
+        self.insert_dict(session, 'role',
+                         {'id': role_id, 'name': uuid.uuid4().hex})
+        session.close()
+
+        self.upgrade(88)
+
+        session = self.Session()
+        self.metadata.clear()
+        self.assertTableColumns('role', ['id', 'name', 'domain_id', 'extra'])
+        # Check the domain_id has been added to the uniqueness constraint
+        inspector = reflection.Inspector.from_engine(self.engine)
+        constraints = inspector.get_unique_constraints('role')
+        constraint_columns = [
+            constraint['column_names'] for constraint in constraints
+            if constraint['name'] == 'ixu_role_name_domain_id']
+        self.assertIn('domain_id', constraint_columns[0])
+
+        # Now check our role has its domain_id attribute set correctly
+        role_table = sqlalchemy.Table('role', self.metadata, autoload=True)
+        cols = [role_table.c.domain_id]
+        filter = role_table.c.id == role_id
+        statement = sqlalchemy.select(cols).where(filter)
+        role_entry = session.execute(statement).fetchone()
+        self.assertEqual(NULL_DOMAIN_ID, role_entry[0])
+
+    def test_add_root_of_all_domains(self):
+        NULL_DOMAIN_ID = '<<keystone.domain.root>>'
+        self.upgrade(89)
+        session = self.Session()
+
+        domain_table = sqlalchemy.Table(
+            'domain', self.metadata, autoload=True)
+        query = session.query(domain_table).filter_by(id=NULL_DOMAIN_ID)
+        domain_from_db = query.one()
+        self.assertIn(NULL_DOMAIN_ID, domain_from_db)
+
+        project_table = sqlalchemy.Table(
+            'project', self.metadata, autoload=True)
+        query = session.query(project_table).filter_by(id=NULL_DOMAIN_ID)
+        project_from_db = query.one()
+        self.assertIn(NULL_DOMAIN_ID, project_from_db)
+
+        session.close()
+
+    def test_add_local_user_and_password_tables(self):
+        local_user_table = 'local_user'
+        password_table = 'password'
+        self.upgrade(89)
+        self.assertTableDoesNotExist(local_user_table)
+        self.assertTableDoesNotExist(password_table)
+        self.upgrade(90)
+        self.assertTableColumns(local_user_table,
+                                ['id',
+                                 'user_id',
+                                 'domain_id',
+                                 'name'])
+        self.assertTableColumns(password_table,
+                                ['id',
+                                 'local_user_id',
+                                 'password'])
+
+    def test_migrate_data_to_local_user_and_password_tables(self):
+        def get_expected_users():
+            expected_users = []
+            for test_user in default_fixtures.USERS:
+                user = {}
+                user['id'] = uuid.uuid4().hex
+                user['name'] = test_user['name']
+                user['domain_id'] = test_user['domain_id']
+                user['password'] = test_user['password']
+                user['enabled'] = True
+                user['extra'] = json.dumps(uuid.uuid4().hex)
+                user['default_project_id'] = uuid.uuid4().hex
+                expected_users.append(user)
+            return expected_users
+
+        def add_users_to_db(expected_users, user_table):
+            for user in expected_users:
+                ins = user_table.insert().values(
                     {'id': user['id'],
                      'name': user['name'],
-                     'password': password,
-                     'enabled': bool(enabled),
-                     'extra': json.dumps(extra)})
-            else:
-                if with_pass_enab_domain:
-                    password = extra.pop('password', None)
-                    enabled = extra.pop('enabled', True)
-                    extra.pop('domain_id')
-                    ins = this_table.insert().values(
-                        {'id': user['id'],
-                         'name': user['name'],
-                         'domain_id': user['domain_id'],
-                         'password': password,
-                         'enabled': bool(enabled),
-                         'extra': json.dumps(extra)})
-                else:
-                    ins = this_table.insert().values(
-                        {'id': user['id'],
-                         'name': user['name'],
-                         'extra': json.dumps(extra)})
-            self.engine.execute(ins)
+                     'domain_id': user['domain_id'],
+                     'password': user['password'],
+                     'enabled': user['enabled'],
+                     'extra': user['extra'],
+                     'default_project_id': user['default_project_id']})
+                ins.execute()
 
-    def populate_tenant_table(self, with_desc_enab=False,
-                              with_desc_enab_domain=False):
-        # Populate the appropriate fields in the tenant or
-        # project table, depending on the parameters
-        #
-        # Default: id, name, extra
-        # desc_enab: Add description, enabled as well
-        # desc_enab_domain: Add description, enabled and domain as well,
-        #                   plus use project instead of tenant
-        #
-        if with_desc_enab_domain:
-            # By this time tenants are now projects
-            this_table = sqlalchemy.Table("project",
-                                          self.metadata,
+        def get_users_from_db(user_table, local_user_table, password_table):
+            sel = (
+                sqlalchemy.select([user_table.c.id,
+                                   user_table.c.enabled,
+                                   user_table.c.extra,
+                                   user_table.c.default_project_id,
+                                   local_user_table.c.name,
+                                   local_user_table.c.domain_id,
+                                   password_table.c.password])
+                .select_from(user_table.join(local_user_table,
+                                             user_table.c.id ==
+                                             local_user_table.c.user_id)
+                                       .join(password_table,
+                                             local_user_table.c.id ==
+                                             password_table.c.local_user_id))
+            )
+            user_rows = sel.execute()
+            users = []
+            for row in user_rows:
+                users.append(
+                    {'id': row['id'],
+                     'name': row['name'],
+                     'domain_id': row['domain_id'],
+                     'password': row['password'],
+                     'enabled': row['enabled'],
+                     'extra': row['extra'],
+                     'default_project_id': row['default_project_id']})
+            return users
+
+        meta = sqlalchemy.MetaData()
+        meta.bind = self.engine
+
+        user_table_name = 'user'
+        local_user_table_name = 'local_user'
+        password_table_name = 'password'
+
+        # populate current user table
+        self.upgrade(90)
+        user_table = sqlalchemy.Table(user_table_name, meta, autoload=True)
+        expected_users = get_expected_users()
+        add_users_to_db(expected_users, user_table)
+
+        # upgrade to migration and test
+        self.upgrade(91)
+        self.assertTableCountsMatch(user_table_name, local_user_table_name)
+        self.assertTableCountsMatch(local_user_table_name, password_table_name)
+        meta.clear()
+        user_table = sqlalchemy.Table(user_table_name, meta, autoload=True)
+        local_user_table = sqlalchemy.Table(local_user_table_name, meta,
+                                            autoload=True)
+        password_table = sqlalchemy.Table(password_table_name, meta,
                                           autoload=True)
-        else:
-            this_table = sqlalchemy.Table("tenant",
-                                          self.metadata,
-                                          autoload=True)
+        actual_users = get_users_from_db(user_table, local_user_table,
+                                         password_table)
+        self.assertListEqual(expected_users, actual_users)
 
-        for tenant in default_fixtures.TENANTS:
-            extra = copy.deepcopy(tenant)
-            extra.pop('id')
-            extra.pop('name')
+    def test_migrate_user_with_null_password_to_password_tables(self):
+        USER_TABLE_NAME = 'user'
+        LOCAL_USER_TABLE_NAME = 'local_user'
+        PASSWORD_TABLE_NAME = 'password'
+        self.upgrade(90)
+        user_ref = unit.new_user_ref(uuid.uuid4().hex)
+        user_ref.pop('password')
+        # pop extra attribute which doesn't recognized by SQL expression
+        # layer.
+        user_ref.pop('email')
+        session = self.Session()
+        self.insert_dict(session, USER_TABLE_NAME, user_ref)
+        self.metadata.clear()
+        self.upgrade(91)
+        # migration should be successful.
+        self.assertTableCountsMatch(USER_TABLE_NAME, LOCAL_USER_TABLE_NAME)
+        # no new entry was added to the password table because the
+        # user doesn't have a password.
+        password_table = self.select_table(PASSWORD_TABLE_NAME)
+        rows = session.execute(password_table.count()).scalar()
+        self.assertEqual(0, rows)
 
-            if with_desc_enab:
-                desc = extra.pop('description', None)
-                enabled = extra.pop('enabled', True)
-                ins = this_table.insert().values(
-                    {'id': tenant['id'],
-                     'name': tenant['name'],
-                     'description': desc,
-                     'enabled': bool(enabled),
-                     'extra': json.dumps(extra)})
-            else:
-                if with_desc_enab_domain:
-                    desc = extra.pop('description', None)
-                    enabled = extra.pop('enabled', True)
-                    extra.pop('domain_id')
-                    ins = this_table.insert().values(
-                        {'id': tenant['id'],
-                         'name': tenant['name'],
-                         'domain_id': tenant['domain_id'],
-                         'description': desc,
-                         'enabled': bool(enabled),
-                         'extra': json.dumps(extra)})
+    def test_migrate_user_skip_user_already_exist_in_local_user(self):
+        USER_TABLE_NAME = 'user'
+        LOCAL_USER_TABLE_NAME = 'local_user'
+        self.upgrade(90)
+        user1_ref = unit.new_user_ref(uuid.uuid4().hex)
+        # pop extra attribute which doesn't recognized by SQL expression
+        # layer.
+        user1_ref.pop('email')
+        user2_ref = unit.new_user_ref(uuid.uuid4().hex)
+        user2_ref.pop('email')
+        session = self.Session()
+        self.insert_dict(session, USER_TABLE_NAME, user1_ref)
+        self.insert_dict(session, USER_TABLE_NAME, user2_ref)
+        user_id = user1_ref.pop('id')
+        user_name = user1_ref.pop('name')
+        domain_id = user1_ref.pop('domain_id')
+        local_user_ref = {'user_id': user_id, 'name': user_name,
+                          'domain_id': domain_id}
+        self.insert_dict(session, LOCAL_USER_TABLE_NAME, local_user_ref)
+        self.metadata.clear()
+        self.upgrade(91)
+        # migration should be successful and user2_ref has been migrated to
+        # `local_user` table.
+        self.assertTableCountsMatch(USER_TABLE_NAME, LOCAL_USER_TABLE_NAME)
+
+    def test_implied_roles_fk_on_delete_cascade(self):
+        if self.engine.name == 'sqlite':
+            self.skipTest('sqlite backend does not support foreign keys')
+
+        self.upgrade(92)
+
+        def _create_three_roles():
+            id_list = []
+            for _ in range(3):
+                role = unit.new_role_ref()
+                self.role_api.create_role(role['id'], role)
+                id_list.append(role['id'])
+            return id_list
+
+        role_id_list = _create_three_roles()
+        self.role_api.create_implied_role(role_id_list[0], role_id_list[1])
+        self.role_api.create_implied_role(role_id_list[0], role_id_list[2])
+
+        # assert that there are two roles implied by role 0.
+        implied_roles = self.role_api.list_implied_roles(role_id_list[0])
+        self.assertThat(implied_roles, matchers.HasLength(2))
+
+        self.role_api.delete_role(role_id_list[0])
+        # assert the cascade deletion is effective.
+        implied_roles = self.role_api.list_implied_roles(role_id_list[0])
+        self.assertThat(implied_roles, matchers.HasLength(0))
+
+    def test_domain_as_project_upgrade(self):
+
+        def _populate_domain_and_project_tables(session):
+            # Three domains, with various different attributes
+            self.domains = [{'id': uuid.uuid4().hex,
+                             'name': uuid.uuid4().hex,
+                             'enabled': True,
+                             'extra': {'description': uuid.uuid4().hex,
+                                       'another_attribute': True}},
+                            {'id': uuid.uuid4().hex,
+                             'name': uuid.uuid4().hex,
+                             'enabled': True,
+                             'extra': {'description': uuid.uuid4().hex}},
+                            {'id': uuid.uuid4().hex,
+                             'name': uuid.uuid4().hex,
+                             'enabled': False}]
+            # Four projects, two top level, two children
+            self.projects = []
+            self.projects.append(unit.new_project_ref(
+                domain_id=self.domains[0]['id'],
+                parent_id=None))
+            self.projects.append(unit.new_project_ref(
+                domain_id=self.domains[0]['id'],
+                parent_id=self.projects[0]['id']))
+            self.projects.append(unit.new_project_ref(
+                domain_id=self.domains[1]['id'],
+                parent_id=None))
+            self.projects.append(unit.new_project_ref(
+                domain_id=self.domains[1]['id'],
+                parent_id=self.projects[2]['id']))
+
+            for domain in self.domains:
+                this_domain = domain.copy()
+                if 'extra' in this_domain:
+                    this_domain['extra'] = json.dumps(this_domain['extra'])
+                self.insert_dict(session, 'domain', this_domain)
+            for project in self.projects:
+                self.insert_dict(session, 'project', project)
+
+        def _check_projects(projects):
+
+            def _assert_domain_matches_project(project):
+                for domain in self.domains:
+                    if project.id == domain['id']:
+                        self.assertEqual(domain['name'], project.name)
+                        self.assertEqual(domain['enabled'], project.enabled)
+                        if domain['id'] == self.domains[0]['id']:
+                            self.assertEqual(domain['extra']['description'],
+                                             project.description)
+                            self.assertEqual({'another_attribute': True},
+                                             json.loads(project.extra))
+                        elif domain['id'] == self.domains[1]['id']:
+                            self.assertEqual(domain['extra']['description'],
+                                             project.description)
+                            self.assertEqual({}, json.loads(project.extra))
+
+            # We had domains 3 we created, which should now be projects acting
+            # as domains, To this we add the 4 original projects, plus the root
+            # of all domains row.
+            self.assertEqual(8, projects.count())
+
+            project_ids = []
+            for project in projects:
+                if project.is_domain:
+                    self.assertEqual(NULL_DOMAIN_ID, project.domain_id)
+                    self.assertIsNone(project.parent_id)
                 else:
-                    ins = this_table.insert().values(
-                        {'id': tenant['id'],
-                         'name': tenant['name'],
-                         'extra': json.dumps(extra)})
-            self.engine.execute(ins)
+                    self.assertIsNotNone(project.domain_id)
+                    self.assertIsNotNone(project.parent_id)
+                project_ids.append(project.id)
 
-    def _mysql_check_all_tables_innodb(self):
-        database = self.engine.url.database
+            for domain in self.domains:
+                self.assertIn(domain['id'], project_ids)
+            for project in self.projects:
+                self.assertIn(project['id'], project_ids)
 
-        connection = self.engine.connect()
-        # sanity check
-        total = connection.execute("SELECT count(*) "
-                                   "from information_schema.TABLES "
-                                   "where TABLE_SCHEMA='%(database)s'" %
-                                   dict(database=database))
-        self.assertTrue(total.scalar() > 0, "No tables found. Wrong schema?")
+            # Now check the attributes of the domains came across OK
+            for project in projects:
+                _assert_domain_matches_project(project)
 
-        noninnodb = connection.execute("SELECT table_name "
-                                       "from information_schema.TABLES "
-                                       "where TABLE_SCHEMA='%(database)s' "
-                                       "and ENGINE!='InnoDB' "
-                                       "and TABLE_NAME!='migrate_version'" %
-                                       dict(database=database))
-        names = [x[0] for x in noninnodb]
-        self.assertEqual([], names,
-                         "Non-InnoDB tables exist")
+        NULL_DOMAIN_ID = '<<keystone.domain.root>>'
+        self.upgrade(92)
 
-        connection.close()
+        session = self.Session()
+
+        _populate_domain_and_project_tables(session)
+
+        self.upgrade(93)
+        proj_table = sqlalchemy.Table('project', self.metadata, autoload=True)
+
+        projects = session.query(proj_table)
+        _check_projects(projects)
+
+    def test_add_federated_user_table(self):
+        federated_user_table = 'federated_user'
+        self.upgrade(93)
+        self.assertTableDoesNotExist(federated_user_table)
+        self.upgrade(94)
+        self.assertTableColumns(federated_user_table,
+                                ['id',
+                                 'user_id',
+                                 'idp_id',
+                                 'protocol_id',
+                                 'unique_id',
+                                 'display_name'])
 
 
 class VersionTests(SqlMigrateBase):

@@ -19,10 +19,10 @@ import fixtures
 import mock
 from oslo_config import cfg
 from six.moves import range
+from testtools import matchers
 
 from keystone.cmd import cli
 from keystone.common import dependency
-from keystone.common.sql import migration_helpers
 from keystone.i18n import _
 from keystone import resource
 from keystone.tests import unit
@@ -107,7 +107,10 @@ class CliBootStrapTestCaseWithEnvironment(CliBootStrapTestCase):
         self.username = uuid.uuid4().hex
         self.project_name = uuid.uuid4().hex
         self.role_name = uuid.uuid4().hex
-        self.default_domain = migration_helpers.get_default_domain()
+        self.default_domain = {
+            'id': CONF.identity.default_domain_id,
+            'name': 'Default',
+        }
         self.useFixture(
             fixtures.EnvironmentVariable('OS_BOOTSTRAP_PASSWORD',
                                          newvalue=self.password))
@@ -223,7 +226,8 @@ class CliDomainConfigAllTestCase(unit.SQLDriverOverrides, unit.TestCase):
                      'user': 'cn=Admin',
                      'password': 'password',
                      'suffix': 'cn=example,cn=com'},
-            'identity': {'driver': 'ldap'}
+            'identity': {'driver': 'ldap',
+                         'list_limit': '101'}
         }
         domain2_config = {
             'ldap': {'url': 'fake://memory',
@@ -294,7 +298,7 @@ class CliDomainConfigSingleDomainTestCase(CliDomainConfigAllTestCase):
         # default domain
         dependency.reset()
         with mock.patch('six.moves.builtins.print') as mock_print:
-            self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
+            self.assertRaises(unit.UnexpectedExit, cli.DomainConfigUpload.main)
             file_name = ('keystone.%s.conf' %
                          resource.calc_default_domain()['name'])
             error_msg = _(
@@ -320,7 +324,7 @@ class CliDomainConfigNoOptionsTestCase(CliDomainConfigAllTestCase):
     def test_config_upload(self):
         dependency.reset()
         with mock.patch('six.moves.builtins.print') as mock_print:
-            self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
+            self.assertRaises(unit.UnexpectedExit, cli.DomainConfigUpload.main)
             mock_print.assert_has_calls(
                 [mock.call(
                     _('At least one option must be provided, use either '
@@ -337,7 +341,7 @@ class CliDomainConfigTooManyOptionsTestCase(CliDomainConfigAllTestCase):
     def test_config_upload(self):
         dependency.reset()
         with mock.patch('six.moves.builtins.print') as mock_print:
-            self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
+            self.assertRaises(unit.UnexpectedExit, cli.DomainConfigUpload.main)
             mock_print.assert_has_calls(
                 [mock.call(_('The --all option cannot be used with '
                              'the --domain-name option'))])
@@ -354,7 +358,7 @@ class CliDomainConfigInvalidDomainTestCase(CliDomainConfigAllTestCase):
     def test_config_upload(self):
         dependency.reset()
         with mock.patch('six.moves.builtins.print') as mock_print:
-            self.assertRaises(SystemExit, cli.DomainConfigUpload.main)
+            self.assertRaises(unit.UnexpectedExit, cli.DomainConfigUpload.main)
             file_name = 'keystone.%s.conf' % self.invalid_domain_name
             error_msg = (_(
                 'Invalid domain name: %(domain)s found in config file name: '
@@ -363,3 +367,31 @@ class CliDomainConfigInvalidDomainTestCase(CliDomainConfigAllTestCase):
                     'file': os.path.join(CONF.identity.domain_config_dir,
                                          file_name)})
             mock_print.assert_has_calls([mock.call(error_msg)])
+
+
+class TestDomainConfigFinder(unit.BaseTestCase):
+
+    def setUp(self):
+        super(TestDomainConfigFinder, self).setUp()
+        self.logging = self.useFixture(fixtures.LoggerFixture())
+
+    @mock.patch('os.walk')
+    def test_finder_ignores_files(self, mock_walk):
+        mock_walk.return_value = [
+            ['.', [], ['file.txt', 'keystone.conf', 'keystone.domain0.conf']],
+        ]
+
+        domain_configs = list(cli._domain_config_finder('.'))
+
+        expected_domain_configs = [('./keystone.domain0.conf', 'domain0')]
+        self.assertThat(domain_configs,
+                        matchers.Equals(expected_domain_configs))
+
+        expected_msg_template = ('Ignoring file (%s) while scanning '
+                                 'domain config directory')
+        self.assertThat(
+            self.logging.output,
+            matchers.Contains(expected_msg_template % 'file.txt'))
+        self.assertThat(
+            self.logging.output,
+            matchers.Contains(expected_msg_template % 'keystone.conf'))

@@ -140,32 +140,40 @@ class CircularRegionHierarchyError(Error):
     title = 'Bad Request'
 
 
-class PasswordVerificationError(Error):
+class ForbiddenNotSecurity(Error):
+    """When you want to return a 403 Forbidden response but not security.
+
+    Use this for errors where the message is always safe to present to the user
+    and won't give away extra information.
+
+    """
+
+    code = 403
+    title = 'Forbidden'
+
+
+class PasswordVerificationError(ForbiddenNotSecurity):
     message_format = _("The password length must be less than or equal "
                        "to %(size)i. The server could not comply with the "
                        "request because the password is invalid.")
-    code = 403
-    title = 'Forbidden'
 
 
-class RegionDeletionError(Error):
+class RegionDeletionError(ForbiddenNotSecurity):
     message_format = _("Unable to delete region %(region_id)s because it or "
                        "its child regions have associated endpoints.")
-    code = 403
-    title = 'Forbidden'
 
 
-class PKITokenExpected(Error):
+class PKITokenExpected(ForbiddenNotSecurity):
     message_format = _('The certificates you requested are not available. '
                        'It is likely that this server does not use PKI tokens '
                        'otherwise this is the result of misconfiguration.')
-    code = 403
-    title = 'Forbidden'
 
 
 class SecurityError(Error):
-    """Avoids exposing details of security failures, unless in insecure_debug
-    mode.
+    """Security error exception.
+
+    Avoids exposing details of security errors, unless in insecure_debug mode.
+
     """
 
     amendment = _('(Disable insecure_debug mode to suppress these details.)')
@@ -265,9 +273,8 @@ class EndpointNotFound(NotFound):
 
 
 class MetadataNotFound(NotFound):
-    """(dolph): metadata is not a user-facing concept,
-    so this exception should not be exposed
-    """
+    # NOTE (dolph): metadata is not a user-facing concept,
+    # so this exception should not be exposed.
 
     message_format = _("An unhandled exception has occurred:"
                        " Could not find metadata.")
@@ -287,6 +294,10 @@ class RoleNotFound(NotFound):
 
 class ImpliedRoleNotFound(NotFound):
     message_format = _("%(prior_role_id)s does not imply %(implied_role_id)s")
+
+
+class InvalidImpliedRole(Forbidden):
+    message_format = _("%(role_id)s cannot be an implied roles")
 
 
 class RoleAssignmentNotFound(NotFound):
@@ -382,6 +393,12 @@ class ConfigRegistrationNotFound(Exception):
     pass
 
 
+class KeystoneConfigurationError(Exception):
+    # This is an exception to be used in the case that Keystone config is
+    # invalid and Keystone should not start.
+    pass
+
+
 class Conflict(Error):
     message_format = _("Conflict occurred attempting to store %(type)s -"
                        " %(details)s")
@@ -435,6 +452,12 @@ class MappedGroupNotFound(UnexpectedError):
 
 class MetadataFileError(UnexpectedError):
     debug_message_format = _("Error while reading metadata file, %(reason)s")
+
+
+class DirectMappingError(UnexpectedError):
+    message_format = _("Local section in mapping %(mapping_id)s refers to a "
+                       "remote match that doesn't exist "
+                       "(e.g. {0} in a local section).")
 
 
 class AssignmentTypeCalculationError(UnexpectedError):

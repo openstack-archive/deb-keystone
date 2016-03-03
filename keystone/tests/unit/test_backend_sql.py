@@ -29,6 +29,7 @@ from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import exception
 from keystone.identity.backends import sql as identity_sql
+from keystone import resource
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import database
@@ -37,7 +38,6 @@ from keystone.token.persistence.backends import sql as token_sql
 
 
 CONF = cfg.CONF
-DEFAULT_DOMAIN_ID = CONF.identity.default_domain_id
 
 
 class SqlTests(unit.SQLDriverOverrides, unit.TestCase):
@@ -124,13 +124,32 @@ class SqlModels(SqlTests):
 
     def test_user_model(self):
         cols = (('id', sql.String, 64),
-                ('name', sql.String, 255),
-                ('password', sql.String, 128),
-                ('domain_id', sql.String, 64),
                 ('default_project_id', sql.String, 64),
                 ('enabled', sql.Boolean, None),
                 ('extra', sql.JsonBlob, None))
         self.assertExpectedSchema('user', cols)
+
+    def test_local_user_model(self):
+        cols = (('id', sql.Integer, None),
+                ('user_id', sql.String, 64),
+                ('name', sql.String, 255),
+                ('domain_id', sql.String, 64))
+        self.assertExpectedSchema('local_user', cols)
+
+    def test_password_model(self):
+        cols = (('id', sql.Integer, None),
+                ('local_user_id', sql.Integer, None),
+                ('password', sql.String, 128))
+        self.assertExpectedSchema('password', cols)
+
+    def test_federated_user_model(self):
+        cols = (('id', sql.Integer, None),
+                ('user_id', sql.String, 64),
+                ('idp_id', sql.String, 64),
+                ('protocol_id', sql.String, 64),
+                ('unique_id', sql.String, 255),
+                ('display_name', sql.String, 255))
+        self.assertExpectedSchema('federated_user', cols)
 
     def test_group_model(self):
         cols = (('id', sql.String, 64),
@@ -174,12 +193,37 @@ class SqlModels(SqlTests):
 
 class SqlIdentity(SqlTests, test_backend.IdentityTests):
     def test_password_hashed(self):
-        session = sql.get_session()
-        user_ref = self.identity_api._get_user(session, self.user_foo['id'])
-        self.assertNotEqual(self.user_foo['password'], user_ref['password'])
+        with sql.session_for_read() as session:
+            user_ref = self.identity_api._get_user(session,
+                                                   self.user_foo['id'])
+            self.assertNotEqual(self.user_foo['password'],
+                                user_ref['password'])
+
+    def test_create_user_with_null_password(self):
+        user_dict = unit.new_user_ref(
+            domain_id=CONF.identity.default_domain_id)
+        user_dict["password"] = None
+        new_user_dict = self.identity_api.create_user(user_dict)
+        with sql.session_for_read() as session:
+            new_user_ref = self.identity_api._get_user(session,
+                                                       new_user_dict['id'])
+            self.assertFalse(new_user_ref.local_user.passwords)
+
+    def test_update_user_with_null_password(self):
+        user_dict = unit.new_user_ref(
+            domain_id=CONF.identity.default_domain_id)
+        self.assertTrue(user_dict['password'])
+        new_user_dict = self.identity_api.create_user(user_dict)
+        new_user_dict["password"] = None
+        new_user_dict = self.identity_api.update_user(new_user_dict['id'],
+                                                      new_user_dict)
+        with sql.session_for_read() as session:
+            new_user_ref = self.identity_api._get_user(session,
+                                                       new_user_dict['id'])
+            self.assertFalse(new_user_ref.local_user.passwords)
 
     def test_delete_user_with_project_association(self):
-        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
@@ -190,14 +234,14 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
 
     def test_create_null_user_name(self):
         user = unit.new_user_ref(name=None,
-                                 domain_id=DEFAULT_DOMAIN_ID)
+                                 domain_id=CONF.identity.default_domain_id)
         self.assertRaises(exception.ValidationError,
                           self.identity_api.create_user,
                           user)
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user_by_name,
                           user['name'],
-                          DEFAULT_DOMAIN_ID)
+                          CONF.identity.default_domain_id)
 
     def test_create_user_case_sensitivity(self):
         # user name case sensitivity is down to the fact that it is marked as
@@ -206,12 +250,50 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
 
         # create a ref with a lowercase name
         ref = unit.new_user_ref(name=uuid.uuid4().hex.lower(),
-                                domain_id=DEFAULT_DOMAIN_ID)
+                                domain_id=CONF.identity.default_domain_id)
         ref = self.identity_api.create_user(ref)
 
         # assign a new ID with the same name, but this time in uppercase
         ref['name'] = ref['name'].upper()
         self.identity_api.create_user(ref)
+
+    def test_create_federated_user_unique_constraint(self):
+        federated_dict = unit.new_federated_user_ref()
+        user_dict = self.shadow_users_api.create_federated_user(federated_dict)
+        user_dict = self.identity_api.get_user(user_dict["id"])
+        self.assertIsNotNone(user_dict["id"])
+        self.assertRaises(exception.Conflict,
+                          self.shadow_users_api.create_federated_user,
+                          federated_dict)
+
+    def test_get_federated_user(self):
+        federated_dict = unit.new_federated_user_ref()
+        user_dict_create = self.shadow_users_api.create_federated_user(
+            federated_dict)
+        user_dict_get = self.shadow_users_api.get_federated_user(
+            federated_dict["idp_id"],
+            federated_dict["protocol_id"],
+            federated_dict["unique_id"])
+        self.assertItemsEqual(user_dict_create, user_dict_get)
+        self.assertEqual(user_dict_create["id"], user_dict_get["id"])
+
+    def test_update_federated_user_display_name(self):
+        federated_dict = unit.new_federated_user_ref()
+        user_dict_create = self.shadow_users_api.create_federated_user(
+            federated_dict)
+        new_display_name = uuid.uuid4().hex
+        self.shadow_users_api.update_federated_user_display_name(
+            federated_dict["idp_id"],
+            federated_dict["protocol_id"],
+            federated_dict["unique_id"],
+            new_display_name)
+        user_ref = self.shadow_users_api._get_federated_user(
+            federated_dict["idp_id"],
+            federated_dict["protocol_id"],
+            federated_dict["unique_id"])
+        self.assertEqual(user_ref.federated_users[0].display_name,
+                         new_display_name)
+        self.assertEqual(user_dict_create["id"], user_ref.id)
 
     def test_create_project_case_sensitivity(self):
         # project name case sensitivity is down to the fact that it is marked
@@ -219,7 +301,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # like LDAP.
 
         # create a ref with a lowercase name
-        ref = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
+        ref = unit.new_project_ref(domain_id=CONF.identity.default_domain_id)
         self.resource_api.create_project(ref['id'], ref)
 
         # assign a new ID with the same name, but this time in uppercase
@@ -228,8 +310,8 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.resource_api.create_project(ref['id'], ref)
 
     def test_create_null_project_name(self):
-        project = unit.new_project_ref(name=None,
-                                       domain_id=DEFAULT_DOMAIN_ID)
+        project = unit.new_project_ref(
+            name=None, domain_id=CONF.identity.default_domain_id)
         self.assertRaises(exception.ValidationError,
                           self.resource_api.create_project,
                           project['id'],
@@ -240,10 +322,10 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.get_project_by_name,
                           project['name'],
-                          DEFAULT_DOMAIN_ID)
+                          CONF.identity.default_domain_id)
 
     def test_delete_project_with_user_association(self):
-        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user = self.identity_api.create_user(user)
         self.assignment_api.add_user_to_project(self.tenant_bar['id'],
                                                 user['id'])
@@ -263,14 +345,15 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         """
         arbitrary_key = uuid.uuid4().hex
         arbitrary_value = uuid.uuid4().hex
-        project = unit.new_project_ref(domain_id=DEFAULT_DOMAIN_ID)
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
         project[arbitrary_key] = arbitrary_value
         ref = self.resource_api.create_project(project['id'], project)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertIsNone(ref.get('extra'))
 
-        project['name'] = uuid.uuid4().hex
-        ref = self.resource_api.update_project(project['id'], project)
+        ref['name'] = uuid.uuid4().hex
+        ref = self.resource_api.update_project(ref['id'], ref)
         self.assertEqual(arbitrary_value, ref[arbitrary_key])
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
@@ -286,7 +369,7 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         """
         arbitrary_key = uuid.uuid4().hex
         arbitrary_value = uuid.uuid4().hex
-        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user[arbitrary_key] = arbitrary_value
         del user["id"]
         ref = self.identity_api.create_user(user)
@@ -303,16 +386,16 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
     def test_sql_user_to_dict_null_default_project_id(self):
-        user = unit.new_user_ref(domain_id=DEFAULT_DOMAIN_ID)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user = self.identity_api.create_user(user)
-        session = sql.get_session()
-        query = session.query(identity_sql.User)
-        query = query.filter_by(id=user['id'])
-        raw_user_ref = query.one()
-        self.assertIsNone(raw_user_ref.default_project_id)
-        user_ref = raw_user_ref.to_dict()
-        self.assertNotIn('default_project_id', user_ref)
-        session.close()
+        with sql.session_for_read() as session:
+            query = session.query(identity_sql.User)
+            query = query.filter_by(id=user['id'])
+            raw_user_ref = query.one()
+            self.assertIsNone(raw_user_ref.default_project_id)
+            user_ref = raw_user_ref.to_dict()
+            self.assertNotIn('default_project_id', user_ref)
+            session.close()
 
     def test_list_domains_for_user(self):
         domain = unit.new_domain_ref()
@@ -411,6 +494,123 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         # roles assignments.
         self.assertThat(user_domains, matchers.HasLength(0))
 
+    def test_storing_null_domain_id_in_project_ref(self):
+        """Test the special storage of domain_id=None in sql resource driver.
+
+        The resource driver uses a special value in place of None for domain_id
+        in the project record. This shouldn't escape the driver. Hence we test
+        the interface to ensure that you can store a domain_id of None, and
+        that any special value used inside the driver does not escape through
+        the interface.
+
+        """
+        spoiler_project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        self.resource_api.create_project(spoiler_project['id'],
+                                         spoiler_project)
+
+        # First let's create a project with a None domain_id and make sure we
+        # can read it back.
+        project = unit.new_project_ref(domain_id=None, is_domain=True)
+        project = self.resource_api.create_project(project['id'], project)
+        ref = self.resource_api.get_project(project['id'])
+        self.assertDictEqual(project, ref)
+
+        # Can we get it by name?
+        ref = self.resource_api.get_project_by_name(project['name'], None)
+        self.assertDictEqual(project, ref)
+
+        # Can we filter for them - create a second domain to ensure we are
+        # testing the receipt of more than one.
+        project2 = unit.new_project_ref(domain_id=None, is_domain=True)
+        project2 = self.resource_api.create_project(project2['id'], project2)
+        hints = driver_hints.Hints()
+        hints.add_filter('domain_id', None)
+        refs = self.resource_api.list_projects(hints)
+        self.assertThat(refs, matchers.HasLength(2 + self.domain_count))
+        self.assertIn(project, refs)
+        self.assertIn(project2, refs)
+
+        # Can we update it?
+        project['name'] = uuid.uuid4().hex
+        self.resource_api.update_project(project['id'], project)
+        ref = self.resource_api.get_project(project['id'])
+        self.assertDictEqual(project, ref)
+
+        # Finally, make sure we can delete it
+        project['enabled'] = False
+        self.resource_api.update_project(project['id'], project)
+        self.resource_api.delete_project(project['id'])
+        self.assertRaises(exception.ProjectNotFound,
+                          self.resource_api.get_project,
+                          project['id'])
+
+    def test_hidden_project_domain_root_is_really_hidden(self):
+        """Ensure we cannot access the hidden root of all project domains.
+
+        Calling any of the driver methods should result in the same as
+        would be returned if we passed a project that does not exist. We don't
+        test create_project, since we do not allow a caller of our API to
+        specify their own ID for a new entity.
+
+        """
+        def _exercise_project_api(ref_id):
+            driver = self.resource_api.driver
+            self.assertRaises(exception.ProjectNotFound,
+                              driver.get_project,
+                              ref_id)
+
+            self.assertRaises(exception.ProjectNotFound,
+                              driver.get_project_by_name,
+                              resource.NULL_DOMAIN_ID,
+                              ref_id)
+
+            project_ids = [x['id'] for x in
+                           driver.list_projects(driver_hints.Hints())]
+            self.assertNotIn(ref_id, project_ids)
+
+            projects = driver.list_projects_from_ids([ref_id])
+            self.assertThat(projects, matchers.HasLength(0))
+
+            project_ids = [x for x in
+                           driver.list_project_ids_from_domain_ids([ref_id])]
+            self.assertNotIn(ref_id, project_ids)
+
+            self.assertRaises(exception.DomainNotFound,
+                              driver.list_projects_in_domain,
+                              ref_id)
+
+            project_ids = [
+                x['id'] for x in
+                driver.list_projects_acting_as_domain(driver_hints.Hints())]
+            self.assertNotIn(ref_id, project_ids)
+
+            projects = driver.list_projects_in_subtree(ref_id)
+            self.assertThat(projects, matchers.HasLength(0))
+
+            self.assertRaises(exception.ProjectNotFound,
+                              driver.list_project_parents,
+                              ref_id)
+
+            # A non-existing project just returns True from the driver
+            self.assertTrue(driver.is_leaf_project(ref_id))
+
+            self.assertRaises(exception.ProjectNotFound,
+                              driver.update_project,
+                              ref_id,
+                              {})
+
+            self.assertRaises(exception.ProjectNotFound,
+                              driver.delete_project,
+                              ref_id)
+
+            # Deleting list of projects that includes a non-existing project
+            # should be silent
+            driver.delete_projects_from_ids([ref_id])
+
+        _exercise_project_api(uuid.uuid4().hex)
+        _exercise_project_api(resource.NULL_DOMAIN_ID)
+
 
 class SqlTrust(SqlTests, test_backend.TrustTests):
     pass
@@ -430,7 +630,7 @@ class SqlToken(SqlTests, test_backend.TokenTests):
             tok = token_sql.Token()
             tok.list_revoked_tokens()
 
-        mock_query = mock_sql.get_session().query
+        mock_query = mock_sql.session_for_read().__enter__().query
         mock_query.assert_called_with(*expected_query_args)
 
     def test_flush_expired_tokens_batch(self):
@@ -455,8 +655,12 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         # other tests below test the differences between how they use the batch
         # strategy
         with mock.patch.object(token_sql, 'sql') as mock_sql:
-            mock_sql.get_session().query().filter().delete.return_value = 0
-            mock_sql.get_session().bind.dialect.name = 'mysql'
+            mock_sql.session_for_write().__enter__(
+            ).query().filter().delete.return_value = 0
+
+            mock_sql.session_for_write().__enter__(
+            ).bind.dialect.name = 'mysql'
+
             tok = token_sql.Token()
             expiry_mock = mock.Mock()
             ITERS = [1, 2, 3]
@@ -467,7 +671,10 @@ class SqlToken(SqlTests, test_backend.TokenTests):
             # The expiry strategy is only invoked once, the other calls are via
             # the yield return.
             self.assertEqual(1, expiry_mock.call_count)
-            mock_delete = mock_sql.get_session().query().filter().delete
+
+            mock_delete = mock_sql.session_for_write().__enter__(
+            ).query().filter().delete
+
             self.assertThat(mock_delete.call_args_list,
                             matchers.HasLength(len(ITERS)))
 
@@ -623,9 +830,6 @@ class SqlTokenCacheInvalidation(SqlTests, test_backend.TokenCacheInvalidation):
 
 class SqlFilterTests(SqlTests, test_backend.FilterTests):
 
-    def _get_user_name_field_size(self):
-        return identity_sql.User.name.type.length
-
     def clean_up_entities(self):
         """Clean up entity test data from Filter Test Cases."""
         for entity in ['user', 'group', 'project']:
@@ -683,7 +887,7 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
 
         # See if we can add a SQL command...use the group table instead of the
         # user table since 'user' is reserved word for SQLAlchemy.
-        group = unit.new_group_ref(domain_id=DEFAULT_DOMAIN_ID)
+        group = unit.new_group_ref(domain_id=CONF.identity.default_domain_id)
         group = self.identity_api.create_group(group)
 
         hints = driver_hints.Hints()

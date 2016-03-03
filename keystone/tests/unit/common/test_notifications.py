@@ -174,8 +174,11 @@ class NotificationsWrapperTestCase(unit.BaseTestCase):
 class NotificationsTestCase(unit.BaseTestCase):
 
     def test_send_notification(self):
-        """Test the private method _send_notification to ensure event_type,
+        """Test _send_notification.
+
+        Test the private method _send_notification to ensure event_type,
         payload, and context are built and passed properly.
+
         """
         resource = uuid.uuid4().hex
         resource_type = EXP_RESOURCE_TYPE
@@ -200,6 +203,82 @@ class NotificationsTestCase(unit.BaseTestCase):
             notifications._send_notification(operation, resource_type,
                                              resource)
             mocked.assert_called_once_with(*expected_args)
+
+    def test_send_notification_with_opt_out(self):
+        """Test the private method _send_notification with opt-out.
+
+        Test that _send_notification does not notify when a valid
+        notification_opt_out configuration is provided.
+        """
+        resource = uuid.uuid4().hex
+        resource_type = EXP_RESOURCE_TYPE
+        operation = CREATED_OPERATION
+        event_type = 'identity.%s.created' % resource_type
+
+        # NOTE(diazjf): Here we add notification_opt_out to the
+        # configuration so that we should return before _get_notifer is
+        # called. This is because we are opting out notifications for the
+        # passed resource_type and operation.
+        conf = self.useFixture(config_fixture.Config(CONF))
+        conf.config(notification_opt_out=event_type)
+
+        with mock.patch.object(notifications._get_notifier(),
+                               '_notify') as mocked:
+
+            notifications._send_notification(operation, resource_type,
+                                             resource)
+            mocked.assert_not_called()
+
+    def test_send_audit_notification_with_opt_out(self):
+        """Test the private method _send_audit_notification with opt-out.
+
+        Test that _send_audit_notification does not notify when a valid
+        notification_opt_out configuration is provided.
+        """
+        resource_type = EXP_RESOURCE_TYPE
+
+        action = CREATED_OPERATION + '.' + resource_type
+        initiator = mock
+        target = mock
+        outcome = 'success'
+        event_type = 'identity.%s.created' % resource_type
+
+        conf = self.useFixture(config_fixture.Config(CONF))
+        conf.config(notification_opt_out=event_type)
+
+        with mock.patch.object(notifications._get_notifier(),
+                               '_notify') as mocked:
+
+            notifications._send_audit_notification(action,
+                                                   initiator,
+                                                   outcome,
+                                                   target,
+                                                   event_type)
+            mocked.assert_not_called()
+
+    def test_opt_out_authenticate_event(self):
+        """Test that authenticate events are successfully opted out."""
+        resource_type = EXP_RESOURCE_TYPE
+
+        action = CREATED_OPERATION + '.' + resource_type
+        initiator = mock
+        target = mock
+        outcome = 'success'
+        event_type = 'identity.authenticate'
+        meter_name = '%s.%s' % (event_type, outcome)
+
+        conf = self.useFixture(config_fixture.Config(CONF))
+        conf.config(notification_opt_out=meter_name)
+
+        with mock.patch.object(notifications._get_notifier(),
+                               '_notify') as mocked:
+
+            notifications._send_audit_notification(action,
+                                                   initiator,
+                                                   outcome,
+                                                   target,
+                                                   event_type)
+            mocked.assert_not_called()
 
 
 class BaseNotificationTest(test_v3.RestfulTestCase):
@@ -1128,7 +1207,9 @@ class TestCallbackRegistration(unit.BaseTestCase):
         self.mock_log.logger.getEffectiveLevel.return_value = logging.DEBUG
 
     def verify_log_message(self, data):
-        """Tests that use this are a little brittle because adding more
+        """Verify log message.
+
+        Tests that use this are a little brittle because adding more
         logging can break them.
 
         TODO(dstanek): remove the need for this in a future refactoring

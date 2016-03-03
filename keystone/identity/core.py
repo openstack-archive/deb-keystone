@@ -21,8 +21,10 @@ import uuid
 
 from oslo_config import cfg
 from oslo_log import log
+from oslo_log import versionutils
 import six
 
+from keystone import assignment  # TODO(lbragstad): Decouple this dependency
 from keystone.common import cache
 from keystone.common import clean
 from keystone.common import config
@@ -447,7 +449,7 @@ def exception_translated(exception_type):
 @notifications.listener
 @dependency.provider('identity_api')
 @dependency.requires('assignment_api', 'credential_api', 'id_mapping_api',
-                     'resource_api', 'revoke_api')
+                     'resource_api', 'revoke_api', 'shadow_users_api')
 class Manager(manager.Manager):
     """Default pivot point for the Identity backend.
 
@@ -788,6 +790,41 @@ class Manager(manager.Manager):
                 not hints.get_exact_filter_by_name('domain_id')):
             hints.add_filter('domain_id', domain_id)
 
+    def _set_list_limit_in_hints(self, hints, driver):
+        """Set list limit in hints from driver
+
+        If a hints list is provided, the wrapper will insert the relevant
+        limit into the hints so that the underlying driver call can try and
+        honor it. If the driver does truncate the response, it will update the
+        'truncated' attribute in the 'limit' entry in the hints list, which
+        enables the caller of this function to know if truncation has taken
+        place. If, however, the driver layer is unable to perform truncation,
+        the 'limit' entry is simply left in the hints list for the caller to
+        handle.
+
+        A _get_list_limit() method is required to be present in the object
+        class hierarchy, which returns the limit for this backend to which
+        we will truncate.
+
+        If a hints list is not provided in the arguments of the wrapped call
+        then any limits set in the config file are ignored.  This allows
+        internal use of such wrapped methods where the entire data set is
+        needed as input for the calculations of some other API (e.g. get role
+        assignments for a given project).
+
+        This method, specific to identity manager, is used instead of more
+        general response_truncated, because the limit for identity entities
+        can be overriden in domain-specific config files. The driver to use
+        is determined during processing of the passed parameters and
+        response_truncated is designed to set the limit before any processing.
+        """
+        if hints is None:
+            return
+
+        list_limit = driver._get_list_limit()
+        if list_limit:
+            hints.set_limit(list_limit)
+
     # The actual driver calls - these are pre/post processed here as
     # part of the Manager layer to make sure we:
     #
@@ -858,11 +895,11 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
 
-    @manager.response_truncated
     @domains_configured
     @exception_translated('user')
     def list_users(self, domain_scope=None, hints=None):
         driver = self._select_identity_driver(domain_scope)
+        self._set_list_limit_in_hints(hints, driver)
         hints = hints or driver_hints.Hints()
         if driver.is_domain_aware():
             # Force the domain_scope into the hint to ensure that we only get
@@ -876,6 +913,14 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref_list, domain_scope, driver, mapping.EntityType.USER)
 
+    def _check_update_of_domain_id(self, new_domain, old_domain):
+        if new_domain != old_domain:
+            versionutils.report_deprecated_feature(
+                LOG,
+                _('update of domain_id is deprecated as of Mitaka '
+                    'and will be removed in O.')
+            )
+
     @domains_configured
     @exception_translated('user')
     def update_user(self, user_id, user_ref, initiator=None):
@@ -886,6 +931,8 @@ class Manager(manager.Manager):
         if 'enabled' in user:
             user['enabled'] = clean.user_enabled(user['enabled'])
         if 'domain_id' in user:
+            self._check_update_of_domain_id(user['domain_id'],
+                                            old_user_ref['domain_id'])
             self.resource_api.get_domain(user['domain_id'])
         if 'id' in user:
             if user_id != user['id']:
@@ -929,6 +976,10 @@ class Manager(manager.Manager):
         self.credential_api.delete_credentials_for_user(user_id)
         self.id_mapping_api.delete_id_mapping(user_id)
         notifications.Audit.deleted(self._USER, user_id, initiator)
+
+        # Invalidate user role assignments cache region, as it may be caching
+        # role assignments where the actor is the specified user
+        assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
 
     @domains_configured
     @exception_translated('group')
@@ -975,6 +1026,9 @@ class Manager(manager.Manager):
     @exception_translated('group')
     def update_group(self, group_id, group, initiator=None):
         if 'domain_id' in group:
+            old_group_ref = self.get_group(group_id)
+            self._check_update_of_domain_id(group['domain_id'],
+                                            old_group_ref['domain_id'])
             self.resource_api.get_domain(group['domain_id'])
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
@@ -1001,6 +1055,10 @@ class Manager(manager.Manager):
         for uid in user_ids:
             self.emit_invalidate_user_token_persistence(uid)
 
+        # Invalidate user role assignments cache region, as it may be caching
+        # role assignments expanded from the specified group to its users
+        assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
+
     @domains_configured
     @exception_translated('group')
     def add_user_to_group(self, user_id, group_id):
@@ -1019,6 +1077,10 @@ class Manager(manager.Manager):
             user_entity_id, user_driver, group_entity_id, group_driver)
 
         group_driver.add_user_to_group(user_entity_id, group_entity_id)
+
+        # Invalidate user role assignments cache region, as it may now need to
+        # include role assignments from the specified group to its users
+        assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
 
     @domains_configured
     @exception_translated('group')
@@ -1039,6 +1101,10 @@ class Manager(manager.Manager):
 
         group_driver.remove_user_from_group(user_entity_id, group_entity_id)
         self.emit_invalidate_user_token_persistence(user_id)
+
+        # Invalidate user role assignments cache region, as it may be caching
+        # role assignments expanded from this group to this user
+        assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
 
     @notifications.internal(notifications.INVALIDATE_USER_TOKEN_PERSISTENCE)
     def emit_invalidate_user_token_persistence(self, user_id):
@@ -1065,12 +1131,12 @@ class Manager(manager.Manager):
         """
         pass
 
-    @manager.response_truncated
     @domains_configured
     @exception_translated('user')
     def list_groups_for_user(self, user_id, hints=None):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
+        self._set_list_limit_in_hints(hints, driver)
         hints = hints or driver_hints.Hints()
         if not driver.is_domain_aware():
             # We are effectively satisfying any domain_id filter by the above
@@ -1080,11 +1146,11 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref_list, domain_id, driver, mapping.EntityType.GROUP)
 
-    @manager.response_truncated
     @domains_configured
     @exception_translated('group')
     def list_groups(self, domain_scope=None, hints=None):
         driver = self._select_identity_driver(domain_scope)
+        self._set_list_limit_in_hints(hints, driver)
         hints = hints or driver_hints.Hints()
         if driver.is_domain_aware():
             # Force the domain_scope into the hint to ensure that we only get
@@ -1098,12 +1164,12 @@ class Manager(manager.Manager):
         return self._set_domain_id_and_mapping(
             ref_list, domain_scope, driver, mapping.EntityType.GROUP)
 
-    @manager.response_truncated
     @domains_configured
     @exception_translated('group')
     def list_users_in_group(self, group_id, hints=None):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(group_id))
+        self._set_list_limit_in_hints(hints, driver)
         hints = hints or driver_hints.Hints()
         if not driver.is_domain_aware():
             # We are effectively satisfying any domain_id filter by the above
@@ -1143,17 +1209,61 @@ class Manager(manager.Manager):
         update_dict = {'password': new_password}
         self.update_user(user_id, update_dict)
 
+    @MEMOIZE
+    def shadow_federated_user(self, idp_id, protocol_id, unique_id,
+                              display_name):
+        """Shadows a federated user by mapping to a user.
+
+        :param idp_id: identity provider id
+        :param protocol_id: protocol id
+        :param unique_id: unique id for the user within the IdP
+        :param display_name: user's display name
+
+        :returns: dictionary of the mapped User entity
+        """
+        user_dict = {}
+        try:
+            user_dict = self.shadow_users_api.get_federated_user(
+                idp_id, protocol_id, unique_id)
+            self.update_federated_user_display_name(idp_id, protocol_id,
+                                                    unique_id, display_name)
+        except exception.UserNotFound:
+            federated_dict = {
+                'idp_id': idp_id,
+                'protocol_id': protocol_id,
+                'unique_id': unique_id,
+                'display_name': display_name
+            }
+            user_dict = self.shadow_users_api.create_federated_user(
+                federated_dict)
+        return user_dict
+
 
 @six.add_metaclass(abc.ABCMeta)
 class IdentityDriverV8(object):
     """Interface description for an Identity driver."""
 
+    def _get_conf(self):
+        try:
+            return self.conf or CONF
+        except AttributeError:
+            return CONF
+
     def _get_list_limit(self):
-        return CONF.identity.list_limit or CONF.list_limit
+        conf = self._get_conf()
+        # use list_limit from domain-specific config. If list_limit in
+        # domain-specific config is not set, look it up in the default config
+        return (conf.identity.list_limit or conf.list_limit or
+                CONF.identity.list_limit or CONF.list_limit)
 
     def is_domain_aware(self):
         """Indicates if Driver supports domains."""
         return True
+
+    def default_assignment_driver(self):
+        # TODO(morganfainberg): To be removed when assignment driver based
+        # upon [identity]/driver option is removed in the "O" release.
+        return 'sql'
 
     @property
     def is_sql(self):
@@ -1172,6 +1282,7 @@ class IdentityDriverV8(object):
     @abc.abstractmethod
     def authenticate(self, user_id, password):
         """Authenticate a given user and password.
+
         :returns: user_ref
         :raises AssertionError: If user or password is invalid.
         """
@@ -1435,3 +1546,54 @@ class MappingDriverV8(object):
 
 
 MappingDriver = manager.create_legacy_driver(MappingDriverV8)
+
+
+@dependency.provider('shadow_users_api')
+class ShadowUsersManager(manager.Manager):
+    """Default pivot point for the Shadow Users backend."""
+
+    driver_namespace = 'keystone.identity.shadow_users'
+
+    def __init__(self):
+        super(ShadowUsersManager, self).__init__(CONF.shadow_users.driver)
+
+
+@six.add_metaclass(abc.ABCMeta)
+class ShadowUsersDriverV9(object):
+    """Interface description for an Shadow Users driver."""
+
+    @abc.abstractmethod
+    def create_federated_user(self, federated_dict):
+        """Create a new user with the federated identity
+
+        :param dict federated_dict: Reference to the federated user
+        :param user_id: user ID for linking to the federated identity
+        :returns dict: Containing the user reference
+
+        """
+        raise exception.NotImplemented()
+
+    @abc.abstractmethod
+    def get_federated_user(self, idp_id, protocol_id, unique_id):
+        """Returns the found user for the federated identity
+
+        :param idp_id: The identity provider ID
+        :param protocol_id: The federation protocol ID
+        :param unique_id: The unique ID for the user
+        :returns dict: Containing the user reference
+
+        """
+        raise exception.NotImplemented()
+
+    @abc.abstractmethod
+    def update_federated_user_display_name(self, idp_id, protocol_id,
+                                           unique_id, display_name):
+        """Updates federated user's display name if changed
+
+        :param idp_id: The identity provider ID
+        :param protocol_id: The federation protocol ID
+        :param unique_id: The unique ID for the user
+        :param display_name: The user's display name
+
+        """
+        raise exception.NotImplemented()

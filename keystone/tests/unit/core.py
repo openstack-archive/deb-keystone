@@ -14,6 +14,7 @@
 
 from __future__ import absolute_import
 import atexit
+import base64
 import datetime
 import functools
 import hashlib
@@ -30,14 +31,16 @@ import warnings
 import fixtures
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
+from oslo_context import context as oslo_context
+from oslo_context import fixture as oslo_ctx_fixture
 from oslo_log import fixture as log_fixture
 from oslo_log import log
 from oslo_utils import timeutils
-import oslotest.base as oslotest
 from oslotest import mockpatch
 from paste.deploy import loadwsgi
 import six
 from sqlalchemy import exc
+import testtools
 from testtools import testcase
 
 # NOTE(ayoung)
@@ -49,12 +52,10 @@ environment.use_eventlet()
 from keystone import auth
 from keystone.common import config
 from keystone.common import dependency
-from keystone.common import kvs
 from keystone.common.kvs import core as kvs_core
 from keystone.common import sql
 from keystone import exception
 from keystone import notifications
-from keystone.policy.backends import rules
 from keystone.server import common
 from keystone.tests.unit import ksfixtures
 from keystone.version import controllers
@@ -82,7 +83,6 @@ TMPDIR = _calc_tmpdir()
 
 CONF = cfg.CONF
 log.register_options(CONF)
-rules.init()
 
 IN_MEM_DB_CONN_STRING = 'sqlite://'
 
@@ -278,7 +278,7 @@ def new_endpoint_ref(service_id, interface='public',
 
     if region_id is NEEDS_REGION_ID:
         ref['region_id'] = uuid.uuid4().hex
-    elif region_id is None and kwargs.get('region', None) is not None:
+    elif region_id is None and kwargs.get('region') is not None:
         # pre-3.2 form endpoints are not supported by this function
         raise NotImplementedError("use new_endpoint_ref_with_region")
     else:
@@ -310,16 +310,19 @@ def new_domain_ref(**kwargs):
     return ref
 
 
-def new_project_ref(domain_id=None, parent_id=None, is_domain=False, **kwargs):
+def new_project_ref(domain_id=None, is_domain=False, **kwargs):
     ref = {
         'id': uuid.uuid4().hex,
         'name': uuid.uuid4().hex,
         'description': uuid.uuid4().hex,
         'enabled': True,
         'domain_id': domain_id,
-        'parent_id': parent_id,
         'is_domain': is_domain,
     }
+    # NOTE(henry-nash): We don't include parent_id in the initial list above
+    # since specifying it is optional depending on where the project sits in
+    # the hierarchy (and a parent_id of None has meaning - i.e. it's a top
+    # level project).
     ref.update(kwargs)
     return ref
 
@@ -335,6 +338,17 @@ def new_user_ref(domain_id, project_id=None, **kwargs):
     }
     if project_id:
         ref['default_project_id'] = project_id
+    ref.update(kwargs)
+    return ref
+
+
+def new_federated_user_ref(idp_id=None, protocol_id=None, **kwargs):
+    ref = {
+        'idp_id': idp_id or 'ORG_IDP',
+        'protocol_id': protocol_id or 'saml2',
+        'unique_id': uuid.uuid4().hex,
+        'display_name': uuid.uuid4().hex,
+    }
     ref.update(kwargs)
     return ref
 
@@ -398,10 +412,21 @@ def new_ec2_credential(user_id, project_id=None, blob=None, **kwargs):
     return blob, credential
 
 
+def new_totp_credential(user_id, project_id=None, blob=None):
+    if not blob:
+        blob = base64.b32encode(uuid.uuid4().hex).rstrip('=')
+    credential = new_credential_ref(user_id=user_id,
+                                    project_id=project_id,
+                                    blob=blob,
+                                    type='totp')
+    return credential
+
+
 def new_role_ref(**kwargs):
     ref = {
         'id': uuid.uuid4().hex,
         'name': uuid.uuid4().hex,
+        'domain_id': None
     }
     ref.update(kwargs)
     return ref
@@ -425,7 +450,8 @@ def new_policy_ref(**kwargs):
 def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
                   impersonation=None, expires=None, role_ids=None,
                   role_names=None, remaining_uses=None,
-                  allow_redelegation=False, **kwargs):
+                  allow_redelegation=False, redelegation_count=None,
+                  redelegated_trust_id=None, **kwargs):
     ref = {
         'id': uuid.uuid4().hex,
         'trustor_user_id': trustor_user_id,
@@ -434,7 +460,11 @@ def new_trust_ref(trustor_user_id, trustee_user_id, project_id=None,
         'project_id': project_id,
         'remaining_uses': remaining_uses,
         'allow_redelegation': allow_redelegation,
+        'redelegated_trust_id': redelegated_trust_id,
     }
+
+    if isinstance(redelegation_count, int):
+        ref.update(redelegation_count=redelegation_count)
 
     if isinstance(expires, six.string_types):
         ref['expires_at'] = expires
@@ -474,7 +504,7 @@ def create_user(api, domain_id, **kwargs):
     return user
 
 
-class BaseTestCase(oslotest.BaseTestCase):
+class BaseTestCase(testtools.TestCase):
     """Light weight base test class.
 
     This is a placeholder that will eventually go away once the
@@ -485,6 +515,10 @@ class BaseTestCase(oslotest.BaseTestCase):
 
     def setUp(self):
         super(BaseTestCase, self).setUp()
+
+        self.useFixture(fixtures.NestedTempfile())
+        self.useFixture(fixtures.TempHomeDir())
+
         self.useFixture(mockpatch.PatchObject(sys, 'exit',
                                               side_effect=UnexpectedExit))
         self.useFixture(log_fixture.get_logging_handle_error_fixture())
@@ -493,6 +527,10 @@ class BaseTestCase(oslotest.BaseTestCase):
                                 module='^keystone\\.')
         warnings.simplefilter('error', exc.SAWarning)
         self.addCleanup(warnings.resetwarnings)
+        # Ensure we have an empty threadlocal context at the start of each
+        # test.
+        self.assertIsNone(oslo_context.get_current())
+        self.useFixture(oslo_ctx_fixture.ClearRequestContext())
 
     def cleanup_instance(self, *names):
         """Create a function suitable for use with self.addCleanup.
@@ -515,6 +553,9 @@ class TestCase(BaseTestCase):
     def config_files(self):
         return []
 
+    def _policy_fixture(self):
+        return ksfixtures.Policy(dirs.etc('policy.json'), self.config_fixture)
+
     def config_overrides(self):
         # NOTE(morganfainberg): enforce config_overrides can only ever be
         # called a single time.
@@ -523,8 +564,9 @@ class TestCase(BaseTestCase):
 
         signing_certfile = 'examples/pki/certs/signing_cert.pem'
         signing_keyfile = 'examples/pki/private/signing_key.pem'
-        self.config_fixture.config(group='oslo_policy',
-                                   policy_file=dirs.etc('policy.json'))
+
+        self.useFixture(self._policy_fixture())
+
         self.config_fixture.config(
             # TODO(morganfainberg): Make Cache Testing a separate test case
             # in tempest, and move it out of the base unit tests.
@@ -534,7 +576,7 @@ class TestCase(BaseTestCase):
             proxies=['oslo_cache.testing.CacheIsolatingProxy'])
         self.config_fixture.config(
             group='catalog',
-            driver='templated',
+            driver='sql',
             template_file=dirs.tests('default_catalog.templates'))
         self.config_fixture.config(
             group='kvs',
@@ -542,7 +584,6 @@ class TestCase(BaseTestCase):
                 ('keystone.tests.unit.test_kvs.'
                  'KVSBackendForcedKeyMangleFixture'),
                 'keystone.tests.unit.test_kvs.KVSBackendFixture'])
-        self.config_fixture.config(group='revoke', driver='kvs')
         self.config_fixture.config(
             group='signing', certfile=signing_certfile,
             keyfile=signing_keyfile,
@@ -564,17 +605,15 @@ class TestCase(BaseTestCase):
                 'routes.middleware=INFO',
                 'stevedore.extension=INFO',
                 'keystone.notifications=INFO',
-                'keystone.common._memcache_pool=INFO',
                 'keystone.common.ldap=INFO',
             ])
         self.auth_plugin_config_override()
 
     def auth_plugin_config_override(self, methods=None, **method_classes):
-        if methods is not None:
-            self.config_fixture.config(group='auth', methods=methods)
-            config.setup_authentication()
-        if method_classes:
-            self.config_fixture.config(group='auth', **method_classes)
+        self.useFixture(
+            ksfixtures.ConfigAuthPlugins(self.config_fixture,
+                                         methods,
+                                         **method_classes))
 
     def _assert_config_overrides_called(self):
         assert self.__config_overrides_called is True
@@ -582,6 +621,7 @@ class TestCase(BaseTestCase):
     def setUp(self):
         super(TestCase, self).setUp()
         self.__config_overrides_called = False
+        self.__load_backends_called = False
         self.addCleanup(CONF.reset)
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.addCleanup(delattr, self, 'config_fixture')
@@ -618,8 +658,6 @@ class TestCase(BaseTestCase):
         # Clear the registry of providers so that providers from previous
         # tests aren't used.
         self.addCleanup(dependency.reset)
-
-        self.addCleanup(kvs.INMEMDB.clear)
 
         # Ensure Notification subscriptions and resource types are empty
         self.addCleanup(notifications.clear_subscribers)
@@ -745,6 +783,17 @@ class TestCase(BaseTestCase):
                 setattr(self, attrname, user_copy)
                 fixtures_to_cleanup.append(attrname)
 
+            for role_assignment in fixtures.ROLE_ASSIGNMENTS:
+                role_id = role_assignment['role_id']
+                user = role_assignment['user']
+                tenant_id = role_assignment['tenant_id']
+                user_id = getattr(self, 'user_%s' % user)['id']
+                try:
+                    self.assignment_api.add_role_to_user_and_project(
+                        user_id, tenant_id, role_id)
+                except exception.Conflict:
+                    pass
+
             self.addCleanup(self.cleanup_instance(*fixtures_to_cleanup))
 
     def _paste_config(self, config):
@@ -788,11 +837,11 @@ class TestCase(BaseTestCase):
             if isinstance(expected_regexp, six.string_types):
                 expected_regexp = re.compile(expected_regexp)
 
-            if isinstance(exc_value.args[0], unicode):
-                if not expected_regexp.search(unicode(exc_value)):
+            if isinstance(exc_value.args[0], six.text_type):
+                if not expected_regexp.search(six.text_type(exc_value)):
                     raise self.failureException(
                         '"%s" does not match "%s"' %
-                        (expected_regexp.pattern, unicode(exc_value)))
+                        (expected_regexp.pattern, six.text_type(exc_value)))
             else:
                 if not expected_regexp.search(str(exc_value)):
                     raise self.failureException(
@@ -839,7 +888,6 @@ class SQLDriverOverrides(object):
         self.config_fixture.config(group='catalog', driver='sql')
         self.config_fixture.config(group='identity', driver='sql')
         self.config_fixture.config(group='policy', driver='sql')
-        self.config_fixture.config(group='revoke', driver='sql')
         self.config_fixture.config(group='token', driver='sql')
         self.config_fixture.config(group='trust', driver='sql')
 
@@ -850,7 +898,7 @@ class SQLDriverOverrides(object):
         :param driver_path: The path to the drivers, e.g. 'keystone.assignment'
         :param versionless_backend: The name of the versionless drivers, e.g.
                                     'backends'
-        :param version_suffix: The suffix for the version , e.g. 'V8_'
+        :param version_suffix: The suffix for the version , e.g. ``V8_``
 
         This method assumes that versioned drivers are named:
         <version_suffix><name of versionless driver>, e.g. 'V8_backends'.

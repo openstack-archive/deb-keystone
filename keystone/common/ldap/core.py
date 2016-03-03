@@ -24,6 +24,7 @@ import ldap.controls
 import ldap.filter
 import ldappool
 from oslo_log import log
+from oslo_utils import reflection
 import six
 from six.moves import map, zip
 
@@ -71,8 +72,10 @@ def utf8_encode(value):
     elif isinstance(value, six.binary_type):
         return value
     else:
+        value_cls_name = reflection.get_class_name(
+            value, fully_qualified=False)
         raise TypeError("value must be basestring, "
-                        "not %s" % value.__class__.__name__)
+                        "not %s" % value_cls_name)
 
 _utf8_decoder = codecs.getdecoder('utf-8')
 
@@ -1597,7 +1600,7 @@ class BaseLdap(object):
             except ldap.NO_SUCH_OBJECT:
                 raise self._not_found(object_id)
 
-    def deleteTree(self, object_id):
+    def delete_tree(self, object_id):
         tree_delete_control = ldap.controls.LDAPControl(CONTROL_TREEDELETE,
                                                         0,
                                                         None)
@@ -1950,24 +1953,3 @@ class EnabledEmuMixIn(BaseLdap):
         if self.enabled_emulation:
             self._remove_enabled(object_id)
         super(EnabledEmuMixIn, self).delete(object_id)
-
-
-class ProjectLdapStructureMixin(object):
-    """Project LDAP Structure shared between LDAP backends.
-
-    This is shared between the resource and assignment LDAP backends.
-
-    """
-
-    DEFAULT_OU = 'ou=Groups'
-    DEFAULT_STRUCTURAL_CLASSES = []
-    DEFAULT_OBJECTCLASS = 'groupOfNames'
-    DEFAULT_ID_ATTR = 'cn'
-    NotFound = exception.ProjectNotFound
-    notfound_arg = 'project_id'  # NOTE(yorik-sar): while options_name = tenant
-    options_name = 'project'
-    attribute_options_names = {'name': 'name',
-                               'description': 'desc',
-                               'enabled': 'enabled',
-                               'domain_id': 'domain_id'}
-    immutable_attrs = ['name']

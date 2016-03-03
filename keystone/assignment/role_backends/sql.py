@@ -10,26 +10,43 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 from oslo_db import exception as db_exception
-from sqlalchemy import and_
 
 from keystone import assignment
 from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import exception
 
+# NOTE(henry-nash): From the manager and above perspective, the domain_id
+# attribute of a role is nullable.  However, to ensure uniqueness in
+# multi-process configurations, it is better to still use a sql uniqueness
+# constraint. Since the support for a nullable component of a uniqueness
+# constraint across different sql databases is mixed, we instead store a
+# special value to represent null, as defined in NULL_DOMAIN_ID below.
+NULL_DOMAIN_ID = '<<null>>'
+
 
 class Role(assignment.RoleDriverV9):
 
     @sql.handle_conflicts(conflict_type='role')
     def create_role(self, role_id, role):
-        with sql.transaction() as session:
+        with sql.session_for_write() as session:
             ref = RoleTable.from_dict(role)
             session.add(ref)
             return ref.to_dict()
 
     @driver_hints.truncated
     def list_roles(self, hints):
-        with sql.transaction() as session:
+        # If there is a filter on domain_id and the value is None, then to
+        # ensure that the sql filtering works correctly, we need to patch
+        # the value to be NULL_DOMAIN_ID. This is safe to do here since we
+        # know we are able to satisfy any filter of this type in the call to
+        # filter_limit_query() below, which will remove the filter from the
+        # hints (hence ensuring our substitution is not exposed to the caller).
+        for f in hints.filters:
+            if (f['name'] == 'domain_id' and f['value'] is None):
+                f['value'] = NULL_DOMAIN_ID
+
+        with sql.session_for_read() as session:
             query = session.query(RoleTable)
             refs = sql.filter_limit_query(RoleTable, query, hints)
             return [ref.to_dict() for ref in refs]
@@ -38,7 +55,7 @@ class Role(assignment.RoleDriverV9):
         if not ids:
             return []
         else:
-            with sql.transaction() as session:
+            with sql.session_for_read() as session:
                 query = session.query(RoleTable)
                 query = query.filter(RoleTable.id.in_(ids))
                 role_refs = query.all()
@@ -51,12 +68,12 @@ class Role(assignment.RoleDriverV9):
         return ref
 
     def get_role(self, role_id):
-        with sql.transaction() as session:
+        with sql.session_for_read() as session:
             return self._get_role(session, role_id).to_dict()
 
     @sql.handle_conflicts(conflict_type='role')
     def update_role(self, role_id, role):
-        with sql.transaction() as session:
+        with sql.session_for_write() as session:
             ref = self._get_role(session, role_id)
             old_dict = ref.to_dict()
             for k in role:
@@ -69,13 +86,26 @@ class Role(assignment.RoleDriverV9):
             return ref.to_dict()
 
     def delete_role(self, role_id):
-        with sql.transaction() as session:
+        with sql.session_for_write() as session:
             ref = self._get_role(session, role_id)
             session.delete(ref)
 
+    def _get_implied_role(self, session, prior_role_id, implied_role_id):
+        query = session.query(
+            ImpliedRoleTable).filter(
+                ImpliedRoleTable.prior_role_id == prior_role_id).filter(
+                    ImpliedRoleTable.implied_role_id == implied_role_id)
+        try:
+            ref = query.one()
+        except sql.NotFound:
+            raise exception.ImpliedRoleNotFound(
+                prior_role_id=prior_role_id,
+                implied_role_id=implied_role_id)
+        return ref
+
     @sql.handle_conflicts(conflict_type='implied_role')
     def create_implied_role(self, prior_role_id, implied_role_id):
-        with sql.transaction() as session:
+        with sql.session_for_write() as session:
             inference = {'prior_role_id': prior_role_id,
                          'implied_role_id': implied_role_id}
             ref = ImpliedRoleTable.from_dict(inference)
@@ -84,19 +114,18 @@ class Role(assignment.RoleDriverV9):
             except db_exception.DBReferenceError:
                 # We don't know which role threw this.
                 # Query each to trigger the exception.
-                self._get_role(prior_role_id)
-                self._get_role(implied_role_id)
+                self._get_role(session, prior_role_id)
+                self._get_role(session, implied_role_id)
             return ref.to_dict()
 
     def delete_implied_role(self, prior_role_id, implied_role_id):
-        with sql.transaction() as session:
-            query = session.query(ImpliedRoleTable).filter(and_(
-                ImpliedRoleTable.prior_role_id == prior_role_id,
-                ImpliedRoleTable.implied_role_id == implied_role_id))
-            query.delete(synchronize_session='fetch')
+        with sql.session_for_write() as session:
+            ref = self._get_implied_role(session, prior_role_id,
+                                         implied_role_id)
+            session.delete(ref)
 
     def list_implied_roles(self, prior_role_id):
-        with sql.transaction() as session:
+        with sql.session_for_read() as session:
             query = session.query(
                 ImpliedRoleTable).filter(
                     ImpliedRoleTable.prior_role_id == prior_role_id)
@@ -104,32 +133,29 @@ class Role(assignment.RoleDriverV9):
             return [ref.to_dict() for ref in refs]
 
     def list_role_inference_rules(self):
-        with sql.transaction() as session:
+        with sql.session_for_read() as session:
             query = session.query(ImpliedRoleTable)
             refs = query.all()
             return [ref.to_dict() for ref in refs]
 
     def get_implied_role(self, prior_role_id, implied_role_id):
-        with sql.transaction() as session:
-            query = session.query(
-                ImpliedRoleTable).filter(
-                    ImpliedRoleTable.prior_role_id == prior_role_id).filter(
-                        ImpliedRoleTable.implied_role_id == implied_role_id)
-            ref = query.all()
-            if len(ref) < 1:
-                raise exception.ImpliedRoleNotFound(
-                    prior_role_id=prior_role_id,
-                    implied_role_id=implied_role_id)
-            return ref[0].to_dict()
+        with sql.session_for_read() as session:
+            ref = self._get_implied_role(session, prior_role_id,
+                                         implied_role_id)
+            return ref.to_dict()
 
 
 class ImpliedRoleTable(sql.ModelBase, sql.DictBase):
     __tablename__ = 'implied_role'
     attributes = ['prior_role_id', 'implied_role_id']
-    prior_role_id = sql.Column(sql.String(64), sql.ForeignKey('role.id'),
-                               primary_key=True)
-    implied_role_id = sql.Column(sql.String(64), sql.ForeignKey('role.id'),
-                                 primary_key=True)
+    prior_role_id = sql.Column(
+        sql.String(64),
+        sql.ForeignKey('role.id', ondelete="CASCADE"),
+        primary_key=True)
+    implied_role_id = sql.Column(
+        sql.String(64),
+        sql.ForeignKey('role.id', ondelete="CASCADE"),
+        primary_key=True)
 
     @classmethod
     def from_dict(cls, dictionary):
@@ -149,9 +175,28 @@ class ImpliedRoleTable(sql.ModelBase, sql.DictBase):
 
 
 class RoleTable(sql.ModelBase, sql.DictBase):
+
+    def to_dict(self, include_extra_dict=False):
+        d = super(RoleTable, self).to_dict(
+            include_extra_dict=include_extra_dict)
+        if d['domain_id'] == NULL_DOMAIN_ID:
+            d['domain_id'] = None
+        return d
+
+    @classmethod
+    def from_dict(cls, role_dict):
+        if 'domain_id' in role_dict and role_dict['domain_id'] is None:
+            new_dict = role_dict.copy()
+            new_dict['domain_id'] = NULL_DOMAIN_ID
+        else:
+            new_dict = role_dict
+        return super(RoleTable, cls).from_dict(new_dict)
+
     __tablename__ = 'role'
-    attributes = ['id', 'name']
+    attributes = ['id', 'name', 'domain_id']
     id = sql.Column(sql.String(64), primary_key=True)
-    name = sql.Column(sql.String(255), unique=True, nullable=False)
+    name = sql.Column(sql.String(255), nullable=False)
+    domain_id = sql.Column(sql.String(64), nullable=False,
+                           server_default=NULL_DOMAIN_ID)
     extra = sql.Column(sql.JsonBlob())
-    __table_args__ = (sql.UniqueConstraint('name'), {})
+    __table_args__ = (sql.UniqueConstraint('name', 'domain_id'),)

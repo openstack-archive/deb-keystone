@@ -16,7 +16,6 @@ import copy
 import uuid
 
 import mock
-from oslo_config import cfg
 from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from pycadf import cadftaxonomy
@@ -30,11 +29,9 @@ from keystone.oauth1 import controllers
 from keystone.oauth1 import core
 from keystone.tests import unit
 from keystone.tests.unit.common import test_notifications
+from keystone.tests.unit import ksfixtures
 from keystone.tests.unit.ksfixtures import temporaryfile
 from keystone.tests.unit import test_v3
-
-
-CONF = cfg.CONF
 
 
 class OAuth1ContribTests(test_v3.RestfulTestCase):
@@ -597,6 +594,18 @@ class AuthTokenTests(OAuthFlowTests):
         url = '/users/%s/OS-OAUTH1/access_tokens' % self.user_id
         self.get(url, token=trust_token,
                  expected_status=http_client.FORBIDDEN)
+
+
+class FernetAuthTokenTests(AuthTokenTests):
+
+    def config_overrides(self):
+        super(FernetAuthTokenTests, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+
+    def test_delete_keystone_tokens_by_consumer_id(self):
+        # NOTE(lbragstad): Fernet tokens are never persisted in the backend.
+        pass
 
 
 class MaliciousOAuth1Tests(OAuth1Tests):

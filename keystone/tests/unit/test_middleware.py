@@ -40,7 +40,8 @@ class MiddlewareRequestTestBase(unit.TestCase):
     def _application(self):
         """A base wsgi application that returns a simple response."""
         def app(environ, start_response):
-            body = uuid.uuid4().hex
+            # WSGI requires the body of the response to be six.binary_type
+            body = uuid.uuid4().hex.encode('utf-8')
             resp_headers = [('Content-Type', 'text/html; charset=utf8'),
                             ('Content-Length', str(len(body)))]
             start_response('200 OK', resp_headers)
@@ -113,8 +114,13 @@ class AdminTokenAuthMiddlewareTest(MiddlewareRequestTestBase):
 
     MIDDLEWARE_CLASS = middleware.AdminTokenAuthMiddleware
 
+    def config_overrides(self):
+        super(AdminTokenAuthMiddlewareTest, self).config_overrides()
+        self.config_fixture.config(
+            admin_token='ADMIN')
+
     def test_request_admin(self):
-        headers = {middleware.AUTH_TOKEN_HEADER: CONF.admin_token}
+        headers = {middleware.AUTH_TOKEN_HEADER: 'ADMIN'}
         req = self._do_middleware_request(headers=headers)
         self.assertTrue(req.environ[middleware.CONTEXT_ENV]['is_admin'])
 
@@ -122,15 +128,6 @@ class AdminTokenAuthMiddlewareTest(MiddlewareRequestTestBase):
         headers = {middleware.AUTH_TOKEN_HEADER: 'NOT-ADMIN'}
         req = self._do_middleware_request(headers=headers)
         self.assertFalse(req.environ[middleware.CONTEXT_ENV]['is_admin'])
-
-
-class PostParamsMiddlewareTest(MiddlewareRequestTestBase):
-
-    MIDDLEWARE_CLASS = middleware.PostParamsMiddleware
-
-    def test_request_with_params(self):
-        req = self._do_middleware_request(params='arg1=one', method='post')
-        self.assertEqual({"arg1": "one"}, req.environ[middleware.PARAMS_ENV])
 
 
 class JsonBodyMiddlewareTest(MiddlewareRequestTestBase):
@@ -197,9 +194,10 @@ class AuthContextMiddlewareTest(test_backend_sql.SqlTests,
         self.config_fixture.config(group='tokenless_auth',
                                    trusted_issuer=[self.trusted_issuer])
 
-        # This idp_id is calculated based on
-        # sha256(self.client_issuer)
-        hashed_idp = hashlib.sha256(self.client_issuer)
+        # client_issuer is encoded because you can't hash
+        # unicode objects with hashlib.
+        # This idp_id is calculated based on sha256(self.client_issuer)
+        hashed_idp = hashlib.sha256(self.client_issuer.encode('utf-8'))
         self.idp_id = hashed_idp.hexdigest()
         self._load_sample_data()
 
@@ -670,7 +668,8 @@ class AuthContextMiddlewareTest(test_backend_sql.SqlTests,
         self._assert_tokenless_auth_context(context, ephemeral_user=True)
 
     def test_ephemeral_any_user_success(self):
-        """Ephemeral user does not need a specified user
+        """Verify ephemeral user does not need a specified user.
+
         Keystone is not looking to match the user, but a corresponding group.
         """
         env = {}
@@ -723,7 +722,8 @@ class AuthContextMiddlewareTest(test_backend_sql.SqlTests,
                                  extra_environ=env)
 
     def test_ephemeral_incorrect_mapping_fail(self):
-        """Ephemeral user picks up the non-ephemeral user mapping.
+        """Test ephemeral user picking up the non-ephemeral user mapping.
+
         Looking up the mapping with protocol Id 'x509' will load up
         the non-ephemeral user mapping, results unauthenticated.
         """
