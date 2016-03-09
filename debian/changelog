@@ -1,3 +1,11 @@
+keystone (2:9.0.0~b3-2) experimental; urgency=medium
+
+  * Using "keystone-manage bootstrap" to create the initial admin, and then
+    using it to further create users and endpoints. Note that through using
+    environment variables, no passwords are leaking in /proc.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 09 Mar 2016 21:31:44 +0000
+
 keystone (2:9.0.0~b3-1) experimental; urgency=medium
 
   [ Ondřej Nový ]

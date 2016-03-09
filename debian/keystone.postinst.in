@@ -6,7 +6,7 @@ set -e
 
 KEY_CONF=/etc/keystone/keystone.conf
 
-keystone_create_admin_tenant () {
+keystone_get_debconf_admin_credentials () {
 	db_get keystone/admin-user
 	ADMIN_USER_NAME=${RET:-admin}
 	db_get keystone/admin-password
@@ -18,46 +18,77 @@ keystone_create_admin_tenant () {
 	db_get keystone/admin-role-name
 	ADMIN_ROLE_NAME=${RET:-admin}
 
-	# TODO: Use keystone-manage bootstrap instead of the admin_token_auth.
-	#export OS_BOOTSTRAP_PASSWORD=${ADMIN_USER_PW}
-	#keystone-manage bootstrap  --bootstrap-username ${ADMIN_USER_NAME} --bootstrap-project-name ${ADMIN_TENANT_NAME}
-	openstack ${OSTACKCLI_PARAMS} project create --or-show $ADMIN_TENANT_NAME --domain default --description "Default Debian admin project" >/dev/null
-	openstack ${OSTACKCLI_PARAMS} project create --or-show service --domain default --description "Default Debian service project" >/dev/null
-	openstack ${OSTACKCLI_PARAMS} user create --or-show --password $ADMIN_USER_PW --project $ADMIN_TENANT_NAME --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME --domain default --description "Default Debian admin user" >/dev/null
+	# We export the retrived credentials for later use
+	export OS_PROJECT_DOMAIN_ID=default
+	export OS_USER_DOMAIN_ID=default
+	export OS_USERNAME=admin
+	export OS_PASSWORD=${ADMIN_USER_PW}
+	export OS_TENANT_NAME=${ADMIN_TENANT_NAME}
+	export OS_PROJECT_NAME=${ADMIN_TENANT_NAME}
+	export OS_AUTH_URL=http://127.0.0.1:35357/v3/
+	export OS_IDENTITY_API_VERSION=3
+	export OS_AUTH_VERSION=3
+	export OS_PROJECT_DOMAIN_ID=default
+	export OS_USER_DOMAIN_ID=default
+	export OS_NO_CACHE=1
+}
+
+keystone_bootstrap_admin () {
+	# This is the new way to bootstrap the admin user of Keystone
+	# and we shouldn't use the admin auth token anymore.
+	export OS_BOOTSTRAP_USERNAME=${ADMIN_USER_NAME}
+	export OS_BOOTSTRAP_PROJECT_NAME=${ADMIN_TENANT_NAME}
+	export OS_BOOTSTRAP_PASSWORD=${ADMIN_USER_PW}
+	keystone-manage bootstrap
+}
+
+keystone_create_admin_tenant () {
+	echo -n "Fixing-up: admin-project-desc "
+	openstack project set --description "Default Debian admin project" $ADMIN_TENANT_NAME
+	echo -n "service-project "
+	openstack project create --or-show service --description "Default Debian service project" >/dev/null
+	echo -n "default-admin-email "
+	openstack user set --description "Default Debian admin user" --email ${ADMIN_USER_EMAIL} --enable $ADMIN_USER_NAME
+	echo "...done!"
 
 	# Note: heat_stack_owner is needed for heat to work, and Member ResellerAdmin
 	# are needed for swift auto account creation.
+	echo -n "Adding roles: "
 	for i in admin KeystoneAdmin KeystoneServiceAdmin heat_stack_owner Member ResellerAdmin ; do
-		openstack ${OSTACKCLI_PARAMS} role create --or-show ${i} >/dev/null
-		openstack ${OSTACKCLI_PARAMS} role add --project $ADMIN_TENANT_NAME --user $ADMIN_TENANT_NAME ${i} >/dev/null
+		echo -n "${i} "
+		openstack role create --or-show ${i} >/dev/null
+		openstack role add --project $ADMIN_TENANT_NAME --user $ADMIN_USER_NAME ${i} >/dev/null
 	done
+	echo "...done!"
 }
 
 keystone_create_endpoint_postinst () {
 	local PKG_NAME
 	PKG_NAME=${1}
-	db_get keystone/register-endpoint
-	if [ "${RET}" = "true" ] ; then
-		db_get keystone/endpoint-ip
-		# Make sure a valid IP has been entered in Debconf.
-		KEYSTONE_ENDPOINT_IP=`echo ${RET} | egrep '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'`
-		if [ -n ${KEYSTONE_ENDPOINT_IP} ] ; then
-			db_get keystone/region-name
-			REGION_NAME=${RET}
-			if [ -n "${REGION_NAME}" ] ; then
-				NUM_LINES=$(openstack ${OSTACKCLI_PARAMS} service list --format=csv | q -d , -H 'SELECT ID FROM - WHERE `Type`="identity"' | wc -l)
-				if [ "${NUM_LINES}" = "0" ] ; then
-					openstack ${OSTACKCLI_PARAMS} service create --name=keystone --description="Keystone Identity Service" identity >/dev/null
 
-					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 >/dev/null
-					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 >/dev/null
-					openstack ${OSTACKCLI_PARAMS} endpoint create --region "${REGION_NAME}" \
-						keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0 >/dev/null
-				else
-					echo -n "Keystone service already registered..."
-				fi
+	db_get keystone/endpoint-ip
+	# Make sure a valid IP has been entered in Debconf.
+	KEYSTONE_ENDPOINT_IP=`echo ${RET} | egrep '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'`
+	if [ -n ${KEYSTONE_ENDPOINT_IP} ] ; then
+		db_get keystone/region-name
+		REGION_NAME=${RET}
+		if [ -n "${REGION_NAME}" ] ; then
+			NUM_LINES=$(OS_TOKEN=`openstack token issue -c id -f value` openstack service list --format=csv --os-url http://localhost:5000/v3 | q -d , -H 'SELECT ID FROM - WHERE `Type`="identity"' | wc -l)
+			if [ "${NUM_LINES}" = "0" ] ; then
+				echo -n "Setting-up: create-keystone-service "
+				OS_TOKEN=`openstack token issue -c id -f value` openstack service create --name=keystone --description="Keystone Identity Service" identity --os-url http://localhost:5000/v3 >/dev/null
+				echo -n "create-public-endpoint "
+				OS_TOKEN=`openstack token issue -c id -f value` openstack endpoint create --region "${REGION_NAME}" \
+					keystone public http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 --os-url http://localhost:5000/v3 >/dev/null
+				echo -n "create-internal-endpoint "
+				OS_TOKEN=`openstack token issue -c id -f value` openstack endpoint create --region "${REGION_NAME}" \
+					keystone internal http://${KEYSTONE_ENDPOINT_IP}:5000/v2.0 --os-url http://localhost:5000/v3 >/dev/null
+				echo -n "create-admin-endpoint "
+				OS_TOKEN=`openstack token issue -c id -f value` openstack endpoint create --region "${REGION_NAME}" \
+					keystone admin http://${KEYSTONE_ENDPOINT_IP}:35357/v2.0 --os-url http://localhost:5000/v3 >/dev/null
+				echo "...done!"
+			else
+				echo -n "Keystone service already registered..."
 			fi
 		fi
 	fi
@@ -88,7 +119,7 @@ if [ "$1" = "configure" ] ; then
 		AUTH_TOKEN=`pkgos_gen_pass`
 	fi
 	pkgos_inifile set ${KEY_CONF} DEFAULT admin_token ${AUTH_TOKEN}
-	OSTACKCLI_PARAMS="--os-token ${AUTH_TOKEN} --os-url=http://127.0.0.1:35357/v3/ --os-domain-name default --os-identity-api-version=3"
+	OSTACKCLI_PARAMS="--os-url=http://127.0.0.1:35357/v3/ --os-domain-name default --os-identity-api-version=3"
 
 	# Make sure /var/log/keystone/keystone.log is owned by keystone
 	# BEFORE any keystone-manage calls.
@@ -138,15 +169,20 @@ if [ "$1" = "configure" ] ; then
 		echo "0"
 		db_get keystone/create-admin-tenant
 		if [ "$RET" = "true" ] ; then
-			echo -n "Creating tenants... "
+			keystone_get_debconf_admin_credentials
+			echo "===> Bootstraping tenants with 'keystone-manage bootstrap':"
+			keystone_get_debconf_admin_credentials
+			keystone_bootstrap_admin
+			db_get keystone/register-endpoint
+			if [ "$RET" = "true" ] ; then
+				echo "===> Registering keystone endpoint"
+				keystone_create_endpoint_postinst
+			fi
+			echo "===> Editing bootstraped tenants and adding default roles"
 			keystone_create_admin_tenant
+
+			echo "done!"
 		fi
-		db_get keystone/register-endpoint
-		if [ "$RET" = "true" ] ; then
-			echo -n "Registering keystone endpoint..."
-			keystone_create_endpoint_postinst
-		fi
-		echo "done!"
 	fi
 	db_stop
 fi
