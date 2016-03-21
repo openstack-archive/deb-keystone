@@ -3,6 +3,7 @@ keystone (2:9.0.0~rc1-1) experimental; urgency=medium
   * New upstream release.
   * Require version >= 0.10.0 of python-migrate to make sure we have the
     python-decorator package installed.
+  * Fixed (build-)depends for this release.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 21 Mar 2016 16:12:36 +0100
 
