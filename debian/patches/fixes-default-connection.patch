@@ -8,7 +8,7 @@ Index: keystone/etc/keystone.conf.sample
 ===================================================================
 --- keystone.orig/etc/keystone.conf.sample
 +++ keystone/etc/keystone.conf.sample
-@@ -545,7 +545,7 @@
+@@ -546,7 +546,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
  # Deprecated group/name - [sql]/connection
