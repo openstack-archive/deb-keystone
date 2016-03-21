@@ -19,16 +19,16 @@ from six.moves import zip
 
 from keystone import catalog
 from keystone.tests import unit
+from keystone.tests.unit.catalog import test_backends as catalog_tests
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import database
-from keystone.tests.unit import test_backend
 
 
 BROKEN_WRITE_FUNCTIONALITY_MSG = ("Templated backend doesn't correctly "
                                   "implement write operations")
 
 
-class TestTemplatedCatalog(unit.TestCase, test_backend.CatalogTests):
+class TestTemplatedCatalog(unit.TestCase, catalog_tests.CatalogTests):
 
     DEFAULT_FIXTURE = {
         'RegionOne': {
@@ -161,8 +161,24 @@ class TestTemplatedCatalog(unit.TestCase, test_backend.CatalogTests):
     def test_service_filtering(self):
         self.skipTest("Templated backend doesn't support filtering")
 
+    def test_list_services_with_hints(self):
+        hints = {}
+        services = self.catalog_api.list_services(hints=hints)
+        exp_services = [
+            {'type': 'compute',
+             'description': '',
+             'enabled': True,
+             'name': "'Compute Service'",
+             'id': 'compute'},
+            {'type': 'identity',
+             'description': '',
+             'enabled': True,
+             'name': "'Identity Service'",
+             'id': 'identity'}]
+        self.assertItemsEqual(exp_services, services)
+
     # NOTE(dstanek): the following methods have been overridden
-    # from test_backend.CatalogTests
+    # from unit.catalog.test_backends.CatalogTests.
 
     def test_region_crud(self):
         self.skipTest(BROKEN_WRITE_FUNCTIONALITY_MSG)

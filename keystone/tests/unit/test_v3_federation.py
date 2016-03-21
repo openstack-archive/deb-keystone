@@ -10,6 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import copy
 import os
 import random
 from testtools import matchers
@@ -1531,6 +1532,35 @@ class MappingCRUDTests(test_v3.RestfulTestCase):
         self.put(url, expected_status=http_client.BAD_REQUEST,
                  body={'mapping': mapping})
 
+    def test_create_mapping_with_local_user_and_local_domain(self):
+        url = self.MAPPING_URL + uuid.uuid4().hex
+        resp = self.put(
+            url,
+            body={
+                'mapping': mapping_fixtures.MAPPING_LOCAL_USER_LOCAL_DOMAIN
+            },
+            expected_status=http_client.CREATED)
+        self.assertValidMappingResponse(
+            resp, mapping_fixtures.MAPPING_LOCAL_USER_LOCAL_DOMAIN)
+
+    def test_create_mapping_with_ephemeral(self):
+        url = self.MAPPING_URL + uuid.uuid4().hex
+        resp = self.put(
+            url,
+            body={'mapping': mapping_fixtures.MAPPING_EPHEMERAL_USER},
+            expected_status=http_client.CREATED)
+        self.assertValidMappingResponse(
+            resp, mapping_fixtures.MAPPING_EPHEMERAL_USER)
+
+    def test_create_mapping_with_bad_user_type(self):
+        url = self.MAPPING_URL + uuid.uuid4().hex
+        # get a copy of a known good map
+        bad_mapping = copy.deepcopy(mapping_fixtures.MAPPING_EPHEMERAL_USER)
+        # now sabotage the user type
+        bad_mapping['rules'][0]['local'][0]['user']['type'] = uuid.uuid4().hex
+        self.put(url, expected_status=http_client.BAD_REQUEST,
+                 body={'mapping': bad_mapping})
+
 
 class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
 
@@ -1668,7 +1698,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
     def test_issue_unscoped_token_with_remote_unavailable(self):
         self.config_fixture.config(group='federation',
                                    remote_id_attribute=self.REMOTE_ID_ATTR)
-        self.assertRaises(exception.ValidationError,
+        self.assertRaises(exception.Unauthorized,
                           self._issue_unscoped_token,
                           idp=self.IDP_WITH_REMOTE,
                           environment={
@@ -3234,6 +3264,15 @@ class ServiceProviderTests(test_v3.RestfulTestCase):
             return '/OS-FEDERATION/service_providers/' + str(suffix)
         return '/OS-FEDERATION/service_providers'
 
+    def _create_default_sp(self, body=None):
+        """Create default Service Provider."""
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        if body is None:
+            body = self.sp_ref()
+        resp = self.put(url, body={'service_provider': body},
+                        expected_status=http_client.CREATED)
+        return resp
+
     def test_get_service_provider(self):
         url = self.base_url(suffix=self.SERVICE_PROVIDER_ID)
         resp = self.get(url)
@@ -3382,6 +3421,56 @@ class ServiceProviderTests(test_v3.RestfulTestCase):
     def test_delete_service_provider_returns_not_found(self):
         url = self.base_url(suffix=uuid.uuid4().hex)
         self.delete(url, expected_status=http_client.NOT_FOUND)
+
+    def test_filter_list_sp_by_id(self):
+        def get_id(resp):
+            sp = resp.result.get('service_provider')
+            return sp.get('id')
+
+        sp1_id = get_id(self._create_default_sp())
+        sp2_id = get_id(self._create_default_sp())
+
+        # list the SP, should get SPs.
+        url = self.base_url()
+        resp = self.get(url)
+        sps = resp.result.get('service_providers')
+        entities_ids = [e['id'] for e in sps]
+        self.assertIn(sp1_id, entities_ids)
+        self.assertIn(sp2_id, entities_ids)
+
+        # filter the SP by 'id'. Only SP1 should appear.
+        url = self.base_url() + '?id=' + sp1_id
+        resp = self.get(url)
+        sps = resp.result.get('service_providers')
+        entities_ids = [e['id'] for e in sps]
+        self.assertIn(sp1_id, entities_ids)
+        self.assertNotIn(sp2_id, entities_ids)
+
+    def test_filter_list_sp_by_enabled(self):
+        def get_id(resp):
+            sp = resp.result.get('service_provider')
+            return sp.get('id')
+
+        sp1_id = get_id(self._create_default_sp())
+        sp2_ref = self.sp_ref()
+        sp2_ref['enabled'] = False
+        sp2_id = get_id(self._create_default_sp(body=sp2_ref))
+
+        # list the SP, should get two SPs.
+        url = self.base_url()
+        resp = self.get(url)
+        sps = resp.result.get('service_providers')
+        entities_ids = [e['id'] for e in sps]
+        self.assertIn(sp1_id, entities_ids)
+        self.assertIn(sp2_id, entities_ids)
+
+        # filter the SP by 'enabled'. Only SP1 should appear.
+        url = self.base_url() + '?enabled=True'
+        resp = self.get(url)
+        sps = resp.result.get('service_providers')
+        entities_ids = [e['id'] for e in sps]
+        self.assertIn(sp1_id, entities_ids)
+        self.assertNotIn(sp2_id, entities_ids)
 
 
 class WebSSOTests(FederatedTokenTests):

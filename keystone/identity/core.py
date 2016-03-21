@@ -17,6 +17,7 @@
 import abc
 import functools
 import os
+import threading
 import uuid
 
 from oslo_config import cfg
@@ -99,6 +100,7 @@ class DomainConfigs(dict):
     configured = False
     driver = None
     _any_sql = False
+    lock = threading.Lock()
 
     def _load_driver(self, domain_config):
         return manager.load_driver(Manager.driver_namespace,
@@ -314,7 +316,6 @@ class DomainConfigs(dict):
 
     def setup_domain_drivers(self, standard_driver, resource_api):
         # This is called by the api call wrapper
-        self.configured = True
         self.driver = standard_driver
 
         if CONF.identity.domain_configurations_from_database:
@@ -323,6 +324,7 @@ class DomainConfigs(dict):
         else:
             self._setup_domain_drivers_from_files(standard_driver,
                                                   resource_api)
+        self.configured = True
 
     def get_domain_driver(self, domain_id):
         self.check_config_and_reload_domain_driver_if_required(domain_id)
@@ -420,8 +422,14 @@ def domains_configured(f):
     def wrapper(self, *args, **kwargs):
         if (not self.domain_configs.configured and
                 CONF.identity.domain_specific_drivers_enabled):
-            self.domain_configs.setup_domain_drivers(
-                self.driver, self.resource_api)
+            # If domain specific driver has not been configured, acquire the
+            # lock and proceed with loading the driver.
+            with self.domain_configs.lock:
+                # Check again just in case some other thread has already
+                # completed domain config.
+                if not self.domain_configs.configured:
+                    self.domain_configs.setup_domain_drivers(
+                        self.driver, self.resource_api)
         return f(self, *args, **kwargs)
     return wrapper
 
@@ -1061,7 +1069,7 @@ class Manager(manager.Manager):
 
     @domains_configured
     @exception_translated('group')
-    def add_user_to_group(self, user_id, group_id):
+    def add_user_to_group(self, user_id, group_id, initiator=None):
         @exception_translated('user')
         def get_entity_info_for_user(public_id):
             return self._get_domain_driver_and_entity_id(public_id)
@@ -1081,10 +1089,12 @@ class Manager(manager.Manager):
         # Invalidate user role assignments cache region, as it may now need to
         # include role assignments from the specified group to its users
         assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
+        notifications.Audit.added_to(self._GROUP, group_id, self._USER,
+                                     user_id, initiator)
 
     @domains_configured
     @exception_translated('group')
-    def remove_user_from_group(self, user_id, group_id):
+    def remove_user_from_group(self, user_id, group_id, initiator=None):
         @exception_translated('user')
         def get_entity_info_for_user(public_id):
             return self._get_domain_driver_and_entity_id(public_id)
@@ -1105,8 +1115,9 @@ class Manager(manager.Manager):
         # Invalidate user role assignments cache region, as it may be caching
         # role assignments expanded from this group to this user
         assignment.COMPUTED_ASSIGNMENTS_REGION.invalidate()
+        notifications.Audit.removed_from(self._GROUP, group_id, self._USER,
+                                         user_id, initiator)
 
-    @notifications.internal(notifications.INVALIDATE_USER_TOKEN_PERSISTENCE)
     def emit_invalidate_user_token_persistence(self, user_id):
         """Emit a notification to the callback system to revoke user tokens.
 
@@ -1116,10 +1127,10 @@ class Manager(manager.Manager):
         :param user_id: user identifier
         :type user_id: string
         """
-        pass
+        notifications.Audit.internal(
+            notifications.INVALIDATE_USER_TOKEN_PERSISTENCE, user_id
+        )
 
-    @notifications.internal(
-        notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE)
     def emit_invalidate_grant_token_persistence(self, user_project):
         """Emit a notification to the callback system to revoke grant tokens.
 
@@ -1129,7 +1140,10 @@ class Manager(manager.Manager):
         :param user_project: {'user_id': user_id, 'project_id': project_id}
         :type user_project: dict
         """
-        pass
+        notifications.Audit.internal(
+            notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE,
+            user_project
+        )
 
     @domains_configured
     @exception_translated('user')

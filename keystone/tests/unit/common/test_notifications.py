@@ -93,84 +93,6 @@ class AuditNotificationsTestCase(unit.BaseTestCase):
                                           DISABLED_OPERATION)
 
 
-class NotificationsWrapperTestCase(unit.BaseTestCase):
-    def create_fake_ref(self):
-        resource_id = uuid.uuid4().hex
-        return resource_id, {
-            'id': resource_id,
-            'key': uuid.uuid4().hex
-        }
-
-    @notifications.created(EXP_RESOURCE_TYPE)
-    def create_resource(self, resource_id, data):
-        return data
-
-    def test_resource_created_notification(self):
-        exp_resource_id, data = self.create_fake_ref()
-        callback = register_callback(CREATED_OPERATION)
-
-        self.create_resource(exp_resource_id, data)
-        callback.assert_called_with('identity', EXP_RESOURCE_TYPE,
-                                    CREATED_OPERATION,
-                                    {'resource_info': exp_resource_id})
-
-    @notifications.updated(EXP_RESOURCE_TYPE)
-    def update_resource(self, resource_id, data):
-        return data
-
-    def test_resource_updated_notification(self):
-        exp_resource_id, data = self.create_fake_ref()
-        callback = register_callback(UPDATED_OPERATION)
-
-        self.update_resource(exp_resource_id, data)
-        callback.assert_called_with('identity', EXP_RESOURCE_TYPE,
-                                    UPDATED_OPERATION,
-                                    {'resource_info': exp_resource_id})
-
-    @notifications.deleted(EXP_RESOURCE_TYPE)
-    def delete_resource(self, resource_id):
-        pass
-
-    def test_resource_deleted_notification(self):
-        exp_resource_id = uuid.uuid4().hex
-        callback = register_callback(DELETED_OPERATION)
-
-        self.delete_resource(exp_resource_id)
-        callback.assert_called_with('identity', EXP_RESOURCE_TYPE,
-                                    DELETED_OPERATION,
-                                    {'resource_info': exp_resource_id})
-
-    @notifications.created(EXP_RESOURCE_TYPE)
-    def create_exception(self, resource_id):
-        raise ArbitraryException()
-
-    def test_create_exception_without_notification(self):
-        callback = register_callback(CREATED_OPERATION)
-        self.assertRaises(
-            ArbitraryException, self.create_exception, uuid.uuid4().hex)
-        self.assertFalse(callback.called)
-
-    @notifications.created(EXP_RESOURCE_TYPE)
-    def update_exception(self, resource_id):
-        raise ArbitraryException()
-
-    def test_update_exception_without_notification(self):
-        callback = register_callback(UPDATED_OPERATION)
-        self.assertRaises(
-            ArbitraryException, self.update_exception, uuid.uuid4().hex)
-        self.assertFalse(callback.called)
-
-    @notifications.deleted(EXP_RESOURCE_TYPE)
-    def delete_exception(self, resource_id):
-        raise ArbitraryException()
-
-    def test_delete_exception_without_notification(self):
-        callback = register_callback(DELETED_OPERATION)
-        self.assertRaises(
-            ArbitraryException, self.delete_exception, uuid.uuid4().hex)
-        self.assertFalse(callback.called)
-
-
 class NotificationsTestCase(unit.BaseTestCase):
 
     def test_send_notification(self):
@@ -290,13 +212,17 @@ class BaseNotificationTest(test_v3.RestfulTestCase):
         self._audits = []
 
         def fake_notify(operation, resource_type, resource_id,
-                        public=True):
+                        actor_dict=None, public=True):
             note = {
                 'resource_id': resource_id,
                 'operation': operation,
                 'resource_type': resource_type,
                 'send_notification_called': True,
                 'public': public}
+            if actor_dict:
+                note['actor_id'] = actor_dict.get('id')
+                note['actor_type'] = actor_dict.get('type')
+                note['actor_operation'] = actor_dict.get('actor_operation')
             self._notifications.append(note)
 
         self.useFixture(mockpatch.PatchObject(
@@ -326,7 +252,9 @@ class BaseNotificationTest(test_v3.RestfulTestCase):
         self.useFixture(mockpatch.PatchObject(
             notifications, '_send_audit_notification', fake_audit))
 
-    def _assert_last_note(self, resource_id, operation, resource_type):
+    def _assert_last_note(self, resource_id, operation, resource_type,
+                          actor_id=None, actor_type=None,
+                          actor_operation=None):
         # NOTE(stevemar): If 'basic' format is not used, then simply
         # return since this assertion is not valid.
         if CONF.notification_format != 'basic':
@@ -337,6 +265,10 @@ class BaseNotificationTest(test_v3.RestfulTestCase):
         self.assertEqual(resource_id, note['resource_id'])
         self.assertEqual(resource_type, note['resource_type'])
         self.assertTrue(note['send_notification_called'])
+        if actor_id:
+            self.assertEqual(actor_id, note['actor_id'])
+            self.assertEqual(actor_type, note['actor_type'])
+            self.assertEqual(actor_operation, note['actor_operation'])
 
     def _assert_last_audit(self, resource_id, operation, resource_type,
                            target_uri):
@@ -711,6 +643,28 @@ class NotificationsForEntities(BaseNotificationTest):
         self._assert_last_note(role_ref['id'], CREATED_OPERATION, 'role')
         # No audit event should have occurred
         self.assertEqual(0, len(self._audits))
+
+    def test_add_user_to_group(self):
+        user_ref = unit.new_user_ref(domain_id=self.domain_id)
+        user_ref = self.identity_api.create_user(user_ref)
+        group_ref = unit.new_group_ref(domain_id=self.domain_id)
+        group_ref = self.identity_api.create_group(group_ref)
+        self.identity_api.add_user_to_group(user_ref['id'], group_ref['id'])
+        self._assert_last_note(group_ref['id'], UPDATED_OPERATION, 'group',
+                               actor_id=user_ref['id'], actor_type='user',
+                               actor_operation='added')
+
+    def test_remove_user_from_group(self):
+        user_ref = unit.new_user_ref(domain_id=self.domain_id)
+        user_ref = self.identity_api.create_user(user_ref)
+        group_ref = unit.new_group_ref(domain_id=self.domain_id)
+        group_ref = self.identity_api.create_group(group_ref)
+        self.identity_api.add_user_to_group(user_ref['id'], group_ref['id'])
+        self.identity_api.remove_user_from_group(user_ref['id'],
+                                                 group_ref['id'])
+        self._assert_last_note(group_ref['id'], UPDATED_OPERATION, 'group',
+                               actor_id=user_ref['id'], actor_type='user',
+                               actor_operation='removed')
 
 
 class CADFNotificationsForEntities(NotificationsForEntities):

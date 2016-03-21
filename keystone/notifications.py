@@ -109,7 +109,8 @@ class Audit(object):
     """
 
     @classmethod
-    def _emit(cls, operation, resource_type, resource_id, initiator, public):
+    def _emit(cls, operation, resource_type, resource_id, initiator, public,
+              actor_dict=None):
         """Directly send an event notification.
 
         :param operation: one of the values from ACTIONS
@@ -120,6 +121,8 @@ class Audit(object):
         :param public: If True (default), the event will be sent to the
                        notifier API.  If False, the event will only be sent via
                        notify_event_callbacks to in process listeners
+        :param actor_dict: dictionary of actor information in the event of
+                           assignment notification
         """
         # NOTE(stevemar): the _send_notification function is
         # overloaded, it's used to register callbacks and to actually
@@ -130,6 +133,7 @@ class Audit(object):
             operation,
             resource_type,
             resource_id,
+            actor_dict,
             public=public)
 
         if CONF.notification_format == 'cadf' and public:
@@ -161,93 +165,35 @@ class Audit(object):
         cls._emit(ACTIONS.deleted, resource_type, resource_id, initiator,
                   public)
 
+    @classmethod
+    def added_to(cls, target_type, target_id, actor_type, actor_id,
+                 initiator=None, public=True):
+        actor_dict = {'id': actor_id,
+                      'type': actor_type,
+                      'actor_operation': 'added'}
+        cls._emit(ACTIONS.updated, target_type, target_id, initiator, public,
+                  actor_dict=actor_dict)
 
-class ManagerNotificationWrapper(object):
-    """Send event notifications for ``Manager`` methods.
+    @classmethod
+    def removed_from(cls, target_type, target_id, actor_type, actor_id,
+                     initiator=None, public=True):
+        actor_dict = {'id': actor_id,
+                      'type': actor_type,
+                      'actor_operation': 'removed'}
+        cls._emit(ACTIONS.updated, target_type, target_id, initiator, public,
+                  actor_dict=actor_dict)
 
-    Sends a notification if the wrapped Manager method does not raise an
-    :class:`Exception` (such as :class:`keystone.exception.NotFound`).
-
-    :param operation: one of the values from ACTIONS
-    :param resource_type: type of resource being affected
-    :param public:  If True (default), the event will be sent to the notifier
-                    API.  If False, the event will only be sent via
-                    notify_event_callbacks to in process listeners
-
-    """
-
-    def __init__(self, operation, resource_type, public=True,
-                 resource_id_arg_index=1, result_id_arg_attr=None):
-        self.operation = operation
-        self.resource_type = resource_type
-        self.public = public
-        self.resource_id_arg_index = resource_id_arg_index
-        self.result_id_arg_attr = result_id_arg_attr
-
-    def __call__(self, f):
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            """Send a notification if the wrapped callable is successful."""
-            try:
-                result = f(*args, **kwargs)
-            except Exception:
-                raise
-            else:
-                if self.result_id_arg_attr is not None:
-                    resource_id = result[self.result_id_arg_attr]
-                else:
-                    resource_id = args[self.resource_id_arg_index]
-
-                # NOTE(stevemar): the _send_notification function is
-                # overloaded, it's used to register callbacks and to actually
-                # send the notification externally. Thus, we should check
-                # the desired notification format in the function instead
-                # of before it.
-                _send_notification(
-                    self.operation,
-                    self.resource_type,
-                    resource_id,
-                    public=self.public)
-
-                # Only emit CADF notifications for public events
-                if CONF.notification_format == 'cadf' and self.public:
-                    outcome = taxonomy.OUTCOME_SUCCESS
-                    # NOTE(morganfainberg): The decorator form will always use
-                    # a 'None' initiator, since we do not pass context around
-                    # in a manner that allows the decorator to inspect context
-                    # and extract the needed information.
-                    initiator = None
-                    _create_cadf_payload(self.operation, self.resource_type,
-                                         resource_id, outcome, initiator)
-            return result
-
-        return wrapper
-
-
-def created(*args, **kwargs):
-    """Decorator to send notifications for ``Manager.create_*`` methods."""
-    return ManagerNotificationWrapper(ACTIONS.created, *args, **kwargs)
-
-
-def updated(*args, **kwargs):
-    """Decorator to send notifications for ``Manager.update_*`` methods."""
-    return ManagerNotificationWrapper(ACTIONS.updated, *args, **kwargs)
-
-
-def disabled(*args, **kwargs):
-    """Decorator to send notifications when an object is disabled."""
-    return ManagerNotificationWrapper(ACTIONS.disabled, *args, **kwargs)
-
-
-def deleted(*args, **kwargs):
-    """Decorator to send notifications for ``Manager.delete_*`` methods."""
-    return ManagerNotificationWrapper(ACTIONS.deleted, *args, **kwargs)
-
-
-def internal(*args, **kwargs):
-    """Decorator to send notifications for internal notifications only."""
-    kwargs['public'] = False
-    return ManagerNotificationWrapper(ACTIONS.internal, *args, **kwargs)
+    @classmethod
+    def internal(cls, resource_type, resource_id):
+        # NOTE(lbragstad): Internal notifications are never public and have
+        # never used the initiator variable, but the _emit() method expects
+        # them. Let's set them here but not expose them through the method
+        # signature - that way someone can not do something like send an
+        # internal notification publicly.
+        initiator = None
+        public = False
+        cls._emit(ACTIONS.internal, resource_type, resource_id, initiator,
+                  public)
 
 
 def _get_callback_info(callback):
@@ -450,7 +396,8 @@ def _create_cadf_payload(operation, resource_type, resource_id,
                              target, event_type, **audit_kwargs)
 
 
-def _send_notification(operation, resource_type, resource_id, public=True):
+def _send_notification(operation, resource_type, resource_id, actor_dict=None,
+                       public=True):
     """Send notification to inform observers about the affected resource.
 
     This method doesn't raise an exception when sending the notification fails.
@@ -458,12 +405,18 @@ def _send_notification(operation, resource_type, resource_id, public=True):
     :param operation: operation being performed (created, updated, or deleted)
     :param resource_type: type of resource being operated on
     :param resource_id: ID of resource being operated on
+    :param actor_dict: a dictionary containing the actor's ID and type
     :param public:  if True (default), the event will be sent
                     to the notifier API.
                     if False, the event will only be sent via
                     notify_event_callbacks to in process listeners.
     """
     payload = {'resource_info': resource_id}
+
+    if actor_dict:
+        payload['actor_id'] = actor_dict['id']
+        payload['actor_type'] = actor_dict['type']
+        payload['actor_operation'] = actor_dict['actor_operation']
 
     notify_event_callbacks(SERVICE, resource_type, operation, payload)
 

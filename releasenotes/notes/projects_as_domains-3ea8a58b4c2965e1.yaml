@@ -1,0 +1,7 @@
+---
+features:
+  - Domains are now represented as top level projects with the attribute
+    `is_domain` set to true. Such projects will appear as parents for any
+    previous top level projects. Projects acting as domains can be created,
+    read, updated, and deleted via either the project API or the domain API
+    (V3 only).

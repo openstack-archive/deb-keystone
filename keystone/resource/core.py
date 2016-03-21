@@ -206,7 +206,7 @@ class Manager(manager.Manager):
                      'within a domain with the same name : %s'
                      ) % project['name']
 
-    def _create_project(self, project_id, project, initiator=None):
+    def create_project(self, project_id, project, initiator=None):
         project = project.copy()
 
         if (CONF.resource.project_name_url_safe != 'off' and
@@ -250,11 +250,6 @@ class Manager(manager.Manager):
             self.get_project_by_name.set(ret, self, ret['name'],
                                          ret['domain_id'])
         return ret
-
-    def create_project(self, project_id, project, initiator=None):
-        project = self._create_project(project_id, project, initiator)
-
-        return project
 
     def assert_domain_enabled(self, domain_id, domain=None):
         """Assert the Domain is enabled.
@@ -300,19 +295,6 @@ class Manager(manager.Manager):
             self.assert_domain_enabled(domain_id=project['domain_id'])
         if not project.get('enabled', True):
             raise AssertionError(_('Project is disabled: %s') % project_id)
-
-    @notifications.disabled(_PROJECT, public=False)
-    def _disable_project(self, project_id):
-        """Emit a notification to the callback system project is been disabled.
-
-        This method, and associated callback listeners, removes the need for
-        making direct calls to other managers to take action (e.g. revoking
-        project scoped tokens) when a project is disabled.
-
-        :param project_id: project identifier
-        :type project_id: string
-        """
-        pass
 
     def _assert_all_parents_are_enabled(self, project_id):
         parents_list = self.list_project_parents(project_id)
@@ -415,7 +397,8 @@ class Manager(manager.Manager):
                       'subtree contains enabled projects.')
                     % {'project_id': project_id})
 
-            self._disable_project(project_id)
+            notifications.Audit.disabled(self._PROJECT, project_id,
+                                         public=False)
         if cascade:
             self._only_allow_enabled_to_update_cascade(project,
                                                        original_project)
@@ -434,7 +417,8 @@ class Manager(manager.Manager):
             # If the domain is being disabled, issue the disable notification
             # as well
             if original_project_enabled and not project_enabled:
-                self._disable_domain(project_id)
+                notifications.Audit.disabled(self._DOMAIN, project_id,
+                                             public=False)
 
         self.get_project.invalidate(self, project_id)
         self.get_project_by_name.invalidate(self, original_project['name'],
@@ -469,7 +453,8 @@ class Manager(manager.Manager):
                 # Does not in fact disable the project, only emits a
                 # notification that it was disabled. The actual disablement
                 # is done in the next line.
-                self._disable_project(child['id'])
+                notifications.Audit.disabled(self._PROJECT, child['id'],
+                                             public=False)
 
             self.driver.update_project(child['id'], child)
 
@@ -487,7 +472,10 @@ class Manager(manager.Manager):
             self.assignment_api.list_user_ids_for_project(project_id))
         for user_id in project_user_ids:
             payload = {'user_id': user_id, 'project_id': project_id}
-            self._emit_invalidate_user_project_tokens_notification(payload)
+            notifications.Audit.internal(
+                notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE,
+                payload
+            )
 
     def _post_delete_cleanup_project(self, project_id, project,
                                      initiator=None):
@@ -758,7 +746,7 @@ class Manager(manager.Manager):
                 utils.is_not_url_safe(domain['name'])):
             self._raise_reserved_character_exception('Domain', domain['name'])
         project_from_domain = _get_project_from_domain(domain)
-        is_domain_project = self._create_project(
+        is_domain_project = self.create_project(
             domain_id, project_from_domain, initiator)
 
         return self._get_domain_from_project(is_domain_project)
@@ -769,19 +757,6 @@ class Manager(manager.Manager):
         domains = [self._get_domain_from_project(project)
                    for project in projects]
         return domains
-
-    @notifications.disabled(_DOMAIN, public=False)
-    def _disable_domain(self, domain_id):
-        """Emit a notification to the callback system domain is been disabled.
-
-        This method, and associated callback listeners, removes the need for
-        making direct calls to other managers to take action (e.g. revoking
-        domain scoped tokens) when a domain is disabled.
-
-        :param domain_id: domain identifier
-        :type domain_id: string
-        """
-        pass
 
     def update_domain(self, domain_id, domain, initiator=None):
         # TODO(henry-nash): We shouldn't have to check for the federated domain
@@ -901,14 +876,6 @@ class Manager(manager.Manager):
     def get_project_by_name(self, project_name, domain_id):
         return self.driver.get_project_by_name(project_name, domain_id)
 
-    @notifications.internal(
-        notifications.INVALIDATE_USER_PROJECT_TOKEN_PERSISTENCE)
-    def _emit_invalidate_user_project_tokens_notification(self, payload):
-        # This notification's payload is a dict of user_id and
-        # project_id so the token provider can invalidate the tokens
-        # from persistence if persistence is enabled.
-        pass
-
     def ensure_default_domain_exists(self):
         """Creates the default domain if it doesn't exist.
 
@@ -957,16 +924,6 @@ class ResourceDriverBase(object):
         return CONF.resource.list_limit or CONF.list_limit
 
     # project crud
-    @abc.abstractmethod
-    def create_project(self, project_id, project):
-        """Creates a new project.
-
-        :raises keystone.exception.Conflict: if project_id or project name
-                                             already exists
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
     @abc.abstractmethod
     def list_projects(self, hints):
         """List projects in the system.
@@ -1121,6 +1078,45 @@ class ResourceDriverV8(ResourceDriverBase):
     """
 
     @abc.abstractmethod
+    def create_project(self, tenant_id, tenant):
+        """Creates a new project.
+
+        :param tenant_id: This parameter can be ignored.
+        :param dict tenant: The new project
+
+        Project schema::
+
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                domain_id:
+                    type: string
+                description:
+                    type: string
+                enabled:
+                    type: boolean
+                parent_id:
+                    type: string
+                is_domain:
+                    type: boolean
+            required: [id, name, domain_id]
+            additionalProperties: true
+
+        If project doesn't match the schema the behavior is undefined.
+
+        The driver can impose requirements such as the maximum length of a
+        field. If these requirements are not met the behavior is undefined.
+
+        :raises keystone.exception.Conflict: if the project id already exists
+            or the name already exists for the domain_id.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
     def get_project_by_name(self, tenant_name, domain_id):
         """Get a tenant by name.
 
@@ -1231,6 +1227,45 @@ class ResourceDriverV9(ResourceDriverBase):
     this class.
 
     """
+
+    @abc.abstractmethod
+    def create_project(self, project_id, project):
+        """Creates a new project.
+
+        :param project_id: This parameter can be ignored.
+        :param dict project: The new project
+
+        Project schema::
+
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                domain_id:
+                    type: [string, null]
+                description:
+                    type: string
+                enabled:
+                    type: boolean
+                parent_id:
+                    type: string
+                is_domain:
+                    type: boolean
+            required: [id, name, domain_id]
+            additionalProperties: true
+
+        If the project doesn't match the schema the behavior is undefined.
+
+        The driver can impose requirements such as the maximum length of a
+        field. If these requirements are not met the behavior is undefined.
+
+        :raises keystone.exception.Conflict: if the project id already exists
+            or the name already exists for the domain_id.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_project_by_name(self, project_name, domain_id):

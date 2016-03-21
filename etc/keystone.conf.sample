@@ -28,8 +28,9 @@
 # found on a different server. (string value)
 #admin_endpoint = <None>
 
-# Maximum depth of the project hierarchy. WARNING: setting it to a large value
-# may adversely impact performance. (integer value)
+# Maximum depth of the project hierarchy, excluding the project acting as a
+# domain at the top of the hierarchy. WARNING: setting it to a large value may
+# adversely impact  performance. (integer value)
 #max_project_tree_depth = 5
 
 # Limit the sizes of user & project ID/names. (integer value)
@@ -1521,7 +1522,7 @@
 # Queues which are unused for the duration of the TTL are automatically
 # deleted. The parameter affects only reply and fanout queues. (integer value)
 # Minimum value: 1
-#rabbit_transient_queues_ttl = 600
+#rabbit_transient_queues_ttl = 1800
 
 # Specifies the number of messages to prefetch. Setting to zero allows
 # unlimited messages. (integer value)
@@ -1883,6 +1884,17 @@
 # The prefix to use for the RelayState SAML attribute, used when generating ECP
 # wrapped assertions. (string value)
 #relay_state_prefix = ss:mem:
+
+
+[shadow_users]
+
+#
+# From keystone
+#
+
+# Entrypoint for the shadow users backend driver in the
+# keystone.identity.shadow_users namespace. (string value)
+#driver = sql
 
 
 [signing]

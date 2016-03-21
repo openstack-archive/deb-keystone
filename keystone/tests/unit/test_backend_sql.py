@@ -31,9 +31,15 @@ from keystone import exception
 from keystone.identity.backends import sql as identity_sql
 from keystone import resource
 from keystone.tests import unit
+from keystone.tests.unit.assignment import test_backends as assignment_tests
+from keystone.tests.unit.catalog import test_backends as catalog_tests
 from keystone.tests.unit import default_fixtures
+from keystone.tests.unit.identity import test_backends as identity_tests
 from keystone.tests.unit.ksfixtures import database
-from keystone.tests.unit import test_backend
+from keystone.tests.unit.policy import test_backends as policy_tests
+from keystone.tests.unit.resource import test_backends as resource_tests
+from keystone.tests.unit.token import test_backends as token_tests
+from keystone.tests.unit.trust import test_backends as trust_tests
 from keystone.token.persistence.backends import sql as token_sql
 
 
@@ -190,8 +196,26 @@ class SqlModels(SqlTests):
                 ('user_id', sql.String, 64))
         self.assertExpectedSchema('user_group_membership', cols)
 
+    def test_revocation_event_model(self):
+        cols = (('id', sql.Integer, None),
+                ('domain_id', sql.String, 64),
+                ('project_id', sql.String, 64),
+                ('user_id', sql.String, 64),
+                ('role_id', sql.String, 64),
+                ('trust_id', sql.String, 64),
+                ('consumer_id', sql.String, 64),
+                ('access_token_id', sql.String, 64),
+                ('issued_before', sql.DateTime, None),
+                ('expires_at', sql.DateTime, None),
+                ('revoked_at', sql.DateTime, None),
+                ('audit_id', sql.String, 32),
+                ('audit_chain_id', sql.String, 32))
+        self.assertExpectedSchema('revocation_event', cols)
 
-class SqlIdentity(SqlTests, test_backend.IdentityTests):
+
+class SqlIdentity(SqlTests, identity_tests.IdentityTests,
+                  assignment_tests.AssignmentTests,
+                  resource_tests.ResourceTests):
     def test_password_hashed(self):
         with sql.session_for_read() as session:
             user_ref = self.identity_api._get_user(session,
@@ -612,11 +636,11 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         _exercise_project_api(resource.NULL_DOMAIN_ID)
 
 
-class SqlTrust(SqlTests, test_backend.TrustTests):
+class SqlTrust(SqlTests, trust_tests.TrustTests):
     pass
 
 
-class SqlToken(SqlTests, test_backend.TokenTests):
+class SqlToken(SqlTests, token_tests.TokenTests):
     def test_token_revocation_list_uses_right_columns(self):
         # This query used to be heavy with too many columns. We want
         # to make sure it is only running with the minimum columns
@@ -718,7 +742,7 @@ class SqlToken(SqlTests, test_backend.TokenTests):
         self.assertEqual({'batch_size': 1000}, mysql_strategy.keywords)
 
 
-class SqlCatalog(SqlTests, test_backend.CatalogTests):
+class SqlCatalog(SqlTests, catalog_tests.CatalogTests):
 
     _legacy_endpoint_id_in_endpoint = True
     _enabled_default_to_true_when_creating_endpoint = True
@@ -810,25 +834,25 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
                           region['id'])
 
 
-class SqlPolicy(SqlTests, test_backend.PolicyTests):
+class SqlPolicy(SqlTests, policy_tests.PolicyTests):
     pass
 
 
-class SqlInheritance(SqlTests, test_backend.InheritanceTests):
+class SqlInheritance(SqlTests, assignment_tests.InheritanceTests):
     pass
 
 
-class SqlImpliedRoles(SqlTests, test_backend.ImpliedRoleTests):
+class SqlImpliedRoles(SqlTests, assignment_tests.ImpliedRoleTests):
     pass
 
 
-class SqlTokenCacheInvalidation(SqlTests, test_backend.TokenCacheInvalidation):
+class SqlTokenCacheInvalidation(SqlTests, token_tests.TokenCacheInvalidation):
     def setUp(self):
         super(SqlTokenCacheInvalidation, self).setUp()
         self._create_test_data()
 
 
-class SqlFilterTests(SqlTests, test_backend.FilterTests):
+class SqlFilterTests(SqlTests, identity_tests.FilterTests):
 
     def clean_up_entities(self):
         """Clean up entity test data from Filter Test Cases."""
@@ -843,9 +867,10 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
         del self.domain1
 
     def test_list_entities_filtered_by_domain(self):
-        # NOTE(henry-nash): This method is here rather than in test_backend
-        # since any domain filtering with LDAP is handled by the manager
-        # layer (and is already tested elsewhere) not at the driver level.
+        # NOTE(henry-nash): This method is here rather than in
+        # unit.identity.test_backends since any domain filtering with LDAP is
+        # handled by the manager layer (and is already tested elsewhere) not at
+        # the driver level.
         self.addCleanup(self.clean_up_entities)
         self.domain1 = unit.new_domain_ref()
         self.resource_api.create_domain(self.domain1['id'], self.domain1)
@@ -899,10 +924,10 @@ class SqlFilterTests(SqlTests, test_backend.FilterTests):
         self.assertTrue(len(groups) > 0)
 
 
-class SqlLimitTests(SqlTests, test_backend.LimitTests):
+class SqlLimitTests(SqlTests, identity_tests.LimitTests):
     def setUp(self):
         super(SqlLimitTests, self).setUp()
-        test_backend.LimitTests.setUp(self)
+        identity_tests.LimitTests.setUp(self)
 
 
 class FakeTable(sql.ModelBase):

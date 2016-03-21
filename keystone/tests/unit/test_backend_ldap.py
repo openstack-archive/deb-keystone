@@ -36,11 +36,13 @@ from keystone import identity
 from keystone.identity.mapping_backends import mapping as map
 from keystone import resource
 from keystone.tests import unit
+from keystone.tests.unit.assignment import test_backends as assignment_tests
 from keystone.tests.unit import default_fixtures
+from keystone.tests.unit.identity import test_backends as identity_tests
 from keystone.tests.unit import identity_mapping as mapping_sql
 from keystone.tests.unit.ksfixtures import database
 from keystone.tests.unit.ksfixtures import ldapdb
-from keystone.tests.unit import test_backend
+from keystone.tests.unit.resource import test_backends as resource_tests
 from keystone.tests.unit.utils import wip
 
 
@@ -120,7 +122,9 @@ def create_group_container(identity_api):
                     ('ou', ['Groups'])])
 
 
-class BaseLDAPIdentity(test_backend.IdentityTests):
+class BaseLDAPIdentity(identity_tests.IdentityTests,
+                       assignment_tests.AssignmentTests,
+                       resource_tests.ResourceTests):
 
     def setUp(self):
         super(BaseLDAPIdentity, self).setUp()
@@ -293,10 +297,10 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
                           role_id='member')
 
     def test_get_and_remove_role_grant_by_group_and_domain(self):
-        # TODO(henry-nash): We should really rewrite the tests in test_backend
-        # to be more flexible as to where the domains are sourced from, so
-        # that we would not need to override such tests here. This is raised
-        # as bug 1373865.
+        # TODO(henry-nash): We should really rewrite the tests in
+        # unit.resource.test_backends to be more flexible as to where the
+        # domains are sourced from, so that we would not need to override such
+        # tests here. This is raised as bug 1373865.
         new_domain = self._get_domain_fixture()
         new_group = unit.new_group_ref(domain_id=new_domain['id'],)
         new_group = self.identity_api.create_group(new_group)
@@ -700,11 +704,11 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
                           user_id=user['id'],
                           password=None)
 
-    # (spzala)The group and domain crud tests below override the standard ones
-    # in test_backend.py so that we can exclude the update name test, since we
-    # do not yet support the update of either group or domain names with LDAP.
-    # In the tests below, the update is demonstrated by updating description.
-    # Refer to bug 1136403 for more detail.
+    # The group and domain CRUD tests below override the standard ones in
+    # unit.identity.test_backends.py so that we can exclude the update name
+    # test, since we do not (and will not) support the update of either group
+    # or domain names with LDAP. In the tests below, the update is tested by
+    # updating description.
     @mock.patch.object(versionutils, 'report_deprecated_feature')
     def test_group_crud(self, mock_deprecator):
         # NOTE(stevemar): As of the Mitaka release, we now check for calls that
@@ -1005,6 +1009,13 @@ class BaseLDAPIdentity(test_backend.IdentityTests):
             exception.ValidationError,
             super(BaseLDAPIdentity, self).
             test_create_project_with_domain_id_mismatch_to_parent_domain)
+
+    def test_remove_foreign_assignments_when_deleting_a_domain(self):
+        """Multiple domains are not supported."""
+        self.assertRaises(
+            (exception.ValidationError, exception.DomainNotFound),
+            super(BaseLDAPIdentity,
+                  self).test_remove_foreign_assignments_when_deleting_a_domain)
 
 
 class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
@@ -1660,9 +1671,9 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
 
     def test_multi_role_grant_by_user_group_on_project_domain(self):
         # This is a partial implementation of the standard test that
-        # is defined in test_backend.py.  It omits both domain and
-        # group grants. since neither of these are yet supported by
-        # the ldap backend.
+        # is defined in unit.assignment.test_backends.py.  It omits
+        # both domain and group grants. since neither of these are
+        # yet supported by the ldap backend.
 
         role_list = []
         for _ in range(2):
@@ -1890,7 +1901,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.assertEqual('Foo Bar', user_ref['name'])
 
 
-class LDAPLimitTests(unit.TestCase, test_backend.LimitTests):
+class LDAPLimitTests(unit.TestCase, identity_tests.LimitTests):
     def setUp(self):
         super(LDAPLimitTests, self).setUp()
 
@@ -1898,7 +1909,7 @@ class LDAPLimitTests(unit.TestCase, test_backend.LimitTests):
         self.useFixture(database.Database(self.sql_driver_version_overrides))
         self.load_backends()
         self.load_fixtures(default_fixtures)
-        test_backend.LimitTests.setUp(self)
+        identity_tests.LimitTests.setUp(self)
         _assert_backends(self,
                          assignment='sql',
                          identity='ldap',
@@ -2201,8 +2212,13 @@ class LDAPPosixGroupsTest(unit.TestCase):
         conn = group_api.get_connection()
         conn.modify_s(group_ref['dn'], [mod])
 
+        # Testing the case "the group contains a user"
         user_refs = self.identity_api.list_users_in_group(new_group['id'])
         self.assertIn(new_user['id'], (x['id'] for x in user_refs))
+
+        # Testing the case "the user is a member of a group"
+        group_refs = self.identity_api.list_groups_for_user(new_user['id'])
+        self.assertIn(new_group['id'], (x['id'] for x in group_refs))
 
 
 class LdapIdentityWithMapping(
@@ -2685,13 +2701,13 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
     def test_list_role_assignment_by_domain(self):
         # With multi LDAP this method should work, so override the override
         # from BaseLDAPIdentity
-        super(BaseLDAPIdentity, self).test_list_role_assignment_by_domain
+        super(BaseLDAPIdentity, self).test_list_role_assignment_by_domain()
 
     def test_list_role_assignment_by_user_with_domain_group_roles(self):
         # With multi LDAP this method should work, so override the override
         # from BaseLDAPIdentity
         super(BaseLDAPIdentity, self).\
-            test_list_role_assignment_by_user_with_domain_group_roles
+            test_list_role_assignment_by_user_with_domain_group_roles()
 
     def test_list_role_assignment_using_sourced_groups_with_domains(self):
         # With SQL Assignment this method should work, so override the override
@@ -2703,13 +2719,19 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
         # With multi LDAP this method should work, so override the override
         # from BaseLDAPIdentity
         super(BaseLDAPIdentity, self).\
-            test_create_project_with_domain_id_and_without_parent_id
+            test_create_project_with_domain_id_and_without_parent_id()
 
     def test_create_project_with_domain_id_mismatch_to_parent_domain(self):
         # With multi LDAP this method should work, so override the override
         # from BaseLDAPIdentity
         super(BaseLDAPIdentity, self).\
-            test_create_project_with_domain_id_mismatch_to_parent_domain
+            test_create_project_with_domain_id_mismatch_to_parent_domain()
+
+    def test_remove_foreign_assignments_when_deleting_a_domain(self):
+        # With multi LDAP this method should work, so override the override
+        # from BaseLDAPIdentity
+        base = super(BaseLDAPIdentity, self)
+        base.test_remove_foreign_assignments_when_deleting_a_domain()
 
 
 class MultiLDAPandSQLIdentityDomainConfigsInSQL(MultiLDAPandSQLIdentity):
@@ -3216,7 +3238,7 @@ class DomainSpecificSQLIdentity(DomainSpecificLDAPandSQLIdentity):
             'domain2')
 
 
-class LdapFilterTests(test_backend.FilterTests, unit.TestCase):
+class LdapFilterTests(identity_tests.FilterTests, unit.TestCase):
 
     def setUp(self):
         super(LdapFilterTests, self).setUp()

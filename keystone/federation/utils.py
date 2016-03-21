@@ -29,6 +29,13 @@ CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 
 
+class UserType(object):
+    """User mapping type."""
+
+    EPHEMERAL = 'ephemeral'
+    LOCAL = 'local'
+
+
 MAPPING_SCHEMA = {
     "type": "object",
     "required": ['rules'],
@@ -60,6 +67,11 @@ MAPPING_SCHEMA = {
                                                 "name": {"type": "string"}
                                             },
                                             "additionalProperties": False,
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [UserType.EPHEMERAL,
+                                                     UserType.LOCAL]
                                         }
                                     },
                                     "additionalProperties": False
@@ -412,13 +424,6 @@ def get_assertion_params_from_env(context):
         yield (k, v)
 
 
-class UserType(object):
-    """User mapping type."""
-
-    EPHEMERAL = 'ephemeral'
-    LOCAL = 'local'
-
-
 class RuleProcessor(object):
     """A class to process assertions and mapping rules."""
 
@@ -593,6 +598,15 @@ class RuleProcessor(object):
         group_ids = set()
         group_names = list()
         groups_by_domain = dict()
+
+        # if mapping yield no valid identity values, we should bail right away
+        # instead of continuing on with a normalized bogus user
+        if not identity_values:
+            msg = _("Could not map any federated user properties to identity "
+                    "values. Check debug logs or the mapping used for "
+                    "additional details.")
+            LOG.warning(msg)
+            raise exception.ValidationError(msg)
 
         for identity_value in identity_values:
             if 'user' in identity_value:
