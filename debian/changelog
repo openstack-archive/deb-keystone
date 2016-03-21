@@ -1,3 +1,10 @@
+keystone (2:9.0.0~b3-3) UNRELEASED; urgency=medium
+
+  * Require version >= 0.10.0 of python-migrate to make sure we have the
+    python-decorator package installed.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 21 Mar 2016 15:40:11 +0100
+
 keystone (2:9.0.0~b3-2) experimental; urgency=medium
 
   * Using "keystone-manage bootstrap" to create the initial admin, and then
