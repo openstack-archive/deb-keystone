@@ -130,18 +130,18 @@ if [ "$1" = "configure" ] ; then
 	if [ "$RET" = "true" ] ; then
 		# Configure the SQL connection of keystone.conf according to dbconfig-common
 		pkgos_dbc_postinst ${KEY_CONF} database connection keystone $@
-		echo "Running su keystone -c 'keystone-manage --noverbose db_sync'..."
+		echo "Running su keystone -s /bin/sh -c 'keystone-manage --noverbose db_sync'..."
 		if [ "${PKGOS_VERBOSE}" = "yes" ] ; then
-			su keystone -c "keystone-manage --verbose db_sync"
+			su keystone -s /bin/sh -c "keystone-manage --verbose db_sync"
 		else
-			su keystone -c "keystone-manage --noverbose db_sync"
+			su keystone -s /bin/sh -c "keystone-manage --noverbose db_sync"
 		fi
 	fi
 
 	# Generate the ssl keys for keystone.
 	# It seems that starting it each time this script is launch
 	# isn't a problem.
-	#su keystone -c "keystone-manage pki_setup"
+	#su keystone -s /bin/sh -c "keystone-manage pki_setup"
 
 	# Activate the keystone.service
 	deb-systemd-helper unmask keystone.service >/dev/null || true
