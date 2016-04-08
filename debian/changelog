@@ -1,6 +1,6 @@
 keystone (2:9.0.0-2) UNRELEASED; urgency=medium
 
-  * Use /bin/sh as shell in postinst script explicitly
+  * Use /bin/sh as su shell in postinst script explicitly
 
  -- Ondřej Nový <novy@ondrej.org>  Fri, 08 Apr 2016 16:22:41 +0200
 
