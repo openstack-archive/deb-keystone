@@ -3,5 +3,14 @@
 set -e
 
 if [ -x /usr/bin/keystone-manage ] ; then
-	su -c '/usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' keystone
+	# We should only run token_flush if we're using uuid tokens.
+	PROVIDER=$(grep -E '^[ \t]*provider[ \t]*=' /etc/keystone/keystone.conf)
+	if [ -n "${PROVIDER}" ] ; then
+		PROVIDER=$(grep -E '^[ \t]*provider[ \t]*=' /etc/keystone/keystone.conf | sed -e 's/[ \t]*provider[ \t]*=//' | awk '{print $1}')
+	else
+		PROVIDER=uuid
+	fi
+	if [ "${PROVIDER}" = "uuid" ] ; then
+		su -c '/usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' keystone
+	fi
 fi
