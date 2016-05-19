@@ -1,6 +1,6 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: keystone
-Source: git://github.com/openstack/keystone.git
+Source: https://github.com/openstack/keystone
 
 Files: *
 Copyright: 2010 United States Government as represented by the Administrator of
