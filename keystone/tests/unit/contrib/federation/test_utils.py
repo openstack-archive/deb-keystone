@@ -381,7 +381,7 @@ class MappingRuleEngineTests(unit.BaseTestCase):
         self.assertEqual([], mapped_properties['group_ids'])
 
     def test_rule_engine_blacklist_and_direct_groups_mapping_multiples(self):
-        """Tests matching multiple values before the blacklist.
+        """Test matching multiple values before the blacklist.
 
         Verifies that the local indexes are correct when matching multiple
         remote values for a field when the field occurs before the blacklist
@@ -409,7 +409,7 @@ class MappingRuleEngineTests(unit.BaseTestCase):
         self.assertEqual([], mapped_properties['group_ids'])
 
     def test_rule_engine_whitelist_direct_group_mapping_missing_domain(self):
-        """Test if the local rule is rejected upon missing domain value
+        """Test if the local rule is rejected upon missing domain value.
 
         This is a variation with a ``whitelist`` filter.
 
@@ -420,7 +420,7 @@ class MappingRuleEngineTests(unit.BaseTestCase):
         self.assertRaises(exception.ValidationError, rp.process, assertion)
 
     def test_rule_engine_blacklist_direct_group_mapping_missing_domain(self):
-        """Test if the local rule is rejected upon missing domain value
+        """Test if the local rule is rejected upon missing domain value.
 
         This is a variation with a ``blacklist`` filter.
 
@@ -568,7 +568,7 @@ class MappingRuleEngineTests(unit.BaseTestCase):
         - Check if the user has proper domain ('federated') set
         - Check if the user has proper type set ('ephemeral')
         - Check if display_name is properly set from the assertion
-        - Check if unique_id is properly set and and equal to value hardcoded
+        - Check if unique_id is properly set and equal to value hardcoded
         in the mapping
 
         This test does two iterations with different assertions used as input
@@ -607,8 +607,66 @@ class MappingRuleEngineTests(unit.BaseTestCase):
         self.assertEqual('Developer',
                          mapped_properties['group_names'][0]['name'])
 
-    def test_mapping_with_incorrect_local_keys(self):
+    def test_mapping_validation_with_incorrect_local_keys(self):
         mapping = mapping_fixtures.MAPPING_BAD_LOCAL_SETUP
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_with_user_name_and_domain_name(self):
+        mapping = mapping_fixtures.MAPPING_WITH_USERNAME_AND_DOMAINNAME
+        mapping_utils.validate_mapping_structure(mapping)
+
+    def test_mapping_validation_with_user_name_and_domain_id(self):
+        mapping = mapping_fixtures.MAPPING_WITH_USERNAME_AND_DOMAINID
+        mapping_utils.validate_mapping_structure(mapping)
+
+    def test_mapping_validation_with_user_id_and_domain_id(self):
+        mapping = mapping_fixtures.MAPPING_WITH_USERID_AND_DOMAINID
+        mapping_utils.validate_mapping_structure(mapping)
+
+    def test_mapping_validation_with_group_name_and_domain(self):
+        mapping = mapping_fixtures.MAPPING_GROUP_NAMES
+        mapping_utils.validate_mapping_structure(mapping)
+
+    def test_mapping_validation_bad_domain(self):
+        mapping = mapping_fixtures.MAPPING_BAD_DOMAIN
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_bad_group(self):
+        mapping = mapping_fixtures.MAPPING_BAD_GROUP
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_with_group_name_without_domain(self):
+        mapping = mapping_fixtures.MAPPING_GROUP_NAME_WITHOUT_DOMAIN
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_with_group_id_and_domain(self):
+        mapping = mapping_fixtures.MAPPING_GROUP_ID_WITH_DOMAIN
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_no_local(self):
+        mapping = mapping_fixtures.MAPPING_MISSING_LOCAL
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validataion_no_remote(self):
+        mapping = mapping_fixtures.MAPPING_NO_REMOTE
+        self.assertRaises(exception.ValidationError,
+                          mapping_utils.validate_mapping_structure,
+                          mapping)
+
+    def test_mapping_validation_no_type(self):
+        mapping = mapping_fixtures.MAPPING_MISSING_TYPE
         self.assertRaises(exception.ValidationError,
                           mapping_utils.validate_mapping_structure,
                           mapping)
@@ -623,7 +681,7 @@ class MappingRuleEngineTests(unit.BaseTestCase):
                           assertion)
 
     def test_rule_engine_group_ids_mapping_whitelist(self):
-        """Test mapping engine when group_ids is explicitly set
+        """Test mapping engine when group_ids is explicitly set.
 
         Also test whitelists on group ids
 

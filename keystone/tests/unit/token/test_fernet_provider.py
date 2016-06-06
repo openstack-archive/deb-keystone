@@ -149,7 +149,7 @@ class TestValidate(unit.TestCase):
                 'protocol': {'id': protocol, },
             },
         }
-        self.assertEqual(exp_user_info, token['user'])
+        self.assertDictEqual(exp_user_info, token['user'])
 
     def test_validate_v3_token_trust(self):
         # Check the trust fields in the token result when use validate_v3_token
@@ -525,7 +525,7 @@ class TestFernetKeyRotation(unit.TestCase):
         self.assertUniqueRepositoryState()
 
     def assertUniqueRepositoryState(self):
-        """Ensures that the current key repo state has not been seen before."""
+        """Ensure that the current key repo state has not been seen before."""
         # This is assigned to a variable because it takes some work to
         # calculate.
         signature = self.key_repository_signature

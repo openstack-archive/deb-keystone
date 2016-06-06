@@ -130,7 +130,7 @@ class DictBase(models.ModelBase):
         return cls(**new_d)
 
     def to_dict(self, include_extra_dict=False):
-        """Returns the model's attributes as a dictionary.
+        """Return the model's attributes as a dictionary.
 
         If include_extra_dict is True, 'extra' attributes are literally
         included in the resulting dictionary twice, for backwards-compatibility
@@ -147,6 +147,7 @@ class DictBase(models.ModelBase):
         return d
 
     def __getitem__(self, key):
+        """Evaluate if key is in extra or not, to return correct item."""
         if key in self.extra:
             return self.extra[key]
         return getattr(self, key)
@@ -156,11 +157,11 @@ class ModelDictMixin(object):
 
     @classmethod
     def from_dict(cls, d):
-        """Returns a model instance from a dictionary."""
+        """Return a model instance from a dictionary."""
         return cls(**d)
 
     def to_dict(self):
-        """Returns the model's attributes as a dictionary."""
+        """Return the model's attributes as a dictionary."""
         names = (column.name for column in self.__table__.columns)
         return {name: getattr(self, name) for name in names}
 
@@ -169,6 +170,9 @@ _main_context_manager = None
 
 
 def _get_main_context_manager():
+    # TODO(DinaBelova): add DB profiling
+    # this requires oslo.db modification for proper format and functionality
+    # will be done in Newton timeframe
     global _main_context_manager
 
     if not _main_context_manager:
@@ -196,12 +200,26 @@ def _get_context():
     return _CONTEXT
 
 
+# Unit tests set this to True so that oslo.db's global engine is used.
+# This allows oslo_db.test_base.DbTestCase to override the transaction manager
+# with its test transaction manager.
+_TESTING_USE_GLOBAL_CONTEXT_MANAGER = False
+
+
 def session_for_read():
-    return _get_main_context_manager().reader.using(_get_context())
+    if _TESTING_USE_GLOBAL_CONTEXT_MANAGER:
+        reader = enginefacade.reader
+    else:
+        reader = _get_main_context_manager().reader
+    return reader.using(_get_context())
 
 
 def session_for_write():
-    return _get_main_context_manager().writer.using(_get_context())
+    if _TESTING_USE_GLOBAL_CONTEXT_MANAGER:
+        writer = enginefacade.writer
+    else:
+        writer = _get_main_context_manager().writer
+    return writer.using(_get_context())
 
 
 def truncated(f):
@@ -242,7 +260,7 @@ class _WontMatch(Exception):
 
 
 def _filter(model, query, hints):
-    """Applies filtering to a query.
+    """Apply filtering to a query.
 
     :param model: the table model in question
     :param query: query to apply filters to
@@ -254,7 +272,7 @@ def _filter(model, query, hints):
 
     """
     def inexact_filter(model, query, filter_, satisfied_filters):
-        """Applies an inexact filter to a query.
+        """Apply an inexact filter to a query.
 
         :param model: the table model in question
         :param query: query to apply filters to
@@ -295,7 +313,7 @@ def _filter(model, query, hints):
         return query.filter(query_term)
 
     def exact_filter(model, query, filter_, satisfied_filters):
-        """Applies an exact filter to a query.
+        """Apply an exact filter to a query.
 
         :param model: the table model in question
         :param query: query to apply filters to
@@ -340,7 +358,7 @@ def _filter(model, query, hints):
 
 
 def _limit(query, hints):
-    """Applies a limit to a query.
+    """Apply a limit to a query.
 
     :param query: query to apply filters to
     :param hints: contains the list of filters and limit details.
@@ -358,7 +376,7 @@ def _limit(query, hints):
 
 
 def filter_limit_query(model, query, hints):
-    """Applies filtering and limit to a query.
+    """Apply filtering and limit to a query.
 
     :param model: table model
     :param query: query to apply filters to
@@ -395,7 +413,7 @@ def filter_limit_query(model, query, hints):
 
 
 def handle_conflicts(conflict_type='object'):
-    """Converts select sqlalchemy exceptions into HTTP 409 Conflict."""
+    """Convert select sqlalchemy exceptions into HTTP 409 Conflict."""
     _conflict_msg = 'Conflict %(conflict_type)s: %(details)s'
 
     def decorator(method):

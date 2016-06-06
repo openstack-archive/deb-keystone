@@ -106,6 +106,8 @@ _VALID_FILTERS = [{'interface': 'admin'},
 
 _INVALID_FILTERS = ['some string', 1, 0, True, False]
 
+_INVALID_NAMES = [True, 24, ' ', '']
+
 
 def expected_validation_failure(msg):
     def wrapper(f):
@@ -304,7 +306,7 @@ class EntityValidationTestCase(unit.BaseTestCase):
                               request_to_validate)
 
     def test_create_entity_with_valid_email_validates(self):
-        """Validate email address
+        """Validate email address.
 
         Test that we successfully validate properly formatted email
         addresses.
@@ -397,12 +399,12 @@ class EntityValidationTestCase(unit.BaseTestCase):
                           request_to_validate)
 
     def test_update_entity_with_a_valid_optional_parameter_validates(self):
-        """Succeeds with only a single valid optional parameter."""
+        """Succeed with only a single valid optional parameter."""
         request_to_validate = {'email': self.valid_email}
         self.update_schema_validator.validate(request_to_validate)
 
     def test_update_entity_with_invalid_optional_parameter_fails(self):
-        """Fails when an optional parameter is invalid."""
+        """Fail when an optional parameter is invalid."""
         request_to_validate = {'email': 0}
         self.assertRaises(exception.SchemaValidationError,
                           self.update_schema_validator.validate,
@@ -472,12 +474,13 @@ class ProjectValidationTestCase(unit.BaseTestCase):
                           self.create_project_validator.validate,
                           request_to_validate)
 
-    def test_validate_project_request_with_name_too_short(self):
-        """Exception raised when `name` is too short."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_project_validator.validate,
-                          request_to_validate)
+    def test_validate_project_create_fails_with_invalid_name(self):
+        """Exception when validating a create request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_project_validator.validate,
+                              request_to_validate)
 
     def test_validate_project_request_with_valid_parent_id(self):
         """Test that we validate `parent_id` in create project requests."""
@@ -522,12 +525,13 @@ class ProjectValidationTestCase(unit.BaseTestCase):
                           self.update_project_validator.validate,
                           request_to_validate)
 
-    def test_validate_project_update_request_with_name_too_short_fails(self):
-        """Exception raised when updating a project with `name` too short."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.update_project_validator.validate,
-                          request_to_validate)
+    def test_validate_project_update_fails_with_invalid_name(self):
+        """Exception when validating an update request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_project_validator.validate,
+                              request_to_validate)
 
     def test_validate_project_create_request_with_valid_domain_id(self):
         """Test that we validate `domain_id` in create project requests."""
@@ -610,12 +614,13 @@ class DomainValidationTestCase(unit.BaseTestCase):
                           self.create_domain_validator.validate,
                           request_to_validate)
 
-    def test_validate_domain_request_with_name_too_short(self):
-        """Exception raised when `name` is too short."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_domain_validator.validate,
-                          request_to_validate)
+    def test_validate_domain_create_fails_with_invalid_name(self):
+        """Exception when validating a create request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_domain_validator.validate,
+                              request_to_validate)
 
     def test_validate_domain_update_request(self):
         """Test that we validate a domain update request."""
@@ -637,12 +642,13 @@ class DomainValidationTestCase(unit.BaseTestCase):
                           self.update_domain_validator.validate,
                           request_to_validate)
 
-    def test_validate_domain_update_request_with_name_too_short_fails(self):
-        """Exception raised when updating a domain with `name` too short."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.update_domain_validator.validate,
-                          request_to_validate)
+    def test_validate_domain_update_fails_with_invalid_name(self):
+        """Exception when validating an update request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_domain_validator.validate,
+                              request_to_validate)
 
 
 class RoleValidationTestCase(unit.BaseTestCase):
@@ -670,13 +676,18 @@ class RoleValidationTestCase(unit.BaseTestCase):
                           self.create_role_validator.validate,
                           request_to_validate)
 
-    def test_validate_role_create_when_name_is_not_string_fails(self):
-        """Exception is raised on role create with a non-string `name`."""
-        request_to_validate = {'name': True}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_role_validator.validate,
-                          request_to_validate)
-        request_to_validate = {'name': 24}
+    def test_validate_role_create_fails_with_invalid_name(self):
+        """Exception when validating a create request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_role_validator.validate,
+                              request_to_validate)
+
+    def test_validate_role_create_request_with_name_too_long_fails(self):
+        """Exception raised when creating a role with `name` too long."""
+        long_role_name = 'a' * 256
+        request_to_validate = {'name': long_role_name}
         self.assertRaises(exception.SchemaValidationError,
                           self.create_role_validator.validate,
                           request_to_validate)
@@ -686,14 +697,18 @@ class RoleValidationTestCase(unit.BaseTestCase):
         request_to_validate = {'name': 'My New Role'}
         self.update_role_validator.validate(request_to_validate)
 
-    def test_validate_role_update_fails_with_invalid_name_fails(self):
+    def test_validate_role_update_fails_with_invalid_name(self):
         """Exception when validating an update request with invalid `name`."""
-        request_to_validate = {'name': True}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.update_role_validator.validate,
-                          request_to_validate)
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_role_validator.validate,
+                              request_to_validate)
 
-        request_to_validate = {'name': 24}
+    def test_validate_role_update_request_with_name_too_long_fails(self):
+        """Exception raised when updating a role with `name` too long."""
+        long_role_name = 'a' * 256
+        request_to_validate = {'name': long_role_name}
         self.assertRaises(exception.SchemaValidationError,
                           self.update_role_validator.validate,
                           request_to_validate)
@@ -1010,7 +1025,7 @@ class ServiceValidationTestCase(unit.BaseTestCase):
             self.create_service_validator.validate(request_to_validate)
 
     def test_validate_service_create_fails_with_invalid_enabled(self):
-        """Exception raised when boolean-like parameters as `enabled`
+        """Exception raised when boolean-like parameters as `enabled`.
 
         On service create, make sure an exception is raised if `enabled` is
         not a boolean value.
@@ -1774,20 +1789,6 @@ class UserValidationTestCase(unit.BaseTestCase):
                           self.create_user_validator.validate,
                           request_to_validate)
 
-    def test_validate_user_create_fails_with_name_of_zero_length(self):
-        """Exception raised when validating a username with length of zero."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_user_validator.validate,
-                          request_to_validate)
-
-    def test_validate_user_create_fails_with_name_of_wrong_type(self):
-        """Exception raised when validating a username of wrong type."""
-        request_to_validate = {'name': True}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_user_validator.validate,
-                          request_to_validate)
-
     def test_validate_user_create_succeeds_with_valid_enabled_formats(self):
         """Validate acceptable enabled formats in create user requests."""
         for enabled in _VALID_ENABLED_FORMATS:
@@ -1836,6 +1837,14 @@ class UserValidationTestCase(unit.BaseTestCase):
                                'description': None}
         self.create_user_validator.validate(request_to_validate)
 
+    def test_validate_user_create_fails_with_invalid_name(self):
+        """Exception when validating a create request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_user_validator.validate,
+                              request_to_validate)
+
     def test_validate_user_update_succeeds(self):
         """Validate an update user request."""
         request_to_validate = {'email': uuid.uuid4().hex}
@@ -1852,6 +1861,14 @@ class UserValidationTestCase(unit.BaseTestCase):
         """Validate user update requests with extra parameters."""
         request_to_validate = {'other_attr': uuid.uuid4().hex}
         self.update_user_validator.validate(request_to_validate)
+
+    def test_validate_user_update_fails_with_invalid_name(self):
+        """Exception when validating an update request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_user_validator.validate,
+                              request_to_validate)
 
 
 class GroupValidationTestCase(unit.BaseTestCase):
@@ -1886,18 +1903,19 @@ class GroupValidationTestCase(unit.BaseTestCase):
                           self.create_group_validator.validate,
                           request_to_validate)
 
-    def test_validate_group_create_fails_when_group_name_is_too_short(self):
-        """Exception raised when group name is equal to zero."""
-        request_to_validate = {'name': ''}
-        self.assertRaises(exception.SchemaValidationError,
-                          self.create_group_validator.validate,
-                          request_to_validate)
-
     def test_validate_group_create_succeeds_with_extra_parameters(self):
         """Validate extra attributes on group create requests."""
         request_to_validate = {'name': self.group_name,
                                'other_attr': uuid.uuid4().hex}
         self.create_group_validator.validate(request_to_validate)
+
+    def test_validate_group_create_fails_with_invalid_name(self):
+        """Exception when validating a create request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.create_group_validator.validate,
+                              request_to_validate)
 
     def test_validate_group_update_succeeds(self):
         """Validate group update requests."""
@@ -1915,6 +1933,14 @@ class GroupValidationTestCase(unit.BaseTestCase):
         """Validate group update requests with extra parameters."""
         request_to_validate = {'other_attr': uuid.uuid4().hex}
         self.update_group_validator.validate(request_to_validate)
+
+    def test_validate_group_update_fails_with_invalid_name(self):
+        """Exception when validating an update request with invalid `name`."""
+        for invalid_name in _INVALID_NAMES:
+            request_to_validate = {'name': invalid_name}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_group_validator.validate,
+                              request_to_validate)
 
 
 class IdentityProviderValidationTestCase(unit.BaseTestCase):
@@ -2012,7 +2038,7 @@ class IdentityProviderValidationTestCase(unit.BaseTestCase):
                           request_to_validate)
 
     def test_validate_idp_request_remote_id_nullable(self):
-        """Test that `remote_ids` could be explicitly set to None"""
+        """Test that `remote_ids` could be explicitly set to None."""
         request_to_validate = {'remote_ids': None}
         self.create_idp_validator.validate(request_to_validate)
         self.update_idp_validator.validate(request_to_validate)
@@ -2024,26 +2050,26 @@ class FederationProtocolValidationTestCase(unit.BaseTestCase):
     def setUp(self):
         super(FederationProtocolValidationTestCase, self).setUp()
 
-        schema = federation_schema.federation_protocol_schema
-        # create protocol and update protocol have the same shema definition,
-        # combine them together, no need to validate separately.
-        self.protocol_validator = validators.SchemaValidator(schema)
+        create = federation_schema.protocol_create
+        update = federation_schema.protocol_update
+        self.create_protocol_validator = validators.SchemaValidator(create)
+        self.update_protocol_validator = validators.SchemaValidator(update)
 
     def test_validate_protocol_request_succeeds(self):
         """Test that we validate a protocol request successfully."""
         request_to_validate = {'mapping_id': uuid.uuid4().hex}
-        self.protocol_validator.validate(request_to_validate)
+        self.create_protocol_validator.validate(request_to_validate)
 
     def test_validate_protocol_request_succeeds_with_nonuuid_mapping_id(self):
         """Test that we allow underscore in mapping_id value."""
         request_to_validate = {'mapping_id': 'my_mapping_id'}
-        self.protocol_validator.validate(request_to_validate)
+        self.create_protocol_validator.validate(request_to_validate)
 
     def test_validate_protocol_request_fails_with_invalid_params(self):
         """Exception raised when unknown parameter is found."""
         request_to_validate = {'bogus': uuid.uuid4().hex}
         self.assertRaises(exception.SchemaValidationError,
-                          self.protocol_validator.validate,
+                          self.create_protocol_validator.validate,
                           request_to_validate)
 
     def test_validate_protocol_request_no_parameters(self):
@@ -2051,15 +2077,48 @@ class FederationProtocolValidationTestCase(unit.BaseTestCase):
         request_to_validate = {}
         # 'mapping_id' is required.
         self.assertRaises(exception.SchemaValidationError,
-                          self.protocol_validator.validate,
+                          self.create_protocol_validator.validate,
                           request_to_validate)
 
     def test_validate_protocol_request_fails_with_invalid_mapping_id(self):
         """Exception raised when mapping_id is not string."""
         request_to_validate = {'mapping_id': 12334}
         self.assertRaises(exception.SchemaValidationError,
-                          self.protocol_validator.validate,
+                          self.create_protocol_validator.validate,
                           request_to_validate)
+
+    def test_validate_protocol_request_succeeds_on_update(self):
+        """Test that we validate a protocol update request successfully."""
+        request_to_validate = {'mapping_id': uuid.uuid4().hex}
+        self.update_protocol_validator.validate(request_to_validate)
+
+    def test_validate_update_protocol_request_succeeds_with_nonuuid_id(self):
+        """Test that we allow underscore in mapping_id value when updating."""
+        request_to_validate = {'mapping_id': 'my_mapping_id'}
+        self.update_protocol_validator.validate(request_to_validate)
+
+    def test_validate_update_protocol_request_fails_with_invalid_params(self):
+        """Exception raised when unknown parameter in protocol update."""
+        request_to_validate = {'bogus': uuid.uuid4().hex}
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_protocol_validator.validate,
+                          request_to_validate)
+
+    def test_validate_update_protocol_with_no_parameters_fails(self):
+        """Test that updating a protocol requires at least one attribute."""
+        request_to_validate = {}
+        # 'mapping_id' is required.
+        self.assertRaises(exception.SchemaValidationError,
+                          self.update_protocol_validator.validate,
+                          request_to_validate)
+
+    def test_validate_update_protocol_request_fails_with_invalid_id(self):
+        """Test that updating a protocol with a non-string mapping_id fail."""
+        for bad_mapping_id in [12345, True]:
+            request_to_validate = {'mapping_id': bad_mapping_id}
+            self.assertRaises(exception.SchemaValidationError,
+                              self.update_protocol_validator.validate,
+                              request_to_validate)
 
 
 class OAuth1ValidationTestCase(unit.BaseTestCase):

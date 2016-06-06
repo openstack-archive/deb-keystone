@@ -9,19 +9,16 @@
 # Olivier Perrin <operrin@heliostech.fr>, 2013
 # Olivier Perrin <operrin@heliostech.fr>, 2013
 # Rémi Le Trocquer <remi.letrocquer@orange.com>, 2014
-# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Tom Cocozzello <tjcocozz@us.ibm.com>, 2015. #zanata
-# Martine Marin <mmarin@fr.ibm.com>, 2016. #zanata
-# Tom Cocozzello <tjcocozz@us.ibm.com>, 2016. #zanata
+# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: keystone 9.0.0.0rc2.dev10\n"
-"Report-Msgid-Bugs-To: https://bugs.launchpad.net/keystone\n"
-"POT-Creation-Date: 2016-03-28 22:17+0000\n"
+"Project-Id-Version: keystone 9.0.1.dev95\n"
+"Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
+"POT-Creation-Date: 2016-04-20 19:33+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-03-28 05:50+0000\n"
+"PO-Revision-Date: 2016-04-06 12:22+0000\n"
 "Last-Translator: Martine Marin <mmarin@fr.ibm.com>\n"
 "Language: fr\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
@@ -95,7 +92,7 @@ msgstr "%s ne peut pas être vide."
 
 #, python-format
 msgid "%s extension does not exist."
-msgstr "L'extension %s n'existe pas."
+msgstr "extension %s n'existe pas."
 
 #, python-format
 msgid "%s field is required and cannot be empty"
@@ -111,7 +108,7 @@ msgid ""
 "in favor of read-only identity LDAP access. It will be removed in the \"O\" "
 "release."
 msgstr ""
-"%s pour le back-end d'identité LDAP est désormais obsolète dans l'édition "
+"%s pour le backend d'identité LDAP est désormais obsolète dans l'édition "
 "Mitaka en faveur de l'accès LDAP d'identité en lecture seule. Sera supprimé "
 "dans l'édition \"O\"."
 
@@ -119,7 +116,7 @@ msgid "(Disable insecure_debug mode to suppress these details.)"
 msgstr "(Désactivez le mode insecure_debug pour supprimer ces détails.)"
 
 msgid "--all option cannot be mixed with other options"
-msgstr "L'option -all ne peut pas être associée à d'autres options"
+msgstr "-all option ne peut pas être mélanger avec d'autres options."
 
 msgid "A project-scoped token is required to produce a service catalog."
 msgstr "Un jeton de projet est requis pour produire un catalogue de service."
@@ -158,7 +155,7 @@ msgid "An unhandled exception has occurred: Could not find metadata."
 msgstr "Une exception non gérée s'est produite : métadonnées introuvables."
 
 msgid "At least one option must be provided"
-msgstr "Au moins une option doit être fournie"
+msgstr "Au moins une option doit être fourni"
 
 msgid "At least one option must be provided, use either --all or --domain-name"
 msgstr ""
@@ -189,14 +186,14 @@ msgstr ""
 "utilisez l'authentification V3"
 
 msgid "Authentication plugin error."
-msgstr "Erreur d'authentification du plug-in."
+msgstr "Erreur d'authentification du plugin."
 
 #, python-format
 msgid ""
 "Backend `%(backend)s` is not a valid memcached backend. Valid backends: "
 "%(backend_list)s"
 msgstr ""
-"Le back-end `%(backend)s` n'est pas un back-end memcached valide. Back-ends "
+"Le backend `%(backend)s` n'est pas un backend memcached valide. Backends "
 "valides : %(backend_list)s"
 
 msgid "Cannot authorize a request token with a token issued via delegation."
@@ -209,7 +206,7 @@ msgid "Cannot change %(option_name)s %(attr)s"
 msgstr "Impossible de modifier %(option_name)s %(attr)s"
 
 msgid "Cannot change Domain ID"
-msgstr "Impossible de modifier l'ID du domaine"
+msgstr "Ne peut pas changer l'identifiant du domaine"
 
 msgid "Cannot change user ID"
 msgstr "Impossible de modifier l'id de l'utilisateur"
@@ -241,7 +238,7 @@ msgid ""
 "this domain_id."
 msgstr ""
 "Impossible de créer le projet, car son parent (%(domain_id)s) fait office de "
-"domaine, mais l'ID parent (%(parent_id)s) du projet spécifié ne correspond "
+"domaine, mais le parent_id (%(parent_id)s) du projet spécifié ne correspond "
 "pas à cet ID de domaine (domain_id)."
 
 msgid "Cannot delete a domain that is enabled, please disable it first."
@@ -304,8 +301,7 @@ msgstr ""
 
 msgid "Cannot update domain_id of a project that has children."
 msgstr ""
-"Impossible de mettre à jour l'ID de domaine (domain_id) d'un projet "
-"comportant des enfants."
+"Impossible de mettre à jour le domain_id d'un projet comportant des enfants."
 
 msgid ""
 "Cannot use parents_as_list and parents_as_ids query params at the same time."
@@ -491,7 +487,7 @@ msgstr ""
 "nom ou la variable d'environnement REMOTE_USER doit être définie."
 
 msgid "Could not validate the access token"
-msgstr "Impossible de valider le jeton d'accès"
+msgstr "Ne peut pas valider l'acces du token"
 
 msgid "Credential belongs to another user"
 msgstr "Les données d'identification appartiennent à un autre utilisateur"
@@ -504,9 +500,9 @@ msgid ""
 "Direct import of auth plugin %(name)r is deprecated as of Liberty in favor "
 "of its entrypoint from %(namespace)r and may be removed in N."
 msgstr ""
-"L'importation directe du plug-in d'authentification %(name)r est obsolète "
-"depuis Liberty en faveur de son point d'entrée depuis %(namespace)r et "
-"susceptible d'être supprimée dans N."
+"L'importation directe du plugin d'authentification %(name)r est obsolète "
+"depuis Liberty en faveur de son point d'entrée depuis %(namespace)r et peut "
+"être supprimée dans N."
 
 #, python-format
 msgid ""
@@ -514,8 +510,8 @@ msgid ""
 "entrypoint from %(namespace)r and may be removed in N."
 msgstr ""
 "L'importation directe du pilote %(name)r est obsolète depuis Liberty en "
-"faveur de son point d'entrée depuis %(namespace)r et susceptible d'être "
-"supprimée dans N."
+"faveur de son point d'entrée depuis %(namespace)r et peut être supprimée "
+"dans N."
 
 msgid ""
 "Disabling an entity where the 'enable' attribute is ignored by configuration."
@@ -629,7 +625,7 @@ msgstr "Erreur lors de l'analyse des règles %(path)s : %(err)s"
 
 #, python-format
 msgid "Error while reading metadata file, %(reason)s"
-msgstr "Erreur lors de la lecture des métadonnées du fichier, %(reason)s"
+msgstr "Erreur durant la lecteur des méta data du fichier, %(reason)s"
 
 #, python-format
 msgid ""
@@ -661,15 +657,11 @@ msgstr ""
 "à la requête puisqu'elle est mal formée ou incorrecte. Par défaut, le client "
 "est en erreur."
 
-#, python-format
-msgid "Failed to start the %(name)s server"
-msgstr "Impossible de démarrer le serveur %(name)s"
-
 msgid "Failed to validate token"
 msgstr "Echec de validation du token"
 
 msgid "Federation token is expired"
-msgstr "Le jeton Federation a expiré"
+msgstr "La fédération du toke est expiré"
 
 #, python-format
 msgid ""
@@ -698,7 +690,7 @@ msgid ""
 "backend."
 msgstr ""
 "Groupe %(group_id)s renvoyé par le mappage %(mapping_id)s introuvable dans "
-"le back-end."
+"le backend."
 
 #, python-format
 msgid ""
@@ -768,12 +760,6 @@ msgstr ""
 msgid "Invalid domain specific configuration: %(reason)s"
 msgstr "Configuration spécifique au domaine non valide : %(reason)s"
 
-#, python-format
-msgid "Invalid input for field '%(path)s'. The value is '%(value)s'."
-msgstr ""
-"Valeur d'entrée incorrecte pour la zone '%(path)s'. La valeur est "
-"'%(value)s'."
-
 msgid "Invalid limit value"
 msgstr "Limite de valeur non valide"
 
@@ -814,7 +800,7 @@ msgstr "KVS region %s est déjà configuré. Ne peut pas être reconfiguré."
 
 #, python-format
 msgid "Key Value Store not configured: %s"
-msgstr "La valeur de la clé du magasin n'est pas configurée : %s"
+msgstr "La valeur de la clé du magasin n'est pas configuré: %s"
 
 #, python-format
 msgid "LDAP %s create"
@@ -889,7 +875,7 @@ msgstr ""
 "interdite. Il est conseillé d'omettre ce paramètre."
 
 msgid "Multiple domains are not supported"
-msgstr "Les domaines multiples ne sont pas pris en charge"
+msgstr "Les multiples domaines ne sont pas supporté"
 
 msgid "Must be called within an active lock context."
 msgstr "Doit être appelé dans un contexte de verrou actif."
@@ -1086,7 +1072,7 @@ msgid "Request must have an origin query parameter"
 msgstr "La demande doit avoir un paramètre de requête d'origine"
 
 msgid "Request token is expired"
-msgstr "Le jeton de la demande a expiré"
+msgstr "La requete du token est expiré"
 
 msgid "Request token not found"
 msgstr "Token de requete non trouvé"
@@ -1103,15 +1089,6 @@ msgid ""
 msgstr ""
 "La profondeur de redélégation demandée %(requested_count)d est supérieure à "
 "la limite autorisée %(max_count)d"
-
-msgid ""
-"Running keystone via eventlet is deprecated as of Kilo in favor of running "
-"in a WSGI server (e.g. mod_wsgi). Support for keystone under eventlet will "
-"be removed in the \"M\"-Release."
-msgstr ""
-"Exécution de keystone via eventlet est obsolète depuis Kilo et remplacée par "
-"l'exécution dans un serveur WSGI (par exemple, mod_wsgi). La prise en charge "
-"pour keystone sous l'eventlet sera supprimée dans \"M\"-Release."
 
 msgid "Scoping to both domain and project is not allowed"
 msgstr "La configuration du domaine et du projet n'est pas autorisée"
@@ -1152,7 +1129,7 @@ msgstr ""
 "la valeur maximale de colonne %(type)s(CHAR(%(length)d))."
 
 msgid "Tenant name cannot contain reserved characters."
-msgstr "Le nom du locataire ne peut pas contenir des caractères réservés."
+msgstr "Le nom du tenant ne peut pas contenir des caractères réservés."
 
 #, python-format
 msgid ""
@@ -1264,7 +1241,7 @@ msgstr "Il ne s'agit pas d'une version de contenu Fernet reconnue : %s"
 
 #, python-format
 msgid "This is not a recognized Fernet token %s"
-msgstr "Il ne s'agit pas d'un jeton Fernet reconnu %s"
+msgstr "Ceci n'est pas un jeton Fernet reconnu %s"
 
 msgid ""
 "Timestamp not in expected format. The server could not comply with the "
@@ -1274,16 +1251,6 @@ msgstr ""
 "Horodatage n'est pas au format attendu. Le serveur n'a pas pu se conformer à "
 "la demande car elle est incorrectement formée ou incorrecte. Le client est "
 "considéré comme étant à l'état d'erreur."
-
-#, python-format
-msgid ""
-"To get a more detailed information on this error, re-run this command for "
-"the specific domain, i.e.: keystone-manage domain_config_upload --domain-"
-"name %s"
-msgstr ""
-"Pour obtenir des informations plus détaillées sur cette erreur, réexécutez "
-"cette commande pour le domaine spécifique, par exemple : keystone-manage "
-"domain_config_upload --domain-name %s"
 
 msgid "Token belongs to another user"
 msgstr "Le jeton appartient à un autre utilisateur"
@@ -1399,7 +1366,7 @@ msgid "Unexpected status requested for JSON Home response, %s"
 msgstr "Statut inattendu demandé pour la réponse JSON Home, %s"
 
 msgid "Unknown Target"
-msgstr "Cible inconnue"
+msgstr "Cible inconnu"
 
 #, python-format
 msgid "Unknown domain '%(name)s' specified by --domain-name"
@@ -1407,7 +1374,7 @@ msgstr "Domaine inconnu '%(name)s' spécifié par --domain-name"
 
 #, python-format
 msgid "Unknown token version %s"
-msgstr "Version de token inconnue %s"
+msgstr "Version du token inconnu %s"
 
 #, python-format
 msgid "Unregistered dependency: %(name)s for %(targets)s"
@@ -1424,13 +1391,12 @@ msgstr "La mise à jour de `parent_id` est interdite."
 
 msgid "Update of domain_id is only allowed for root projects."
 msgstr ""
-"La mise à jour de l'ID de domaine (domain_id) est autorisée uniquement pour "
-"les projets racine."
+"La mise à jour de domain_id est autorisée uniquement pour les projets racine."
 
 msgid "Update of domain_id of projects acting as domains is not allowed."
 msgstr ""
-"La mise à jour de l'ID de domaine (domain_id) des projets faisant office de "
-"domaines n'est pas autorisée."
+"La mise à jour de domain_id des projets faisant office de domaines n'est pas "
+"autorisée."
 
 msgid "Use a project scoped token when attempting to create a SAML assertion"
 msgstr ""
@@ -1445,7 +1411,7 @@ msgid ""
 msgstr ""
 "L'utilisation de la configuration du pilote d'identité pour configurer "
 "automatiquement le même pilote d'affectation est désormais obsolète, dans "
-"l'édition \"O\", le pilote d'affectation doit être configuré explicitement "
+"l'édition \"O\" , le pilote d'affectation doit être configuré explicitement "
 "s'il est différent de la valeur par défaut (SQL)."
 
 #, python-format
@@ -1493,7 +1459,7 @@ msgid "User not found"
 msgstr "Utilisateur introuvable"
 
 msgid "User not valid for tenant."
-msgstr "Utilisateur non valide pour le locataire."
+msgstr "Utilisateur non valide pour le projet (tenant)."
 
 msgid "User roles not supported: tenant_id required"
 msgstr "Rôles utilisateur non pris en charge : tenant_id est requis"
@@ -1560,7 +1526,7 @@ msgstr ""
 
 #, python-format
 msgid "invalid date format %s"
-msgstr "Format de date non valide %s"
+msgstr "Format de date invalid %s"
 
 #, python-format
 msgid ""
@@ -1569,14 +1535,6 @@ msgid ""
 msgstr ""
 "il n'est pas autorisé d'avoir deux projets faisant office de domaines avec "
 "le même nom : %s"
-
-#, python-format
-msgid ""
-"it is not permitted to have two projects within a domain with the same "
-"name : %s"
-msgstr ""
-"il n'est pas autorisé d'avoir deux projets au sein d'un domaine avec le même "
-"nom : %s"
 
 msgid "only root projects are allowed to act as domains."
 msgstr "seuls les projets racine sont autorisés à faire office de domaines."

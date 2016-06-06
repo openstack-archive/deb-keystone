@@ -12,12 +12,11 @@
 #   License for the specific language governing permissions and limitations
 #   under the License.
 
-"""Notifications module for OpenStack Identity Service resources"""
+"""Notifications module for OpenStack Identity Service resources."""
 
 import collections
 import functools
 import inspect
-import logging
 import socket
 
 from oslo_config import cfg
@@ -32,8 +31,10 @@ from pycadf import eventfactory
 from pycadf import resource
 
 from keystone.i18n import _, _LE
+from keystone.common import dependency
 from keystone.common import utils
 
+_CATALOG_HELPER_OBJ = None
 
 notifier_opts = [
     cfg.StrOpt('default_publisher_id',
@@ -244,7 +245,7 @@ def register_event_callback(event, resource_type, callbacks):
         _SUBSCRIBERS.setdefault(event, {}).setdefault(resource_type, set())
         _SUBSCRIBERS[event][resource_type].add(callback)
 
-        if LOG.logger.getEffectiveLevel() <= logging.DEBUG:
+        if LOG.logger.getEffectiveLevel() <= log.DEBUG:
             # Do this only if its going to appear in the logs.
             msg = 'Callback: `%(callback)s` subscribed to event `%(event)s`.'
             callback_info = _get_callback_info(callback)
@@ -301,7 +302,7 @@ def listener(cls):
 
 
 def notify_event_callbacks(service, resource_type, operation, payload):
-    """Sends a notification to registered extensions."""
+    """Send a notification to registered extensions."""
     if operation in _SUBSCRIBERS:
         if resource_type in _SUBSCRIBERS[operation]:
             for cb in _SUBSCRIBERS[operation][resource_type]:
@@ -329,7 +330,7 @@ def _get_notifier():
     if _notifier is None:
         host = CONF.default_publisher_id or socket.gethostname()
         try:
-            transport = oslo_messaging.get_transport(CONF)
+            transport = oslo_messaging.get_notification_transport(CONF)
             _notifier = oslo_messaging.Notifier(transport,
                                                 "identity.%s" % host)
         except Exception:
@@ -504,7 +505,7 @@ class CadfNotificationWrapper(object):
     def __call__(self, f):
         @functools.wraps(f)
         def wrapper(wrapped_self, context, user_id, *args, **kwargs):
-            """Always send a notification."""
+            """Alway send a notification."""
             initiator = _get_request_audit_info(context, user_id)
             target = resource.Resource(typeURI=taxonomy.ACCOUNT_USER)
             try:
@@ -662,6 +663,11 @@ def send_saml_audit_notification(action, context, user_id, group_ids,
     _send_audit_notification(action, initiator, outcome, target, event_type)
 
 
+@dependency.requires('catalog_api')
+class _CatalogHelperObj(object):
+    """A helper object to allow lookups of identity service id."""
+
+
 def _send_audit_notification(action, initiator, outcome, target,
                              event_type, **kwargs):
     """Send CADF notification to inform observers about the affected resource.
@@ -682,6 +688,17 @@ def _send_audit_notification(action, initiator, outcome, target,
     if _check_notification_opt_out(event_type, outcome):
         return
 
+    global _CATALOG_HELPER_OBJ
+    if _CATALOG_HELPER_OBJ is None:
+        _CATALOG_HELPER_OBJ = _CatalogHelperObj()
+    service_list = _CATALOG_HELPER_OBJ.catalog_api.list_services()
+    service_id = None
+
+    for i in service_list:
+        if i['type'] == SERVICE:
+            service_id = i['id']
+            break
+
     event = eventfactory.EventFactory().new_event(
         eventType=cadftype.EVENTTYPE_ACTIVITY,
         outcome=outcome,
@@ -689,6 +706,9 @@ def _send_audit_notification(action, initiator, outcome, target,
         initiator=initiator,
         target=target,
         observer=resource.Resource(typeURI=taxonomy.SERVICE_SECURITY))
+
+    if service_id is not None:
+        event.observer.id = service_id
 
     for key, value in kwargs.items():
         setattr(event, key, value)

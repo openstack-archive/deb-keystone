@@ -16,7 +16,7 @@ from oslo_config import cfg
 import sqlalchemy
 from sqlalchemy.sql.expression import false
 
-from keystone import assignment as keystone_assignment
+from keystone.assignment.backends import base
 from keystone.common import sql
 from keystone import exception
 from keystone.i18n import _
@@ -47,7 +47,7 @@ class AssignmentType(object):
         raise exception.AssignmentTypeCalculationError(**locals())
 
 
-class Assignment(keystone_assignment.AssignmentDriverV8):
+class Assignment(base.AssignmentDriverV8):
 
     def default_role_driver(self):
         return 'sql'
@@ -301,7 +301,7 @@ class Assignment(keystone_assignment.AssignmentDriverV8):
         return [AssignmentType.USER_DOMAIN, AssignmentType.GROUP_DOMAIN]
 
     def _get_assignment_types(self, user, group, project, domain):
-        """Returns a list of role assignment types based on provided entities
+        """Return a list of role assignment types based on provided entities.
 
         If one of user or group (the "actor") as well as one of project or
         domain (the "target") are provided, the list will contain the role

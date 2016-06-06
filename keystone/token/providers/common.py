@@ -34,7 +34,7 @@ CONF = cfg.CONF
 
 @dependency.requires('catalog_api', 'resource_api', 'assignment_api')
 class V2TokenDataHelper(object):
-    """Creates V2 token data."""
+    """Create V2 token data."""
 
     def v3_to_v2_token(self, v3_token_data):
         """Convert v3 token data into v2.0 token data.
@@ -263,6 +263,8 @@ class V3TokenDataHelper(object):
             token_data['domain'] = self._get_filtered_domain(domain_id)
         if project_id:
             token_data['project'] = self._get_filtered_project(project_id)
+            project_ref = self.resource_api.get_project(project_id)
+            token_data['is_domain'] = project_ref['is_domain']
 
     def _populate_is_admin_project(self, token_data):
         # TODO(ayoung): Support the ability for a project acting as a domain
@@ -270,11 +272,17 @@ class V3TokenDataHelper(object):
         # acting as domains is merged.  Code will likely be:
         # (r.admin_project_name == None and project['is_domain'] == True
         #  and project['name'] == r.admin_project_domain_name)
+        admin_project_name = CONF.resource.admin_project_name
+        admin_project_domain_name = CONF.resource.admin_project_domain_name
+
+        if not (admin_project_name and admin_project_domain_name):
+            return  # admin project not enabled
+
         project = token_data['project']
-        r = CONF.resource
-        if (project['name'] == r.admin_project_name and
-                project['domain']['name'] == r.admin_project_domain_name):
-            token_data['is_admin_project'] = True
+
+        token_data['is_admin_project'] = (
+            project['name'] == admin_project_name and
+            project['domain']['name'] == admin_project_domain_name)
 
     def _get_roles_for_user(self, user_id, domain_id, project_id):
         roles = []
@@ -289,7 +297,7 @@ class V3TokenDataHelper(object):
     def populate_roles_for_groups(self, token_data, group_ids,
                                   project_id=None, domain_id=None,
                                   user_id=None):
-        """Populate roles basing on provided groups and project/domain
+        """Populate roles basing on provided groups and project/domain.
 
         Used for ephemeral users with dynamically assigned groups.
         This method does not return anything, yet it modifies token_data in

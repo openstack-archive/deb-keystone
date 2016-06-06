@@ -47,7 +47,7 @@ class AuthTestMixin(object):
     def build_auth_scope(self, project_id=None, project_name=None,
                          project_domain_id=None, project_domain_name=None,
                          domain_id=None, domain_name=None, trust_id=None,
-                         unscoped=None):
+                         unscoped=None, is_domain=None):
         scope_data = {}
         if unscoped:
             scope_data['unscoped'] = {}
@@ -57,6 +57,8 @@ class AuthTestMixin(object):
                 scope_data['project']['id'] = project_id
             else:
                 scope_data['project']['name'] = project_name
+                if is_domain is not None:
+                    scope_data['is_domain'] = is_domain
                 if project_domain_id or project_domain_name:
                     project_domain_json = {}
                     if project_domain_id:
@@ -203,6 +205,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             properties['is_admin_project'] = {'type': 'boolean'}
             properties['catalog'] = {'type': 'array'}
             properties['roles'] = {'type': 'array'}
+            properties['is_domain'] = {'type': 'boolean'}
             properties['project'] = {
                 'type': ['object'],
                 'required': ['id', 'name', 'domain'],
@@ -240,6 +243,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             schema['optional'].append('catalog')
             schema['optional'].append('OS-TRUST:trust')
             schema['optional'].append('is_admin_project')
+            schema['optional'].append('is_domain')
 
         return schema
 
@@ -292,19 +296,14 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.load_sample_data()
 
     def _populate_default_domain(self):
-        if CONF.database.connection == unit.IN_MEM_DB_CONN_STRING:
-            # NOTE(morganfainberg): If an in-memory db is being used, be sure
-            # to populate the default domain, this is typically done by
-            # a migration, but the in-mem db uses model definitions  to create
-            # the schema (no migrations are run).
-            try:
-                self.resource_api.get_domain(DEFAULT_DOMAIN_ID)
-            except exception.DomainNotFound:
-                domain = unit.new_domain_ref(
-                    description=(u'The default domain'),
-                    id=DEFAULT_DOMAIN_ID,
-                    name=u'Default')
-                self.resource_api.create_domain(DEFAULT_DOMAIN_ID, domain)
+        try:
+            self.resource_api.get_domain(DEFAULT_DOMAIN_ID)
+        except exception.DomainNotFound:
+            domain = unit.new_domain_ref(
+                description=(u'The default domain'),
+                id=DEFAULT_DOMAIN_ID,
+                name=u'Default')
+            self.resource_api.create_domain(DEFAULT_DOMAIN_ID, domain)
 
     def load_sample_data(self):
         self._populate_default_domain()
@@ -697,7 +696,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         require_catalog = kwargs.pop('require_catalog', True)
         endpoint_filter = kwargs.pop('endpoint_filter', False)
         ep_filter_assoc = kwargs.pop('ep_filter_assoc', 0)
-        is_admin_project = kwargs.pop('is_admin_project', False)
+        is_admin_project = kwargs.pop('is_admin_project', None)
         token = self.assertValidTokenResponse(r, *args, **kwargs)
 
         if require_catalog:
@@ -725,11 +724,8 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             self.assertIn('id', role)
             self.assertIn('name', role)
 
-        if is_admin_project:
-            # NOTE(samueldmq): We want to explicitly test for boolean
-            self.assertIs(True, token['is_admin_project'])
-        else:
-            self.assertNotIn('is_admin_project', token)
+        # NOTE(samueldmq): We want to explicitly test for boolean or None
+        self.assertIs(is_admin_project, token.get('is_admin_project'))
 
         return token
 
@@ -1469,7 +1465,7 @@ class AuthContextMiddlewareTestCase(RestfulTestCase):
 
 
 class JsonHomeTestMixin(object):
-    """JSON Home test
+    """JSON Home test.
 
     Mixin this class to provide a test for the JSON-Home response for an
     extension.

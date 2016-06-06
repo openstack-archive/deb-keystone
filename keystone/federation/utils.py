@@ -61,12 +61,7 @@ MAPPING_SCHEMA = {
                                         "name": {"type": "string"},
                                         "email": {"type": "string"},
                                         "domain": {
-                                            "type": "object",
-                                            "properties": {
-                                                "id": {"type": "string"},
-                                                "name": {"type": "string"}
-                                            },
-                                            "additionalProperties": False,
+                                            "$ref": "#/definitions/domain"
                                         },
                                         "type": {
                                             "type": "string",
@@ -78,11 +73,10 @@ MAPPING_SCHEMA = {
                                 },
                                 "group": {
                                     "type": "object",
-                                    "properties": {
-                                        "id": {"type": "string"},
-                                        "name": {"type": "string"}
-                                    },
-                                    "additionalProperties": False,
+                                    "oneOf": [
+                                        {"$ref": "#/definitions/group_by_id"},
+                                        {"$ref": "#/definitions/group_by_name"}
+                                    ]
                                 },
                                 "groups": {
                                     "type": "string"
@@ -90,14 +84,7 @@ MAPPING_SCHEMA = {
                                 "group_ids": {
                                     "type": "string"
                                 },
-                                "domain": {
-                                    "type": "object",
-                                    "properties": {
-                                        "id": {"type": "string"},
-                                        "name": {"type": "string"}
-                                    },
-                                    "additionalProperties": False
-                                }
+                                "domain": {"$ref": "#/definitions/domain"},
                             }
                         }
                     },
@@ -187,6 +174,31 @@ MAPPING_SCHEMA = {
                     "type": "array"
                 }
             }
+        },
+        "domain": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"}
+            },
+            "additionalProperties": False
+        },
+        "group_by_id": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"}
+            },
+            "additionalProperties": False,
+            "required": ["id"]
+        },
+        "group_by_name": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "domain": {"$ref": "#/definitions/domain"}
+            },
+            "additionalProperties": False,
+            "required": ["name", "domain"]
         }
     }
 }
@@ -202,7 +214,7 @@ class DirectMaps(object):
         self._matches = []
 
     def add(self, values):
-        """Adds a matched value to the list of matches.
+        """Add a matched value to the list of matches.
 
         :param list value: the match to save
 
@@ -346,7 +358,7 @@ def validate_groups(group_ids, mapping_id, identity_api):
 # backend are minimized.
 def transform_to_group_ids(group_names, mapping_id,
                            identity_api, resource_api):
-    """Transform groups identified by name/domain to their ids
+    """Transform groups identified by name/domain to their ids.
 
     Function accepts list of groups identified by a name and domain giving
     a list of group ids in return.

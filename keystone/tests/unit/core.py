@@ -19,7 +19,7 @@ import datetime
 import functools
 import hashlib
 import json
-import logging
+import ldap
 import os
 import re
 import shutil
@@ -36,18 +36,11 @@ from oslo_context import fixture as oslo_ctx_fixture
 from oslo_log import fixture as log_fixture
 from oslo_log import log
 from oslo_utils import timeutils
-from oslotest import mockpatch
 from paste.deploy import loadwsgi
 import six
 from sqlalchemy import exc
 import testtools
 from testtools import testcase
-
-# NOTE(ayoung)
-# environment.use_eventlet must run before any of the code that will
-# call the eventlet monkeypatching.
-from keystone.common import environment  # noqa
-environment.use_eventlet()
 
 from keystone import auth
 from keystone.common import config
@@ -55,6 +48,7 @@ from keystone.common import dependency
 from keystone.common.kvs import core as kvs_core
 from keystone.common import sql
 from keystone import exception
+from keystone.identity.backends.ldap import common as ks_ldap
 from keystone import notifications
 from keystone.server import common
 from keystone.tests.unit import ksfixtures
@@ -63,6 +57,7 @@ from keystone.version import service
 
 
 config.configure()
+config.set_config_defaults()
 
 PID = six.text_type(os.getpid())
 TESTSDIR = os.path.dirname(os.path.abspath(__file__))
@@ -172,7 +167,7 @@ def remove_generated_paste_config(extension_name):
 
 
 def skip_if_cache_disabled(*sections):
-    """This decorator is used to skip a test if caching is disabled.
+    """Skip a test if caching is disabled, this is a decorator.
 
     Caching can be disabled either globally or for a specific section.
 
@@ -414,7 +409,9 @@ def new_ec2_credential(user_id, project_id=None, blob=None, **kwargs):
 
 def new_totp_credential(user_id, project_id=None, blob=None):
     if not blob:
-        blob = base64.b32encode(uuid.uuid4().hex).rstrip('=')
+        # NOTE(notmorgan): 20 bytes of data from os.urandom for
+        # a totp secret.
+        blob = base64.b32encode(os.urandom(20)).decode('utf-8')
     credential = new_credential_ref(user_id=user_id,
                                     project_id=project_id,
                                     blob=blob,
@@ -517,8 +514,8 @@ class BaseTestCase(testtools.TestCase):
         self.useFixture(fixtures.NestedTempfile())
         self.useFixture(fixtures.TempHomeDir())
 
-        self.useFixture(mockpatch.PatchObject(sys, 'exit',
-                                              side_effect=UnexpectedExit))
+        self.useFixture(fixtures.MockPatchObject(sys, 'exit',
+                                                 side_effect=UnexpectedExit))
         self.useFixture(log_fixture.get_logging_handle_error_fixture())
 
         warnings.filterwarnings('error', category=DeprecationWarning,
@@ -529,6 +526,25 @@ class BaseTestCase(testtools.TestCase):
         # test.
         self.assertIsNone(oslo_context.get_current())
         self.useFixture(oslo_ctx_fixture.ClearRequestContext())
+
+        orig_debug_level = ldap.get_option(ldap.OPT_DEBUG_LEVEL)
+        self.addCleanup(ldap.set_option, ldap.OPT_DEBUG_LEVEL,
+                        orig_debug_level)
+        orig_tls_cacertfile = ldap.get_option(ldap.OPT_X_TLS_CACERTFILE)
+        if orig_tls_cacertfile is None:
+            orig_tls_cacertfile = ''
+        self.addCleanup(ldap.set_option, ldap.OPT_X_TLS_CACERTFILE,
+                        orig_tls_cacertfile)
+        orig_tls_cacertdir = ldap.get_option(ldap.OPT_X_TLS_CACERTDIR)
+        # Setting orig_tls_cacertdir to None is not allowed.
+        if orig_tls_cacertdir is None:
+            orig_tls_cacertdir = ''
+        self.addCleanup(ldap.set_option, ldap.OPT_X_TLS_CACERTDIR,
+                        orig_tls_cacertdir)
+        orig_tls_require_cert = ldap.get_option(ldap.OPT_X_TLS_REQUIRE_CERT)
+        self.addCleanup(ldap.set_option, ldap.OPT_X_TLS_REQUIRE_CERT,
+                        orig_tls_require_cert)
+        self.addCleanup(ks_ldap.PooledLDAPHandler.connection_pools.clear)
 
     def cleanup_instance(self, *names):
         """Create a function suitable for use with self.addCleanup.
@@ -544,6 +560,10 @@ class BaseTestCase(testtools.TestCase):
                 if hasattr(self, name):
                     delattr(self, name)
         return cleanup
+
+    def skip_if_env_not_set(self, env_var):
+        if not os.environ.get(env_var):
+            self.skipTest('Env variable %s is not set.' % env_var)
 
 
 class TestCase(BaseTestCase):
@@ -586,7 +606,6 @@ class TestCase(BaseTestCase):
             group='signing', certfile=signing_certfile,
             keyfile=signing_keyfile,
             ca_certs='examples/pki/certs/cacert.pem')
-        self.config_fixture.config(group='token', driver='kvs')
         self.config_fixture.config(
             group='saml', certfile=signing_certfile, keyfile=signing_keyfile)
         self.config_fixture.config(
@@ -603,7 +622,7 @@ class TestCase(BaseTestCase):
                 'routes.middleware=INFO',
                 'stevedore.extension=INFO',
                 'keystone.notifications=INFO',
-                'keystone.common.ldap=INFO',
+                'keystone.identity.backends.ldap.common=INFO',
             ])
         self.auth_plugin_config_override()
 
@@ -630,7 +649,7 @@ class TestCase(BaseTestCase):
         # cleanup.
         def mocked_register_auth_plugin_opt(conf, opt):
             self.config_fixture.register_opt(opt, group='auth')
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             config, '_register_auth_plugin_opt',
             new=mocked_register_auth_plugin_opt))
 
@@ -639,17 +658,17 @@ class TestCase(BaseTestCase):
         # NOTE(morganfainberg): ensure config_overrides has been called.
         self.addCleanup(self._assert_config_overrides_called)
 
-        self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        self.useFixture(fixtures.FakeLogger(level=log.DEBUG))
 
         # NOTE(morganfainberg): This code is a copy from the oslo-incubator
         # log module. This is not in a function or otherwise available to use
         # without having a CONF object to setup logging. This should help to
         # reduce the log size by limiting what we log (similar to how Keystone
-        # would run under mod_wsgi or eventlet).
+        # would run under mod_wsgi).
         for pair in CONF.default_log_levels:
             mod, _sep, level_name = pair.partition('=')
-            logger = logging.getLogger(mod)
-            logger.setLevel(level_name)
+            logger = log.getLogger(mod)
+            logger.logger.setLevel(level_name)
 
         self.useFixture(ksfixtures.Cache())
 
@@ -671,7 +690,7 @@ class TestCase(BaseTestCase):
         CONF(args=[], project='keystone', default_config_files=config_files)
 
     def load_backends(self):
-        """Initializes each manager and assigns them to an attribute."""
+        """Initialize each manager and assigns them to an attribute."""
         # TODO(blk-u): Shouldn't need to clear the registry here, but some
         # tests call load_backends multiple times. These should be fixed to
         # only call load_backends once.
@@ -729,7 +748,8 @@ class TestCase(BaseTestCase):
                 fixtures_to_cleanup.append(attrname)
 
             for tenant in fixtures.TENANTS:
-                if hasattr(self, 'tenant_%s' % tenant['id']):
+                tenant_attr_name = 'tenant_%s' % tenant['name'].lower()
+                if hasattr(self, tenant_attr_name):
                     try:
                         # This will clear out any roles on the project as well
                         self.resource_api.delete_project(tenant['id'])
@@ -738,9 +758,8 @@ class TestCase(BaseTestCase):
                 rv = self.resource_api.create_project(
                     tenant['id'], tenant)
 
-                attrname = 'tenant_%s' % tenant['id']
-                setattr(self, attrname, rv)
-                fixtures_to_cleanup.append(attrname)
+                setattr(self, tenant_attr_name, rv)
+                fixtures_to_cleanup.append(tenant_attr_name)
 
             for role in fixtures.ROLES:
                 try:
@@ -811,7 +830,7 @@ class TestCase(BaseTestCase):
         auth.controllers.AUTH_PLUGINS_LOADED = False
 
     def assertCloseEnoughForGovernmentWork(self, a, b, delta=3):
-        """Asserts that two datetimes are nearly equal within a small delta.
+        """Assert that two datetimes are nearly equal within a small delta.
 
         :param delta: Maximum allowable time delta, defined in seconds.
         """
@@ -828,7 +847,7 @@ class TestCase(BaseTestCase):
 
     def assertRaisesRegexp(self, expected_exception, expected_regexp,
                            callable_obj, *args, **kwargs):
-        """Asserts that the message in a raised exception matches a regexp."""
+        """Assert that the message in a raised exception matches a regexp."""
         try:
             callable_obj(*args, **kwargs)
         except expected_exception as exc_value:
@@ -871,10 +890,6 @@ class TestCase(BaseTestCase):
     def skip_if_no_ipv6(self):
         if not self.ipv6_enabled:
             raise self.skipTest("IPv6 is not enabled in the system")
-
-    def skip_if_env_not_set(self, env_var):
-        if not os.environ.get(env_var):
-            self.skipTest('Env variable %s is not set.' % env_var)
 
 
 class SQLDriverOverrides(object):

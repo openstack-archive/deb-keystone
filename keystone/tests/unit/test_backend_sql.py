@@ -28,8 +28,8 @@ from testtools import matchers
 from keystone.common import driver_hints
 from keystone.common import sql
 from keystone import exception
-from keystone.identity.backends import sql as identity_sql
-from keystone import resource
+from keystone.identity.backends import sql_model as identity_sql
+from keystone.resource.backends import base as resource
 from keystone.tests import unit
 from keystone.tests.unit.assignment import test_backends as assignment_tests
 from keystone.tests.unit.catalog import test_backends as catalog_tests
@@ -164,13 +164,6 @@ class SqlModels(SqlTests):
                 ('domain_id', sql.String, 64),
                 ('extra', sql.JsonBlob, None))
         self.assertExpectedSchema('group', cols)
-
-    def test_domain_model(self):
-        cols = (('id', sql.String, 64),
-                ('name', sql.String, 64),
-                ('enabled', sql.Boolean, True),
-                ('extra', sql.JsonBlob, None))
-        self.assertExpectedSchema('domain', cols)
 
     def test_project_model(self):
         cols = (('id', sql.String, 64),
@@ -358,7 +351,7 @@ class SqlIdentity(SqlTests, identity_tests.IdentityTests,
         self.assertEqual([], tenants)
 
     def test_update_project_returns_extra(self):
-        """This tests for backwards-compatibility with an essex/folsom bug.
+        """Test for backward compatibility with an essex/folsom bug.
 
         Non-indexed attributes were returned in an 'extra' attribute, instead
         of on the entity itself; for consistency and backwards compatibility,
@@ -382,7 +375,7 @@ class SqlIdentity(SqlTests, identity_tests.IdentityTests,
         self.assertEqual(arbitrary_value, ref['extra'][arbitrary_key])
 
     def test_update_user_returns_extra(self):
-        """This tests for backwards-compatibility with an essex/folsom bug.
+        """Test for backwards-compatibility with an essex/folsom bug.
 
         Non-indexed attributes were returned in an 'extra' attribute, instead
         of on the entity itself; for consistency and backwards compatibility,
@@ -894,7 +887,7 @@ class SqlFilterTests(SqlTests, identity_tests.FilterTests):
             self.assertFalse(hints.get_exact_filter_by_name('domain_id'))
 
     def test_filter_sql_injection_attack(self):
-        """Test against sql injection attack on filters
+        """Test against sql injection attack on filters.
 
         Test Plan:
         - Attempt to get all entities back by passing a two-term attribute

@@ -12,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 """
+Test for SQL migration extensions.
+
 To run these tests against a live database:
 
 1. Modify the file ``keystone/tests/unit/config_files/backend_sql.conf`` to use
@@ -39,10 +41,9 @@ import mock
 from oslo_config import cfg
 from oslo_db import exception as db_exception
 from oslo_db.sqlalchemy import migration
-from oslo_db.sqlalchemy import session as db_session
+from oslo_db.sqlalchemy import test_base
 from sqlalchemy.engine import reflection
 import sqlalchemy.exc
-from sqlalchemy import schema
 from testtools import matchers
 
 from keystone.common import sql
@@ -179,7 +180,7 @@ class MigrationHelpersGetInitVersionTests(unit.TestCase):
             self.assertEqual(initial_version, version)
 
 
-class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
+class SqlMigrateBase(test_base.DbTestCase):
     # override this in subclasses. The default of zero covers tests such
     # as extensions upgrades.
     _initial_db_version = 0
@@ -188,83 +189,32 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
         self.metadata = sqlalchemy.MetaData()
         self.metadata.bind = self.engine
 
-    def config_files(self):
-        config_files = super(SqlMigrateBase, self).config_files()
-        config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
-        return config_files
-
     def repo_package(self):
         return sql
 
     def setUp(self):
         super(SqlMigrateBase, self).setUp()
-        self.load_backends()
-        database.initialize_sql_session()
-        conn_str = CONF.database.connection
-        if (conn_str != unit.IN_MEM_DB_CONN_STRING and
-                conn_str.startswith('sqlite') and
-                conn_str[10:] == unit.DEFAULT_TEST_DB_FILE):
-            # Override the default with a DB that is specific to the migration
-            # tests only if the DB Connection string is the same as the global
-            # default. This is required so that no conflicts occur due to the
-            # global default DB already being under migrate control. This is
-            # only needed if the DB is not-in-memory
-            db_file = unit.dirs.tmp('keystone_migrate_test.db')
-            self.config_fixture.config(
-                group='database',
-                connection='sqlite:///%s' % db_file)
 
-        # create and share a single sqlalchemy engine for testing
-        with sql.session_for_write() as session:
-            self.engine = session.get_bind()
-            self.addCleanup(self.cleanup_instance('engine'))
-        self.Session = db_session.get_maker(self.engine, autocommit=False)
-        self.addCleanup(sqlalchemy.orm.session.Session.close_all)
+        # Set keystone's connection URL to be the test engine's url.
+        database.initialize_sql_session(self.engine.url)
+
+        # Override keystone's context manager to be oslo.db's global context
+        # manager.
+        sql.core._TESTING_USE_GLOBAL_CONTEXT_MANAGER = True
+        self.addCleanup(setattr,
+                        sql.core, '_TESTING_USE_GLOBAL_CONTEXT_MANAGER', False)
+        self.addCleanup(sql.cleanup)
 
         self.initialize_sql()
         self.repo_path = migration_helpers.find_migrate_repo(
             self.repo_package())
-        self.schema = versioning_api.ControlledSchema.create(
+        self.schema_ = versioning_api.ControlledSchema.create(
             self.engine,
             self.repo_path,
             self._initial_db_version)
 
         # auto-detect the highest available schema version in the migrate_repo
-        self.max_version = self.schema.repository.version().version
-
-        self.addCleanup(sql.cleanup)
-
-        # drop tables and FKs.
-        self.addCleanup(self._cleanupDB)
-
-    def _cleanupDB(self):
-        meta = sqlalchemy.MetaData()
-        meta.bind = self.engine
-        meta.reflect(self.engine)
-
-        with self.engine.begin() as conn:
-            inspector = reflection.Inspector.from_engine(self.engine)
-            metadata = schema.MetaData()
-            tbs = []
-            all_fks = []
-
-            for table_name in inspector.get_table_names():
-                fks = []
-                for fk in inspector.get_foreign_keys(table_name):
-                    if not fk['name']:
-                        continue
-                    fks.append(
-                        schema.ForeignKeyConstraint((), (), name=fk['name']))
-                table = schema.Table(table_name, metadata, *fks)
-                tbs.append(table)
-                all_fks.extend(fks)
-
-            for fkc in all_fks:
-                if self.engine.name != 'sqlite':
-                    conn.execute(schema.DropConstraint(fkc))
-
-            for table in tbs:
-                conn.execute(schema.DropTable(table))
+        self.max_version = self.schema_.repository.version().version
 
     def select_table(self, name):
         table = sqlalchemy.Table(name,
@@ -280,7 +230,7 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
             raise AssertionError('Table "%s" does not exist' % table_name)
 
     def assertTableDoesNotExist(self, table_name):
-        """Asserts that a given table exists cannot be selected by name."""
+        """Assert that a given table exists cannot be selected by name."""
         # Switch to a different metadata otherwise you might still
         # detect renamed or dropped tables
         try:
@@ -292,18 +242,17 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
         else:
             raise AssertionError('Table "%s" already exists' % table_name)
 
+    def calc_table_row_count(self, table_name):
+        """Return the number of rows in the table."""
+        t = sqlalchemy.Table(table_name, self.metadata, autoload=True)
+        session = self.sessionmaker()
+        row_count = session.query(
+            sqlalchemy.func.count('*')).select_from(t).scalar()
+        return row_count
+
     def assertTableCountsMatch(self, table1_name, table2_name):
-        try:
-            table1 = self.select_table(table1_name)
-        except sqlalchemy.exc.NoSuchTableError:
-            raise AssertionError('Table "%s" does not exist' % table1_name)
-        try:
-            table2 = self.select_table(table2_name)
-        except sqlalchemy.exc.NoSuchTableError:
-            raise AssertionError('Table "%s" does not exist' % table2_name)
-        session = self.Session()
-        table1_count = session.execute(table1.count()).scalar()
-        table2_count = session.execute(table2.count()).scalar()
+        table1_count = self.calc_table_row_count(table1_name)
+        table2_count = self.calc_table_row_count(table2_name)
         if table1_count != table2_count:
             raise AssertionError('Table counts do not match: {0} ({1}), {2} '
                                  '({3})'.format(table1_name, table1_count,
@@ -316,19 +265,19 @@ class SqlMigrateBase(unit.SQLDriverOverrides, unit.TestCase):
                  current_schema=None):
         repository = repository or self.repo_path
         err = ''
-        version = versioning_api._migrate_version(self.schema,
+        version = versioning_api._migrate_version(self.schema_,
                                                   version,
                                                   not downgrade,
                                                   err)
         if not current_schema:
-            current_schema = self.schema
+            current_schema = self.schema_
         changeset = current_schema.changeset(version)
         for ver, change in changeset:
-            self.schema.runchange(ver, change, changeset.step)
-        self.assertEqual(self.schema.version, version)
+            self.schema_.runchange(ver, change, changeset.step)
+        self.assertEqual(self.schema_.version, version)
 
     def assertTableColumns(self, table_name, expected_cols):
-        """Asserts that the table contains the expected set of columns."""
+        """Assert that the table contains the expected set of columns."""
         self.initialize_sql()
         table = self.select_table(table_name)
         actual_cols = [col.name for col in table.columns]
@@ -370,7 +319,6 @@ class SqlUpgradeTests(SqlMigrateBase):
             this_table = table
         insert = this_table.insert().values(**d)
         session.execute(insert)
-        session.commit()
 
     def test_kilo_squash(self):
         self.upgrade(67)
@@ -407,8 +355,8 @@ class SqlUpgradeTests(SqlMigrateBase):
 
         # In 067 the role ID index was removed from the assignment table
         if self.engine.name == "mysql":
-            self.assertFalse(self._does_index_exist('assignment',
-                                                    'assignment_role_id_fkey'))
+            self.assertFalse(self.does_index_exist('assignment',
+                                                   'assignment_role_id_fkey'))
 
     def test_insert_assignment_inherited_pk(self):
         ASSIGNMENT_TABLE_NAME = 'assignment'
@@ -421,7 +369,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertFalse(self.does_pk_exist(ASSIGNMENT_TABLE_NAME,
                                             INHERITED_COLUMN_NAME))
 
-        session = self.Session()
+        session = self.sessionmaker()
 
         role = {'id': uuid.uuid4().hex,
                 'name': uuid.uuid4().hex}
@@ -455,7 +403,7 @@ class SqlUpgradeTests(SqlMigrateBase):
 
         self.upgrade(73)
 
-        session = self.Session()
+        session = self.sessionmaker()
         self.metadata.clear()
 
         # Check that the 'inherited' column is now part of the PK
@@ -477,7 +425,7 @@ class SqlUpgradeTests(SqlMigrateBase):
                           assignments)
 
     def does_pk_exist(self, table, pk_column):
-        """Checks whether a column is primary key on a table."""
+        """Check whether a column is primary key on a table."""
         inspector = reflection.Inspector.from_engine(self.engine)
         pk_columns = inspector.get_pk_constraint(table)['constrained_columns']
 
@@ -720,7 +668,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         NULL_DOMAIN_ID = '<<null>>'
 
         self.upgrade(87)
-        session = self.Session()
+        session = self.sessionmaker()
         role_table = sqlalchemy.Table('role', self.metadata, autoload=True)
         # Add a role before we upgrade, so we can check that its new domain_id
         # attribute is handled correctly
@@ -731,7 +679,7 @@ class SqlUpgradeTests(SqlMigrateBase):
 
         self.upgrade(88)
 
-        session = self.Session()
+        session = self.sessionmaker()
         self.metadata.clear()
         self.assertTableColumns('role', ['id', 'name', 'domain_id', 'extra'])
         # Check the domain_id has been added to the uniqueness constraint
@@ -753,7 +701,7 @@ class SqlUpgradeTests(SqlMigrateBase):
     def test_add_root_of_all_domains(self):
         NULL_DOMAIN_ID = '<<keystone.domain.root>>'
         self.upgrade(89)
-        session = self.Session()
+        session = self.sessionmaker()
 
         domain_table = sqlalchemy.Table(
             'domain', self.metadata, autoload=True)
@@ -867,7 +815,7 @@ class SqlUpgradeTests(SqlMigrateBase):
                                           autoload=True)
         actual_users = get_users_from_db(user_table, local_user_table,
                                          password_table)
-        self.assertListEqual(expected_users, actual_users)
+        self.assertItemsEqual(expected_users, actual_users)
 
     def test_migrate_user_with_null_password_to_password_tables(self):
         USER_TABLE_NAME = 'user'
@@ -879,7 +827,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         # pop extra attribute which doesn't recognized by SQL expression
         # layer.
         user_ref.pop('email')
-        session = self.Session()
+        session = self.sessionmaker()
         self.insert_dict(session, USER_TABLE_NAME, user_ref)
         self.metadata.clear()
         self.upgrade(91)
@@ -887,8 +835,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableCountsMatch(USER_TABLE_NAME, LOCAL_USER_TABLE_NAME)
         # no new entry was added to the password table because the
         # user doesn't have a password.
-        password_table = self.select_table(PASSWORD_TABLE_NAME)
-        rows = session.execute(password_table.count()).scalar()
+        rows = self.calc_table_row_count(PASSWORD_TABLE_NAME)
         self.assertEqual(0, rows)
 
     def test_migrate_user_skip_user_already_exist_in_local_user(self):
@@ -901,7 +848,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         user1_ref.pop('email')
         user2_ref = unit.new_user_ref(uuid.uuid4().hex)
         user2_ref.pop('email')
-        session = self.Session()
+        session = self.sessionmaker()
         self.insert_dict(session, USER_TABLE_NAME, user1_ref)
         self.insert_dict(session, USER_TABLE_NAME, user2_ref)
         user_id = user1_ref.pop('id')
@@ -922,25 +869,52 @@ class SqlUpgradeTests(SqlMigrateBase):
 
         self.upgrade(92)
 
+        session = self.sessionmaker()
+
+        ROLE_TABLE_NAME = 'role'
+        role_table = sqlalchemy.Table(ROLE_TABLE_NAME, self.metadata,
+                                      autoload=True)
+        IMPLIED_ROLE_TABLE_NAME = 'implied_role'
+        implied_role_table = sqlalchemy.Table(
+            IMPLIED_ROLE_TABLE_NAME, self.metadata, autoload=True)
+
         def _create_three_roles():
             id_list = []
             for _ in range(3):
-                role = unit.new_role_ref()
-                self.role_api.create_role(role['id'], role)
-                id_list.append(role['id'])
+                new_role_fields = {
+                    'id': uuid.uuid4().hex,
+                    'name': uuid.uuid4().hex,
+                }
+                self.insert_dict(session, ROLE_TABLE_NAME, new_role_fields,
+                                 table=role_table)
+                id_list.append(new_role_fields['id'])
             return id_list
 
         role_id_list = _create_three_roles()
-        self.role_api.create_implied_role(role_id_list[0], role_id_list[1])
-        self.role_api.create_implied_role(role_id_list[0], role_id_list[2])
+        implied_role_fields = {
+            'prior_role_id': role_id_list[0],
+            'implied_role_id': role_id_list[1],
+        }
+        self.insert_dict(session, IMPLIED_ROLE_TABLE_NAME, implied_role_fields,
+                         table=implied_role_table)
+
+        implied_role_fields = {
+            'prior_role_id': role_id_list[0],
+            'implied_role_id': role_id_list[2],
+        }
+        self.insert_dict(session, IMPLIED_ROLE_TABLE_NAME, implied_role_fields,
+                         table=implied_role_table)
 
         # assert that there are two roles implied by role 0.
-        implied_roles = self.role_api.list_implied_roles(role_id_list[0])
+        implied_roles = session.query(implied_role_table).filter_by(
+            prior_role_id=role_id_list[0]).all()
         self.assertThat(implied_roles, matchers.HasLength(2))
 
-        self.role_api.delete_role(role_id_list[0])
+        session.execute(
+            role_table.delete().where(role_table.c.id == role_id_list[0]))
         # assert the cascade deletion is effective.
-        implied_roles = self.role_api.list_implied_roles(role_id_list[0])
+        implied_roles = session.query(implied_role_table).filter_by(
+            prior_role_id=role_id_list[0]).all()
         self.assertThat(implied_roles, matchers.HasLength(0))
 
     def test_domain_as_project_upgrade(self):
@@ -1026,7 +1000,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         NULL_DOMAIN_ID = '<<keystone.domain.root>>'
         self.upgrade(92)
 
-        session = self.Session()
+        session = self.sessionmaker()
 
         _populate_domain_and_project_tables(session)
 
@@ -1063,7 +1037,7 @@ class SqlUpgradeTests(SqlMigrateBase):
         revocation_event_table = sqlalchemy.Table(REVOCATION_EVENT_TABLE_NAME,
                                                   meta, autoload=True)
         # assert id column is an integer (after)
-        self.assertEqual('INTEGER', str(revocation_event_table.c.id.type))
+        self.assertIsInstance(revocation_event_table.c.id.type, sql.Integer)
 
     def _add_unique_constraint_to_role_name(self,
                                             constraint_name='ixu_role_name'):
@@ -1151,6 +1125,50 @@ class SqlUpgradeTests(SqlMigrateBase):
         else:
             self.assertFalse(self.does_constraint_exist('role',
                                                         'ixu_role_name'))
+
+    def test_migration_101(self):
+        self.upgrade(100)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('role', 'ixu_role_name'))
+        else:
+            self.assertFalse(self.does_constraint_exist('role',
+                                                        'ixu_role_name'))
+        self.upgrade(101)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('role', 'ixu_role_name'))
+        else:
+            self.assertFalse(self.does_constraint_exist('role',
+                                                        'ixu_role_name'))
+
+    def test_migration_101_constraint_exists(self):
+        self.upgrade(100)
+        self._add_unique_constraint_to_role_name()
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist('role', 'ixu_role_name'))
+        else:
+            self.assertTrue(self.does_constraint_exist('role',
+                                                       'ixu_role_name'))
+        self.upgrade(101)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('role', 'ixu_role_name'))
+        else:
+            self.assertFalse(self.does_constraint_exist('role',
+                                                        'ixu_role_name'))
+
+    def test_drop_domain_table(self):
+        self.upgrade(101)
+        self.assertTableExists('domain')
+        self.upgrade(102)
+        self.assertTableDoesNotExist('domain')
+
+
+class MySQLOpportunisticUpgradeTestCase(SqlUpgradeTests):
+    FIXTURE = test_base.MySQLOpportunisticFixture
+
+
+class PostgreSQLOpportunisticUpgradeTestCase(SqlUpgradeTests):
+    FIXTURE = test_base.PostgreSQLOpportunisticFixture
 
 
 class VersionTests(SqlMigrateBase):

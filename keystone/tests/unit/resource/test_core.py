@@ -13,11 +13,10 @@
 import copy
 import uuid
 
+import fixtures
 import mock
-from testtools import matchers
-
 from oslo_config import cfg
-from oslotest import mockpatch
+from testtools import matchers
 
 from keystone import exception
 from keystone.tests import unit
@@ -87,12 +86,33 @@ class TestResourceManagerNoFixtures(unit.SQLDriverOverrides, unit.TestCase):
     def test_ensure_default_domain_exists_fails(self):
         # When there's an unexpected exception creating domain it's passed on.
 
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             self.resource_api, 'create_domain',
             side_effect=exception.UnexpectedError))
 
         self.assertRaises(exception.UnexpectedError,
                           self.resource_api.ensure_default_domain_exists)
+
+    def test_update_project_name_conflict(self):
+        name = uuid.uuid4().hex
+        description = uuid.uuid4().hex
+        domain_attrs = {
+            'id': CONF.identity.default_domain_id,
+            'name': name,
+            'description': description,
+        }
+        domain = self.resource_api.create_domain(
+            CONF.identity.default_domain_id, domain_attrs)
+        project1 = unit.new_project_ref(domain_id=domain['id'],
+                                        name=uuid.uuid4().hex)
+        self.resource_api.create_project(project1['id'], project1)
+        project2 = unit.new_project_ref(domain_id=domain['id'],
+                                        name=uuid.uuid4().hex)
+        project = self.resource_api.create_project(project2['id'], project2)
+
+        self.assertRaises(exception.Conflict,
+                          self.resource_api.update_project,
+                          project['id'], {'name': project1['name']})
 
 
 class DomainConfigDriverTests(object):
@@ -102,29 +122,29 @@ class DomainConfigDriverTests(object):
         group = uuid.uuid4().hex
         option = uuid.uuid4().hex
         value = uuid.uuid4().hex
-        self.driver.create_config_option(
-            domain, group, option, value, sensitive)
+        config = {'group': group, 'option': option, 'value': value,
+                  'sensitive': sensitive}
+        self.driver.create_config_options(domain, [config])
         res = self.driver.get_config_option(
             domain, group, option, sensitive)
-        config = {'group': group, 'option': option, 'value': value}
+        config.pop('sensitive')
         self.assertEqual(config, res)
 
         value = uuid.uuid4().hex
-        self.driver.update_config_option(
-            domain, group, option, value, sensitive)
+        config = {'group': group, 'option': option, 'value': value,
+                  'sensitive': sensitive}
+        self.driver.update_config_options(domain, [config])
         res = self.driver.get_config_option(
             domain, group, option, sensitive)
-        config = {'group': group, 'option': option, 'value': value}
+        config.pop('sensitive')
         self.assertEqual(config, res)
 
-        self.driver.delete_config_options(
-            domain, group, option, sensitive)
+        self.driver.delete_config_options(domain, group, option)
         self.assertRaises(exception.DomainConfigNotFound,
                           self.driver.get_config_option,
                           domain, group, option, sensitive)
         # ...and silent if we try to delete it again
-        self.driver.delete_config_options(
-            domain, group, option, sensitive)
+        self.driver.delete_config_options(domain, group, option)
 
     def test_whitelisted_domain_config_crud(self):
         self._domain_config_crud(sensitive=False)
@@ -135,19 +155,19 @@ class DomainConfigDriverTests(object):
     def _list_domain_config(self, sensitive):
         """Test listing by combination of domain, group & option."""
         config1 = {'group': uuid.uuid4().hex, 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         # Put config2 in the same group as config1
         config2 = {'group': config1['group'], 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         config3 = {'group': uuid.uuid4().hex, 'option': uuid.uuid4().hex,
-                   'value': 100}
+                   'value': 100, 'sensitive': sensitive}
         domain = uuid.uuid4().hex
 
-        for config in [config1, config2, config3]:
-            self.driver.create_config_option(
-                domain, config['group'], config['option'],
-                config['value'], sensitive)
+        self.driver.create_config_options(
+            domain, [config1, config2, config3])
 
+        for config in [config1, config2, config3]:
+            config.pop('sensitive')
         # Try listing all items from a domain
         res = self.driver.list_config_options(
             domain, sensitive=sensitive)
@@ -178,45 +198,39 @@ class DomainConfigDriverTests(object):
     def _delete_domain_configs(self, sensitive):
         """Test deleting by combination of domain, group & option."""
         config1 = {'group': uuid.uuid4().hex, 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         # Put config2 and config3 in the same group as config1
         config2 = {'group': config1['group'], 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         config3 = {'group': config1['group'], 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         config4 = {'group': uuid.uuid4().hex, 'option': uuid.uuid4().hex,
-                   'value': uuid.uuid4().hex}
+                   'value': uuid.uuid4().hex, 'sensitive': sensitive}
         domain = uuid.uuid4().hex
 
-        for config in [config1, config2, config3, config4]:
-            self.driver.create_config_option(
-                domain, config['group'], config['option'],
-                config['value'], sensitive)
+        self.driver.create_config_options(
+            domain, [config1, config2, config3, config4])
 
+        for config in [config1, config2, config3, config4]:
+            config.pop('sensitive')
         # Try deleting by domain, group and option
         res = self.driver.delete_config_options(
-            domain, group=config2['group'],
-            option=config2['option'], sensitive=sensitive)
-        res = self.driver.list_config_options(
-            domain, sensitive=sensitive)
+            domain, group=config2['group'], option=config2['option'])
+        res = self.driver.list_config_options(domain, sensitive=sensitive)
         self.assertThat(res, matchers.HasLength(3))
         for res_entry in res:
             self.assertIn(res_entry, [config1, config3, config4])
 
         # Try deleting by domain and group
-        res = self.driver.delete_config_options(
-            domain, group=config4['group'], sensitive=sensitive)
-        res = self.driver.list_config_options(
-            domain, sensitive=sensitive)
+        res = self.driver.delete_config_options(domain, group=config4['group'])
+        res = self.driver.list_config_options(domain, sensitive=sensitive)
         self.assertThat(res, matchers.HasLength(2))
         for res_entry in res:
             self.assertIn(res_entry, [config1, config3])
 
         # Try deleting all items from a domain
-        res = self.driver.delete_config_options(
-            domain, sensitive=sensitive)
-        res = self.driver.list_config_options(
-            domain, sensitive=sensitive)
+        res = self.driver.delete_config_options(domain)
+        res = self.driver.list_config_options(domain, sensitive=sensitive)
         self.assertThat(res, matchers.HasLength(0))
 
     def test_delete_whitelisted_domain_configs(self):
@@ -226,18 +240,18 @@ class DomainConfigDriverTests(object):
         self._delete_domain_configs(True)
 
     def _create_domain_config_twice(self, sensitive):
-        """Test conflict error thrown if create the same option twice."""
+        """Test create the same option twice just overwrites."""
         config = {'group': uuid.uuid4().hex, 'option': uuid.uuid4().hex,
-                  'value': uuid.uuid4().hex}
+                  'value': uuid.uuid4().hex, 'sensitive': sensitive}
         domain = uuid.uuid4().hex
 
-        self.driver.create_config_option(
-            domain, config['group'], config['option'],
-            config['value'], sensitive=sensitive)
-        self.assertRaises(exception.Conflict,
-                          self.driver.create_config_option,
-                          domain, config['group'], config['option'],
-                          config['value'], sensitive=sensitive)
+        self.driver.create_config_options(domain, [config])
+        config['value'] = uuid.uuid4().hex
+        self.driver.create_config_options(domain, [config])
+        res = self.driver.get_config_option(
+            domain, config['group'], config['option'], sensitive)
+        config.pop('sensitive')
+        self.assertEqual(config, res)
 
     def test_create_whitelisted_domain_config_twice(self):
         self._create_domain_config_twice(False)
@@ -580,8 +594,6 @@ class DomainConfigTests(object):
 
         # delete, bypassing domain config manager api
         self.domain_config_api.delete_config_options(self.domain['id'])
-        self.domain_config_api.delete_config_options(self.domain['id'],
-                                                     sensitive=True)
 
         self.assertDictEqual(
             res, self.domain_config_api.get_config_with_sensitive_info(

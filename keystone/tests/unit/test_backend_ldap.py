@@ -17,11 +17,11 @@
 import copy
 import uuid
 
+import fixtures
 import ldap
 import mock
 from oslo_config import cfg
 from oslo_log import versionutils
-from oslotest import mockpatch
 import pkg_resources
 from six.moves import http_client
 from six.moves import range
@@ -29,12 +29,10 @@ from testtools import matchers
 
 from keystone.common import cache
 from keystone.common import driver_hints
-from keystone.common import ldap as common_ldap
-from keystone.common.ldap import core as common_ldap_core
 from keystone import exception
 from keystone import identity
+from keystone.identity.backends.ldap import common as common_ldap
 from keystone.identity.mapping_backends import mapping as map
-from keystone import resource
 from keystone.tests import unit
 from keystone.tests.unit.assignment import test_backends as assignment_tests
 from keystone.tests.unit import default_fixtures
@@ -135,7 +133,7 @@ class BaseLDAPIdentity(identity_tests.IdentityTests,
         self.config_fixture.config(group='os_inherit', enabled=False)
 
     def _get_domain_fixture(self):
-        """Domains in LDAP are read-only, so just return the static one."""
+        """Return the static domain, since domains in LDAP are read-only."""
         return self.resource_api.get_domain(CONF.identity.default_domain_id)
 
     def get_config(self, domain_id):
@@ -236,6 +234,20 @@ class BaseLDAPIdentity(identity_tests.IdentityTests,
         self.assertRaises(exception.UserNotFound,
                           self.identity_api.get_user,
                           self.user_foo['id'])
+
+    def test_list_users_by_name_and_with_filter(self):
+        # confirm that the user is not exposed when it does not match the
+        # filter setting in conf even if it is requested by name in user list
+        hints = driver_hints.Hints()
+        hints.add_filter('name', self.user_foo['name'])
+        domain_id = self.user_foo['domain_id']
+        driver = self.identity_api._select_identity_driver(domain_id)
+        driver.user.ldap_filter = ('(|(cn=%s)(cn=%s))' %
+                                   (self.user_sna['id'], self.user_two['id']))
+        users = self.identity_api.list_users(
+            domain_scope=self._set_domain_scope(domain_id),
+            hints=hints)
+        self.assertEqual(0, len(users))
 
     def test_remove_role_grant_from_user_and_project(self):
         self.assignment_api.create_grant(user_id=self.user_foo['id'],
@@ -1038,7 +1050,11 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
 
     def test_list_domains(self):
         domains = self.resource_api.list_domains()
-        self.assertEqual([resource.calc_default_domain()], domains)
+        default_domain = unit.new_domain_ref(
+            description=u'The default domain',
+            id=CONF.identity.default_domain_id,
+            name=u'Default')
+        self.assertEqual([default_domain], domains)
 
     def test_configurable_allowed_project_actions(self):
         domain = self._get_domain_fixture()
@@ -1210,7 +1226,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         user_ref = self.identity_api.get_user(user_ref['id'])
         self.assertIs(True, user_ref['enabled'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_enabled_invert_no_enabled_value(self, mock_ldap_get):
         self.config_fixture.config(group='ldap', user_enabled_invert=True,
                                    user_enabled_default=False)
@@ -1231,7 +1247,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # from the resource default.
         self.assertIs(not CONF.ldap.user_enabled_default, user_ref['enabled'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_enabled_invert_default_str_value(self, mock_ldap_get):
         self.config_fixture.config(group='ldap', user_enabled_invert=True,
                                    user_enabled_default='False')
@@ -1252,7 +1268,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # from the resource default.
         self.assertIs(True, user_ref['enabled'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_enabled_attribute_handles_expired(self, mock_ldap_get):
         # If using 'passwordisexpired' as enabled attribute, and inverting it,
         # Then an unauthorized user (expired password) should not be enabled.
@@ -1272,7 +1288,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         user_ref = user_api.get('123456789')
         self.assertIs(False, user_ref['enabled'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_enabled_attribute_handles_utf8(self, mock_ldap_get):
         # If using 'passwordisexpired' as enabled attribute, and inverting it,
         # and the result is utf8 encoded, then the an authorized user should
@@ -1293,7 +1309,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         user_ref = user_api.get('123456789')
         self.assertIs(True, user_ref['enabled'])
 
-    @mock.patch.object(common_ldap_core.KeystoneLDAPHandler, 'simple_bind_s')
+    @mock.patch.object(common_ldap.KeystoneLDAPHandler, 'simple_bind_s')
     def test_user_api_get_connection_no_user_password(self, mocked_method):
         """Don't bind in case the user and password are blank."""
         # Ensure the username/password are in-fact blank
@@ -1303,7 +1319,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.assertFalse(mocked_method.called,
                          msg='`simple_bind_s` method was unexpectedly called')
 
-    @mock.patch.object(common_ldap_core.KeystoneLDAPHandler, 'connect')
+    @mock.patch.object(common_ldap.KeystoneLDAPHandler, 'connect')
     def test_chase_referrals_off(self, mocked_fakeldap):
         self.config_fixture.config(
             group='ldap',
@@ -1317,7 +1333,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # is as expected.
         self.assertFalse(mocked_fakeldap.call_args[-1]['chase_referrals'])
 
-    @mock.patch.object(common_ldap_core.KeystoneLDAPHandler, 'connect')
+    @mock.patch.object(common_ldap.KeystoneLDAPHandler, 'connect')
     def test_chase_referrals_on(self, mocked_fakeldap):
         self.config_fixture.config(
             group='ldap',
@@ -1331,7 +1347,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # is as expected.
         self.assertTrue(mocked_fakeldap.call_args[-1]['chase_referrals'])
 
-    @mock.patch.object(common_ldap_core.KeystoneLDAPHandler, 'connect')
+    @mock.patch.object(common_ldap.KeystoneLDAPHandler, 'connect')
     def test_debug_level_set(self, mocked_fakeldap):
         level = 12345
         self.config_fixture.config(
@@ -1456,7 +1472,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         users = self.identity_api.driver.user.get_all()
         self.assertThat(users, matchers.HasLength(len(default_fixtures.USERS)))
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_mixed_case_attribute(self, mock_ldap_get):
         # Mock the search results to return attribute names
         # with unexpected case.
@@ -1824,7 +1840,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # user_ref['id'] should contains the email attribute
         self.assertEqual(self.user_foo['email'], user_ref['id'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_get_id_from_dn_for_multivalued_attribute_id(self, mock_ldap_get):
         driver = self.identity_api._select_identity_driver(
             CONF.identity.default_domain_id)
@@ -1847,7 +1863,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         # has multiple values
         self.assertEqual('nobodycares', user_ref['id'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_id_attribute_not_found(self, mock_ldap_get):
         mock_ldap_get.return_value = (
             'cn=nobodycares,dc=example,dc=com',
@@ -1861,7 +1877,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
                           user_api.get,
                           'nobodycares')
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_id_not_in_dn(self, mock_ldap_get):
         driver = self.identity_api._select_identity_driver(
             CONF.identity.default_domain_id)
@@ -1881,7 +1897,7 @@ class LDAPIdentity(BaseLDAPIdentity, unit.TestCase):
         self.assertEqual('crap', user_ref['id'])
         self.assertEqual('junk', user_ref['name'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_name_in_dn(self, mock_ldap_get):
         driver = self.identity_api._select_identity_driver(
             CONF.identity.default_domain_id)
@@ -2106,7 +2122,7 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
         self.skipTest(
             "N/A: Covered by test_user_enabled_invert")
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get')
     def test_user_enabled_attribute_handles_utf8(self, mock_ldap_get):
         # Since user_enabled_emulation is enabled in this test, this test will
         # fail since it's using user_enabled_invert.
@@ -2152,7 +2168,8 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             sample_dn_filter_esc)
 
         with mixin_impl.get_connection() as conn:
-            m = self.useFixture(mockpatch.PatchObject(conn, 'search_s')).mock
+            m = self.useFixture(
+                fixtures.MockPatchObject(conn, 'search_s')).mock
             mixin_impl._get_enabled(object_id, conn)
             # The 3rd argument is the DN.
             self.assertEqual(exp_filter, m.call_args[0][2])
@@ -2189,7 +2206,7 @@ class LDAPPosixGroupsTest(unit.TestCase):
         return config_files
 
     def _get_domain_fixture(self):
-        """Domains in LDAP are read-only, so just return the static one."""
+        """Return the static domain, since domains in LDAP are read-only."""
         return self.resource_api.get_domain(CONF.identity.default_domain_id)
 
     def test_posix_member_id(self):
@@ -2297,7 +2314,11 @@ class LdapIdentityWithMapping(
 
     def test_list_domains(self):
         domains = self.resource_api.list_domains()
-        self.assertEqual([resource.calc_default_domain()], domains)
+        default_domain = unit.new_domain_ref(
+            description=u'The default domain',
+            id=CONF.identity.default_domain_id,
+            name=u'Default')
+        self.assertEqual([default_domain], domains)
 
 
 class BaseMultiLDAPandSQLIdentity(object):
@@ -2374,8 +2395,10 @@ class BaseMultiLDAPandSQLIdentity(object):
             domain = 'domain%s' % x
             self.domains[domain] = create_domain(
                 {'id': uuid.uuid4().hex, 'name': domain})
-        self.domains['domain_default'] = create_domain(
-            resource.calc_default_domain())
+        self.domains['domain_default'] = create_domain(unit.new_domain_ref(
+            description='The default domain',
+            id=CONF.identity.default_domain_id,
+            name='Default'))
 
     def test_authenticate_to_each_domain(self):
         """Test that a user in each domain can authenticate."""
@@ -2497,7 +2520,7 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
             self.assertNotIn('password', user_ref)
         self.assertEqual(expected_user_ids, user_ids)
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get_all')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get_all')
     def test_list_limit_domain_specific_inheritance(self, ldap_get_all):
         # passiging hints is important, because if it's not passed, limiting
         # is considered be disabled
@@ -2512,7 +2535,7 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
         hints = args[0]
         self.assertEqual(1000, hints.limit['limit'])
 
-    @mock.patch.object(common_ldap_core.BaseLdap, '_ldap_get_all')
+    @mock.patch.object(common_ldap.BaseLdap, '_ldap_get_all')
     def test_list_limit_domain_specific_override(self, ldap_get_all):
         # passiging hints is important, because if it's not passed, limiting
         # is considered to be disabled
@@ -3136,6 +3159,12 @@ class DomainSpecificLDAPandSQLIdentity(
         # required aditional domains will work
         base = super(BaseLDAPIdentity, self)
         base.test_create_project_with_domain_id_mismatch_to_parent_domain()
+
+    def test_list_domains_filtered_and_limited(self):
+        # With this restricted multi LDAP class, tests that use multiple
+        # domains and identity, are still not supported
+        self.skipTest(
+            'Restricted multi LDAP class does not support multiple domains')
 
 
 class DomainSpecificSQLIdentity(DomainSpecificLDAPandSQLIdentity):

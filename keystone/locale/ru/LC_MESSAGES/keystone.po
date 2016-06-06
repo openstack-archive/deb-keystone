@@ -6,15 +6,12 @@
 # kogamatranslator49 <r.podarov@yandex.ru>, 2015
 # sher <sher@online.ua>, 2013
 # sher <sher@online.ua>, 2013
-# Lucas Palm <lapalm@us.ibm.com>, 2015. #zanata
-# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Grigory Mokhin <mokhin@gmail.com>, 2016. #zanata
-# Lucas Palm <lapalm@us.ibm.com>, 2016. #zanata
+# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: keystone 9.0.0.0rc2.dev4\n"
-"Report-Msgid-Bugs-To: https://bugs.launchpad.net/keystone\n"
-"POT-Creation-Date: 2016-03-18 19:18+0000\n"
+"Project-Id-Version: keystone 9.0.1.dev95\n"
+"Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
+"POT-Creation-Date: 2016-04-20 19:33+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -639,10 +636,6 @@ msgstr ""
 "запрос, поскольку его формат является неверным, либо запрос некорректен по "
 "другой причине. Предположительно, клиент находится в состоянии ошибки."
 
-#, python-format
-msgid "Failed to start the %(name)s server"
-msgstr "Не удалось запустить сервер %(name)s"
-
 msgid "Failed to validate token"
 msgstr "Проверить маркер не удалось"
 
@@ -748,10 +741,6 @@ msgstr ""
 #, python-format
 msgid "Invalid domain specific configuration: %(reason)s"
 msgstr "Недопустимая конфигурация для домена: %(reason)s"
-
-#, python-format
-msgid "Invalid input for field '%(path)s'. The value is '%(value)s'."
-msgstr "Недопустимый ввод для поля '%(path)s'. Значение - '%(value)s'."
 
 msgid "Invalid limit value"
 msgstr "Недопустимое значение ограничения"
@@ -1074,15 +1063,6 @@ msgstr ""
 "Запрошенная глубина изменения делегирования %(requested_count)d превышает "
 "разрешенную %(max_count)d"
 
-msgid ""
-"Running keystone via eventlet is deprecated as of Kilo in favor of running "
-"in a WSGI server (e.g. mod_wsgi). Support for keystone under eventlet will "
-"be removed in the \"M\"-Release."
-msgstr ""
-"Выполнение Keystone через библиотеку eventlet устарело начиная с выпуска "
-"Kilo. Следует выполнять на сервере WSGI (например, mod_wsgi). Поддержка "
-"keystone в библиотеке eventlet будет убрана в выпуске \"M\"."
-
 msgid "Scoping to both domain and project is not allowed"
 msgstr "Назначать и домен, и проект в качестве области нельзя"
 
@@ -1237,16 +1217,6 @@ msgid ""
 msgstr ""
 "Метка в неожиданном формате. Сервер не может выполнить запрос, поскольку он "
 "либо искажен или неправилен. Клиент, как предполагается, является ошибочным."
-
-#, python-format
-msgid ""
-"To get a more detailed information on this error, re-run this command for "
-"the specific domain, i.e.: keystone-manage domain_config_upload --domain-"
-"name %s"
-msgstr ""
-"Для получения дополнительной информации об этой ошибке еще раз выполните эту "
-"команду для конкретного домена. Пример: keystone-manage domain_config_upload "
-"--domain-name %s"
 
 msgid "Token belongs to another user"
 msgstr "Маркер принадлежит другому пользователю"
@@ -1525,14 +1495,6 @@ msgid ""
 msgstr ""
 "Не разрешено использовать два проекта в качестве доменов с одинаковым "
 "именем: %s"
-
-#, python-format
-msgid ""
-"it is not permitted to have two projects within a domain with the same "
-"name : %s"
-msgstr ""
-"Не разрешено использовать два проекта в одном домене с одинаковыми именами: "
-"%s"
 
 msgid "only root projects are allowed to act as domains."
 msgstr "Только корневые проекты могут работать в качестве доменов."

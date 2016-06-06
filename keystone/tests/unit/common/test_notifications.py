@@ -12,13 +12,13 @@
 #   License for the specific language governing permissions and limitations
 #   under the License.
 
-import logging
 import uuid
 
+import fixtures
 import mock
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
-from oslotest import mockpatch
+from oslo_log import log
 from pycadf import cadftaxonomy
 from pycadf import cadftype
 from pycadf import eventfactory
@@ -225,7 +225,7 @@ class BaseNotificationTest(test_v3.RestfulTestCase):
                 note['actor_operation'] = actor_dict.get('actor_operation')
             self._notifications.append(note)
 
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             notifications, '_send_notification', fake_notify))
 
         def fake_audit(action, initiator, outcome, target,
@@ -249,7 +249,7 @@ class BaseNotificationTest(test_v3.RestfulTestCase):
                 'send_notification_called': True}
             self._audits.append(audit)
 
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             notifications, '_send_audit_notification', fake_audit))
 
     def _assert_last_note(self, resource_id, operation, resource_type,
@@ -831,17 +831,11 @@ class V2Notifications(BaseNotificationTest):
 
 class TestEventCallbacks(test_v3.RestfulTestCase):
 
-    def setUp(self):
-        super(TestEventCallbacks, self).setUp()
-        self.has_been_called = False
+    class FakeManager(object):
 
-    def _project_deleted_callback(self, service, resource_type, operation,
-                                  payload):
-        self.has_been_called = True
-
-    def _project_created_callback(self, service, resource_type, operation,
-                                  payload):
-        self.has_been_called = True
+        def _project_deleted_callback(self, service, resource_type, operation,
+                                      payload):
+            """Used just for the callback interface."""
 
     def test_notification_received(self):
         callback = register_callback(CREATED_OPERATION, 'project')
@@ -858,22 +852,28 @@ class TestEventCallbacks(test_v3.RestfulTestCase):
                           [fake_method])
 
     def test_notification_event_not_valid(self):
+        manager = self.FakeManager()
         self.assertRaises(ValueError,
                           notifications.register_event_callback,
                           uuid.uuid4().hex,
                           'project',
-                          self._project_deleted_callback)
+                          manager._project_deleted_callback)
 
     def test_event_registration_for_unknown_resource_type(self):
         # Registration for unknown resource types should succeed.  If no event
         # is issued for that resource type, the callback wont be triggered.
-        notifications.register_event_callback(DELETED_OPERATION,
-                                              uuid.uuid4().hex,
-                                              self._project_deleted_callback)
+
+        manager = self.FakeManager()
+
+        notifications.register_event_callback(
+            DELETED_OPERATION,
+            uuid.uuid4().hex,
+            manager._project_deleted_callback)
         resource_type = uuid.uuid4().hex
-        notifications.register_event_callback(DELETED_OPERATION,
-                                              resource_type,
-                                              self._project_deleted_callback)
+        notifications.register_event_callback(
+            DELETED_OPERATION,
+            resource_type,
+            manager._project_deleted_callback)
 
     def test_provider_event_callback_subscription(self):
         callback_called = []
@@ -948,7 +948,7 @@ class TestEventCallbacks(test_v3.RestfulTestCase):
                 self.event_callbacks = {CREATED_OPERATION:
                                         {'project': Foo.callback}}
 
-            def callback(self, *args):
+            def callback(self, service, resource_type, operation, payload):
                 pass
 
         # TODO(dstanek): it would probably be nice to fail early using
@@ -993,7 +993,7 @@ class CadfNotificationsWrapperTestCase(test_v3.RestfulTestCase):
                 'send_notification_called': True}
             self._notifications.append(note)
 
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             notifications, '_send_audit_notification', fake_notify))
 
     def _assert_last_note(self, action, user_id, event_type=None):
@@ -1158,7 +1158,7 @@ class TestCallbackRegistration(unit.BaseTestCase):
         super(TestCallbackRegistration, self).setUp()
         self.mock_log = mock.Mock()
         # Force the callback logging to occur
-        self.mock_log.logger.getEffectiveLevel.return_value = logging.DEBUG
+        self.mock_log.logger.getEffectiveLevel.return_value = log.DEBUG
 
     def verify_log_message(self, data):
         """Verify log message.
@@ -1246,3 +1246,42 @@ class TestCallbackRegistration(unit.BaseTestCase):
                           uuid.uuid4().hex,
                           'thing',
                           callback)
+
+
+class CADFNotificationsDataTestCase(test_v3.RestfulTestCase):
+
+    def setUp(self):
+        super(CADFNotificationsDataTestCase, self).setUp()
+
+    def test_receive_identityId_from_audit_notification(self):
+
+        observer = None
+        resource_type = EXP_RESOURCE_TYPE
+
+        ref = unit.new_service_ref()
+        ref['type'] = 'identity'
+        self.catalog_api.create_service(ref['id'], ref.copy())
+
+        action = CREATED_OPERATION + '.' + resource_type
+        initiator = notifications._get_request_audit_info(self.user_id)
+        target = cadfresource.Resource(typeURI=cadftaxonomy.ACCOUNT_USER)
+        outcome = 'success'
+        event_type = 'identity.authenticate.created'
+
+        with mock.patch.object(notifications._get_notifier(),
+                               '_notify') as mocked:
+
+            notifications._send_audit_notification(action,
+                                                   initiator,
+                                                   outcome,
+                                                   target,
+                                                   event_type)
+
+            for mock_args_list in mocked.call_args:
+                if len(mock_args_list) != 0:
+                    for mock_args in mock_args_list:
+                        if 'observer' in mock_args:
+                            observer = mock_args['observer']
+                            break
+
+        self.assertEqual(ref['id'], observer['id'])

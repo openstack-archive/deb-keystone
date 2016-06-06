@@ -13,6 +13,7 @@
 import copy
 import os
 import random
+import subprocess
 from testtools import matchers
 import uuid
 
@@ -23,7 +24,6 @@ from oslo_config import cfg
 from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
-from oslotest import mockpatch
 import saml2
 from saml2 import saml
 from saml2 import sigver
@@ -34,7 +34,6 @@ if not xmldsig:
     xmldsig = importutils.try_import("xmldsig")
 
 from keystone.auth import controllers as auth_controllers
-from keystone.common import environment
 from keystone.contrib.federation import routers
 from keystone import exception
 from keystone.federation import controllers as federation_controllers
@@ -49,8 +48,6 @@ from keystone.tests.unit import test_v3
 from keystone.tests.unit import utils
 from keystone.token.providers import common as token_common
 
-
-subprocess = environment.subprocess
 
 CONF = cfg.CONF
 ROOTDIR = os.path.dirname(os.path.abspath(__file__))
@@ -858,7 +855,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         return r
 
     def test_create_idp(self):
-        """Creates the IdentityProvider entity associated to remote_ids."""
+        """Create the IdentityProvider entity associated to remote_ids."""
         keys_to_check = list(self.idp_keys)
         body = self.default_body.copy()
         body['description'] = uuid.uuid4().hex
@@ -868,7 +865,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
                                  ref=body)
 
     def test_create_idp_remote(self):
-        """Creates the IdentityProvider entity associated to remote_ids."""
+        """Create the IdentityProvider entity associated to remote_ids."""
         keys_to_check = list(self.idp_keys)
         keys_to_check.append('remote_ids')
         body = self.default_body.copy()
@@ -882,7 +879,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
                                  ref=body)
 
     def test_create_idp_remote_repeated(self):
-        """Creates two IdentityProvider entities with some remote_ids
+        """Create two IdentityProvider entities with some remote_ids.
 
         A remote_id is the same for both so the second IdP is not
         created because of the uniqueness of the remote_ids
@@ -909,7 +906,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
                       resp_data.get('error', {}).get('message'))
 
     def test_create_idp_remote_empty(self):
-        """Creates an IdP with empty remote_ids."""
+        """Create an IdP with empty remote_ids."""
         keys_to_check = list(self.idp_keys)
         keys_to_check.append('remote_ids')
         body = self.default_body.copy()
@@ -921,7 +918,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
                                  ref=body)
 
     def test_create_idp_remote_none(self):
-        """Creates an IdP with a None remote_ids."""
+        """Create an IdP with a None remote_ids."""
         keys_to_check = list(self.idp_keys)
         keys_to_check.append('remote_ids')
         body = self.default_body.copy()
@@ -988,8 +985,39 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         self.assertEqual(sorted(body['remote_ids']),
                          sorted(returned_idp.get('remote_ids')))
 
+    def test_update_idp_remote_repeated(self):
+        """Update an IdentityProvider entity reusing a remote_id.
+
+        A remote_id is the same for both so the second IdP is not
+        updated because of the uniqueness of the remote_ids.
+
+        Expect HTTP 409 Conflict code for the latter call.
+
+        """
+        # Create first identity provider
+        body = self.default_body.copy()
+        repeated_remote_id = uuid.uuid4().hex
+        body['remote_ids'] = [uuid.uuid4().hex,
+                              repeated_remote_id]
+        self._create_default_idp(body=body)
+
+        # Create second identity provider (without remote_ids)
+        body = self.default_body.copy()
+        default_resp = self._create_default_idp(body=body)
+        default_idp = self._fetch_attribute_from_response(default_resp,
+                                                          'identity_provider')
+        idp_id = default_idp.get('id')
+        url = self.base_url(suffix=idp_id)
+
+        body['remote_ids'] = [repeated_remote_id]
+        resp = self.patch(url, body={'identity_provider': body},
+                          expected_status=http_client.CONFLICT)
+        resp_data = jsonutils.loads(resp.body)
+        self.assertIn('Duplicate remote ID',
+                      resp_data['error']['message'])
+
     def test_list_idps(self, iterations=5):
-        """Lists all available IdentityProviders.
+        """List all available IdentityProviders.
 
         This test collects ids of created IdPs and
         intersects it with the list of all available IdPs.
@@ -1097,8 +1125,11 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         idp_id = default_idp.get('id')
         url = self.base_url(suffix=idp_id)
         resp = self.get(url)
+        # Strip keys out of `body` dictionary. This is done
+        # to be python 3 compatible
+        body_keys = list(body)
         self.assertValidResponse(resp, 'identity_provider',
-                                 dummy_validator, keys_to_check=body.keys(),
+                                 dummy_validator, keys_to_check=body_keys,
                                  ref=body)
 
     def test_get_nonexisting_idp(self):
@@ -1219,7 +1250,7 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
                    expected_status=http_client.BAD_REQUEST)
 
     def test_update_nonexistent_idp(self):
-        """Update nonexistent IdP
+        """Update nonexistent IdP.
 
         Expect HTTP 404 Not Found code.
 
@@ -1299,9 +1330,12 @@ class FederatedIdentityProviderTests(test_v3.RestfulTestCase):
         resp = self.get(url)
 
         reference = {'id': proto_id}
+        # Strip keys out of `body` dictionary. This is done
+        # to be python 3 compatible
+        reference_keys = list(reference)
         self.assertValidResponse(resp, 'protocol',
                                  dummy_validator,
-                                 keys_to_check=reference.keys(),
+                                 keys_to_check=reference_keys,
                                  ref=reference)
 
     def test_list_protocols(self):
@@ -1521,7 +1555,7 @@ class MappingCRUDTests(test_v3.RestfulTestCase):
                  body={'mapping': mapping_fixtures.MAPPING_EXTRA_RULES_PROPS})
 
     def test_create_mapping_with_blacklist_and_whitelist(self):
-        """Test for adding whitelist and blacklist in the rule
+        """Test for adding whitelist and blacklist in the rule.
 
         Server should respond with HTTP 400 Bad Request error upon discovering
         both ``whitelist`` and ``blacklist`` keywords in the same rule.
@@ -1582,7 +1616,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
                 'send_notification_called': True}
             self._notifications.append(note)
 
-        self.useFixture(mockpatch.PatchObject(
+        self.useFixture(fixtures.MockPatchObject(
             notifications,
             'send_saml_audit_notification',
             fake_saml_notify))
@@ -1612,7 +1646,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         self.assertValidMappedUser(r.json['token'])
 
     def test_issue_unscoped_token_disabled_idp(self):
-        """Checks if authentication works with disabled identity providers.
+        """Check if authentication works with disabled identity providers.
 
         Test plan:
         1) Disable default IdP
@@ -1984,7 +2018,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         employee_unscoped_token_id = r.headers.get('X-Subject-Token')
         r = self.get('/auth/projects', token=employee_unscoped_token_id)
         projects = r.result['projects']
-        random_project = random.randint(0, len(projects)) - 1
+        random_project = random.randint(0, len(projects) - 1)
         project = projects[random_project]
 
         v3_scope_request = self._scope_request(employee_unscoped_token_id,
@@ -2069,7 +2103,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
             scoped_token, expected_status=http_client.INTERNAL_SERVER_ERROR)
 
     def test_lists_with_missing_group_in_backend(self):
-        """Test a mapping that points to a group that does not exist
+        """Test a mapping that points to a group that does not exist.
 
         For explicit mappings, we expect the group to exist in the backend,
         but for lists, specifically blacklists, a missing group is expected
@@ -2122,7 +2156,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         self.federation_api.update_mapping(self.mapping['id'], rules)
 
     def test_empty_blacklist_passess_all_values(self):
-        """Test a mapping with empty blacklist specified
+        """Test a mapping with empty blacklist specified.
 
         Not adding a ``blacklist`` keyword to the mapping rules has the same
         effect as adding an empty ``blacklist``.
@@ -2269,7 +2303,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
             self.assertIn(group['id'], group_ids)
 
     def test_empty_whitelist_discards_all_values(self):
-        """Test that empty whitelist blocks all the values
+        """Test that empty whitelist blocks all the values.
 
         Not adding a ``whitelist`` keyword to the mapping value is different
         than adding empty whitelist.  The former case will simply pass all the
@@ -2331,7 +2365,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
                           assertion='UNMATCHED_GROUP_ASSERTION')
 
     def test_not_setting_whitelist_accepts_all_values(self):
-        """Test that not setting whitelist passes
+        """Test that not setting whitelist passes.
 
         Not adding a ``whitelist`` keyword to the mapping value is different
         than adding empty whitelist.  The former case will simply pass all the
@@ -2520,7 +2554,7 @@ class FernetFederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         unscoped_token = resp.headers.get('X-Subject-Token')
         resp = self.get('/auth/projects', token=unscoped_token)
         projects = resp.result['projects']
-        random_project = random.randint(0, len(projects)) - 1
+        random_project = random.randint(0, len(projects) - 1)
         project = projects[random_project]
 
         v3_scope_request = self._scope_request(unscoped_token,
@@ -2565,7 +2599,7 @@ class FederatedTokenTestsMethodToken(FederatedTokenTests):
         employee_unscoped_token_id = r.headers.get('X-Subject-Token')
         r = self.get('/auth/projects', token=employee_unscoped_token_id)
         projects = r.result['projects']
-        random_project = random.randint(0, len(projects)) - 1
+        random_project = random.randint(0, len(projects) - 1)
         project = projects[random_project]
 
         v3_scope_request = self._scope_request(employee_unscoped_token_id,
@@ -2579,7 +2613,7 @@ class FederatedTokenTestsMethodToken(FederatedTokenTests):
 
 
 class FederatedUserTests(test_v3.RestfulTestCase, FederatedSetupMixin):
-    """Tests for federated users
+    """Test for federated users.
 
     Tests new shadow users functionality
 
@@ -2798,13 +2832,17 @@ class SAMLGenerationTests(test_v3.RestfulTestCase):
                                                self.ROLES, self.PROJECT,
                                                self.PROJECT_DOMAIN)
             assertion_xml = response.assertion.to_string()
+            # The expected values in the assertions bellow need to be 'str' in
+            # Python 2 and 'bytes' in Python 3
             # make sure we have the proper tag and prefix for the assertion
             # namespace
-            self.assertIn('<saml:Assertion', assertion_xml)
-            self.assertIn('xmlns:saml="' + saml2.NAMESPACE + '"',
-                          assertion_xml)
-            self.assertIn('xmlns:xmldsig="' + xmldsig.NAMESPACE + '"',
-                          assertion_xml)
+            self.assertIn(b'<saml:Assertion', assertion_xml)
+            self.assertIn(
+                ('xmlns:saml="' + saml2.NAMESPACE + '"').encode('utf-8'),
+                assertion_xml)
+            self.assertIn(
+                ('xmlns:xmldsig="' + xmldsig.NAMESPACE).encode('utf-8'),
+                assertion_xml)
 
     def test_saml_signing(self):
         """Test that the SAML generator produces a SAML object.
@@ -3228,6 +3266,10 @@ class IdPMetadataGenerationTests(test_v3.RestfulTestCase):
         self.assertEqual('text/xml', r.headers.get('Content-Type'))
 
         reference_file = _load_xml('idp_saml2_metadata.xml')
+
+        # `reference_file` needs to be converted to bytes to be able to be
+        # compared to `r.result` in the case of Python 3.
+        reference_file = str.encode(reference_file)
         self.assertEqual(reference_file, r.result)
 
 
@@ -3498,8 +3540,10 @@ class WebSSOTests(FederatedTokenTests):
     def test_render_callback_template(self):
         token_id = uuid.uuid4().hex
         resp = self.api.render_html_response(self.TRUSTED_DASHBOARD, token_id)
-        self.assertIn(token_id, resp.body)
-        self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
+        # The expected value in the assertions bellow need to be 'str' in
+        # Python 2 and 'bytes' in Python 3
+        self.assertIn(token_id.encode('utf-8'), resp.body)
+        self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
     def test_federated_sso_auth(self):
         environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
@@ -3507,7 +3551,10 @@ class WebSSOTests(FederatedTokenTests):
         query_string = {'origin': self.ORIGIN}
         self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
         resp = self.api.federated_sso_auth(context, self.PROTOCOL)
-        self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
+        # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
+        # which is why expected value: `self.TRUSTED_DASHBOARD`
+        # needs to be encoded
+        self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
     def test_get_sso_origin_host_case_insensitive(self):
         # test lowercase hostname in trusted_dashboard
@@ -3534,7 +3581,10 @@ class WebSSOTests(FederatedTokenTests):
         query_string = {'origin': self.ORIGIN}
         self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
         resp = self.api.federated_sso_auth(context, self.PROTOCOL)
-        self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
+        # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
+        # which is why expected value: `self.TRUSTED_DASHBOARD`
+        # needs to be encoded
+        self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
     def test_federated_sso_auth_bad_remote_id(self):
         environment = {self.REMOTE_ID_ATTR: self.IDP}
@@ -3595,7 +3645,10 @@ class WebSSOTests(FederatedTokenTests):
         resp = self.api.federated_idp_specific_sso_auth(context,
                                                         self.idp['id'],
                                                         self.PROTOCOL)
-        self.assertIn(self.TRUSTED_DASHBOARD, resp.body)
+        # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
+        # which is why the expected value: `self.TRUSTED_DASHBOARD`
+        # needs to be encoded
+        self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
 
 class K2KServiceCatalogTests(test_v3.RestfulTestCase):

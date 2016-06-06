@@ -10,7 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""Time-based One-time Password Algorithm (TOTP) auth plugin
+"""Time-based One-time Password Algorithm (TOTP) auth plugin.
 
 TOTP is an algorithm that computes a one-time password from a shared secret
 key and the current time.
@@ -23,12 +23,12 @@ same secret key will be equal.
 """
 
 import base64
-import time
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.twofactor import totp as crypto_totp
 from oslo_log import log
+from oslo_utils import timeutils
 import six
 
 from keystone import auth
@@ -62,14 +62,14 @@ def _generate_totp_passcode(secret):
     decoded = base64.b32decode(secret)
     totp = crypto_totp.TOTP(
         decoded, 6, hashes.SHA1(), 30, backend=default_backend())
-    return totp.generate(time.time())
+    return six.text_type(totp.generate(timeutils.utcnow_ts(microsecond=True)))
 
 
 @dependency.requires('credential_api')
 class TOTP(auth.AuthMethodHandler):
 
     def authenticate(self, context, auth_payload, auth_context):
-        """Try to authenticate using TOTP"""
+        """Try to authenticate using TOTP."""
         user_info = plugins.TOTPUserInfo.create(auth_payload, METHOD_NAME)
         auth_passcode = auth_payload.get('user').get('passcode')
 

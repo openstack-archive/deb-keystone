@@ -63,6 +63,7 @@ class KeystoneToken(dict):
                                               'both project and domain.'))
 
     def __repr__(self):
+        """Return string representation of KeystoneToken."""
         desc = ('<%(type)s (audit_id=%(audit_id)s, '
                 'audit_chain_id=%(audit_chain_id)s) at %(loc)s>')
         self_cls_name = reflection.get_class_name(self,
@@ -205,6 +206,12 @@ class KeystoneToken(dict):
             pass
 
         raise exception.UnexpectedError()
+
+    @property
+    def is_domain(self):
+        if self.version is V3:
+            return self['is_domain']
+        return False
 
     @property
     def project_scoped(self):

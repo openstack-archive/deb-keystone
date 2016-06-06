@@ -29,9 +29,9 @@ from keystone.trust import schema
 
 
 def _trustor_trustee_only(trust, user_id):
-    if (user_id != trust.get('trustee_user_id') and
-            user_id != trust.get('trustor_user_id')):
-                raise exception.Forbidden()
+    if user_id not in [trust.get('trustee_user_id'),
+                       trust.get('trustor_user_id')]:
+        raise exception.Forbidden()
 
 
 def _admin_trustor_only(context, trust, user_id):
@@ -207,7 +207,7 @@ class TrustV3(controller.V3Controller):
         return expiration_time
 
     def _check_role_for_trust(self, context, trust_id, role_id):
-        """Checks if a role has been assigned to a trust."""
+        """Check if a role has been assigned to a trust."""
         trust = self.trust_api.get_trust(trust_id)
         user_id = self._get_user_id(context)
         _trustor_trustee_only(trust, user_id)

@@ -12,6 +12,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 """
+Test SQL migration extensions.
+
 To run these tests against a live database:
 
 1. Modify the file `keystone/tests/unit/config_files/backend_sql.conf` to use
@@ -30,7 +32,6 @@ WARNING::
 """
 
 from keystone.contrib import endpoint_filter
-from keystone.contrib import endpoint_policy
 from keystone.contrib import federation
 from keystone.contrib import oauth1
 from keystone.contrib import revoke
@@ -66,20 +67,6 @@ class EndpointFilterExtension(test_sql_upgrade.SqlMigrateBase):
             self.assertRaises(exception.MigrationMovedFailure,
                               self.upgrade, version=v,
                               repository=self.repo_path)
-
-
-class EndpointPolicyExtension(test_sql_upgrade.SqlMigrateBase):
-
-    ENDPOINT_POLICY_MIGRATIONS = 1
-
-    def repo_package(self):
-        return endpoint_policy
-
-    def test_upgrade(self):
-        self.assertRaises(exception.MigrationMovedFailure,
-                          self.upgrade,
-                          version=self.ENDPOINT_POLICY_MIGRATIONS,
-                          repository=self.repo_path)
 
 
 class FederationExtension(test_sql_upgrade.SqlMigrateBase):

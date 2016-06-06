@@ -16,7 +16,6 @@ import string
 
 from oslo_config import cfg
 from oslo_log import log
-import six
 from six.moves import urllib
 import webob
 
@@ -179,7 +178,7 @@ class FederationProtocol(_ControllerBase):
         return {cls.member_name: ref}
 
     @controller.protected()
-    @validation.validated(schema.federation_protocol_schema, 'protocol')
+    @validation.validated(schema.protocol_create, 'protocol')
     def create_protocol(self, context, idp_id, protocol_id, protocol):
         ref = self._normalize_dict(protocol)
         ref = self.federation_api.create_protocol(idp_id, protocol_id, ref)
@@ -187,7 +186,7 @@ class FederationProtocol(_ControllerBase):
         return wsgi.render_response(body=response, status=('201', 'Created'))
 
     @controller.protected()
-    @validation.validated(schema.federation_protocol_schema, 'protocol')
+    @validation.validated(schema.protocol_update, 'protocol')
     def update_protocol(self, context, idp_id, protocol_id, protocol):
         ref = self._normalize_dict(protocol)
         ref = self.federation_api.update_protocol(idp_id, protocol_id,
@@ -331,7 +330,7 @@ class Auth(auth_controllers.Auth):
         return self.render_html_response(host, token_id)
 
     def render_html_response(self, host, token_id):
-        """Forms an HTML Form from a template with autosubmit."""
+        """Form an HTML Form from a template with autosubmit."""
         headers = [('Content-Type', 'text/html')]
 
         with open(CONF.federation.sso_callback_template) as template:
@@ -373,9 +372,10 @@ class Auth(auth_controllers.Auth):
         return (response, service_provider)
 
     def _build_response_headers(self, service_provider):
+        # URLs in header are encoded into bytes
         return [('Content-Type', 'text/xml'),
-                ('X-sp-url', six.binary_type(service_provider['sp_url'])),
-                ('X-auth-url', six.binary_type(service_provider['auth_url']))]
+                ('X-sp-url', service_provider['sp_url'].encode('utf-8')),
+                ('X-auth-url', service_provider['auth_url'].encode('utf-8'))]
 
     @validation.validated(schema.saml_create, 'auth')
     def create_saml_assertion(self, context, auth):

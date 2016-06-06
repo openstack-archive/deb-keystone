@@ -15,7 +15,6 @@
 import copy
 import datetime
 import itertools
-import json
 import operator
 import uuid
 
@@ -23,7 +22,10 @@ from keystoneclient.common import cms
 import mock
 from oslo_config import cfg
 from oslo_log import versionutils
+from oslo_serialization import jsonutils as json
+from oslo_utils import fixture
 from oslo_utils import timeutils
+import six
 from six.moves import http_client
 from six.moves import range
 from testtools import matchers
@@ -118,6 +120,28 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
                           auth_info.get_method_data,
                           method_name)
 
+    def test_empty_domain_in_scope(self):
+        auth_data = self.build_authentication_request(
+            user_id='test',
+            password='test',
+            domain_name='')['auth']
+        auth_data['scope']['domain'] = []
+        self.assertRaises(exception.ValidationError,
+                          auth.controllers.AuthInfo.create,
+                          None,
+                          auth_data)
+
+    def test_empty_project_in_scope(self):
+        auth_data = self.build_authentication_request(
+            user_id='test',
+            password='test',
+            project_name='')['auth']
+        auth_data['scope']['project'] = []
+        self.assertRaises(exception.ValidationError,
+                          auth.controllers.AuthInfo.create,
+                          None,
+                          auth_data)
+
 
 class TokenAPITests(object):
     # Why is this not just setUp? Because TokenAPITests is not a test class
@@ -197,6 +221,17 @@ class TokenAPITests(object):
     def _set_user_enabled(self, user, enabled=True):
         user['enabled'] = enabled
         self.identity_api.update_user(user['id'], user)
+
+    def assertTimestampEqual(self, expected, value):
+        # Compare two timestamps but ignore the microseconds part
+        # of the expected timestamp. Keystone does not track microseconds and
+        # is working to eliminate microseconds from it's datetimes used.
+        expected = timeutils.parse_isotime(expected).replace(microsecond=0)
+        value = timeutils.parse_isotime(value).replace(microsecond=0)
+        self.assertEqual(
+            expected,
+            value,
+            "%s != %s" % (expected, value))
 
     def test_validate_unscoped_token(self):
         unscoped_token = self._get_unscoped_token()
@@ -602,10 +637,8 @@ class TokenAPITests(object):
 
         self.assertEqual(v2_token_data['access']['user']['id'],
                          v3_token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token_data['access']['token']['expires'][:-1],
-                      v3_token_data['token']['expires_at'])
+        self.assertTimestampEqual(v2_token_data['access']['token']['expires'],
+                                  v3_token_data['token']['expires_at'])
 
     def test_v3_v2_token_intermix(self):
         # FIXME(gyee): PKI tokens are not interchangeable because token
@@ -627,10 +660,8 @@ class TokenAPITests(object):
 
         self.assertEqual(v2_token_data['access']['user']['id'],
                          v3_token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token_data['access']['token']['expires'][:-1],
-                      v3_token_data['token']['expires_at'])
+        self.assertTimestampEqual(v2_token_data['access']['token']['expires'],
+                                  v3_token_data['token']['expires_at'])
         self.assertEqual(v2_token_data['access']['user']['roles'][0]['name'],
                          v3_token_data['token']['roles'][0]['name'])
 
@@ -655,10 +686,8 @@ class TokenAPITests(object):
 
         self.assertEqual(v2_token_data['access']['user']['id'],
                          v3_token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token_data['access']['token']['expires'][-1],
-                      v3_token_data['token']['expires_at'])
+        self.assertTimestampEqual(v2_token_data['access']['token']['expires'],
+                                  v3_token_data['token']['expires_at'])
 
     def test_v2_v3_token_intermix(self):
         r = self.admin_request(
@@ -682,10 +711,8 @@ class TokenAPITests(object):
 
         self.assertEqual(v2_token_data['access']['user']['id'],
                          v3_token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token_data['access']['token']['expires'][-1],
-                      v3_token_data['token']['expires_at'])
+        self.assertTimestampEqual(v2_token_data['access']['token']['expires'],
+                                  v3_token_data['token']['expires_at'])
         self.assertEqual(v2_token_data['access']['user']['roles'][0]['name'],
                          v3_token_data['token']['roles'][0]['name'])
 
@@ -730,7 +757,7 @@ class TokenAPITests(object):
         self.assertValidProjectScopedTokenResponse(r)
 
         # ensure token expiration stayed the same
-        self.assertEqual(expires, r.result['token']['expires_at'])
+        self.assertTimestampEqual(expires, r.result['token']['expires_at'])
 
     def test_check_token(self):
         self.head('/auth/tokens', headers=self.headers,
@@ -826,10 +853,10 @@ class TokenAPITests(object):
             user_id=self.user['id'],
             password=self.user['password'],
             project_id=self.project['id']))
-        self.assertValidProjectScopedTokenResponse(r, is_admin_project=False)
+        self.assertValidProjectScopedTokenResponse(r, is_admin_project=None)
         v3_token = r.headers.get('X-Subject-Token')
         r = self.get('/auth/tokens', headers={'X-Subject-Token': v3_token})
-        self.assertValidProjectScopedTokenResponse(r, is_admin_project=False)
+        self.assertValidProjectScopedTokenResponse(r, is_admin_project=None)
 
     def _create_role(self, domain_id=None):
         """Call ``POST /roles``."""
@@ -1110,7 +1137,7 @@ class TokenDataTests(object):
         r = self.get('/auth/tokens', headers=self.headers)
 
         # populate the response result with some extra data
-        r.result['token'][u'extra'] = unicode(uuid.uuid4().hex)
+        r.result['token'][u'extra'] = six.text_type(uuid.uuid4().hex)
         self.assertRaises(exception.SchemaValidationError,
                           self.assertValidUnscopedTokenResponse,
                           r)
@@ -1132,7 +1159,7 @@ class TokenDataTests(object):
         r = self.get('/auth/tokens', headers=self.headers)
 
         # populate the response result with some extra data
-        r.result['token'][u'extra'] = unicode(uuid.uuid4().hex)
+        r.result['token'][u'extra'] = six.text_type(uuid.uuid4().hex)
         self.assertRaises(exception.SchemaValidationError,
                           self.assertValidDomainScopedTokenResponse,
                           r)
@@ -1149,7 +1176,7 @@ class TokenDataTests(object):
         resp = self.get('/auth/tokens', headers=self.headers)
 
         # populate the response result with some extra data
-        resp.result['token'][u'extra'] = unicode(uuid.uuid4().hex)
+        resp.result['token'][u'extra'] = six.text_type(uuid.uuid4().hex)
         self.assertRaises(exception.SchemaValidationError,
                           self.assertValidProjectScopedTokenResponse,
                           resp)
@@ -1257,8 +1284,8 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests, TokenDataTests):
 
         decoded_token = self.verify_token(token_id, CONF.signing.certfile,
                                           CONF.signing.ca_certs)
-        decoded_token_dict = json.loads(decoded_token)
 
+        decoded_token_dict = json.loads(decoded_token)
         token_resp_dict = json.loads(resp.body)
 
         self.assertEqual(decoded_token_dict, token_resp_dict)
@@ -1287,10 +1314,8 @@ class TestPKITokenAPIs(test_v3.RestfulTestCase, TokenAPITests, TokenDataTests):
         v2_token = resp.result
         self.assertEqual(v2_token['access']['user']['id'],
                          token_data['token']['user']['id'])
-        # v2 token time has not fraction of second precision so
-        # just need to make sure the non fraction part agrees
-        self.assertIn(v2_token['access']['token']['expires'][:-1],
-                      token_data['token']['expires_at'])
+        self.assertTimestampEqual(v2_token['access']['token']['expires'],
+                                  token_data['token']['expires_at'])
         self.assertEqual(v2_token['access']['user']['roles'][0]['name'],
                          token_data['token']['roles'][0]['name'])
 
@@ -3447,7 +3472,7 @@ class TestAuth(test_v3.RestfulTestCase):
             project_name=project['name'],
             project_domain_id=test_v3.DEFAULT_DOMAIN_ID)
 
-        # Since name url restriction is off, we should be able to autenticate
+        # Since name url restriction is off, we should be able to authenticate
         self.v3_create_token(auth_data)
 
         # Set the name url restriction to new, which should still allow us to
@@ -3484,7 +3509,7 @@ class TestAuth(test_v3.RestfulTestCase):
             password=self.user['password'],
             domain_name=domain['name'])
 
-        # Since name url restriction is off, we should be able to autenticate
+        # Since name url restriction is off, we should be able to authenticate
         self.v3_create_token(auth_data)
 
         # Set the name url restriction to new, which should still allow us to
@@ -3526,7 +3551,7 @@ class TestAuth(test_v3.RestfulTestCase):
             project_name=project['name'],
             project_domain_name=domain['name'])
 
-        # Since name url restriction is off, we should be able to autenticate
+        # Since name url restriction is off, we should be able to authenticate
         self.v3_create_token(auth_data)
 
         # Set the name url restriction to new, which should still allow us to
@@ -3539,6 +3564,47 @@ class TestAuth(test_v3.RestfulTestCase):
         # authenticate
         self.config_fixture.config(group='resource',
                                    domain_name_url_safe='strict')
+        self.v3_create_token(auth_data,
+                             expected_status=http_client.UNAUTHORIZED)
+
+    def test_project_scope_if_domain_and_project_name_clash(self):
+        """Authenticate to a project with the same name as its domain."""
+        domain = unit.new_project_ref(is_domain=True)
+        domain = self.resource_api.create_project(domain['id'], domain)
+        project = unit.new_project_ref(domain_id=domain['id'],
+                                       name=domain['name'])
+        self.resource_api.create_project(project['id'], project)
+        role_member = unit.new_role_ref()
+        self.role_api.create_role(role_member['id'], role_member)
+        self.assignment_api.add_role_to_user_and_project(
+            self.user['id'], project['id'], role_member['id'])
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_name=project['name'],
+            project_domain_name=domain['name'])
+
+        r = self.v3_create_token(auth_data)
+        self.assertEqual(project['id'], r.result['token']['project']['id'])
+
+    def test_project_scope_fails_if_domain_name_only_matches_request(self):
+        """Authenticate fails to a project when only domain name matches."""
+        domain = unit.new_project_ref(is_domain=True)
+        domain = self.resource_api.create_project(domain['id'], domain)
+        role_member = unit.new_role_ref()
+        self.role_api.create_role(role_member['id'], role_member)
+        self.assignment_api.create_grant(
+            role_member['id'],
+            user_id=self.user['id'],
+            domain_id=domain['id'])
+
+        auth_data = self.build_authentication_request(
+            user_id=self.user['id'],
+            password=self.user['password'],
+            project_name=domain['name'],
+            project_domain_name=domain['name'])
+
         self.v3_create_token(auth_data,
                              expected_status=http_client.UNAUTHORIZED)
 
@@ -3581,7 +3647,7 @@ class TestTrustOptional(test_v3.RestfulTestCase):
 
 
 class TrustAPIBehavior(test_v3.RestfulTestCase):
-    """Redelegation valid and secure
+    """Redelegation valid and secure.
 
     Redelegation is a hierarchical structure of trusts between initial trustor
     and a group of users allowed to impersonate trustor and act in his name.
@@ -4676,10 +4742,10 @@ class TestTrustAuthFernetTokenProvider(TrustAPIBehavior, TestTrustChain):
 class TestAuthFernetTokenProvider(TestAuth):
     def setUp(self):
         super(TestAuthFernetTokenProvider, self).setUp()
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
 
     def config_overrides(self):
         super(TestAuthFernetTokenProvider, self).config_overrides()
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
         self.config_fixture.config(group='token', provider='fernet')
 
     def test_verify_with_bound_token(self):
@@ -4826,6 +4892,11 @@ class TestAuthTOTP(test_v3.RestfulTestCase):
                                          project_id=self.project['id'])
         creds = self._make_credentials('totp', count=1, user_id=user['id'])
         secret = creds[-1]['blob']
+
+        # Stop the clock otherwise there is a chance of auth failure due to
+        # getting a different TOTP between the call here and the call in the
+        # auth plugin.
+        self.useFixture(fixture.TimeFixture())
 
         auth_data = self._make_auth_data_by_id(
             totp._generate_totp_passcode(secret), user_id=user['id'])

@@ -48,7 +48,7 @@ class TokenModel(sql.ModelBase, sql.DictBase):
 
 
 def _expiry_range_batched(session, upper_bound_func, batch_size):
-    """Returns the stop point of the next batch for expiration.
+    """Return the stop point of the next batch for expiration.
 
     Return the timestamp of the next token that is `batch_size` rows from
     being the oldest expired token.
@@ -77,7 +77,7 @@ def _expiry_range_batched(session, upper_bound_func, batch_size):
 
 
 def _expiry_range_all(session, upper_bound_func):
-    """Expires all tokens in one pass."""
+    """Expire all tokens in one pass."""
     yield upper_bound_func()
 
 
@@ -114,7 +114,7 @@ class Token(token.persistence.TokenDriverV8):
 
     def delete_tokens(self, user_id, tenant_id=None, trust_id=None,
                       consumer_id=None):
-        """Deletes all tokens in one session
+        """Delete all tokens in one session.
 
         The user_id will be ignored if the trust_id is specified. user_id
         will always be specified.
@@ -244,7 +244,7 @@ class Token(token.persistence.TokenDriverV8):
             return tokens
 
     def _expiry_range_strategy(self, dialect):
-        """Choose a token range expiration strategy
+        """Choose a token range expiration strategy.
 
         Based on the DB dialect, select an expiry range callable that is
         appropriate.

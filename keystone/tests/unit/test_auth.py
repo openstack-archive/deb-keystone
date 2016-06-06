@@ -33,9 +33,9 @@ from keystone import exception
 from keystone.models import token_model
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
+from keystone.tests.unit import ksfixtures
 from keystone.tests.unit.ksfixtures import database
 from keystone import token
-from keystone.token import provider
 from keystone import trust
 
 
@@ -243,7 +243,7 @@ class AuthBadRequests(AuthTest):
             password=self.user_foo['password'],
             tenant_name=project['name'])
 
-        # Since name url restriction is off, we should be able to autenticate
+        # Since name url restriction is off, we should be able to authenticate
         self.controller.authenticate(no_context, body_dict)
 
         # Set the name url restriction to strict and we should fail to
@@ -604,71 +604,26 @@ class AuthWithToken(AuthTest):
         # audit_chain_id will also return None.
         return [None, None]
 
+
+class FernetAuthWithToken(AuthWithToken):
+    def config_overrides(self):
+        super(FernetAuthWithToken, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+
+    def test_token_auth_with_binding(self):
+        self.config_fixture.config(group='token', bind=['kerberos'])
+        body_dict = _build_user_auth()
+        self.assertRaises(exception.NotImplemented,
+                          self.controller.authenticate,
+                          self.context_with_remote_user,
+                          body_dict)
+
     def test_revoke_with_no_audit_info(self):
-        self.config_fixture.config(group='token', revoke_by_id=False)
-        context = {}
+        self.skipTest('Fernet with v2.0 and revocation is broken')
 
-        with mock.patch.object(provider, 'audit_info', self._mock_audit_info):
-            # get a token
-            body_dict = _build_user_auth(username='FOO', password='foo2')
-            unscoped_token = self.controller.authenticate(context, body_dict)
-            token_id = unscoped_token['access']['token']['id']
-            self.time_fixture.advance_time_seconds(1)
-
-            # get a second token
-            body_dict = _build_user_auth(
-                token=unscoped_token['access']['token'])
-            unscoped_token_2 = self.controller.authenticate(context, body_dict)
-            token_2_id = unscoped_token_2['access']['token']['id']
-            self.time_fixture.advance_time_seconds(1)
-
-            self.token_provider_api.revoke_token(token_id, revoke_chain=True)
-            self.time_fixture.advance_time_seconds(1)
-
-            revoke_events = self.revoke_api.list_events()
-            self.assertThat(revoke_events, matchers.HasLength(1))
-            revoke_event = revoke_events[0].to_dict()
-            self.assertIn('expires_at', revoke_event)
-            self.assertEqual(unscoped_token_2['access']['token']['expires'],
-                             revoke_event['expires_at'])
-
-            self.assertRaises(exception.TokenNotFound,
-                              self.token_provider_api.validate_v2_token,
-                              token_id=token_id)
-            self.assertRaises(exception.TokenNotFound,
-                              self.token_provider_api.validate_v2_token,
-                              token_id=token_2_id)
-
-            # get a new token, with no audit info
-            body_dict = _build_user_auth(username='FOO', password='foo2')
-            unscoped_token = self.controller.authenticate(context, body_dict)
-            token_id = unscoped_token['access']['token']['id']
-            self.time_fixture.advance_time_seconds(1)
-            # get a second token
-            body_dict = _build_user_auth(
-                token=unscoped_token['access']['token'])
-            unscoped_token_2 = self.controller.authenticate(context, body_dict)
-            token_2_id = unscoped_token_2['access']['token']['id']
-            self.time_fixture.advance_time_seconds(1)
-
-            # Revoke by audit_id, no audit_info means both parent and child
-            # token are revoked.
-            self.token_provider_api.revoke_token(token_id)
-            self.time_fixture.advance_time_seconds(1)
-
-            revoke_events = self.revoke_api.list_events()
-            self.assertThat(revoke_events, matchers.HasLength(2))
-            revoke_event = revoke_events[1].to_dict()
-            self.assertIn('expires_at', revoke_event)
-            self.assertEqual(unscoped_token_2['access']['token']['expires'],
-                             revoke_event['expires_at'])
-
-            self.assertRaises(exception.TokenNotFound,
-                              self.token_provider_api.validate_v2_token,
-                              token_id=token_id)
-            self.assertRaises(exception.TokenNotFound,
-                              self.token_provider_api.validate_v2_token,
-                              token_id=token_2_id)
+    def test_deleting_role_revokes_token(self):
+        self.skipTest('Fernet with v2.0 and revocation is broken')
 
 
 class AuthWithPasswordCredentials(AuthTest):
@@ -1312,7 +1267,7 @@ class TokenExpirationTest(AuthTest):
 
 
 class AuthCatalog(unit.SQLDriverOverrides, AuthTest):
-    """Tests for the catalog provided in the auth response."""
+    """Test for the catalog provided in the auth response."""
 
     def config_files(self):
         config_files = super(AuthCatalog, self).config_files()

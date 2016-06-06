@@ -12,9 +12,6 @@
 
 """Main entry point into the Resource service."""
 
-import abc
-import copy
-
 from oslo_config import cfg
 from oslo_log import log
 from oslo_log import versionutils
@@ -30,29 +27,12 @@ from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _, _LE, _LW
 from keystone import notifications
-
+from keystone.resource.backends import base
+from keystone.resource.config_backends import base as config_base
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
 MEMOIZE = cache.get_memoization_decorator(group='resource')
-
-
-def calc_default_domain():
-    return {'description':
-            (u'The default domain'),
-            'enabled': True,
-            'id': CONF.identity.default_domain_id,
-            'name': u'Default'}
-
-
-def _get_project_from_domain(domain_ref):
-    """Creates a project ref from the provided domain ref."""
-    project_ref = domain_ref.copy()
-    project_ref['is_domain'] = True
-    project_ref['domain_id'] = None
-    project_ref['parent_id'] = None
-
-    return project_ref
 
 
 @dependency.provider('resource_api')
@@ -84,9 +64,9 @@ class Manager(manager.Manager):
 
         # Make sure it is a driver version we support, and if it is a legacy
         # driver, then wrap it.
-        if isinstance(self.driver, ResourceDriverV8):
-            self.driver = V9ResourceWrapperForV8Driver(self.driver)
-        elif not isinstance(self.driver, ResourceDriverV9):
+        if isinstance(self.driver, base.ResourceDriverV8):
+            self.driver = base.V9ResourceWrapperForV8Driver(self.driver)
+        elif not isinstance(self.driver, base.ResourceDriverV9):
             raise exception.UnsupportedDriverVersion(driver=resource_driver)
 
     def _get_hierarchy_depth(self, parents_list):
@@ -106,7 +86,7 @@ class Manager(manager.Manager):
                 _('Max hierarchy depth reached for %s branch.') % project_id)
 
     def _assert_is_domain_project_constraints(self, project_ref):
-        """Enforces specific constraints of projects that act as domains
+        """Enforce specific constraints of projects that act as domains.
 
         Called when is_domain is true, this method ensures that:
 
@@ -130,7 +110,7 @@ class Manager(manager.Manager):
                           'domains.'))
 
     def _assert_regular_project_constraints(self, project_ref):
-        """Enforces regular project hierarchy constraints
+        """Enforce regular project hierarchy constraints.
 
         Called when is_domain is false. The project must contain a valid
         domain_id and parent_id. The goal of this method is to check
@@ -203,7 +183,7 @@ class Manager(manager.Manager):
                      ) % project['name']
         else:
             return _('it is not permitted to have two projects '
-                     'within a domain with the same name : %s'
+                     'with the same name in the same domain : %s'
                      ) % project['name']
 
     def create_project(self, project_id, project, initiator=None):
@@ -216,6 +196,7 @@ class Manager(manager.Manager):
 
         project.setdefault('enabled', True)
         project['enabled'] = clean.project_enabled(project['enabled'])
+        project['name'] = clean.project_name(project['name'])
         project.setdefault('description', '')
 
         # For regular projects, the controller will ensure we have a valid
@@ -327,12 +308,14 @@ class Manager(manager.Manager):
             url_safe_option = CONF.resource.project_name_url_safe
             exception_entity = 'Project'
 
-        if (url_safe_option != 'off' and
-                'name' in project and
-                project['name'] != original_project['name'] and
+        project_name_changed = ('name' in project and project['name'] !=
+                                original_project['name'])
+        if (url_safe_option != 'off' and project_name_changed and
                 utils.is_not_url_safe(project['name'])):
             self._raise_reserved_character_exception(exception_entity,
                                                      project['name'])
+        elif project_name_changed:
+            project['name'] = clean.project_name(project['name'])
 
         parent_id = original_project.get('parent_id')
         if 'parent_id' in project and project.get('parent_id') != parent_id:
@@ -405,6 +388,8 @@ class Manager(manager.Manager):
             self._update_project_enabled_cascade(project_id, project_enabled)
 
         try:
+            project['is_domain'] = (project.get('is_domain') or
+                                    original_project['is_domain'])
             ret = self.driver.update_project(project_id, project)
         except exception.Conflict:
             raise exception.Conflict(
@@ -579,7 +564,7 @@ class Manager(manager.Manager):
         return traverse_parents_hierarchy(project)
 
     def get_project_parents_as_ids(self, project):
-        """Gets the IDs from the parents from a given project.
+        """Get the IDs from the parents from a given project.
 
         The project IDs are returned as a structured dictionary traversing up
         the hierarchy to the top level project. For example, considering the
@@ -635,7 +620,7 @@ class Manager(manager.Manager):
         return traverse_subtree_hierarchy(project_id)
 
     def get_projects_in_subtree_as_ids(self, project_id):
-        """Gets the IDs from the projects in the subtree from a given project.
+        """Get the IDs from the projects in the subtree from a given project.
 
         The project IDs are returned as a structured dictionary representing
         their hierarchy. For example, considering the following project
@@ -717,7 +702,7 @@ class Manager(manager.Manager):
         return self._get_domain_from_project(project)
 
     def _get_domain_from_project(self, project_ref):
-        """Creates a domain ref from a project ref.
+        """Create a domain ref from a project ref.
 
         Based on the provided project ref, create a domain ref, so that the
         result can be returned in response to a domain API call.
@@ -745,7 +730,7 @@ class Manager(manager.Manager):
         if (CONF.resource.domain_name_url_safe != 'off' and
                 utils.is_not_url_safe(domain['name'])):
             self._raise_reserved_character_exception('Domain', domain['name'])
-        project_from_domain = _get_project_from_domain(domain)
+        project_from_domain = base.get_project_from_domain(domain)
         is_domain_project = self.create_project(
             domain_id, project_from_domain, initiator)
 
@@ -763,7 +748,7 @@ class Manager(manager.Manager):
         # here as well as _update_project, but currently our tests assume the
         # checks are done in a specific order. The tests should be refactored.
         self.assert_domain_not_federated(domain_id, domain)
-        project = _get_project_from_domain(domain)
+        project = base.get_project_from_domain(domain)
         try:
             original_domain = self.driver.get_project(domain_id)
             project = self._update_project(domain_id, project, initiator)
@@ -797,7 +782,6 @@ class Manager(manager.Manager):
         self._delete_project(domain_id, initiator)
         # Delete any database stored domain config
         self.domain_config_api.delete_config_options(domain_id)
-        self.domain_config_api.delete_config_options(domain_id, sensitive=True)
         self.domain_config_api.release_registration(domain_id)
         # TODO(henry-nash): Although the controller will ensure deletion of
         # all users & groups within the domain (which will cause all
@@ -877,7 +861,7 @@ class Manager(manager.Manager):
         return self.driver.get_project_by_name(project_name, domain_id)
 
     def ensure_default_domain_exists(self):
-        """Creates the default domain if it doesn't exist.
+        """Create the default domain if it doesn't exist.
 
         This is only used for the v2 API and can go away when V2 does.
 
@@ -903,601 +887,43 @@ class Manager(manager.Manager):
             raise
 
 
-# The ResourceDriverBase class is the set of driver methods from earlier
-# drivers that we still support, that have not been removed or modified. This
-# class is then used to created the augmented V8 and V9 version abstract driver
-# classes, without having to duplicate a lot of abstract method signatures.
-# If you remove a method from V9, then move the abstract methods from this Base
-# class to the V8 class. Do not modify any of the method signatures in the Base
-# class - changes should only be made in the V8 and subsequent classes.
-
-# Starting with V9, some drivers use a special value to represent a domain_id
-# of None. See comment in Project class of resource/backends/sql.py for more
-# details.
-NULL_DOMAIN_ID = '<<keystone.domain.root>>'
-
-
-@six.add_metaclass(abc.ABCMeta)
-class ResourceDriverBase(object):
-
-    def _get_list_limit(self):
-        return CONF.resource.list_limit or CONF.list_limit
-
-    # project crud
-    @abc.abstractmethod
-    def list_projects(self, hints):
-        """List projects in the system.
-
-        :param hints: filter hints which the driver should
-                      implement if at all possible.
-
-        :returns: a list of project_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_projects_from_ids(self, project_ids):
-        """List projects for the provided list of ids.
-
-        :param project_ids: list of ids
-
-        :returns: a list of project_refs.
-
-        This method is used internally by the assignment manager to bulk read
-        a set of projects given their ids.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_project_ids_from_domain_ids(self, domain_ids):
-        """List project ids for the provided list of domain ids.
-
-        :param domain_ids: list of domain ids
-
-        :returns: a list of project ids owned by the specified domain ids.
-
-        This method is used internally by the assignment manager to bulk read
-        a set of project ids given a list of domain ids.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_projects_in_domain(self, domain_id):
-        """List projects in the domain.
-
-        :param domain_id: the driver MUST only return projects
-                          within this domain.
-
-        :returns: a list of project_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_project(self, project_id):
-        """Get a project by ID.
-
-        :returns: project_ref
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def update_project(self, project_id, project):
-        """Updates an existing project.
-
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-        :raises keystone.exception.Conflict: if project name already exists
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def delete_project(self, project_id):
-        """Deletes an existing project.
-
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_project_parents(self, project_id):
-        """List all parents from a project by its ID.
-
-        :param project_id: the driver will list the parents of this
-                           project.
-
-        :returns: a list of project_refs or an empty list.
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-
-        """
-        raise exception.NotImplemented()
-
-    @abc.abstractmethod
-    def list_projects_in_subtree(self, project_id):
-        """List all projects in the subtree of a given project.
-
-        :param project_id: the driver will get the subtree under
-                           this project.
-
-        :returns: a list of project_refs or an empty list
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-
-        """
-        raise exception.NotImplemented()
-
-    @abc.abstractmethod
-    def is_leaf_project(self, project_id):
-        """Checks if a project is a leaf in the hierarchy.
-
-        :param project_id: the driver will check if this project
-                           is a leaf in the hierarchy.
-
-        :raises keystone.exception.ProjectNotFound: if project_id does not
-                                                    exist
-
-        """
-        raise exception.NotImplemented()
-
-    def _validate_default_domain(self, ref):
-        """Validate that either the default domain or nothing is specified.
-
-        Also removes the domain from the ref so that LDAP doesn't have to
-        persist the attribute.
-
-        """
-        ref = ref.copy()
-        domain_id = ref.pop('domain_id', CONF.identity.default_domain_id)
-        self._validate_default_domain_id(domain_id)
-        return ref
-
-    def _validate_default_domain_id(self, domain_id):
-        """Validate that the domain ID belongs to the default domain."""
-        if domain_id != CONF.identity.default_domain_id:
-            raise exception.DomainNotFound(domain_id=domain_id)
-
-
-class ResourceDriverV8(ResourceDriverBase):
-    """Removed or redefined methods from V8.
-
-    Move the abstract methods of any methods removed or modified in later
-    versions of the driver from ResourceDriverBase to here. We maintain this
-    so that legacy drivers, which will be a subclass of ResourceDriverV8, can
-    still reference them.
-
-    """
-
-    @abc.abstractmethod
-    def create_project(self, tenant_id, tenant):
-        """Creates a new project.
-
-        :param tenant_id: This parameter can be ignored.
-        :param dict tenant: The new project
-
-        Project schema::
-
-            type: object
-            properties:
-                id:
-                    type: string
-                name:
-                    type: string
-                domain_id:
-                    type: string
-                description:
-                    type: string
-                enabled:
-                    type: boolean
-                parent_id:
-                    type: string
-                is_domain:
-                    type: boolean
-            required: [id, name, domain_id]
-            additionalProperties: true
-
-        If project doesn't match the schema the behavior is undefined.
-
-        The driver can impose requirements such as the maximum length of a
-        field. If these requirements are not met the behavior is undefined.
-
-        :raises keystone.exception.Conflict: if the project id already exists
-            or the name already exists for the domain_id.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_project_by_name(self, tenant_name, domain_id):
-        """Get a tenant by name.
-
-        :returns: tenant_ref
-        :raises keystone.exception.ProjectNotFound: if a project with the
-                             tenant_name does not exist within the domain
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    # Domain management functions for backends that only allow a single
-    # domain.  Although we no longer use this, a custom legacy driver might
-    # have made use of it, so keep it here in case.
-    def _set_default_domain(self, ref):
-        """If the domain ID has not been set, set it to the default."""
-        if isinstance(ref, dict):
-            if 'domain_id' not in ref:
-                ref = ref.copy()
-                ref['domain_id'] = CONF.identity.default_domain_id
-            return ref
-        elif isinstance(ref, list):
-            return [self._set_default_domain(x) for x in ref]
-        else:
-            raise ValueError(_('Expected dict or list: %s') % type(ref))
-
-    # domain crud
-    @abc.abstractmethod
-    def create_domain(self, domain_id, domain):
-        """Creates a new domain.
-
-        :raises keystone.exception.Conflict: if the domain_id or domain name
-                                             already exists
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_domains(self, hints):
-        """List domains in the system.
-
-        :param hints: filter hints which the driver should
-                      implement if at all possible.
-
-        :returns: a list of domain_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_domains_from_ids(self, domain_ids):
-        """List domains for the provided list of ids.
-
-        :param domain_ids: list of ids
-
-        :returns: a list of domain_refs.
-
-        This method is used internally by the assignment manager to bulk read
-        a set of domains given their ids.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_domain(self, domain_id):
-        """Get a domain by ID.
-
-        :returns: domain_ref
-        :raises keystone.exception.DomainNotFound: if domain_id does not exist
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_domain_by_name(self, domain_name):
-        """Get a domain by name.
-
-        :returns: domain_ref
-        :raises keystone.exception.DomainNotFound: if domain_name does not
-                                                   exist
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def update_domain(self, domain_id, domain):
-        """Updates an existing domain.
-
-        :raises keystone.exception.DomainNotFound: if domain_id does not exist
-        :raises keystone.exception.Conflict: if domain name already exists
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def delete_domain(self, domain_id):
-        """Deletes an existing domain.
-
-        :raises keystone.exception.DomainNotFound: if domain_id does not exist
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-
-class ResourceDriverV9(ResourceDriverBase):
-    """New or redefined methods from V8.
-
-    Add any new V9 abstract methods (or those with modified signatures) to
-    this class.
-
-    """
-
-    @abc.abstractmethod
-    def create_project(self, project_id, project):
-        """Creates a new project.
-
-        :param project_id: This parameter can be ignored.
-        :param dict project: The new project
-
-        Project schema::
-
-            type: object
-            properties:
-                id:
-                    type: string
-                name:
-                    type: string
-                domain_id:
-                    type: [string, null]
-                description:
-                    type: string
-                enabled:
-                    type: boolean
-                parent_id:
-                    type: string
-                is_domain:
-                    type: boolean
-            required: [id, name, domain_id]
-            additionalProperties: true
-
-        If the project doesn't match the schema the behavior is undefined.
-
-        The driver can impose requirements such as the maximum length of a
-        field. If these requirements are not met the behavior is undefined.
-
-        :raises keystone.exception.Conflict: if the project id already exists
-            or the name already exists for the domain_id.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_project_by_name(self, project_name, domain_id):
-        """Get a project by name.
-
-        :returns: project_ref
-        :raises keystone.exception.ProjectNotFound: if a project with the
-                             project_name does not exist within the domain
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def delete_projects_from_ids(self, project_ids):
-        """Deletes a given list of projects.
-
-        Deletes a list of projects. Ensures no project on the list exists
-        after it is successfully called. If an empty list is provided,
-        the it is silently ignored. In addition, if a project ID in the list
-        of project_ids is not found in the backend, no exception is raised,
-        but a message is logged.
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_projects_acting_as_domain(self, hints):
-        """List all projects acting as domains.
-
-        :param hints: filter hints which the driver should
-                      implement if at all possible.
-
-        :returns: a list of project_refs or an empty list.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-
-class V9ResourceWrapperForV8Driver(ResourceDriverV9):
-    """Wrapper class to supported a V8 legacy driver.
-
-    In order to support legacy drivers without having to make the manager code
-    driver-version aware, we wrap legacy drivers so that they look like the
-    latest version. For the various changes made in a new driver, here are the
-    actions needed in this wrapper:
-
-    Method removed from new driver - remove the call-through method from this
-                                     class, since the manager will no longer be
-                                     calling it.
-    Method signature (or meaning) changed - wrap the old method in a new
-                                            signature here, and munge the input
-                                            and output parameters accordingly.
-    New method added to new driver - add a method to implement the new
-                                     functionality here if possible. If that is
-                                     not possible, then return NotImplemented,
-                                     since we do not guarantee to support new
-                                     functionality with legacy drivers.
-
-    This wrapper contains the following support for newer manager code:
-
-    - The current manager code expects domains to be represented as projects
-      acting as domains, something that may not be possible in a legacy driver.
-      Hence the wrapper will map any calls for projects acting as a domain back
-      onto the driver domain methods. The caveat for this, is that this assumes
-      that there can not be a clash between a project_id and a domain_id, in
-      which case it may not be able to locate the correct entry.
-
-    """
-
-    @versionutils.deprecated(
-        as_of=versionutils.deprecated.MITAKA,
-        what='keystone.resource.ResourceDriverV8',
-        in_favor_of='keystone.resource.ResourceDriverV9',
-        remove_in=+2)
-    def __init__(self, wrapped_driver):
-        self.driver = wrapped_driver
-
-    def _get_domain_from_project(self, project_ref):
-        """Creates a domain ref from a project ref.
-
-        Based on the provided project ref (or partial ref), creates a
-        domain ref, so that the result can be passed to the driver
-        domain methods.
-        """
-        domain_ref = project_ref.copy()
-        for k in ['parent_id', 'domain_id', 'is_domain']:
-            domain_ref.pop(k, None)
-        return domain_ref
-
-    def get_project_by_name(self, project_name, domain_id):
-        if domain_id is None:
-            try:
-                domain_ref = self.driver.get_domain_by_name(project_name)
-                return _get_project_from_domain(domain_ref)
-            except exception.DomainNotFound:
-                raise exception.ProjectNotFound(project_id=project_name)
-        else:
-            return self.driver.get_project_by_name(project_name, domain_id)
-
-    def create_project(self, project_id, project):
-        if project['is_domain']:
-            new_domain = self._get_domain_from_project(project)
-            domain_ref = self.driver.create_domain(project_id, new_domain)
-            return _get_project_from_domain(domain_ref)
-        else:
-            return self.driver.create_project(project_id, project)
-
-    def list_projects(self, hints):
-        """List projects and/or domains.
-
-        We use the hints filter to determine whether we are listing projects,
-        domains or both.
-
-        If the filter includes domain_id==None, then we should only list
-        domains (convert to a project acting as a domain) since regular
-        projcets always have a non-None value for domain_id.
-
-        Likewise, if the filter includes domain_id==<non-None value>, then we
-        should only list projects.
-
-        If there is no domain_id filter, then we need to do a combained listing
-        of domains and projects, converting domains to projects acting as a
-        domain.
-
-        """
-        domain_listing_filter = None
-        for f in hints.filters:
-            if (f['name'] == 'domain_id'):
-                domain_listing_filter = f
-
-        if domain_listing_filter is not None:
-            if domain_listing_filter['value'] is not None:
-                proj_list = self.driver.list_projects(hints)
-            else:
-                domains = self.driver.list_domains(hints)
-                proj_list = [_get_project_from_domain(p) for p in domains]
-            hints.filters.remove(domain_listing_filter)
-            return proj_list
-        else:
-            # No domain_id filter, so combine domains and projects. Although
-            # we hand any remaining filters into each driver, since each filter
-            # might need to be carried out more than once, we use copies of the
-            # filters, allowing the original filters to be passed back up to
-            # controller level where a final filter will occur.
-            local_hints = copy.deepcopy(hints)
-            proj_list = self.driver.list_projects(local_hints)
-            local_hints = copy.deepcopy(hints)
-            domains = self.driver.list_domains(local_hints)
-            for domain in domains:
-                proj_list.append(_get_project_from_domain(domain))
-            return proj_list
-
-    def list_projects_from_ids(self, project_ids):
-        return [self.get_project(id) for id in project_ids]
-
-    def list_project_ids_from_domain_ids(self, domain_ids):
-        return self.driver.list_project_ids_from_domain_ids(domain_ids)
-
-    def list_projects_in_domain(self, domain_id):
-            return self.driver.list_projects_in_domain(domain_id)
-
-    def get_project(self, project_id):
-        try:
-            domain_ref = self.driver.get_domain(project_id)
-            return _get_project_from_domain(domain_ref)
-        except exception.DomainNotFound:
-            return self.driver.get_project(project_id)
-
-    def _is_domain(self, project_id):
-        ref = self.get_project(project_id)
-        return ref.get('is_domain', False)
-
-    def update_project(self, project_id, project):
-        if self._is_domain(project_id):
-            update_domain = self._get_domain_from_project(project)
-            domain_ref = self.driver.update_domain(project_id, update_domain)
-            return _get_project_from_domain(domain_ref)
-        else:
-            return self.driver.update_project(project_id, project)
-
-    def delete_project(self, project_id):
-        if self._is_domain(project_id):
-            try:
-                self.driver.delete_domain(project_id)
-            except exception.DomainNotFound:
-                raise exception.ProjectNotFound(project_id=project_id)
-        else:
-            self.driver.delete_project(project_id)
-
-    def delete_projects_from_ids(self, project_ids):
-        raise exception.NotImplemented()  # pragma: no cover
-
-    def list_project_parents(self, project_id):
-        """List a project's ancestors.
-
-        The current manager expects the ancestor tree to end with the project
-        acting as the domain (since that's now the top of the tree), but a
-        legacy driver will not have that top project in their projects table,
-        since it's still in the domain table. Hence we lift the algorithm for
-        traversing up the tree from the driver to here, so that our version of
-        get_project() is called, which will fetch the "project" from the right
-        table.
-
-        """
-        project = self.get_project(project_id)
-        parents = []
-        examined = set()
-        while project.get('parent_id') is not None:
-            if project['id'] in examined:
-                msg = _LE('Circular reference or a repeated '
-                          'entry found in projects hierarchy - '
-                          '%(project_id)s.')
-                LOG.error(msg, {'project_id': project['id']})
-                return
-
-            examined.add(project['id'])
-            parent_project = self.get_project(project['parent_id'])
-            parents.append(parent_project)
-            project = parent_project
-        return parents
-
-    def list_projects_in_subtree(self, project_id):
-        return self.driver.list_projects_in_subtree(project_id)
-
-    def is_leaf_project(self, project_id):
-        return self.driver.is_leaf_project(project_id)
-
-    def list_projects_acting_as_domain(self, hints):
-        refs = self.driver.list_domains(hints)
-        return [_get_project_from_domain(p) for p in refs]
-
-
-Driver = manager.create_legacy_driver(ResourceDriverV8)
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.resource.ResourceDriverBase',
+    in_favor_of='keystone.resource.backends.base.ResourceDriverBase',
+    remove_in=+1)
+class ResourceDriverBase(base.ResourceDriverBase):
+    pass
+
+
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.resource.ResourceDriverV8',
+    in_favor_of='keystone.resource.backends.base.ResourceDriverV8',
+    remove_in=+1)
+class ResourceDriverV8(base.ResourceDriverV8):
+    pass
+
+
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.resource.ResourceDriverV9',
+    in_favor_of='keystone.resource.backends.base.ResourceDriverV9',
+    remove_in=+1)
+class ResourceDriverV9(base.ResourceDriverV9):
+    pass
+
+
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.resource.V9ResourceWrapperForV8Driver',
+    in_favor_of='keystone.resource.backends.base.V9ResourceWrapperForV8Driver',
+    remove_in=+1)
+class V9ResourceWrapperForV8Driver(base.V9ResourceWrapperForV8Driver):
+    pass
+
+
+Driver = manager.create_legacy_driver(base.ResourceDriverV8)
 
 
 MEMOIZE_CONFIG = cache.get_memoization_decorator(group='domain_config')
@@ -1618,18 +1044,16 @@ class DomainConfigManager(manager.Manager):
         return option in self.sensitive_options[group]
 
     def _config_to_list(self, config):
-        """Build whitelisted and sensitive lists for use by backend drivers."""
-        whitelisted = []
-        sensitive = []
+        """Build list of options for use by backend drivers."""
+        option_list = []
         for group in config:
             for option in config[group]:
-                the_list = (sensitive if self._is_sensitive(group, option)
-                            else whitelisted)
-                the_list.append({
+                option_list.append({
                     'group': group, 'option': option,
-                    'value': config[group][option]})
+                    'value': config[group][option],
+                    'sensitive': self._is_sensitive(group, option)})
 
-        return whitelisted, sensitive
+        return option_list
 
     def _list_to_config(self, whitelisted, sensitive=None, req_option=None):
         """Build config dict from a list of option dicts.
@@ -1673,7 +1097,7 @@ class DomainConfigManager(manager.Manager):
         return config
 
     def create_config(self, domain_id, config):
-        """Create config for a domain
+        """Create config for a domain.
 
         :param domain_id: the domain in question
         :param config: the dict of config groups/options to assign to the
@@ -1689,26 +1113,16 @@ class DomainConfigManager(manager.Manager):
 
         """
         self._assert_valid_config(config)
-        whitelisted, sensitive = self._config_to_list(config)
-        # Delete any existing config
-        self.delete_config_options(domain_id)
-        self.delete_config_options(domain_id, sensitive=True)
-        # ...and create the new one
-        for option in whitelisted:
-            self.create_config_option(
-                domain_id, option['group'], option['option'], option['value'])
-        for option in sensitive:
-            self.create_config_option(
-                domain_id, option['group'], option['option'], option['value'],
-                sensitive=True)
+        option_list = self._config_to_list(config)
+        self.create_config_options(domain_id, option_list)
         # Since we are caching on the full substituted config, we just
         # invalidate here, rather than try and create the right result to
         # cache.
         self.get_config_with_sensitive_info.invalidate(self, domain_id)
-        return self._list_to_config(whitelisted)
+        return self._list_to_config(self.list_config_options(domain_id))
 
     def get_config(self, domain_id, group=None, option=None):
-        """Get config, or partial config, for a domain
+        """Get config, or partial config, for a domain.
 
         :param domain_id: the domain in question
         :param group: an optional specific group of options
@@ -1750,7 +1164,7 @@ class DomainConfigManager(manager.Manager):
             domain_id=domain_id, group_or_option=msg)
 
     def update_config(self, domain_id, config, group=None, option=None):
-        """Update config, or partial config, for a domain
+        """Update config, or partial config, for a domain.
 
         :param domain_id: the domain in question
         :param config: the config dict containing and groups/options being
@@ -1832,17 +1246,6 @@ class DomainConfigManager(manager.Manager):
                         raise exception.DomainConfigNotFound(
                             domain_id=domain_id, group_or_option=msg)
 
-        def _update_or_create(domain_id, option, sensitive):
-            """Update the option, if it doesn't exist then create it."""
-            try:
-                self.create_config_option(
-                    domain_id, option['group'], option['option'],
-                    option['value'], sensitive=sensitive)
-            except exception.Conflict:
-                self.update_config_option(
-                    domain_id, option['group'], option['option'],
-                    option['value'], sensitive=sensitive)
-
         update_config = config
         if group and option:
             # The config will just be a dict containing the option and
@@ -1852,12 +1255,8 @@ class DomainConfigManager(manager.Manager):
 
         _assert_valid_update(domain_id, update_config, group, option)
 
-        whitelisted, sensitive = self._config_to_list(update_config)
-
-        for new_option in whitelisted:
-            _update_or_create(domain_id, new_option, sensitive=False)
-        for new_option in sensitive:
-            _update_or_create(domain_id, new_option, sensitive=True)
+        option_list = self._config_to_list(update_config)
+        self.update_config_options(domain_id, option_list)
 
         self.get_config_with_sensitive_info.invalidate(self, domain_id)
         return self.get_config(domain_id)
@@ -1899,7 +1298,6 @@ class DomainConfigManager(manager.Manager):
                     domain_id=domain_id, group_or_option=msg)
 
         self.delete_config_options(domain_id, group, option)
-        self.delete_config_options(domain_id, group, option, sensitive=True)
         self.get_config_with_sensitive_info.invalidate(self, domain_id)
 
     def _get_config_with_sensitive_info(self, domain_id, group=None,
@@ -1974,7 +1372,7 @@ class DomainConfigManager(manager.Manager):
         return self._get_config_with_sensitive_info(domain_id)
 
     def get_config_default(self, group=None, option=None):
-        """Get default config, or partial default config
+        """Get default config, or partial default config.
 
         :param group: an optional specific group of options
         :param option: an optional specific option within the group
@@ -2027,133 +1425,14 @@ class DomainConfigManager(manager.Manager):
         return self._list_to_config(config_list, req_option=option)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class DomainConfigDriverV8(object):
-    """Interface description for a Domain Config driver."""
-
-    @abc.abstractmethod
-    def create_config_option(self, domain_id, group, option, value,
-                             sensitive=False):
-        """Creates a config option for a domain.
-
-        :param domain_id: the domain for this option
-        :param group: the group name
-        :param option: the option name
-        :param value: the value to assign to this option
-        :param sensitive: whether the option is sensitive
-
-        :returns: dict containing group, option and value
-        :raises keystone.exception.Conflict: when the option already exists
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def get_config_option(self, domain_id, group, option, sensitive=False):
-        """Gets the config option for a domain.
-
-        :param domain_id: the domain for this option
-        :param group: the group name
-        :param option: the option name
-        :param sensitive: whether the option is sensitive
-
-        :returns: dict containing group, option and value
-        :raises keystone.exception.DomainConfigNotFound: the option doesn't
-                                                         exist.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def list_config_options(self, domain_id, group=None, option=False,
-                            sensitive=False):
-        """Gets a config options for a domain.
-
-        :param domain_id: the domain for this option
-        :param group: optional group option name
-        :param option: optional option name. If group is None, then this
-                       parameter is ignored
-        :param sensitive: whether the option is sensitive
-
-        :returns: list of dicts containing group, option and value
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def update_config_option(self, domain_id, group, option, value,
-                             sensitive=False):
-        """Updates a config option for a domain.
-
-        :param domain_id: the domain for this option
-        :param group: the group option name
-        :param option: the option name
-        :param value: the value to assign to this option
-        :param sensitive: whether the option is sensitive
-
-        :returns: dict containing updated group, option and value
-        :raises keystone.exception.DomainConfigNotFound: the option doesn't
-                                                         exist.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def delete_config_options(self, domain_id, group=None, option=None,
-                              sensitive=False):
-        """Deletes config options for a domain.
-
-        Allows deletion of all options for a domain, all options in a group
-        or a specific option. The driver is silent if there are no options
-        to delete.
-
-        :param domain_id: the domain for this option
-        :param group: optional group option name
-        :param option: optional option name. If group is None, then this
-                       parameter is ignored
-        :param sensitive: whether the option is sensitive
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def obtain_registration(self, domain_id, type):
-        """Try and register this domain to use the type specified.
-
-        :param domain_id: the domain required
-        :param type: type of registration
-        :returns: True if the domain was registered, False otherwise. Failing
-                  to register means that someone already has it (which could
-                  even be the domain being requested).
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def read_registration(self, type):
-        """Get the domain ID of who is registered to use this type.
-
-        :param type: type of registration
-        :returns: domain_id of who is registered.
-        :raises keystone.exception.ConfigRegistrationNotFound: If nobody is
-            registered.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def release_registration(self, domain_id, type=None):
-        """Release registration if it is held by the domain specified.
-
-        If the specified domain is registered for this domain then free it,
-        if it is not then do nothing - no exception is raised.
-
-        :param domain_id: the domain in question
-        :param type: type of registration, if None then all registrations
-                     for this domain will be freed
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.resource.DomainConfigDriverV8',
+    in_favor_of='keystone.resource.config_backends.base.DomainConfigDriverV8',
+    remove_in=+1)
+class DomainConfigDriverV8(config_base.DomainConfigDriverV8):
+    pass
 
 
-DomainConfigDriver = manager.create_legacy_driver(DomainConfigDriverV8)
+DomainConfigDriver = manager.create_legacy_driver(
+    config_base.DomainConfigDriverV8)

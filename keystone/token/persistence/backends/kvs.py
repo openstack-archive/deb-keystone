@@ -15,6 +15,7 @@
 
 from __future__ import absolute_import
 import copy
+import threading
 
 from oslo_config import cfg
 from oslo_log import log
@@ -31,6 +32,8 @@ from keystone.token import provider
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
+
+STORE_CONF_LOCK = threading.Lock()
 
 
 class Token(token.persistence.TokenDriverV8):
@@ -49,9 +52,12 @@ class Token(token.persistence.TokenDriverV8):
         self._store = kvs.get_key_value_store('token-driver')
         if backing_store is not None:
             self.kvs_backend = backing_store
-        if not self._store.is_configured:
-            # Do not re-configure the backend if the store has been initialized
-            self._store.configure(backing_store=self.kvs_backend, **kwargs)
+        # Using a lock here to avoid race condition.
+        with STORE_CONF_LOCK:
+            if not self._store.is_configured:
+                # Do not re-configure the backend if the store has been
+                # initialized.
+                self._store.configure(backing_store=self.kvs_backend, **kwargs)
         if self.__class__ == Token:
             # NOTE(morganfainberg): Only warn if the base KVS implementation
             # is instantiated.
@@ -61,10 +67,14 @@ class Token(token.persistence.TokenDriverV8):
                             "'memcache' or 'sql' instead."))
 
     def _prefix_token_id(self, token_id):
-        return 'token-%s' % token_id.encode('utf-8')
+        if six.PY2:
+            token_id = token_id.encode('utf-8')
+        return 'token-%s' % token_id
 
     def _prefix_user_id(self, user_id):
-        return 'usertokens-%s' % user_id.encode('utf-8')
+        if six.PY2:
+            user_id = user_id.encode('utf-8')
+        return 'usertokens-%s' % user_id
 
     def _get_key_or_default(self, key, default=None):
         try:
@@ -164,7 +174,7 @@ class Token(token.persistence.TokenDriverV8):
             for item in token_list:
                 try:
                     item_id, expires = self._format_token_index_item(item)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError):  # nosec(tkelsey)
                     # NOTE(morganfainberg): Skip on expected errors
                     # possibilities from the `_format_token_index_item` method.
                     continue
@@ -328,7 +338,7 @@ class Token(token.persistence.TokenDriverV8):
         for item in token_list:
             try:
                 token_id, expires = self._format_token_index_item(item)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # nosec(tkelsey)
                 # NOTE(morganfainberg): Skip on expected error possibilities
                 # from the `_format_token_index_item` method.
                 continue
@@ -338,7 +348,7 @@ class Token(token.persistence.TokenDriverV8):
 
             try:
                 token_ref = self.get_token(token_id)
-            except exception.TokenNotFound:
+            except exception.TokenNotFound:  # nosec(tkelsey)
                 # NOTE(morganfainberg): Token doesn't exist, skip it.
                 continue
             if token_ref:

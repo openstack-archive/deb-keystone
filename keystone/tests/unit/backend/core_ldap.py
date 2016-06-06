@@ -15,8 +15,7 @@ import ldap
 from oslo_config import cfg
 
 from keystone.common import cache
-from keystone.common import ldap as common_ldap
-from keystone.common.ldap import core as common_ldap_core
+from keystone.identity.backends.ldap import common as common_ldap
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit import fakeldap
@@ -45,11 +44,11 @@ class BaseBackendLdapCommon(object):
         self.load_backends()
         self.load_fixtures(default_fixtures)
 
-        self.addCleanup(common_ldap_core._HANDLERS.clear)
+        self.addCleanup(common_ldap._HANDLERS.clear)
         self.addCleanup(self.clear_database)
 
     def _get_domain_fixture(self):
-        """Domains in LDAP are read-only, so just return the static one."""
+        """Return the static domain, since domains in LDAP are read-only."""
         return self.resource_api.get_domain(CONF.identity.default_domain_id)
 
     def clear_database(self):

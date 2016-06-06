@@ -12,18 +12,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import json
 import time
 import uuid
 
 from keystoneclient.common import cms
 from oslo_config import cfg
+from oslo_serialization import jsonutils
 import six
 from six.moves import http_client
 from testtools import matchers
 
 from keystone.common import extension as keystone_extension
 from keystone.tests import unit
+from keystone.tests.unit import default_fixtures
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import rest
 from keystone.tests.unit.schema import v2
@@ -180,7 +181,8 @@ class CoreApiTests(object):
             self.tenant_service['id'],
             self.role_service['id'])
 
-        token = self.get_scoped_token(tenant_id='service')
+        token = self.get_scoped_token(
+            tenant_id=default_fixtures.SERVICE_TENANT_ID)
         r = self.admin_request(
             path='/v2.0/tokens/%s' % token,
             token=token)
@@ -192,7 +194,8 @@ class CoreApiTests(object):
             self.tenant_service['id'],
             self.role_service['id'])
 
-        token = self.get_scoped_token(tenant_id='service')
+        token = self.get_scoped_token(
+            tenant_id=default_fixtures.SERVICE_TENANT_ID)
         r = self.admin_request(
             path='/v2.0/tokens/%s' % token,
             token=token)
@@ -382,7 +385,7 @@ class CoreApiTests(object):
                            expected_status=http_client.OK)
 
     def test_error_response(self):
-        """This triggers assertValidErrorResponse by convention."""
+        """Trigger assertValidErrorResponse by convention."""
         self.public_request(path='/v2.0/tenants',
                             expected_status=http_client.UNAUTHORIZED)
 
@@ -444,7 +447,7 @@ class CoreApiTests(object):
         raise NotImplementedError()
 
     def assertNoRoles(self, r):
-        """Helper method to assert No Roles
+        """Helper method to assert No Roles.
 
         This needs to be overridden by child classes
         based on their content type.
@@ -701,7 +704,7 @@ class CoreApiTests(object):
 
 
 class LegacyV2UsernameTests(object):
-    """Tests to show the broken username behavior in V2.
+    """Test to show the broken username behavior in V2.
 
     The V2 API is documented to use `username` instead of `name`.  The
     API forced used to use name and left the username to fall into the
@@ -712,7 +715,7 @@ class LegacyV2UsernameTests(object):
     """
 
     def create_user(self, **user_attrs):
-        """Creates a users and returns the response object.
+        """Create a users and returns the response object.
 
         :param user_attrs: attributes added to the request body (optional)
         """
@@ -1254,7 +1257,7 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
         data_json = cms.cms_verify(signed_text, CONF.signing.certfile,
                                    CONF.signing.ca_certs)
 
-        data = json.loads(data_json)
+        data = jsonutils.loads(data_json)
 
         return (data, token2)
 
@@ -1418,8 +1421,6 @@ class TestFernetTokenProviderV2(RestfulTestCase):
 
     def setUp(self):
         super(TestFernetTokenProviderV2, self).setUp()
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
-
         # Add catalog data
         self.region = unit.new_region_ref()
         self.region_id = self.region['id']
@@ -1455,6 +1456,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
     def config_overrides(self):
         super(TestFernetTokenProviderV2, self).config_overrides()
         self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
 
     def test_authenticate_unscoped_token(self):
         unscoped_token = self.get_unscoped_token()
@@ -1521,6 +1523,9 @@ class TestFernetTokenProviderV2(RestfulTestCase):
         self.assignment_api.add_role_to_user_and_project(self.user_foo['id'],
                                                          project_ref['id'],
                                                          self.role_admin['id'])
+        token_id = unscoped_token
+        if six.PY2:
+            token_id = token_id.encode('ascii')
         r = self.public_request(
             method='POST',
             path='/v2.0/tokens',
@@ -1528,7 +1533,7 @@ class TestFernetTokenProviderV2(RestfulTestCase):
                 'auth': {
                     'tenantName': project_ref['name'],
                     'token': {
-                        'id': unscoped_token.encode('ascii')
+                        'id': token_id,
                     }
                 }
             },

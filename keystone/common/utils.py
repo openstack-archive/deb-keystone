@@ -20,6 +20,7 @@ import calendar
 import collections
 import grp
 import hashlib
+import itertools
 import os
 import pwd
 import uuid
@@ -40,8 +41,12 @@ from keystone.i18n import _, _LE, _LW
 
 
 CONF = cfg.CONF
-
 LOG = log.getLogger(__name__)
+WHITELISTED_PROPERTIES = [
+    'tenant_id', 'project_id', 'user_id',
+    'public_bind_host', 'admin_bind_host',
+    'compute_host', 'admin_port', 'public_port',
+    'public_endpoint', 'admin_endpoint', ]
 
 
 # NOTE(stevermar): This UUID must stay the same, forever, across
@@ -51,7 +56,7 @@ RESOURCE_ID_NAMESPACE = uuid.UUID('4332ecab-770b-4288-a680-b9aca3b1b153')
 
 
 def resource_uuid(value):
-    """Converts input to valid UUID hex digits."""
+    """Convert input to valid UUID hex digits."""
     try:
         uuid.UUID(value)
         return value
@@ -65,7 +70,7 @@ def resource_uuid(value):
 
 
 def flatten_dict(d, parent_key=''):
-    """Flatten a nested dictionary
+    """Flatten a nested dictionary.
 
     Converts a dictionary with nested values to a single level flat
     dictionary, with dotted notation for each key.
@@ -173,7 +178,7 @@ def check_password(password, hashed):
 
 
 def attr_as_boolean(val_attr):
-    """Returns the boolean value, decoded from a string.
+    """Return the boolean value, decoded from a string.
 
     We test explicitly for a value meaning False, which can be one of
     several formats as specified in oslo strutils.FALSE_STRINGS.
@@ -217,7 +222,7 @@ def convert_v3_to_ec2_credential(credential):
 
 
 def unixtime(dt_obj):
-    """Format datetime object as unix timestamp
+    """Format datetime object as unix timestamp.
 
     :param dt_obj: datetime.datetime object
     :returns: float
@@ -498,6 +503,7 @@ class WhiteListedItemFilter(object):
         self._data = data
 
     def __getitem__(self, name):
+        """Evaluation on an item access."""
         if name not in self._whitelist:
             raise KeyError
         return self._data[name]
@@ -537,7 +543,7 @@ def strtime():
 
 
 def get_token_ref(context):
-    """Retrieves KeystoneToken object from the auth context and returns it.
+    """Retrieve KeystoneToken object from the auth context and returns it.
 
     :param dict context: The request context.
     :raises keystone.exception.Unauthorized: If auth context cannot be found.
@@ -571,7 +577,7 @@ def list_url_unsafe_chars(name):
 
 
 def lower_case_hostname(url):
-    """Change the URL's hostname to lowercase"""
+    """Change the URL's hostname to lowercase."""
     # NOTE(gyee): according to
     # https://www.w3.org/TR/WD-html40-970708/htmlweb.html, the netloc portion
     # of the URL is case-insensitive
@@ -587,7 +593,7 @@ def remove_standard_port(url):
     separator = ':'
     (host, separator, port) = o.netloc.partition(':')
     if o.scheme.lower() == 'http' and port == '80':
-        # NOTE(gyee): _replace() is not a private method. It has an
+        # NOTE(gyee): _replace() is not a private method. It has
         # an underscore prefix to prevent conflict with field names.
         # See https://docs.python.org/2/library/collections.html#
         # collections.namedtuple
@@ -596,3 +602,67 @@ def remove_standard_port(url):
         o = o._replace(netloc=host)
 
     return moves.urllib.parse.urlunparse(o)
+
+
+def format_url(url, substitutions, silent_keyerror_failures=None):
+    """Format a user-defined URL with the given substitutions.
+
+    :param string url: the URL to be formatted
+    :param dict substitutions: the dictionary used for substitution
+    :param list silent_keyerror_failures: keys for which we should be silent
+        if there is a KeyError exception on substitution attempt
+    :returns: a formatted URL
+
+    """
+    substitutions = WhiteListedItemFilter(
+        WHITELISTED_PROPERTIES,
+        substitutions)
+    allow_keyerror = silent_keyerror_failures or []
+    try:
+        result = url.replace('$(', '%(') % substitutions
+    except AttributeError:
+        LOG.error(_LE('Malformed endpoint - %(url)r is not a string'),
+                  {"url": url})
+        raise exception.MalformedEndpoint(endpoint=url)
+    except KeyError as e:
+        if not e.args or e.args[0] not in allow_keyerror:
+            LOG.error(_LE("Malformed endpoint %(url)s - unknown key "
+                          "%(keyerror)s"),
+                      {"url": url,
+                       "keyerror": e})
+            raise exception.MalformedEndpoint(endpoint=url)
+        else:
+            result = None
+    except TypeError as e:
+        LOG.error(_LE("Malformed endpoint '%(url)s'. The following type error "
+                      "occurred during string substitution: %(typeerror)s"),
+                  {"url": url,
+                   "typeerror": e})
+        raise exception.MalformedEndpoint(endpoint=url)
+    except ValueError as e:
+        LOG.error(_LE("Malformed endpoint %s - incomplete format "
+                      "(are you missing a type notifier ?)"), url)
+        raise exception.MalformedEndpoint(endpoint=url)
+    return result
+
+
+def check_endpoint_url(url):
+    """Check substitution of url.
+
+    The invalid urls are as follows:
+    urls with substitutions that is not in the whitelist
+
+    Check the substitutions in the URL to make sure they are valid
+    and on the whitelist.
+
+    :param str url: the URL to validate
+    :rtype: None
+    :raises keystone.exception.URLValidationError: if the URL is invalid
+    """
+    # check whether the property in the path is exactly the same
+    # with that in the whitelist below
+    substitutions = dict(zip(WHITELISTED_PROPERTIES, itertools.repeat('')))
+    try:
+        url.replace('$(', '%(') % substitutions
+    except (KeyError, TypeError, ValueError):
+        raise exception.URLValidationError(url)

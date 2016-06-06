@@ -10,7 +10,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""Keystone Compressed PKI Token Provider"""
+"""Keystone Compressed PKI Token Provider."""
+
+import subprocess  # nosec : used to catch subprocess exceptions
 
 from keystoneclient.common import cms
 from oslo_config import cfg
@@ -18,7 +20,6 @@ from oslo_log import log
 from oslo_log import versionutils
 from oslo_serialization import jsonutils
 
-from keystone.common import environment
 from keystone.common import utils
 from keystone import exception
 from keystone.i18n import _
@@ -47,7 +48,7 @@ class Provider(common.BaseProvider):
                                          CONF.signing.certfile,
                                          CONF.signing.keyfile))
             return token_id
-        except environment.subprocess.CalledProcessError:
+        except subprocess.CalledProcessError:
             LOG.exception(ERROR_MESSAGE)
             raise exception.UnexpectedError(ERROR_MESSAGE)
 

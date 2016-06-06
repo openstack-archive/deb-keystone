@@ -103,6 +103,7 @@ class AuthContext(dict):
                                      'expires_at'])
 
     def __setitem__(self, key, val):
+        """Override __setitem__ to prevent conflicting values."""
         if key in self.IDENTITY_ATTRIBUTES and key in self:
             existing_val = self[key]
             if key == 'expires_at':
@@ -169,6 +170,9 @@ class AuthInfo(object):
                         sys.exc_info()[2])
 
     def _lookup_domain(self, domain_info):
+        if isinstance(domain_info, dict) is False:
+            raise exception.ValidationError(attribute='dict',
+                                            target='domain')
         domain_id = domain_info.get('id')
         domain_name = domain_info.get('name')
         domain_ref = None
@@ -192,6 +196,9 @@ class AuthInfo(object):
         return domain_ref
 
     def _lookup_project(self, project_info):
+        if isinstance(project_info, dict) is False:
+            raise exception.ValidationError(attribute='dict',
+                                            target='project')
         project_id = project_info.get('id')
         project_name = project_info.get('name')
         project_ref = None
@@ -305,7 +312,7 @@ class AuthInfo(object):
         self._validate_and_normalize_scope_data()
 
     def get_method_names(self):
-        """Returns the identity method names.
+        """Return the identity method names.
 
         :returns: list of auth method names
 
@@ -410,10 +417,11 @@ class Auth(controller.V3Controller):
 
             token_audit_id = auth_context.get('audit_id')
 
+            is_domain = auth_context.get('is_domain')
             (token_id, token_data) = self.token_provider_api.issue_v3_token(
                 auth_context['user_id'], method_names, expires_at, project_id,
-                domain_id, auth_context, trust, metadata_ref, include_catalog,
-                parent_audit_id=token_audit_id)
+                is_domain, domain_id, auth_context, trust, metadata_ref,
+                include_catalog, parent_audit_id=token_audit_id)
 
             # NOTE(wanghong): We consume a trust use only when we are using
             # trusts and have successfully issued a token.

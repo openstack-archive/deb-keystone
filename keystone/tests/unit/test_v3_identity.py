@@ -12,12 +12,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import logging
 import uuid
 
 import fixtures
 import mock
 from oslo_config import cfg
+from oslo_log import log
 from six.moves import http_client
 from testtools import matchers
 
@@ -219,12 +219,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.post('/users', body={'user': {}},
                   expected_status=http_client.BAD_REQUEST)
 
-    def test_list_users(self):
-        """Call ``GET /users``."""
+    def test_list_head_users(self):
+        """Call ``GET & HEAD /users``."""
         resource_url = '/users'
         r = self.get(resource_url)
         self.assertValidUserListResponse(r, ref=self.user,
                                          resource_url=resource_url)
+        self.head(resource_url, expected_status=http_client.OK)
 
     def test_list_users_with_multiple_backends(self):
         """Call ``GET /users`` when multiple backends is enabled.
@@ -291,11 +292,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.assertValidUserListResponse(r, ref=user,
                                          resource_url=resource_url)
 
-    def test_get_user(self):
-        """Call ``GET /users/{user_id}``."""
-        r = self.get('/users/%(user_id)s' % {
-            'user_id': self.user['id']})
+    def test_get_head_user(self):
+        """Call ``GET & HEAD /users/{user_id}``."""
+        resource_url = '/users/%(user_id)s' % {
+            'user_id': self.user['id']}
+        r = self.get(resource_url)
         self.assertValidUserResponse(r, self.user)
+        self.head(resource_url, expected_status=http_client.OK)
 
     def test_get_user_with_default_project(self):
         """Call ``GET /users/{user_id}`` making sure of default_project_id."""
@@ -310,8 +313,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.put('/groups/%(group_id)s/users/%(user_id)s' % {
             'group_id': self.group_id, 'user_id': self.user['id']})
 
-    def test_list_groups_for_user(self):
-        """Call ``GET /users/{user_id}/groups``."""
+    def test_list_head_groups_for_user(self):
+        """Call ``GET & HEAD /users/{user_id}/groups``."""
         user1 = unit.create_user(self.identity_api,
                                  domain_id=self.domain['id'])
         user2 = unit.create_user(self.identity_api,
@@ -331,6 +334,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get(resource_url, auth=auth)
         self.assertValidGroupListResponse(r, ref=self.group,
                                           resource_url=resource_url)
+        self.head(resource_url, auth=auth, expected_status=http_client.OK)
 
         # Administrator is allowed to list others' groups
         resource_url = ('/users/%(user_id)s/groups' %
@@ -338,14 +342,18 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get(resource_url)
         self.assertValidGroupListResponse(r, ref=self.group,
                                           resource_url=resource_url)
+        self.head(resource_url, expected_status=http_client.OK)
 
         # Ordinary users should not be allowed to list other's groups
         auth = self.build_authentication_request(
             user_id=user2['id'],
             password=user2['password'])
-        r = self.get('/users/%(user_id)s/groups' % {
-            'user_id': user1['id']}, auth=auth,
-            expected_status=exception.ForbiddenAction.code)
+        resource_url = '/users/%(user_id)s/groups' % {
+            'user_id': user1['id']}
+        self.get(resource_url, auth=auth,
+                 expected_status=exception.ForbiddenAction.code)
+        self.head(resource_url, auth=auth,
+                  expected_status=exception.ForbiddenAction.code)
 
     def test_check_user_in_group(self):
         """Call ``HEAD /groups/{group_id}/users/{user_id}``."""
@@ -354,8 +362,8 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.head('/groups/%(group_id)s/users/%(user_id)s' % {
             'group_id': self.group_id, 'user_id': self.user['id']})
 
-    def test_list_users_in_group(self):
-        """Call ``GET /groups/{group_id}/users``."""
+    def test_list_head_users_in_group(self):
+        """Call ``GET & HEAD /groups/{group_id}/users``."""
         self.put('/groups/%(group_id)s/users/%(user_id)s' % {
             'group_id': self.group_id, 'user_id': self.user['id']})
         resource_url = ('/groups/%(group_id)s/users' %
@@ -365,6 +373,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                                          resource_url=resource_url)
         self.assertIn('/groups/%(group_id)s/users' % {
             'group_id': self.group_id}, r.result['links']['self'])
+        self.head(resource_url, expected_status=http_client.OK)
 
     def test_remove_user_from_group(self):
         """Call ``DELETE /groups/{group_id}/users/{user_id}``."""
@@ -487,14 +496,13 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_shadow_federated_user(self):
         fed_user = unit.new_federated_user_ref()
         user = (
-            self.identity_api.shadow_federated_user(fed_user["idp_id"],
-                                                    fed_user["protocol_id"],
-                                                    fed_user["unique_id"],
-                                                    fed_user["display_name"])
+            self.identity_api.shadow_federated_user(fed_user['idp_id'],
+                                                    fed_user['protocol_id'],
+                                                    fed_user['unique_id'],
+                                                    fed_user['display_name'])
         )
-        self.assertIsNotNone(user["id"])
-        self.assertEqual(len(user.keys()), 4)
         self.assertIsNotNone(user['id'])
+        self.assertEqual(len(user.keys()), 4)
         self.assertIsNotNone(user['name'])
         self.assertIsNone(user['domain_id'])
         self.assertEqual(user['enabled'], True)
@@ -504,10 +512,10 @@ class IdentityTestCase(test_v3.RestfulTestCase):
 
         # introduce the user to keystone for the first time
         shadow_user1 = self.identity_api.shadow_federated_user(
-            fed_user["idp_id"],
-            fed_user["protocol_id"],
-            fed_user["unique_id"],
-            fed_user["display_name"])
+            fed_user['idp_id'],
+            fed_user['protocol_id'],
+            fed_user['unique_id'],
+            fed_user['display_name'])
         self.assertEqual(fed_user['display_name'], shadow_user1['name'])
 
         # shadow the user again, with another name to invalidate the cache
@@ -515,14 +523,12 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # not fail.
         fed_user['display_name'] = uuid.uuid4().hex
         shadow_user2 = self.identity_api.shadow_federated_user(
-            fed_user["idp_id"],
-            fed_user["protocol_id"],
-            fed_user["unique_id"],
-            fed_user["display_name"])
-        # FIXME(dolph): These assertEqual / assertNotEqual should be reversed,
-        # to illustrate that the display name has been updated as expected.
-        self.assertNotEqual(fed_user['display_name'], shadow_user2['name'])
-        self.assertEqual(shadow_user1['name'], shadow_user2['name'])
+            fed_user['idp_id'],
+            fed_user['protocol_id'],
+            fed_user['unique_id'],
+            fed_user['display_name'])
+        self.assertEqual(fed_user['display_name'], shadow_user2['name'])
+        self.assertNotEqual(shadow_user1['name'], shadow_user2['name'])
 
         # The shadowed users still share the same unique ID.
         self.assertEqual(shadow_user1['id'], shadow_user2['id'])
@@ -543,18 +549,21 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.post('/groups', body={'group': {}},
                   expected_status=http_client.BAD_REQUEST)
 
-    def test_list_groups(self):
-        """Call ``GET /groups``."""
+    def test_list_head_groups(self):
+        """Call ``GET & HEAD /groups``."""
         resource_url = '/groups'
         r = self.get(resource_url)
         self.assertValidGroupListResponse(r, ref=self.group,
                                           resource_url=resource_url)
+        self.head(resource_url, expected_status=http_client.OK)
 
-    def test_get_group(self):
-        """Call ``GET /groups/{group_id}``."""
-        r = self.get('/groups/%(group_id)s' % {
-            'group_id': self.group_id})
+    def test_get_head_group(self):
+        """Call ``GET & HEAD /groups/{group_id}``."""
+        resource_url = '/groups/%(group_id)s' % {
+            'group_id': self.group_id}
+        r = self.get(resource_url)
         self.assertValidGroupResponse(r, self.group)
+        self.head(resource_url, expected_status=http_client.OK)
 
     def test_update_group(self):
         """Call ``PATCH /groups/{group_id}``."""
@@ -587,7 +596,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_create_user_password_not_logged(self):
         # When a user is created, the password isn't logged at any level.
 
-        log_fix = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        log_fix = self.useFixture(fixtures.FakeLogger(level=log.DEBUG))
 
         ref = unit.new_user_ref(domain_id=self.domain_id)
         self.post(
@@ -600,7 +609,7 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # When admin modifies user password, the password isn't logged at any
         # level.
 
-        log_fix = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        log_fix = self.useFixture(fixtures.FakeLogger(level=log.DEBUG))
 
         # bootstrap a user as admin
         user_ref = unit.create_user(self.identity_api,
@@ -614,6 +623,32 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                    body={'user': {'password': new_password}})
 
         self.assertNotIn(new_password, log_fix.output)
+
+    def test_setting_default_project_id_to_domain_failed(self):
+        """Call ``POST and PATCH /users`` default_project_id=domain_id.
+
+        Make sure we validate the default_project_id if it is specified.
+        It cannot be set to a domain_id, even for a project acting as domain
+        right now. That's because we haven't sort out the issuing
+        project-scoped token for project acting as domain bit yet. Once we
+        got that sorted out, we can relax this constraint.
+
+        """
+        # creating a new user with default_project_id set to a
+        # domain_id should result in HTTP 400
+        ref = unit.new_user_ref(domain_id=self.domain_id,
+                                project_id=self.domain_id)
+        self.post('/users', body={'user': ref}, token=CONF.admin_token,
+                  expected_status=http_client.BAD_REQUEST)
+
+        # updating user's default_project_id to a domain_id should result
+        # in HTTP 400
+        user = {'default_project_id': self.domain_id}
+        self.patch('/users/%(user_id)s' % {
+            'user_id': self.user['id']},
+            body={'user': user},
+            token=CONF.admin_token,
+            expected_status=http_client.BAD_REQUEST)
 
 
 class IdentityV3toV2MethodsTestCase(unit.TestCase):
@@ -722,7 +757,7 @@ class UserSelfServiceChangingPasswordsTestCase(test_v3.RestfulTestCase):
         return r.headers.get('X-Subject-Token')
 
     def change_password(self, expected_status, **kwargs):
-        """Returns a test response for a change password request."""
+        """Return a test response for a change password request."""
         return self.post('/users/%s/password' % self.user_ref['id'],
                          body={'user': kwargs},
                          token=self.token,
@@ -785,7 +820,7 @@ class UserSelfServiceChangingPasswordsTestCase(test_v3.RestfulTestCase):
         # When a user changes their password, the password isn't logged at any
         # level.
 
-        log_fix = self.useFixture(fixtures.FakeLogger(level=logging.DEBUG))
+        log_fix = self.useFixture(fixtures.FakeLogger(level=log.DEBUG))
 
         # change password
         new_password = uuid.uuid4().hex

@@ -15,10 +15,9 @@
 # under the License.
 
 import gettext
-import socket
+import os
 import uuid
 
-import eventlet
 import mock
 import oslo_i18n
 from oslo_serialization import jsonutils
@@ -27,9 +26,9 @@ from six.moves import http_client
 from testtools import matchers
 import webob
 
-from keystone.common import environment
 from keystone.common import wsgi
 from keystone import exception
+from keystone.server import wsgi as server_wsgi
 from keystone.tests import unit
 
 
@@ -43,12 +42,12 @@ class FakeAttributeCheckerApp(wsgi.Application):
         return context['query_string']
 
     def assert_attribute(self, body, attr):
-        """Asserts that the given request has a certain attribute."""
+        """Assert that the given request has a certain attribute."""
         ref = jsonutils.loads(body)
         self._require_attribute(ref, attr)
 
     def assert_attributes(self, body, attr):
-        """Asserts that the given request has a certain set attributes."""
+        """Assert that the given request has a certain set attributes."""
         ref = jsonutils.loads(body)
         self._require_attributes(ref, attr)
 
@@ -312,6 +311,122 @@ class ApplicationTest(BaseWSGITest):
         self.assertEqual(b"http://foo/identity", resp.body)
 
 
+class WSGIAppConfigTest(unit.TestCase):
+    default_config_file = 'keystone.conf'
+    custom_config_dir = '/etc/kst/'
+    custom_config_files = ['kst.conf', 'kst2.conf']
+
+    def test_config_files_have_default_values_when_envars_not_set(self):
+        config_files = server_wsgi._get_config_files()
+        config_files.sort()
+        expected_config_files = []
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_config_files_have_default_values_with_empty_envars(self):
+        env = {'OS_KEYSTONE_CONFIG_FILES': '',
+               'OS_KEYSTONE_CONFIG_DIR': ''}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = []
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_use_single_config_file_under_default_config_dir(self):
+        cfg = self.custom_config_files[0]
+        env = {'OS_KEYSTONE_CONFIG_FILES': cfg}
+        config_files = server_wsgi._get_config_files(env)
+        expected_config_files = [cfg]
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_use_multiple_config_files_under_default_config_dir(self):
+        env = {'OS_KEYSTONE_CONFIG_FILES': ';'.join(self.custom_config_files)}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = self.custom_config_files
+        self.assertListEqual(config_files, expected_config_files)
+
+        config_with_empty_strings = self.custom_config_files + ['', ' ']
+        env = {'OS_KEYSTONE_CONFIG_FILES': ';'.join(config_with_empty_strings)}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_use_single_absolute_path_config_file(self):
+        cfg = self.custom_config_files[0]
+        cfgpath = os.path.join(self.custom_config_dir, cfg)
+        env = {'OS_KEYSTONE_CONFIG_FILES': cfgpath}
+        config_files = server_wsgi._get_config_files(env)
+        self.assertListEqual(config_files, [cfgpath])
+
+    def test_can_use_multiple_absolute_path_config_files(self):
+        cfgpaths = [os.path.join(self.custom_config_dir, cfg)
+                    for cfg in self.custom_config_files]
+        cfgpaths.sort()
+        env = {'OS_KEYSTONE_CONFIG_FILES': ';'.join(cfgpaths)}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        self.assertListEqual(config_files, cfgpaths)
+
+        env = {'OS_KEYSTONE_CONFIG_FILES': ';'.join(cfgpaths + ['', ' '])}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        self.assertListEqual(config_files, cfgpaths)
+
+    def test_can_use_default_config_files_with_custom_config_dir(self):
+        env = {'OS_KEYSTONE_CONFIG_DIR': self.custom_config_dir}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = [os.path.join(self.custom_config_dir,
+                                              self.default_config_file)]
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_use_single_config_file_under_custom_config_dir(self):
+        cfg = self.custom_config_files[0]
+        env = {'OS_KEYSTONE_CONFIG_DIR': self.custom_config_dir,
+               'OS_KEYSTONE_CONFIG_FILES': cfg}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = [os.path.join(self.custom_config_dir, cfg)]
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_use_multiple_config_files_under_custom_config_dir(self):
+        env = {'OS_KEYSTONE_CONFIG_DIR': self.custom_config_dir,
+               'OS_KEYSTONE_CONFIG_FILES': ';'.join(self.custom_config_files)}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = [os.path.join(self.custom_config_dir, s)
+                                 for s in self.custom_config_files]
+        expected_config_files.sort()
+        self.assertListEqual(config_files, expected_config_files)
+
+        config_with_empty_strings = self.custom_config_files + ['', ' ']
+        env = {'OS_KEYSTONE_CONFIG_DIR': self.custom_config_dir,
+               'OS_KEYSTONE_CONFIG_FILES': ';'.join(config_with_empty_strings)}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        self.assertListEqual(config_files, expected_config_files)
+
+    def test_can_mix_relative_and_absolute_paths_config_file(self):
+        cfg0 = self.custom_config_files[0]
+        cfgpath0 = os.path.join(self.custom_config_dir,
+                                self.custom_config_files[0])
+        cfgpath1 = os.path.join(self.custom_config_dir,
+                                self.custom_config_files[1])
+        env = {'OS_KEYSTONE_CONFIG_DIR': self.custom_config_dir,
+               'OS_KEYSTONE_CONFIG_FILES': ';'.join([cfg0, cfgpath1])}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = [cfgpath0, cfgpath1]
+        expected_config_files.sort()
+        self.assertListEqual(config_files, expected_config_files)
+
+        env = {'OS_KEYSTONE_CONFIG_FILES': ';'.join([cfg0, cfgpath1])}
+        config_files = server_wsgi._get_config_files(env)
+        config_files.sort()
+        expected_config_files = [cfg0, cfgpath1]
+        expected_config_files.sort()
+        self.assertListEqual(config_files, expected_config_files)
+
+
 class ExtensionRouterTest(BaseWSGITest):
     def test_extensionrouter_local_config(self):
         class FakeRouter(wsgi.ExtensionRouter):
@@ -485,102 +600,3 @@ class LocalizedResponseTest(unit.TestCase):
             self.assertThat(resp.json['error']['message'],
                             matchers.Equals(exp_msg))
             self.assertThat(xlation_mock.called, matchers.Equals(True))
-
-
-class ServerTest(unit.TestCase):
-
-    def setUp(self):
-        super(ServerTest, self).setUp()
-        self.host = '127.0.0.1'
-        self.port = '1234'
-
-    @mock.patch('eventlet.listen')
-    @mock.patch('socket.getaddrinfo')
-    def test_keepalive_unset(self, mock_getaddrinfo, mock_listen):
-        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
-        mock_sock_dup = mock_listen.return_value.dup.return_value
-
-        server = environment.Server(mock.MagicMock(), host=self.host,
-                                    port=self.port)
-        server.start()
-        self.addCleanup(server.stop)
-        self.assertTrue(mock_listen.called)
-        self.assertFalse(mock_sock_dup.setsockopt.called)
-
-    @mock.patch('eventlet.listen')
-    @mock.patch('socket.getaddrinfo')
-    def test_keepalive_set(self, mock_getaddrinfo, mock_listen):
-        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
-        mock_sock_dup = mock_listen.return_value.dup.return_value
-
-        server = environment.Server(mock.MagicMock(), host=self.host,
-                                    port=self.port, keepalive=True)
-        server.start()
-        self.addCleanup(server.stop)
-        mock_sock_dup.setsockopt.assert_called_once_with(socket.SOL_SOCKET,
-                                                         socket.SO_KEEPALIVE,
-                                                         1)
-        self.assertTrue(mock_listen.called)
-
-    @mock.patch('eventlet.listen')
-    @mock.patch('socket.getaddrinfo')
-    def test_keepalive_and_keepidle_set(self, mock_getaddrinfo, mock_listen):
-        mock_getaddrinfo.return_value = [(1, 2, 3, 4, 5)]
-        mock_sock_dup = mock_listen.return_value.dup.return_value
-
-        server = environment.Server(mock.MagicMock(), host=self.host,
-                                    port=self.port, keepalive=True,
-                                    keepidle=1)
-        server.start()
-        self.addCleanup(server.stop)
-
-        if hasattr(socket, 'TCP_KEEPIDLE'):
-            self.assertEqual(2, mock_sock_dup.setsockopt.call_count)
-            # Test the last set of call args i.e. for the keepidle
-            mock_sock_dup.setsockopt.assert_called_with(socket.IPPROTO_TCP,
-                                                        socket.TCP_KEEPIDLE,
-                                                        1)
-        else:
-            self.assertEqual(1, mock_sock_dup.setsockopt.call_count)
-
-        self.assertTrue(mock_listen.called)
-
-    def test_client_socket_timeout(self):
-        # mocking server method of eventlet.wsgi to check it is called with
-        # configured 'client_socket_timeout' value.
-        for socket_timeout in range(1, 10):
-            self.config_fixture.config(group='eventlet_server',
-                                       client_socket_timeout=socket_timeout)
-            server = environment.Server(mock.MagicMock(), host=self.host,
-                                        port=self.port)
-            with mock.patch.object(eventlet.wsgi, 'server') as mock_server:
-                fake_application = uuid.uuid4().hex
-                fake_socket = uuid.uuid4().hex
-                server._run(fake_application, fake_socket)
-                mock_server.assert_called_once_with(
-                    fake_socket,
-                    fake_application,
-                    debug=mock.ANY,
-                    socket_timeout=socket_timeout,
-                    log=mock.ANY,
-                    keepalive=mock.ANY)
-
-    def test_wsgi_keep_alive(self):
-        # mocking server method of eventlet.wsgi to check it is called with
-        # configured 'wsgi_keep_alive' value.
-        wsgi_keepalive = False
-        self.config_fixture.config(group='eventlet_server',
-                                   wsgi_keep_alive=wsgi_keepalive)
-
-        server = environment.Server(mock.MagicMock(), host=self.host,
-                                    port=self.port)
-        with mock.patch.object(eventlet.wsgi, 'server') as mock_server:
-            fake_application = uuid.uuid4().hex
-            fake_socket = uuid.uuid4().hex
-            server._run(fake_application, fake_socket)
-            mock_server.assert_called_once_with(fake_socket,
-                                                fake_application,
-                                                debug=mock.ANY,
-                                                socket_timeout=mock.ANY,
-                                                log=mock.ANY,
-                                                keepalive=wsgi_keepalive)

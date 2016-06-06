@@ -49,7 +49,7 @@ class ResourceTests(object):
 
     @unit.skip_if_no_multiple_domains_support
     def test_get_project_by_name_for_project_acting_as_a_domain(self):
-        """Tests get_project_by_name works when the domain_id is None."""
+        """Test get_project_by_name works when the domain_id is None."""
         project = unit.new_project_ref(
             domain_id=CONF.identity.default_domain_id, is_domain=False)
         project = self.resource_api.create_project(project['id'], project)
@@ -98,6 +98,16 @@ class ResourceTests(object):
                           self.resource_api.create_project,
                           project['id'],
                           project)
+
+    def test_create_project_name_with_trailing_whitespace(self):
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        project_id = project['id']
+        project_name = project['name'] = (project['name'] + '    ')
+        project_returned = self.resource_api.create_project(project_id,
+                                                            project)
+        self.assertEqual(project_returned['id'], project_id)
+        self.assertEqual(project_returned['name'], project_name.strip())
 
     def test_create_duplicate_project_name_in_different_domains(self):
         new_domain = unit.new_domain_ref()
@@ -240,6 +250,17 @@ class ResourceTests(object):
         self.assertRaises(exception.ProjectNotFound,
                           self.resource_api.get_project,
                           'fake2')
+
+    def test_update_project_name_with_trailing_whitespace(self):
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        project_id = project['id']
+        project_create = self.resource_api.create_project(project_id, project)
+        self.assertEqual(project_create['id'], project_id)
+        project_name = project['name'] = (project['name'] + '    ')
+        project_update = self.resource_api.update_project(project_id, project)
+        self.assertEqual(project_update['id'], project_id)
+        self.assertEqual(project_update['name'], project_name.strip())
 
     def test_delete_domain_with_user_group_project_links(self):
         # TODO(chungg):add test case once expected behaviour defined
@@ -475,7 +496,7 @@ class ResourceTests(object):
                                    domain_id=None,
                                    is_domain=False,
                                    parent_project_id=None):
-        """Creates a project hierarchy with specified size.
+        """Create a project hierarchy with specified size.
 
         :param hierarchy_size: the desired hierarchy size, default is 2 -
                                a project with one child.
@@ -521,7 +542,7 @@ class ResourceTests(object):
 
     @unit.skip_if_no_multiple_domains_support
     def test_project_as_a_domain_uniqueness_constraints(self):
-        """Tests project uniqueness for those acting as domains.
+        """Test project uniqueness for those acting as domains.
 
         If it is a project acting as a domain, we can't have two or more with
         the same name.
@@ -751,6 +772,52 @@ class ResourceTests(object):
         subtree = self.resource_api.list_projects_in_subtree(project3['id'])
         self.assertEqual(0, len(subtree))
 
+    def test_get_projects_in_subtree_as_ids_with_large_tree(self):
+        """Check project hierarchy is returned correctly in large tree.
+
+        With a large hierarchy we need to enforce the projects
+        are returned in the correct order (illustrated below).
+
+        Tree we will create::
+
+               +------p1------+
+               |              |
+            +---p3---+      +-p2-+
+            |        |      |    |
+            p7    +-p6-+   p5    p4
+            |     |    |
+            p10   p9   p8
+                  |
+                 p11
+        """
+        # Create large project hierarchy, of above depiction
+        p1, p2, p4 = self._create_projects_hierarchy(hierarchy_size=3)
+        p5 = self._create_projects_hierarchy(
+            hierarchy_size=1, parent_project_id=p2['id'])[0]
+        p3, p6, p8 = self._create_projects_hierarchy(
+            hierarchy_size=3, parent_project_id=p1['id'])
+        p9, p11 = self._create_projects_hierarchy(
+            hierarchy_size=2, parent_project_id=p6['id'])
+        p7, p10 = self._create_projects_hierarchy(
+            hierarchy_size=2, parent_project_id=p3['id'])
+
+        expected_projects = {
+            p2['id']: {
+                p5['id']: None,
+                p4['id']: None},
+            p3['id']: {
+                p7['id']: {
+                    p10['id']: None},
+                p6['id']: {
+                    p9['id']: {
+                        p11['id']: None},
+                    p8['id']: None}}}
+
+        prjs_hierarchy = self.resource_api.get_projects_in_subtree_as_ids(
+            p1['id'])
+
+        self.assertDictEqual(expected_projects, prjs_hierarchy)
+
     def test_list_projects_in_subtree_with_circular_reference(self):
         project1 = unit.new_project_ref(
             domain_id=CONF.identity.default_domain_id)
@@ -807,7 +874,7 @@ class ResourceTests(object):
         self.assertEqual(1, len(parents))
 
     def test_update_project_enabled_cascade(self):
-        """Test update_project_cascade
+        """Test update_project_cascade.
 
         Ensures the enabled attribute is correctly updated across
         a simple 3-level projects hierarchy.
@@ -980,7 +1047,7 @@ class ResourceTests(object):
                           leaf_project['id'])
 
     def test_delete_projects_from_ids(self):
-        """Tests the resource backend call delete_projects_from_ids.
+        """Test the resource backend call delete_projects_from_ids.
 
         Tests the normal flow of the delete_projects_from_ids backend call,
         that ensures no project on the list exists after it is succesfully
@@ -1008,7 +1075,7 @@ class ResourceTests(object):
         self.resource_api.driver.delete_projects_from_ids([])
 
     def test_delete_projects_from_ids_with_no_existing_project_id(self):
-        """Tests delete_projects_from_ids issues warning if not found.
+        """Test delete_projects_from_ids issues warning if not found.
 
         Tests the resource backend call delete_projects_from_ids passing a
         non existing ID in project_ids, which is logged and ignored by
@@ -1590,9 +1657,42 @@ class ResourceTests(object):
         project_ref = self.resource_api.get_project(project['id'])
         self.assertDictEqual(updated_project_ref, project_ref)
 
+    @test_utils.wip('waiting for fix to bug #1523369')
+    def test_delete_project_clears_default_project_id(self):
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id,
+                                 project_id=project['id'])
+        self.resource_api.create_project(project['id'], project)
+        user = self.identity_api.create_user(user)
+        user = self.identity_api.get_user(user['id'])
+        self.assertIsNotNone(user['default_project_id'])
+
+        self.resource_api.delete_project(project['id'])
+        user = self.identity_api.get_user(user['id'])
+        self.assertIsNone(user['default_project_id'])
+
+    @test_utils.wip('waiting for fix to bug #1523369')
+    def test_delete_project_with_roles_clears_default_project_id(self):
+        project = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id,
+                                 project_id=project['id'])
+        self.resource_api.create_project(project['id'], project)
+        user = self.identity_api.create_user(user)
+        role = unit.new_role_ref()
+        self.role_api.create_role(role['id'], role)
+        self.assignment_api.create_grant(user_id=user['id'],
+                                         project_id=project['id'],
+                                         role_id=role['id'])
+
+        self.resource_api.delete_project(project['id'])
+        user = self.identity_api.get_user(user['id'])
+        self.assertIsNone(user['default_project_id'])
+
 
 class ResourceDriverTests(object):
-    """Tests for the resource driver.
+    """Test for the resource driver.
 
     Subclasses must set self.driver to the driver instance.
 

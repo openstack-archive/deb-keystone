@@ -95,7 +95,7 @@ def add_constraints(constraints):
 
 
 def rename_tables_with_constraints(renames, constraints, engine):
-    """Renames tables with foreign key constraints.
+    """Rename tables with foreign key constraints.
 
     Tables are renamed after first removing constraints. The constraints are
     replaced after the rename is complete.
@@ -137,7 +137,7 @@ def _sync_common_repo(version):
 
 
 def get_init_version(abs_path=None):
-    """Get the initial version of a migrate repository
+    """Get the initial version of a migrate repository.
 
     :param abs_path: Absolute path to migrate repository.
     :return:         initial version number or None, if DB is empty.

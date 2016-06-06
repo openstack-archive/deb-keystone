@@ -72,10 +72,10 @@ class MiddlewareRequestTestBase(unit.TestCase):
 
             _called = False
 
-            def process_request(i_self, *i_args, **i_kwargs):
+            def fill_context(i_self, *i_args, **i_kwargs):
                 # i_ to distinguish it from and not clobber the outer vars
                 e = self.assertRaises(exc,
-                                      super(_Failing, i_self).process_request,
+                                      super(_Failing, i_self).fill_context,
                                       *i_args, **i_kwargs)
                 i_self._called = True
                 raise e
@@ -302,7 +302,7 @@ class AuthContextMiddlewareTest(test_backend_sql.SqlTests,
 
     def _create_context(self, request, mapping_ref=None,
                         exception_expected=False):
-        """Builds the auth context from the given arguments.
+        """Build the auth context from the given arguments.
 
         auth context will be returned from the AuthContextMiddleware based on
         what is being passed in the given request and what mapping is being

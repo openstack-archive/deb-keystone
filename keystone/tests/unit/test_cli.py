@@ -18,13 +18,15 @@ import uuid
 import fixtures
 import mock
 from oslo_config import cfg
+from oslo_config import fixture as config_fixture
+from oslo_log import log
+from oslotest import mockpatch
 from six.moves import range
 from testtools import matchers
 
 from keystone.cmd import cli
 from keystone.common import dependency
 from keystone.i18n import _
-from keystone import resource
 from keystone.tests import unit
 from keystone.tests.unit.ksfixtures import database
 
@@ -42,6 +44,31 @@ class CliTestCase(unit.SQLDriverOverrides, unit.TestCase):
         self.useFixture(database.Database())
         self.load_backends()
         cli.TokenFlush.main()
+
+
+class CliNoConfigTestCase(unit.BaseTestCase):
+
+    def setUp(self):
+        self.config_fixture = self.useFixture(config_fixture.Config(CONF))
+        self.config_fixture.register_cli_opt(cli.command_opt)
+        self.useFixture(mockpatch.Patch(
+            'oslo_config.cfg.find_config_files', return_value=[]))
+        super(CliNoConfigTestCase, self).setUp()
+
+        # NOTE(crinkle): the command call doesn't have to actually work,
+        # that's what the other unit tests are for. So just mock it out.
+        class FakeConfCommand(object):
+            def __init__(self):
+                self.cmd_class = mock.Mock()
+        self.useFixture(mockpatch.PatchObject(
+            CONF, 'command', FakeConfCommand()))
+
+        self.logging = self.useFixture(fixtures.FakeLogger(level=log.WARN))
+
+    def test_cli(self):
+        expected_msg = 'Config file not found, using default configs.'
+        cli.main(argv=['keystone-manage', 'db_sync'])
+        self.assertThat(self.logging.output, matchers.Contains(expected_msg))
 
 
 class CliBootStrapTestCase(unit.SQLDriverOverrides, unit.TestCase):
@@ -289,8 +316,11 @@ class CliDomainConfigAllTestCase(unit.SQLDriverOverrides, unit.TestCase):
             domain = 'domain%s' % x
             self.domains[domain] = create_domain(
                 {'id': uuid.uuid4().hex, 'name': domain})
-        self.domains['domain_default'] = create_domain(
-            resource.calc_default_domain())
+        self.default_domain = unit.new_domain_ref(
+            description=u'The default domain',
+            id=CONF.identity.default_domain_id,
+            name=u'Default')
+        self.domains['domain_default'] = create_domain(self.default_domain)
 
     def test_config_upload(self):
         # The values below are the same as in the domain_configs_multi_ldap
@@ -380,12 +410,11 @@ class CliDomainConfigSingleDomainTestCase(CliDomainConfigAllTestCase):
         dependency.reset()
         with mock.patch('six.moves.builtins.print') as mock_print:
             self.assertRaises(unit.UnexpectedExit, cli.DomainConfigUpload.main)
-            file_name = ('keystone.%s.conf' %
-                         resource.calc_default_domain()['name'])
+            file_name = ('keystone.%s.conf' % self.default_domain['name'])
             error_msg = _(
                 'Domain: %(domain)s already has a configuration defined - '
                 'ignoring file: %(file)s.') % {
-                    'domain': resource.calc_default_domain()['name'],
+                    'domain': self.default_domain['name'],
                     'file': os.path.join(CONF.identity.domain_config_dir,
                                          file_name)}
             mock_print.assert_has_calls([mock.call(error_msg)])

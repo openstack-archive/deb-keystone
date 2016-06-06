@@ -12,13 +12,9 @@
 
 """Main entry point into the Revoke service."""
 
-import abc
-import datetime
-
+import oslo_cache
 from oslo_config import cfg
 from oslo_log import versionutils
-from oslo_utils import timeutils
-import six
 
 from keystone.common import cache
 from keystone.common import dependency
@@ -28,6 +24,7 @@ from keystone import exception
 from keystone.i18n import _
 from keystone.models import revoke_model
 from keystone import notifications
+from keystone.revoke.backends import base
 
 
 CONF = cfg.CONF
@@ -51,14 +48,13 @@ EXTENSION_DATA = {
 extension.register_admin_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)
 extension.register_public_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)
 
-MEMOIZE = cache.get_memoization_decorator(group='revoke')
-
-
-def revoked_before_cutoff_time():
-    expire_delta = datetime.timedelta(
-        seconds=CONF.token.expiration + CONF.revoke.expiration_buffer)
-    oldest = timeutils.utcnow() - expire_delta
-    return oldest
+# This builds a discrete cache region dedicated to revoke events. The API can
+# return a filtered list based upon last fetchtime. This is deprecated but
+# must be maintained.
+REVOKE_REGION = oslo_cache.create_region()
+MEMOIZE = cache.get_memoization_decorator(
+    group='revoke',
+    region=REVOKE_REGION)
 
 
 @dependency.provider('revoke_api')
@@ -78,6 +74,13 @@ class Manager(manager.Manager):
         super(Manager, self).__init__(CONF.revoke.driver)
         self._register_listeners()
         self.model = revoke_model
+
+    @MEMOIZE
+    def _list_events(self, last_fetch):
+        return self.driver.list_events(last_fetch)
+
+    def list_events(self, last_fetch=None):
+        return self._list_events(last_fetch)
 
     def _user_callback(self, service, resource_type, operation,
                        payload):
@@ -158,20 +161,6 @@ class Manager(manager.Manager):
                     'current request is aborted.')
             raise exception.UnexpectedError(exception=msg)
 
-    @versionutils.deprecated(as_of=versionutils.deprecated.JUNO,
-                             remove_in=0)
-    def revoke_by_expiration(self, user_id, expires_at,
-                             domain_id=None, project_id=None):
-
-        self._assert_not_domain_and_project_scoped(domain_id=domain_id,
-                                                   project_id=project_id)
-
-        self.revoke(
-            revoke_model.RevokeEvent(user_id=user_id,
-                                     expires_at=expires_at,
-                                     domain_id=domain_id,
-                                     project_id=project_id))
-
     def revoke_by_audit_id(self, audit_id):
         self.revoke(revoke_model.RevokeEvent(audit_id=audit_id))
 
@@ -205,15 +194,8 @@ class Manager(manager.Manager):
         self.revoke(revoke_model.RevokeEvent(domain_id=domain_id,
                                              role_id=role_id))
 
-    @MEMOIZE
-    def _get_revoke_tree(self):
-        events = self.driver.list_events()
-        revoke_tree = revoke_model.RevokeTree(revoke_events=events)
-
-        return revoke_tree
-
     def check_token(self, token_values):
-        """Checks the values from a token against the revocation list
+        """Check the values from a token against the revocation list.
 
         :param token_values: dictionary of values from a token, normalized for
                              differences between v2 and v3. The checked values
@@ -222,40 +204,21 @@ class Manager(manager.Manager):
         :raises keystone.exception.TokenNotFound: If the token is invalid.
 
         """
-        if self._get_revoke_tree().is_revoked(token_values):
+        if revoke_model.is_revoked(self.list_events(), token_values):
             raise exception.TokenNotFound(_('Failed to validate token'))
 
     def revoke(self, event):
         self.driver.revoke(event)
-        self._get_revoke_tree.invalidate(self)
+        REVOKE_REGION.invalidate()
 
 
-@six.add_metaclass(abc.ABCMeta)
-class RevokeDriverV8(object):
-    """Interface for recording and reporting revocation events."""
-
-    @abc.abstractmethod
-    def list_events(self, last_fetch=None):
-        """return the revocation events, as a list of objects
-
-        :param last_fetch:   Time of last fetch.  Return all events newer.
-        :returns: A list of keystone.revoke.model.RevokeEvent
-                  newer than `last_fetch.`
-                  If no last_fetch is specified, returns all events
-                  for tokens issued after the expiration cutoff.
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
-
-    @abc.abstractmethod
-    def revoke(self, event):
-        """register a revocation event
-
-        :param event: An instance of
-            keystone.revoke.model.RevocationEvent
-
-        """
-        raise exception.NotImplemented()  # pragma: no cover
+@versionutils.deprecated(
+    versionutils.deprecated.NEWTON,
+    what='keystone.revoke.RevokeDriverV8',
+    in_favor_of='keystone.revoke.backends.base.RevokeDriverV8',
+    remove_in=+1)
+class RevokeDriverV8(base.RevokeDriverV8):
+    pass
 
 
-Driver = manager.create_legacy_driver(RevokeDriverV8)
+Driver = manager.create_legacy_driver(base.RevokeDriverV8)

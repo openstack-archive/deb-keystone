@@ -8,16 +8,12 @@
 # Lucas Ribeiro <lucasribeiro1990@gmail.com>, 2014
 # Volmar Oliveira Junior <volmar.oliveira.jr@gmail.com>, 2013
 # Volmar Oliveira Junior <volmar.oliveira.jr@gmail.com>, 2013
-# Lucas Palm <lapalm@us.ibm.com>, 2015. #zanata
-# OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Raildo Mascena <raildom@gmail.com>, 2015. #zanata
-# Carlos Marques <marquesc@br.ibm.com>, 2016. #zanata
-# Lucas Palm <lapalm@us.ibm.com>, 2016. #zanata
+# Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: keystone 9.0.0.0rc2.dev5\n"
-"Report-Msgid-Bugs-To: https://bugs.launchpad.net/keystone\n"
-"POT-Creation-Date: 2016-03-21 10:57+0000\n"
+"Project-Id-Version: keystone 9.0.1.dev95\n"
+"Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
+"POT-Creation-Date: 2016-04-20 19:33+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -648,10 +644,6 @@ msgstr ""
 "obedecer à solicitação porque ela está malformada ou de alguma maneira "
 "incorreta. O cliente deve estar em erro."
 
-#, python-format
-msgid "Failed to start the %(name)s server"
-msgstr "Falha ao iniciar o servidor do %(name)s"
-
 msgid "Failed to validate token"
 msgstr "Falha ao validar token"
 
@@ -752,10 +744,6 @@ msgstr ""
 #, python-format
 msgid "Invalid domain specific configuration: %(reason)s"
 msgstr "Configuração específica de domínio inválida: %(reason)s"
-
-#, python-format
-msgid "Invalid input for field '%(path)s'. The value is '%(value)s'."
-msgstr "Entrada inválida para o campo '%(path)s'. O valor é '%(value)s'."
 
 msgid "Invalid limit value"
 msgstr "Valor limite inválido"
@@ -1080,15 +1068,6 @@ msgstr ""
 "Profundidade da nova delegação solicitada de %(requested_count)d é maior que "
 "a %(max_count)d permitida"
 
-msgid ""
-"Running keystone via eventlet is deprecated as of Kilo in favor of running "
-"in a WSGI server (e.g. mod_wsgi). Support for keystone under eventlet will "
-"be removed in the \"M\"-Release."
-msgstr ""
-"Executar o keystone via eventlet foi descontinuado como Kilo em favor de "
-"executar em um servidor WSGI (por exemplo, mod_wsgi). Suporte para o "
-"keystone sob eventlet será removida no \"M\"-Release."
-
 msgid "Scoping to both domain and project is not allowed"
 msgstr "A definição de escopo para o domínio e o projeto não é permitida"
 
@@ -1244,16 +1223,6 @@ msgstr ""
 "A data não está no formato especificado. O servidor não pôde realizar a "
 "requisição pois ela está mal formada ou incorreta. Assume-se que o cliente "
 "está com erro."
-
-#, python-format
-msgid ""
-"To get a more detailed information on this error, re-run this command for "
-"the specific domain, i.e.: keystone-manage domain_config_upload --domain-"
-"name %s"
-msgstr ""
-"Para obter uma obter informações mais detalhadas sobre este erro, execute "
-"novamente este comando para o domínio específico, ou seja: keystone-manage "
-"domain_config_upload --domain-name %s"
 
 msgid "Token belongs to another user"
 msgstr "O token pertence à outro usuário"
@@ -1535,13 +1504,6 @@ msgid ""
 "name: %s"
 msgstr ""
 "Não é permitido ter dois projetos agindo como domínios com o mesmo nome: %s"
-
-#, python-format
-msgid ""
-"it is not permitted to have two projects within a domain with the same "
-"name : %s"
-msgstr ""
-"Não é permitido ter dois projetos dentro de um domínio com o mesmo nome: %s"
 
 msgid "only root projects are allowed to act as domains."
 msgstr "Somente projetos raízes são permitidos para agirem como domínios. "

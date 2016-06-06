@@ -22,6 +22,7 @@ from keystone.common import dependency
 from keystone.common import utils
 from keystone import exception
 from keystone.tests import unit
+from keystone.tests.unit import ksfixtures
 from keystone.tests.unit.ksfixtures import database
 from keystone import token
 from keystone.token.providers import fernet
@@ -317,6 +318,7 @@ SAMPLE_V3_TOKEN = {
             "id": "01257",
             "name": "service"
         },
+        "is_domain": False,
         "roles": [
             {
                 "id": "9fe2ff9ee4384b1894a90878d3e92bab",
@@ -717,6 +719,7 @@ class TestTokenProvider(unit.TestCase):
     def setUp(self):
         super(TestTokenProvider, self).setUp()
         self.useFixture(database.Database())
+        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
         self.load_backends()
 
     def test_get_token_version(self):
@@ -798,17 +801,10 @@ class PKIProviderTests(object):
         from keystoneclient.common import cms
         self.cms = cms
 
-        from keystone.common import environment
-        self.environment = environment
-
         old_cms_subprocess = cms.subprocess
         self.addCleanup(setattr, cms, 'subprocess', old_cms_subprocess)
 
-        old_env_subprocess = environment.subprocess
-        self.addCleanup(setattr, environment, 'subprocess', old_env_subprocess)
-
         self.cms.subprocess = self.target_subprocess
-        self.environment.subprocess = self.target_subprocess
 
         # force module reload so the imports get re-evaluated
         reload_module(pki)
@@ -823,16 +819,6 @@ class PKIProviderTests(object):
         self.assertRaises(exception.UnexpectedError,
                           provider._get_token_id,
                           token_data)
-
-
-class TestPKIProviderWithEventlet(PKIProviderTests, unit.TestCase):
-
-    def setUp(self):
-        # force keystoneclient.common.cms to use eventlet's subprocess
-        from eventlet.green import subprocess
-        self.target_subprocess = subprocess
-
-        super(TestPKIProviderWithEventlet, self).setUp()
 
 
 class TestPKIProviderWithStdlib(PKIProviderTests, unit.TestCase):

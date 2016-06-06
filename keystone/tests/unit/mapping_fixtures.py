@@ -584,6 +584,104 @@ MAPPING_GROUP_NAMES = {
     ]
 }
 
+MAPPING_GROUP_NAME_WITHOUT_DOMAIN = {
+
+    "rules": [
+        {
+            "local": [
+                {
+                    "group": {
+                        "name": DEVELOPER_GROUP_NAME,
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "orgPersonType",
+                    "any_one_of": [
+                        "Employee"
+                    ],
+                }
+            ]
+        },
+    ]
+}
+
+MAPPING_GROUP_ID_WITH_DOMAIN = {
+
+    "rules": [
+        {
+            "local": [
+                {
+                    "group": {
+                        "id": EMPLOYEE_GROUP_ID,
+                        "domain": {
+                            "id": DEVELOPER_GROUP_DOMAIN_ID
+                        }
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "orgPersonType",
+                    "any_one_of": [
+                        "Employee"
+                    ],
+                }
+            ]
+        },
+    ]
+}
+
+MAPPING_BAD_GROUP = {
+
+    "rules": [
+        {
+            "local": [
+                {
+                    "group": {
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "orgPersonType",
+                    "any_one_of": [
+                        "Employee"
+                    ],
+                }
+            ]
+        },
+    ]
+}
+
+MAPPING_BAD_DOMAIN = {
+
+    "rules": [
+        {
+            "local": [
+                {
+                    "group": {
+                        "id": EMPLOYEE_GROUP_ID,
+                        "domain": {
+                            "id": DEVELOPER_GROUP_DOMAIN_ID,
+                            "badkey": "badvalue"
+                        }
+                    }
+                }
+            ],
+            "remote": [
+                {
+                    "type": "orgPersonType",
+                    "any_one_of": [
+                        "Employee"
+                    ],
+                }
+            ]
+        },
+    ]
+}
+
 MAPPING_EPHEMERAL_USER = {
     "rules": [
         {
