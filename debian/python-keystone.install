@@ -1,2 +1,1 @@
-usr/lib/python*/dist-packages/*.egg-info
-usr/lib/python*/dist-packages/keystone
+usr/lib/python2.7/*

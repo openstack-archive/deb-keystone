@@ -57,6 +57,7 @@ ifeq (,$(findstring nodocs, $(DEB_BUILD_OPTIONS)))
 endif
 
 override_dh_install:
+	rm -rf $(CURDIR)/debian/tmp/usr/etc
 	dh_install --fail-missing
 	rm -rf debian/python-keystone/usr/lib/python*/*/doc
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
