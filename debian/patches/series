@@ -1,4 +1,2 @@
 fixes-keystone-default-catalog.patch
 fixes-default-connection.patch
-fixes-jsonschema-requirements.txt.patch
-CVE-2016-4911_Incorrect_Audit_IDs_in_Keystone_Fernet_Tokens_can_result_in_revocation_bypass.patch
