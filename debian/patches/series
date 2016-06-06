@@ -1,2 +1,3 @@
 fixes-keystone-default-catalog.patch
 fixes-default-connection.patch
+fix-requirements.txt.patch
