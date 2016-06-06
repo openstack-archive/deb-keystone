@@ -1,4 +1,4 @@
+/etc/keystone
 /var/lib/keystone
 /var/lib/keystone/cache
 /var/log/keystone
-/etc/keystone

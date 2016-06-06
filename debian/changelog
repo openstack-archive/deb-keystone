@@ -5,6 +5,7 @@ keystone (2:10.0.0~b1-1) experimental; urgency=medium
 
   [ Thomas Goirand ]
   * New upstream release.
+  * Fixed (build-)depends for this release.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 06 Jun 2016 15:30:58 +0000
 
