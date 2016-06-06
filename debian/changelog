@@ -1,8 +1,12 @@
-keystone (2:9.0.0-3) UNRELEASED; urgency=medium
+keystone (2:10.0.0~b1-1) experimental; urgency=medium
 
+  [ Ondřej Nový ]
   * d/copyright: Changed source URL to https protocol
 
- -- Ondřej Nový <novy@ondrej.org>  Thu, 19 May 2016 20:57:23 +0200
+  [ Thomas Goirand ]
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 06 Jun 2016 15:30:58 +0000
 
 keystone (2:9.0.0-2) unstable; urgency=high
 
