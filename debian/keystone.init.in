@@ -17,5 +17,6 @@ PROJECT_NAME=keystone
 NAME=keystone
 DAEMON=/usr/bin/uwsgi
 DAEMON_ARGS="--http :5000 --wsgi-file /usr/bin/keystone-wsgi-public --master --processes 4 --threads 1 --die-on-term --logto /var/log/keystone/keystone.log"
-DAEMON=/usr/bin/keystone-all
-
+NO_OPENSTACK_CONFIG_FILE_DAEMON_ARG=yes
+USE_LOGFILE=no
+USE_SYSLOG=no
