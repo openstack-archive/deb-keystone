@@ -78,6 +78,8 @@ Vcs-Git: https://anonscm.debian.org/git/openstack/keystone.git
 Package: python-keystone
 Architecture: all
 Section: python
+Breaks: keystone (<< 10.0.0~),
+Replaces: keystone (<< 10.0.0~),
 Depends: python-babel (>= 2.3.4),
          python-crypto,
          python-cryptography (>= 1.0),
