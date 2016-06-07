@@ -1,4 +1,6 @@
 debian/apache-conf/wsgi-keystone.conf	/etc/apache2/sites-available
+debian/keystone-admin.ini	/etc/keystone
+debian/keystone-public.ini	/etc/keystone
 etc/default_catalog.templates	/etc/keystone
 etc/keystone-paste.ini	/etc/keystone
 etc/logging.conf.sample	/usr/share/doc/keystone

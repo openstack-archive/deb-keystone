@@ -99,5 +99,9 @@ override_dh_clean:
 	find $(CURDIR)/keystone/tests -name '*.db' -delete
 	rm -rf $(CURDIR)/vendor
 	rm -f $(CURDIR)/debian/tests/testing.db
-	rm -f $(CURDIR)/debian/keystone.init $(CURDIR)/debian/keystone.service $(CURDIR)/debian/keystone.upstart
+	rm -f $(CURDIR)/debian/keystone.keystone*.init $(CURDIR)/debian/keystone.keystone*.service $(CURDIR)/debian/keystone.keystone*.upstart
 	dh_clean
+
+#override_dh_installmenu:
+#	dh_installinit --name=keystone-admin
+#	dh_installinit --name=keystone-public

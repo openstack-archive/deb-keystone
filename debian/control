@@ -144,7 +144,7 @@ Depends: adduser,
          q-text-as-data,
          sqlite3,
          ssl-cert (>= 1.0.12),
-         uwsgi-plugin-python,
+         libapache2-mod-wsgi,
          ${misc:Depends},
          ${ostack-lsb-base},
          ${python:Depends},
@@ -161,7 +161,6 @@ Description: OpenStack identity service
 Package: keystone-doc
 Architecture: all
 Section: doc
-Pre-Depends: dpkg (>= 1.15.6~),
 Depends: ${misc:Depends},
          ${sphinxdoc:Depends},
 Description: OpenStack identity service - documentation

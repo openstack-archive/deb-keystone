@@ -142,32 +142,38 @@ if [ "$1" = "configure" ] ; then
 	# isn't a problem.
 	#su keystone -s /bin/sh -c "keystone-manage pki_setup"
 
-	# Activate the keystone.service
-	deb-systemd-helper unmask keystone.service >/dev/null || true
-	if deb-systemd-helper --quiet was-enabled keystone.service ; then
-		deb-systemd-helper enable keystone.service >/dev/null || true
-	else
-		deb-systemd-helper update-state keystone.service >/dev/null || true
-	fi
-
-	# Setup init script and start keystone
-	pkgos_init keystone
+	# Activate the keystone*.service
+#	for k in keystone-admin keystone-public ; do
+#		deb-systemd-helper unmask ${k}.service >/dev/null || true
+#		if deb-systemd-helper --quiet was-enabled ${k}.service ; then
+#			deb-systemd-helper enable ${k}.service >/dev/null || true
+#		else
+#			deb-systemd-helper update-state ${k}.service >/dev/null || true
+#		fi
+#
+#		# Setup init script and start keystone
+#		pkgos_init ${k}
+#	done
 
 	# On first install, create basics configuration and add roles
 	if [ -z "$2" ] ; then
-		echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
-		sleep 1
-		echo -n "4..."
-		sleep 1
-		echo -n "3..."
-		sleep 1
-		echo -n "2..."
-		sleep 1
-		echo -n "1..."
-		sleep 1
-		echo "0"
 		db_get keystone/create-admin-tenant
 		if [ "$RET" = "true" ] ; then
+			a2enmod wsgi
+			a2ensite wsgi-keystone.conf
+			invoke-rc.d apache2 restart || true
+			echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
+			sleep 1
+			echo -n "4..."
+			sleep 1
+			echo -n "3..."
+			sleep 1
+			echo -n "2..."
+			sleep 1
+			echo -n "1..."
+			sleep 1
+			echo "0"
+
 			keystone_get_debconf_admin_credentials
 			echo "===> Bootstraping tenants with 'keystone-manage bootstrap':"
 			keystone_get_debconf_admin_credentials

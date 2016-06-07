@@ -13,6 +13,7 @@ if [ "${1}" = "purge" ] ; then
 		fi
 	fi
 	rm -rf /var/log/keystone /var/lib/keystone /etc/keystone
+	a2dissite wsgi-keystone.conf || true
 fi
 
 #DEBHELPER#
