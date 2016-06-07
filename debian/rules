@@ -63,11 +63,20 @@ override_dh_install:
 	rm -rf debian/python-keystone/usr/lib/python*/*/tools
 	rm -rf debian/python-keystone/usr/lib/python*/*/examples
 	install -D -m 0600 $(CURDIR)/debian/logging.conf $(CURDIR)/debian/keystone/etc/keystone/logging.conf
-	install -D -m 0640 etc/keystone.conf.sample $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
-	sed -i -e "s|^[ \t#]*template_file[ \t#]*=.*|template_file = /etc/keystone/default_catalog.templates|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
-	sed -i -e "s|^[ \t#]*log_dir[ \t#]*=.*|log_dir = /var/log/keystone|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
-	sed -i -e "s|^[ \t#]*log_file[ \t#]*=.*|log_file = keystone.log|" $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf
-	cp -f etc/keystone.conf.sample debian/keystone/usr/share/doc/keystone/keystone.conf.sample
+	PYTHONPATH=$(CURDIR)/debian/tmp/usr/lib/python2.7/dist-packages oslo-config-generator --output-file $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf \
+		--wrap-width 79 \
+		--namespace keystone \
+		--namespace keystone.notifications \
+		--namespace oslo.cache \
+		--namespace oslo.log \
+		--namespace oslo.messaging \
+		--namespace oslo.policy \
+		--namespace oslo.db \
+		--namespace oslo.middleware \
+		--namespace osprofiler
+	pkgos-fix-config-default $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf catalog template_file /etc/keystone/default_catalog.templates
+	pkgos-fix-config-default $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf DEFAULT log_dir /var/log/keystone
+	pkgos-fix-config-default $(CURDIR)/debian/keystone/usr/share/keystone/keystone.conf DEFAULT log_file keystone.log
 
 	install -D -m 0644 httpd/keystone.py $(CURDIR)/debian/python-keystone/usr/share/keystone/wsgi.py
 	dh_python2 /usr/share/keystone

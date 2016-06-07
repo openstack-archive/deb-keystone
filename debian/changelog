@@ -11,6 +11,7 @@ keystone (2:10.0.0~b1-1) experimental; urgency=medium
     --fail-missing to fail.
   * Install tempest plugin correctly.
   * Patch requirements.txt to trash lines than breaks deps calculation.
+  * Using oslo-config-generator to build keystone.conf.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 06 Jun 2016 15:30:58 +0000
 
