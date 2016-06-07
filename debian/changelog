@@ -13,6 +13,7 @@ keystone (2:10.0.0~b1-1) experimental; urgency=medium
   * Patch requirements.txt to trash lines than breaks deps calculation.
   * Using oslo-config-generator to build keystone.conf.
   * Move all binaries to python-keystone, preparing Py3 transition.
+  * keystone-all is gone, using uwsgi instead.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 06 Jun 2016 15:30:58 +0000
 

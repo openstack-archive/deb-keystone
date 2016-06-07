@@ -15,5 +15,7 @@
 DESC="OpenStack Identity service"
 PROJECT_NAME=keystone
 NAME=keystone
+DAEMON=/usr/bin/uwsgi
+DAEMON_ARGS="--http :5000 --wsgi-file /usr/bin/keystone-wsgi-public --master --processes 4 --threads 1 --die-on-term --logto /var/log/keystone/keystone.log"
 DAEMON=/usr/bin/keystone-all
 
