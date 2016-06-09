@@ -157,11 +157,11 @@ if [ "$1" = "configure" ] ; then
 
 	# On first install, create basics configuration and add roles
 	if [ -z "$2" ] ; then
+		a2enmod wsgi || true
+		a2ensite wsgi-keystone.conf || true
+		invoke-rc.d apache2 restart || true
 		db_get keystone/create-admin-tenant
 		if [ "$RET" = "true" ] ; then
-			a2enmod wsgi
-			a2ensite wsgi-keystone.conf
-			invoke-rc.d apache2 restart || true
 			echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
 			sleep 1
 			echo -n "4..."

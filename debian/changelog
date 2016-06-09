@@ -5,8 +5,9 @@ keystone (2:10.0.0~b2-1) experimental; urgency=medium
   * Added missing build-depends: python-testresources.
   * Added missing runtime depends: apache2.
   * Make the cron.hourly work also with a commented provider= directive.
+  * Also setup apache if not setting-up db.
 
- -- Thomas Goirand <zigo@debian.org>  Fri, 10 Jun 2016 18:39:16 +0200
+ -- Thomas Goirand <zigo@debian.org>  Thu, 14 Jul 2016 21:34:02 +0000
 
 keystone (2:10.0.0~b1-1) experimental; urgency=medium
 
