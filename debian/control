@@ -139,6 +139,7 @@ Description: OpenStack identity service - library
 Package: keystone
 Architecture: all
 Depends: adduser,
+         apache2,
          dbconfig-common,
          init-system-helpers,
          python-keystone (= ${source:Version}),
