@@ -1,3 +1,10 @@
+keystone (2:9.0.2-2) unstable; urgency=medium
+
+  * Make the cron.hourly work also with a commented provider= directive
+    (Closes: #828912).
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 29 Jun 2016 21:47:02 +0200
+
 keystone (2:9.0.2-1) unstable; urgency=medium
 
   [ Ondřej Nový ]
