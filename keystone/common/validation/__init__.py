@@ -11,22 +11,14 @@
 # under the License.
 """Request body validating middleware for OpenStack Identity resources."""
 
-import functools
-import inspect
-
 from keystone.common.validation import validators
-from keystone import exception
-from keystone.i18n import _
 
 
-def validated(request_body_schema, resource_to_validate):
-    """Register a schema to validate a resource reference.
-
-    Registered schema will be used for validating a request body just before
-    API method execution.
+def lazy_validate(request_body_schema, resource_to_validate):
+    """A non-decorator way to validate a request, to be used inline.
 
     :param request_body_schema: a schema to validate the resource reference
-    :param resource_to_validate: the reference to validate
+    :param resource_to_validate: dictionary to validate
     :raises keystone.exception.ValidationError: if `resource_to_validate` is
             None. (see wrapper method below).
     :raises TypeError: at decoration time when the expected resource to
@@ -35,41 +27,7 @@ def validated(request_body_schema, resource_to_validate):
 
     """
     schema_validator = validators.SchemaValidator(request_body_schema)
-
-    def add_validator(func):
-        argspec = inspect.getargspec(func)
-        try:
-            arg_index = argspec.args.index(resource_to_validate)
-        except ValueError:
-            raise TypeError(_('validated expected to find %(param_name)r in '
-                              'function signature for %(func_name)r.') %
-                            {'param_name': resource_to_validate,
-                             'func_name': func.__name__})
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            if (resource_to_validate in kwargs and
-                    kwargs[resource_to_validate] is not None):
-                schema_validator.validate(kwargs[resource_to_validate])
-            else:
-                try:
-                    resource = args[arg_index]
-                    # If the resource to be validated is not None but
-                    # empty, it is possible to be validated by jsonschema.
-                    if resource is not None:
-                        schema_validator.validate(resource)
-                    else:
-                        raise exception.ValidationError(
-                            attribute=resource_to_validate,
-                            target='request body')
-                # We cannot find the resource neither from kwargs nor args.
-                except IndexError:
-                    raise exception.ValidationError(
-                        attribute=resource_to_validate,
-                        target='request body')
-            return func(*args, **kwargs)
-        return wrapper
-    return add_validator
+    schema_validator.validate(resource_to_validate)
 
 
 def nullable(property_schema):

@@ -14,7 +14,7 @@
 
 from oslo_utils import timeutils
 
-from keystone import auth
+from keystone.auth.plugins import base
 from keystone.common import controller
 from keystone.common import dependency
 from keystone import exception
@@ -24,11 +24,10 @@ from keystone.oauth1 import validator
 
 
 @dependency.requires('oauth_api')
-class OAuth(auth.AuthMethodHandler):
-    def authenticate(self, context, auth_info, auth_context):
+class OAuth(base.AuthMethodHandler):
+    def authenticate(self, request, auth_info, auth_context):
         """Turn a signed request with an access key into a keystone token."""
-        headers = context['headers']
-        oauth_headers = oauth.get_oauth_headers(headers)
+        oauth_headers = oauth.get_oauth_headers(request.headers)
         access_token_id = oauth_headers.get('oauth_token')
 
         if not access_token_id:
@@ -45,15 +44,16 @@ class OAuth(auth.AuthMethodHandler):
             if now > expires:
                 raise exception.Unauthorized(_('Access token is expired'))
 
-        url = controller.V3Controller.base_url(context, context['path'])
+        url = controller.V3Controller.base_url(request.context_dict,
+                                               request.path_info)
         access_verifier = oauth.ResourceEndpoint(
             request_validator=validator.OAuthValidator(),
             token_generator=oauth.token_generator)
         result, request = access_verifier.validate_protected_resource_request(
             url,
             http_method='POST',
-            body=context['query_string'],
-            headers=headers,
+            body=request.params,
+            headers=request.headers,
             realms=None
         )
         if not result:

@@ -14,13 +14,13 @@
 
 import abc
 
-from oslo_config import cfg
 import six
 
+import keystone.conf
 from keystone import exception
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -110,7 +110,7 @@ class DomainConfigDriverV8(object):
                        parameter is ignored
 
         The option is uniquely defined by domain_id, group and option,
-        irrespective of whether it is sensistive ot not.
+        irrespective of whether it is sensitive ot not.
 
         """
         raise exception.NotImplemented()  # pragma: no cover

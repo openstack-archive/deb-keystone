@@ -29,7 +29,6 @@ import uuid
 import warnings
 
 import fixtures
-from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 from oslo_context import context as oslo_context
 from oslo_context import fixture as oslo_ctx_fixture
@@ -42,22 +41,21 @@ from sqlalchemy import exc
 import testtools
 from testtools import testcase
 
-from keystone import auth
-from keystone.common import config
+from keystone.common import context
 from keystone.common import dependency
-from keystone.common.kvs import core as kvs_core
+from keystone.common import request
 from keystone.common import sql
+import keystone.conf
 from keystone import exception
 from keystone.identity.backends.ldap import common as ks_ldap
 from keystone import notifications
-from keystone.server import common
 from keystone.tests.unit import ksfixtures
 from keystone.version import controllers
 from keystone.version import service
 
 
-config.configure()
-config.set_config_defaults()
+keystone.conf.configure()
+keystone.conf.set_config_defaults()
 
 PID = six.text_type(os.getpid())
 TESTSDIR = os.path.dirname(os.path.abspath(__file__))
@@ -76,12 +74,15 @@ def _calc_tmpdir():
 
 TMPDIR = _calc_tmpdir()
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 log.register_options(CONF)
 
 IN_MEM_DB_CONN_STRING = 'sqlite://'
 
+# Strictly matches ISO 8601 timestamps with subsecond precision like:
+# 2016-06-28T20:48:56.000000Z
 TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+TIME_FORMAT_REGEX = '^\d{4}-[0-1]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d\.\d{6}Z$'
 
 exception._FATAL_EXCEPTION_FORMAT_ERRORS = True
 os.makedirs(TMPDIR)
@@ -565,6 +566,19 @@ class BaseTestCase(testtools.TestCase):
         if not os.environ.get(env_var):
             self.skipTest('Env variable %s is not set.' % env_var)
 
+    def skip_test_overrides(self, *args, **kwargs):
+        if self._check_for_method_in_parents(self._testMethodName):
+            return super(BaseTestCase, self).skipTest(*args, **kwargs)
+        raise Exception('%r is not a previously defined test method'
+                        % self._testMethodName)
+
+    def _check_for_method_in_parents(self, name):
+        # skip first to get to parents
+        for cls in self.__class__.__mro__[1:]:
+            if hasattr(cls, name):
+                return True
+        return False
+
 
 class TestCase(BaseTestCase):
 
@@ -573,6 +587,20 @@ class TestCase(BaseTestCase):
 
     def _policy_fixture(self):
         return ksfixtures.Policy(dirs.etc('policy.json'), self.config_fixture)
+
+    def make_request(self, path='/', **kwargs):
+        is_admin = kwargs.pop('is_admin', False)
+        environ = kwargs.setdefault('environ', {})
+
+        if not environ.get(context.REQUEST_CONTEXT_ENV):
+            environ[context.REQUEST_CONTEXT_ENV] = context.RequestContext(
+                is_admin=is_admin,
+                authenticated=kwargs.pop('authenticated', True))
+
+        req = request.Request.blank(path=path, **kwargs)
+        req.context_dict['is_admin'] = is_admin
+
+        return req
 
     def config_overrides(self):
         # NOTE(morganfainberg): enforce config_overrides can only ever be
@@ -624,13 +652,6 @@ class TestCase(BaseTestCase):
                 'keystone.notifications=INFO',
                 'keystone.identity.backends.ldap.common=INFO',
             ])
-        self.auth_plugin_config_override()
-
-    def auth_plugin_config_override(self, methods=None, **method_classes):
-        self.useFixture(
-            ksfixtures.ConfigAuthPlugins(self.config_fixture,
-                                         methods,
-                                         **method_classes))
 
     def _assert_config_overrides_called(self):
         assert self.__config_overrides_called is True
@@ -639,7 +660,6 @@ class TestCase(BaseTestCase):
         super(TestCase, self).setUp()
         self.__config_overrides_called = False
         self.__load_backends_called = False
-        self.addCleanup(CONF.reset)
         self.config_fixture = self.useFixture(config_fixture.Config(CONF))
         self.addCleanup(delattr, self, 'config_fixture')
         self.config(self.config_files())
@@ -650,7 +670,7 @@ class TestCase(BaseTestCase):
         def mocked_register_auth_plugin_opt(conf, opt):
             self.config_fixture.register_opt(opt, group='auth')
         self.useFixture(fixtures.MockPatchObject(
-            config, '_register_auth_plugin_opt',
+            keystone.conf.auth, '_register_auth_plugin_opt',
             new=mocked_register_auth_plugin_opt))
 
         self.sql_driver_version_overrides = {}
@@ -680,9 +700,6 @@ class TestCase(BaseTestCase):
         self.addCleanup(notifications.clear_subscribers)
         self.addCleanup(notifications.reset_notifier)
 
-        # Reset the auth-plugin registry
-        self.addCleanup(self.clear_auth_plugin_registry)
-
         self.addCleanup(setattr, controllers, '_VERSIONS', [])
 
     def config(self, config_files):
@@ -691,34 +708,7 @@ class TestCase(BaseTestCase):
 
     def load_backends(self):
         """Initialize each manager and assigns them to an attribute."""
-        # TODO(blk-u): Shouldn't need to clear the registry here, but some
-        # tests call load_backends multiple times. These should be fixed to
-        # only call load_backends once.
-        dependency.reset()
-
-        # TODO(morganfainberg): Shouldn't need to clear the registry here, but
-        # some tests call load_backends multiple times.  Since it is not
-        # possible to re-configure a backend, we need to clear the list.  This
-        # should eventually be removed once testing has been cleaned up.
-        kvs_core.KEY_VALUE_STORE_REGISTRY.clear()
-
-        self.clear_auth_plugin_registry()
-        drivers, _unused = common.setup_backends(
-            load_extra_backends_fn=self.load_extra_backends)
-
-        for manager_name, manager in drivers.items():
-            setattr(self, manager_name, manager)
-        self.addCleanup(self.cleanup_instance(*list(drivers.keys())))
-
-    def load_extra_backends(self):
-        """Override to load managers that aren't loaded by default.
-
-        This is useful to load managers initialized by extensions. No extra
-        backends are loaded by default.
-
-        :returns: dict of name -> manager
-        """
-        return {}
+        self.useFixture(ksfixtures.BackendLoader(self))
 
     def load_fixtures(self, fixtures):
         """Hacky basic and naive fixture loading based on a python module.
@@ -825,10 +815,6 @@ class TestCase(BaseTestCase):
     def loadapp(self, config, name='main'):
         return service.loadapp(self._paste_config(config), name=name)
 
-    def clear_auth_plugin_registry(self):
-        auth.controllers.AUTH_METHODS.clear()
-        auth.controllers.AUTH_PLUGINS_LOADED = False
-
     def assertCloseEnoughForGovernmentWork(self, a, b, delta=3):
         """Assert that two datetimes are nearly equal within a small delta.
 
@@ -841,6 +827,17 @@ class TestCase(BaseTestCase):
         msg = '%s != %s within %s delta' % (a, b, delta)
 
         self.assertTrue(abs(a - b).seconds <= delta, msg)
+
+    def assertTimestampEqual(self, expected, value):
+        # Compare two timestamps but ignore the microseconds part
+        # of the expected timestamp. Keystone does not track microseconds and
+        # is working to eliminate microseconds from it's datetimes used.
+        expected = timeutils.parse_isotime(expected).replace(microsecond=0)
+        value = timeutils.parse_isotime(value).replace(microsecond=0)
+        self.assertEqual(
+            expected,
+            value,
+            "%s != %s" % (expected, value))
 
     def assertNotEmpty(self, l):
         self.assertTrue(len(l))

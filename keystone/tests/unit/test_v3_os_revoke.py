@@ -62,6 +62,7 @@ class OSRevokeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
                 utils.isotime(event_issued_before, subsecond=True),
                 utils.isotime(after_time, subsecond=True)))
         del (event['issued_before'])
+        del (event['revoked_at'])
         self.assertEqual(sample, event)
 
     def test_revoked_list_self_url(self):
@@ -131,3 +132,16 @@ class OSRevokeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
         resp = self.get('/OS-REVOKE/events?since=%s' % _future_time_string())
         events = resp.json_body['events']
         self.assertEqual([], events)
+
+    def test_revoked_at_in_list(self):
+        revoked_at = timeutils.utcnow()
+        # Given or not, `revoked_at` will always be set in the backend.
+        self.revoke_api.revoke(
+            revoke_model.RevokeEvent(revoked_at=revoked_at))
+
+        resp = self.get('/OS-REVOKE/events')
+        events = resp.json_body['events']
+        self.assertThat(events, matchers.HasLength(1))
+        # Strip off the microseconds from `revoked_at`.
+        self.assertTimestampEqual(utils.isotime(revoked_at),
+                                  events[0]['revoked_at'])

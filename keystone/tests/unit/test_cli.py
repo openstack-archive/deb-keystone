@@ -17,7 +17,6 @@ import uuid
 
 import fixtures
 import mock
-from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 from oslo_log import log
 from oslotest import mockpatch
@@ -26,12 +25,13 @@ from testtools import matchers
 
 from keystone.cmd import cli
 from keystone.common import dependency
+import keystone.conf
 from keystone.i18n import _
 from keystone.tests import unit
 from keystone.tests.unit.ksfixtures import database
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class CliTestCase(unit.SQLDriverOverrides, unit.TestCase):
@@ -144,6 +144,28 @@ class CliBootStrapTestCase(unit.SQLDriverOverrides, unit.TestCase):
         bootstrap = cli.BootStrap()
         self._do_test_bootstrap(bootstrap)
         self._do_test_bootstrap(bootstrap)
+
+    def test_bootstrap_recovers_user(self):
+        bootstrap = cli.BootStrap()
+        self._do_test_bootstrap(bootstrap)
+
+        # Completely lock the user out.
+        user_id = bootstrap.identity_manager.get_user_by_name(
+            bootstrap.username,
+            'default')['id']
+        bootstrap.identity_manager.update_user(
+            user_id,
+            {'enabled': False,
+             'password': uuid.uuid4().hex})
+
+        # The second bootstrap run will recover the account.
+        self._do_test_bootstrap(bootstrap)
+
+        # Sanity check that the original password works again.
+        bootstrap.identity_manager.authenticate(
+            {},
+            user_id,
+            bootstrap.password)
 
 
 class CliBootStrapTestCaseWithEnvironment(CliBootStrapTestCase):
@@ -278,14 +300,9 @@ class CliDomainConfigAllTestCase(unit.SQLDriverOverrides, unit.TestCase):
 
     def config_files(self):
         self.config_fixture.register_cli_opt(cli.command_opt)
-        self.addCleanup(self.cleanup)
         config_files = super(CliDomainConfigAllTestCase, self).config_files()
         config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
         return config_files
-
-    def cleanup(self):
-        CONF.reset()
-        CONF.unregister_opt(cli.command_opt)
 
     def cleanup_domains(self):
         for domain in self.domains:

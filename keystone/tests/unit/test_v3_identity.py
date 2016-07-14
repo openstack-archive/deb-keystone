@@ -16,18 +16,18 @@ import uuid
 
 import fixtures
 import mock
-from oslo_config import cfg
 from oslo_log import log
 from six.moves import http_client
 from testtools import matchers
 
 from keystone.common import controller
+import keystone.conf
 from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 # NOTE(morganfainberg): To be removed when admin_token_auth middleware is
@@ -219,6 +219,15 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         self.post('/users', body={'user': {}},
                   expected_status=http_client.BAD_REQUEST)
 
+    def test_create_user_bad_domain_id(self):
+        """Call ``POST /users``."""
+        # create user with 'DEFaUlT' domain_id instead if 'default'
+        # and verify it fails
+        self.post('/users',
+                  body={'user': {"name": "baddomain", "domain_id":
+                        "DEFaUlT"}},
+                  expected_status=http_client.NOT_FOUND)
+
     def test_list_head_users(self):
         """Call ``GET & HEAD /users``."""
         resource_url = '/users'
@@ -299,6 +308,16 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         r = self.get(resource_url)
         self.assertValidUserResponse(r, self.user)
         self.head(resource_url, expected_status=http_client.OK)
+
+    def test_get_user_does_not_include_extra_attributes(self):
+        """Call ``GET /users/{user_id}`` extra attributes are not included."""
+        user = unit.new_user_ref(domain_id=self.domain_id,
+                                 project_id=self.project_id)
+        user = self.identity_api.create_user(user)
+        self.assertNotIn('created_at', user)
+        self.assertNotIn('last_active_at', user)
+        r = self.get('/users/%(user_id)s' % {'user_id': user['id']})
+        self.assertValidUserResponse(r, user)
 
     def test_get_user_with_default_project(self):
         """Call ``GET /users/{user_id}`` making sure of default_project_id."""
@@ -491,47 +510,6 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         # But the credential for user2 is unaffected
         r = self.credential_api.get_credential(credential2['id'])
         self.assertDictEqual(credential2, r)
-
-    # shadow user tests
-    def test_shadow_federated_user(self):
-        fed_user = unit.new_federated_user_ref()
-        user = (
-            self.identity_api.shadow_federated_user(fed_user['idp_id'],
-                                                    fed_user['protocol_id'],
-                                                    fed_user['unique_id'],
-                                                    fed_user['display_name'])
-        )
-        self.assertIsNotNone(user['id'])
-        self.assertEqual(len(user.keys()), 4)
-        self.assertIsNotNone(user['name'])
-        self.assertIsNone(user['domain_id'])
-        self.assertEqual(user['enabled'], True)
-
-    def test_shadow_existing_federated_user(self):
-        fed_user = unit.new_federated_user_ref()
-
-        # introduce the user to keystone for the first time
-        shadow_user1 = self.identity_api.shadow_federated_user(
-            fed_user['idp_id'],
-            fed_user['protocol_id'],
-            fed_user['unique_id'],
-            fed_user['display_name'])
-        self.assertEqual(fed_user['display_name'], shadow_user1['name'])
-
-        # shadow the user again, with another name to invalidate the cache
-        # internally, this operation causes request to the driver. It should
-        # not fail.
-        fed_user['display_name'] = uuid.uuid4().hex
-        shadow_user2 = self.identity_api.shadow_federated_user(
-            fed_user['idp_id'],
-            fed_user['protocol_id'],
-            fed_user['unique_id'],
-            fed_user['display_name'])
-        self.assertEqual(fed_user['display_name'], shadow_user2['name'])
-        self.assertNotEqual(shadow_user1['name'], shadow_user2['name'])
-
-        # The shadowed users still share the same unique ID.
-        self.assertEqual(shadow_user1['id'], shadow_user2['id'])
 
     # group crud tests
 

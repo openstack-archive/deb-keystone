@@ -12,18 +12,22 @@
 
 """Main entry point into the Federation service."""
 
-from oslo_config import cfg
 from oslo_log import versionutils
 
+from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import extension
 from keystone.common import manager
+import keystone.conf
 from keystone import exception
 from keystone.federation.backends import base
 from keystone.federation import utils
 
 
-CONF = cfg.CONF
+# This is a general cache region for service providers.
+MEMOIZE = cache.get_memoization_decorator(group='federation')
+
+CONF = keystone.conf.CONF
 EXTENSION_DATA = {
     'name': 'OpenStack Federation APIs',
     'namespace': 'http://docs.openstack.org/identity/api/ext/'
@@ -63,6 +67,7 @@ class Manager(manager.Manager):
             raise exception.UnsupportedDriverVersion(
                 driver=CONF.federation.driver)
 
+    @MEMOIZE
     def get_enabled_service_providers(self):
         """List enabled service providers for Service Catalog.
 
@@ -88,6 +93,20 @@ class Manager(manager.Manager):
 
         service_providers = self.driver.get_enabled_service_providers()
         return [normalize(sp) for sp in service_providers]
+
+    def create_sp(self, sp_id, service_provider):
+        sp_ref = self.driver.create_sp(sp_id, service_provider)
+        self.get_enabled_service_providers.invalidate(self)
+        return sp_ref
+
+    def delete_sp(self, sp_id):
+        self.driver.delete_sp(sp_id)
+        self.get_enabled_service_providers.invalidate(self)
+
+    def update_sp(self, sp_id, service_provider):
+        sp_ref = self.driver.update_sp(sp_id, service_provider)
+        self.get_enabled_service_providers.invalidate(self)
+        return sp_ref
 
     def evaluate(self, idp_id, protocol_id, assertion_data):
         mapping = self.get_mapping_from_idp_and_protocol(idp_id, protocol_id)

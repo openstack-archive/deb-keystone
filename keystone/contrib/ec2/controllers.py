@@ -39,6 +39,7 @@ import uuid
 from keystoneclient.contrib.ec2 import utils as ec2_utils
 from oslo_serialization import jsonutils
 import six
+from six.moves import http_client
 
 from keystone.common import controller
 from keystone.common import dependency
@@ -265,7 +266,7 @@ class Ec2ControllerCommon(object):
 class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
 
     @controller.v2_ec2_deprecated
-    def authenticate(self, context, credentials=None, ec2Credentials=None):
+    def authenticate(self, request, credentials=None, ec2Credentials=None):
         (user_ref, tenant_ref, metadata_ref, roles_ref,
          catalog_ref) = self._authenticate(credentials=credentials,
                                            ec2credentials=ec2Credentials)
@@ -285,29 +286,29 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
         return token_data
 
     @controller.v2_ec2_deprecated
-    def get_credential(self, context, user_id, credential_id):
-        if not self._is_admin(context):
-            self._assert_identity(context, user_id)
+    def get_credential(self, request, user_id, credential_id):
+        if not self._is_admin(request):
+            self._assert_identity(request.context_dict, user_id)
         return super(Ec2Controller, self).get_credential(user_id,
                                                          credential_id)
 
     @controller.v2_ec2_deprecated
-    def get_credentials(self, context, user_id):
-        if not self._is_admin(context):
-            self._assert_identity(context, user_id)
+    def get_credentials(self, request, user_id):
+        if not self._is_admin(request):
+            self._assert_identity(request.context_dict, user_id)
         return super(Ec2Controller, self).get_credentials(user_id)
 
     @controller.v2_ec2_deprecated
-    def create_credential(self, context, user_id, tenant_id):
-        if not self._is_admin(context):
-            self._assert_identity(context, user_id)
-        return super(Ec2Controller, self).create_credential(context, user_id,
-                                                            tenant_id)
+    def create_credential(self, request, user_id, tenant_id):
+        if not self._is_admin(request):
+            self._assert_identity(request.context_dict, user_id)
+        return super(Ec2Controller, self).create_credential(
+            request.context_dict, user_id, tenant_id)
 
     @controller.v2_ec2_deprecated
-    def delete_credential(self, context, user_id, credential_id):
-        if not self._is_admin(context):
-            self._assert_identity(context, user_id)
+    def delete_credential(self, request, user_id, credential_id):
+        if not self._is_admin(request):
+            self._assert_identity(request.context_dict, user_id)
             self._assert_owner(user_id, credential_id)
         return super(Ec2Controller, self).delete_credential(user_id,
                                                             credential_id)
@@ -325,7 +326,7 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
         if token_ref.user_id != user_id:
             raise exception.Forbidden(_('Token belongs to another user'))
 
-    def _is_admin(self, context):
+    def _is_admin(self, request):
         """Wrap admin assertion error return statement.
 
         :param context: standard context
@@ -335,7 +336,7 @@ class Ec2Controller(Ec2ControllerCommon, controller.V2Controller):
         try:
             # NOTE(morganfainberg): policy_api is required for assert_admin
             # to properly perform policy enforcement.
-            self.assert_admin(context)
+            self.assert_admin(request)
             return True
         except (exception.Forbidden, exception.Unauthorized):
             return False
@@ -363,7 +364,7 @@ class Ec2ControllerV3(Ec2ControllerCommon, controller.V3Controller):
     def __init__(self):
         super(Ec2ControllerV3, self).__init__()
 
-    def _check_credential_owner_and_user_id_match(self, context, prep_info,
+    def _check_credential_owner_and_user_id_match(self, request, prep_info,
                                                   user_id, credential_id):
         # NOTE(morganfainberg): this method needs to capture the arguments of
         # the method that is decorated with @controller.protected() (with
@@ -377,7 +378,7 @@ class Ec2ControllerV3(Ec2ControllerCommon, controller.V3Controller):
         ref['credential'] = self.credential_api.get_credential(credential_id)
         # NOTE(morganfainberg): policy_api is required for this
         # check_protection to properly be able to perform policy enforcement.
-        self.check_protection(context, prep_info, ref)
+        self.check_protection(request, prep_info, ref)
 
     def authenticate(self, context, credentials=None, ec2Credentials=None):
         (user_ref, project_ref, metadata_ref, roles_ref,
@@ -392,24 +393,27 @@ class Ec2ControllerV3(Ec2ControllerCommon, controller.V3Controller):
         return render_token_data_response(token_id, token_data)
 
     @controller.protected(callback=_check_credential_owner_and_user_id_match)
-    def ec2_get_credential(self, context, user_id, credential_id):
+    def ec2_get_credential(self, request, user_id, credential_id):
         ref = super(Ec2ControllerV3, self).get_credential(user_id,
                                                           credential_id)
-        return Ec2ControllerV3.wrap_member(context, ref['credential'])
+        return Ec2ControllerV3.wrap_member(request.context_dict,
+                                           ref['credential'])
 
     @controller.protected()
-    def ec2_list_credentials(self, context, user_id):
+    def ec2_list_credentials(self, request, user_id):
         refs = super(Ec2ControllerV3, self).get_credentials(user_id)
-        return Ec2ControllerV3.wrap_collection(context, refs['credentials'])
+        return Ec2ControllerV3.wrap_collection(request.context_dict,
+                                               refs['credentials'])
 
     @controller.protected()
-    def ec2_create_credential(self, context, user_id, tenant_id):
-        ref = super(Ec2ControllerV3, self).create_credential(context, user_id,
-                                                             tenant_id)
-        return Ec2ControllerV3.wrap_member(context, ref['credential'])
+    def ec2_create_credential(self, request, user_id, tenant_id):
+        ref = super(Ec2ControllerV3, self).create_credential(
+            request.context_dict, user_id, tenant_id)
+        return Ec2ControllerV3.wrap_member(request.context_dict,
+                                           ref['credential'])
 
     @controller.protected(callback=_check_credential_owner_and_user_id_match)
-    def ec2_delete_credential(self, context, user_id, credential_id):
+    def ec2_delete_credential(self, request, user_id, credential_id):
         return super(Ec2ControllerV3, self).delete_credential(user_id,
                                                               credential_id)
 
@@ -432,4 +436,6 @@ def render_token_data_response(token_id, token_data):
     headers = [('X-Subject-Token', token_id)]
 
     return wsgi.render_response(body=token_data,
-                                status=(200, 'OK'), headers=headers)
+                                status=(http_client.OK,
+                                        http_client.responses[http_client.OK]),
+                                headers=headers)

@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_config import cfg
 from oslo_log import log
 from oslo_serialization import jsonutils
 import six
@@ -21,6 +20,7 @@ from six.moves.urllib import parse
 from keystone.common import controller as common_controller
 from keystone.common import dependency
 from keystone.common import utils
+import keystone.conf
 from keystone import exception
 from keystone.federation import constants as federation_constants
 from keystone.i18n import _, _LE
@@ -29,7 +29,7 @@ from keystone.token import provider
 
 
 LOG = log.getLogger(__name__)
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 @dependency.requires('catalog_api', 'resource_api', 'assignment_api')
@@ -294,12 +294,12 @@ class V3TokenDataHelper(object):
                 user_id, project_id)
         return [self.role_api.get_role(role_id) for role_id in roles]
 
-    def populate_roles_for_groups(self, token_data, group_ids,
-                                  project_id=None, domain_id=None,
-                                  user_id=None):
+    def populate_roles_for_federated_user(self, token_data, group_ids,
+                                          project_id=None, domain_id=None,
+                                          user_id=None):
         """Populate roles basing on provided groups and project/domain.
 
-        Used for ephemeral users with dynamically assigned groups.
+        Used for federated users with dynamically assigned groups.
         This method does not return anything, yet it modifies token_data in
         place.
 
@@ -309,8 +309,7 @@ class V3TokenDataHelper(object):
         :param domain_id: domain ID to scope to
         :param user_id: user ID
 
-        :raises keystone.exception.Unauthorized: when no roles were found for a
-            (group_ids, project_id) or (group_ids, domain_id) pairs.
+        :raises keystone.exception.Unauthorized: when no roles were found
 
         """
         def check_roles(roles, user_id, project_id, domain_id):
@@ -335,6 +334,12 @@ class V3TokenDataHelper(object):
         roles = self.assignment_api.get_roles_for_groups(group_ids,
                                                          project_id,
                                                          domain_id)
+        roles = roles + self._get_roles_for_user(user_id, domain_id,
+                                                 project_id)
+
+        # remove duplicates
+        roles = [dict(t) for t in set([tuple(d.items()) for d in roles])]
+
         check_roles(roles, user_id, project_id, domain_id)
         token_data['roles'] = roles
 
@@ -347,6 +352,19 @@ class V3TokenDataHelper(object):
         if CONF.trust.enabled and trust and 'OS-TRUST:trust' not in token_data:
             trustor_user_ref = (self.identity_api.get_user(
                                 trust['trustor_user_id']))
+            trustee_user_ref = (self.identity_api.get_user(
+                                trust['trustee_user_id']))
+            try:
+                self.resource_api.assert_domain_enabled(
+                    trustor_user_ref['domain_id'])
+            except AssertionError:
+                raise exception.TokenNotFound(_('Trustor domain is disabled.'))
+            try:
+                self.resource_api.assert_domain_enabled(
+                    trustee_user_ref['domain_id'])
+            except AssertionError:
+                raise exception.TokenNotFound(_('Trustee domain is disabled.'))
+
             try:
                 self.identity_api.assert_user_enabled(trust['trustor_user_id'])
             except AssertionError:
@@ -485,8 +503,7 @@ class V3TokenDataHelper(object):
         if service_providers:
             token_data['service_providers'] = service_providers
 
-    def _populate_token_dates(self, token_data, expires=None, trust=None,
-                              issued_at=None):
+    def _populate_token_dates(self, token_data, expires=None, issued_at=None):
         if not expires:
             expires = provider.default_expire_time()
         if not isinstance(expires, six.string_types):
@@ -533,7 +550,7 @@ class V3TokenDataHelper(object):
             self._populate_service_catalog(token_data, user_id, domain_id,
                                            project_id, trust)
         self._populate_service_providers(token_data)
-        self._populate_token_dates(token_data, expires=expires, trust=trust,
+        self._populate_token_dates(token_data, expires=expires,
                                    issued_at=issued_at)
         self._populate_oauth_section(token_data, access_token)
         return {'token': token_data}
@@ -653,7 +670,7 @@ class BaseProvider(provider.Provider):
         }
 
         if project_id or domain_id:
-            self.v3_token_data_helper.populate_roles_for_groups(
+            self.v3_token_data_helper.populate_roles_for_federated_user(
                 token_data, group_ids, project_id, domain_id, user_id)
 
         return token_data

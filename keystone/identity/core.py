@@ -26,10 +26,10 @@ from oslo_log import versionutils
 from keystone import assignment  # TODO(lbragstad): Decouple this dependency
 from keystone.common import cache
 from keystone.common import clean
-from keystone.common import config
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _, _LW
 from keystone.identity.backends import base as identity_interface
@@ -39,7 +39,7 @@ from keystone.identity.shadow_backends import base as shadow_interface
 from keystone import notifications
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 LOG = log.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class DomainConfigs(dict):
         # config dict to make sure we call the right driver
         domain_config = {}
         domain_config['cfg'] = cfg.ConfigOpts()
-        config.configure(conf=domain_config['cfg'])
+        keystone.conf.configure(conf=domain_config['cfg'])
         domain_config['cfg'](args=[], project='keystone',
                              default_config_files=file_list)
         domain_config['driver'] = self._load_driver(domain_config)
@@ -254,7 +254,7 @@ class DomainConfigs(dict):
 
         domain_config = {}
         domain_config['cfg'] = cfg.ConfigOpts()
-        config.configure(conf=domain_config['cfg'])
+        keystone.conf.configure(conf=domain_config['cfg'])
         domain_config['cfg'](args=[], project='keystone',
                              default_config_files=[])
 
@@ -543,8 +543,8 @@ class Manager(manager.Manager):
           single domain/driver LDAP configurations were previously supported).
         - If the driver does support UUIDs, then we always create a mapping
           entry, but use the local UUID as the public ID.  The exception to
-        - this is that if we just have single driver (i.e. not using specific
-          multi-domain configs), then we don't both with the mapping at all.
+          this is that if we just have single driver (i.e. not using specific
+          multi-domain configs), then we don't bother with the mapping at all.
 
         """
         conf = CONF.identity
@@ -825,8 +825,11 @@ class Manager(manager.Manager):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
         ref = driver.authenticate(entity_id, password)
-        return self._set_domain_id_and_mapping(
+        ref = self._set_domain_id_and_mapping(
             ref, domain_id, driver, mapping.EntityType.USER)
+        ref = self._shadow_nonlocal_user(ref)
+        self.shadow_users_api.set_last_active_at(ref['id'])
+        return ref
 
     def _assert_default_project_id_is_not_domain(self, default_project_id):
         if default_project_id:
@@ -1226,6 +1229,13 @@ class Manager(manager.Manager):
         self.update_user(user_id, update_dict)
 
     @MEMOIZE
+    def _shadow_nonlocal_user(self, user):
+        try:
+            return self.shadow_users_api.get_user(user['id'])
+        except exception.UserNotFound:
+            return self.shadow_users_api.create_nonlocal_user(user)
+
+    @MEMOIZE
     def shadow_federated_user(self, idp_id, protocol_id, unique_id,
                               display_name):
         """Map a federated user to a user.
@@ -1252,6 +1262,7 @@ class Manager(manager.Manager):
             }
             user_dict = self.shadow_users_api.create_federated_user(
                 federated_dict)
+        self.shadow_users_api.set_last_active_at(user_dict['id'])
         return user_dict
 
 
@@ -1295,7 +1306,16 @@ class ShadowUsersManager(manager.Manager):
     driver_namespace = 'keystone.identity.shadow_users'
 
     def __init__(self):
-        super(ShadowUsersManager, self).__init__(CONF.shadow_users.driver)
+        shadow_driver = CONF.shadow_users.driver
+
+        super(ShadowUsersManager, self).__init__(shadow_driver)
+
+        if isinstance(self.driver, shadow_interface.ShadowUsersDriverV9):
+            self.driver = (
+                shadow_interface.V10ShadowUsersWrapperForV9Driver(self.driver))
+        elif not isinstance(self.driver,
+                            shadow_interface.ShadowUsersDriverV10):
+            raise exception.UnsupportedDriverVersion(driver=shadow_driver)
 
 
 @versionutils.deprecated(

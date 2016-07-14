@@ -16,20 +16,20 @@ import time
 import uuid
 
 from keystoneclient.common import cms
-from oslo_config import cfg
 from oslo_serialization import jsonutils
 import six
 from six.moves import http_client
 from testtools import matchers
 
 from keystone.common import extension as keystone_extension
+import keystone.conf
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit import rest
 from keystone.tests.unit.schema import v2
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class CoreApiTests(object):
@@ -1408,13 +1408,13 @@ class RevokeApiTestCase(V2TestCase):
             revoke_by_id=False)
 
     def test_fetch_revocation_list_admin_200(self):
-        self.skipTest('Revoke API disables revocation_list.')
+        self.skip_test_overrides('Revoke API disables revocation_list.')
 
     def test_fetch_revocation_list_md5(self):
-        self.skipTest('Revoke API disables revocation_list.')
+        self.skip_test_overrides('Revoke API disables revocation_list.')
 
     def test_fetch_revocation_list_sha256(self):
-        self.skipTest('Revoke API disables revocation_list.')
+        self.skip_test_overrides('Revoke API disables revocation_list.')
 
 
 class TestFernetTokenProviderV2(RestfulTestCase):

@@ -13,16 +13,16 @@
 import random
 import uuid
 
-from oslo_config import cfg
 from six.moves import http_client
 from six.moves import range
 from testtools import matchers
 
+import keystone.conf
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class AssignmentTestCase(test_v3.RestfulTestCase,
@@ -1633,10 +1633,10 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
                 'role_id': role1['id']})
         rs_role = self.get(collection_url_role)
         # Make sure all entities were created successfully
-        self.assertEqual(rs_domain.status_int, http_client.OK)
-        self.assertEqual(rs_project.status_int, http_client.OK)
-        self.assertEqual(rs_group.status_int, http_client.OK)
-        self.assertEqual(rs_user.status_int, http_client.OK)
+        self.assertEqual(http_client.OK, rs_domain.status_int)
+        self.assertEqual(http_client.OK, rs_project.status_int)
+        self.assertEqual(http_client.OK, rs_group.status_int)
+        self.assertEqual(http_client.OK, rs_user.status_int)
         # Make sure we can get back the correct number of entities
         self.assertValidRoleAssignmentListResponse(
             rs_domain,
@@ -2187,7 +2187,7 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
                  expected_status=http_client.BAD_REQUEST)
 
     def test_get_role_assignments_for_project_tree(self):
-        """Get role_assignment?scope.project.id=X?include_subtree``.
+        """Get role_assignment?scope.project.id=X&include_subtree``.
 
         Test Plan:
 
@@ -2255,7 +2255,7 @@ class AssignmentInheritanceTestCase(test_v3.RestfulTestCase,
         self.assertRoleAssignmentInListResponse(r, non_inher_entity_root)
 
     def test_get_effective_role_assignments_for_project_tree(self):
-        """Get role_assignment ?project_id=X?include_subtree=True?effective``.
+        """Get role_assignment ?project_id=X&include_subtree=True&effective``.
 
         Test Plan:
 
@@ -2437,17 +2437,20 @@ class ImpliedRolesTests(test_v3.RestfulTestCase, test_v3.AssignmentTestMixin,
     def _assert_expected_implied_role_response(
             self, expected_prior_id, expected_implied_ids):
         r = self.get('/roles/%s/implies' % expected_prior_id)
-        response = r.json["role_inference"]
-        self.assertEqual(expected_prior_id, response['prior_role']['id'])
+        response = r.json
+        role_inference = response['role_inference']
+        self.assertEqual(expected_prior_id, role_inference['prior_role']['id'])
+        prior_link = '/v3/roles/' + expected_prior_id + '/implies'
+        self.assertThat(response['links']['self'],
+                        matchers.EndsWith(prior_link))
 
-        actual_implied_ids = [implied['id'] for implied in response['implies']]
+        actual_implied_ids = [implied['id']
+                              for implied in role_inference['implies']]
 
-        for expected_id in expected_implied_ids:
-            self.assertIn(expected_id, actual_implied_ids)
-        self.assertEqual(len(expected_implied_ids), len(response['implies']))
+        self.assertItemsEqual(expected_implied_ids, actual_implied_ids)
 
-        self.assertIsNotNone(response['prior_role']['links']['self'])
-        for implied in response['implies']:
+        self.assertIsNotNone(role_inference['prior_role']['links']['self'])
+        for implied in role_inference['implies']:
             self.assertIsNotNone(implied['links']['self'])
 
     def _assert_two_roles_implied(self):

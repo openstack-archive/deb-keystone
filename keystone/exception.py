@@ -12,15 +12,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import encodeutils
 import six
 
+import keystone.conf
 from keystone.i18n import _, _LW
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 # Tests use this to make exception message format errors fatal
@@ -210,6 +210,10 @@ class AuthPluginException(Unauthorized):
 class MissingGroups(Unauthorized):
     message_format = _("Unable to find valid groups while using "
                        "mapping %(mapping_id)s")
+
+
+class UserDisabled(Unauthorized):
+    message_format = _("The account is disabled for user: %(user_id)s")
 
 
 class AuthMethodNotSupported(AuthPluginException):

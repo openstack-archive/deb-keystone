@@ -12,6 +12,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import json
+
+from six.moves import http_client
 from tempest import config
 from tempest.lib.common import rest_client
 
@@ -34,3 +37,41 @@ class Identity(rest_client.RestClient):
             SERVICE_TYPE,
             CONF.identity.region,
             endpoint_type='adminURL')
+
+
+class Federation(Identity):
+    """Tempest REST client for keystone's Federated Identity API."""
+
+    subpath_prefix = 'OS-FEDERATION'
+    subpath_suffix = None
+
+    def _build_path(self, entity_id=None):
+        subpath = '%s/%s' % (self.subpath_prefix, self.subpath_suffix)
+        return '%s/%s' % (subpath, entity_id) if entity_id else subpath
+
+    def _delete(self, entity_id, **kwargs):
+        url = self._build_path(entity_id)
+        resp, body = super(Federation, self).delete(url, **kwargs)
+        self.expected_success(http_client.NO_CONTENT, resp.status)
+        return rest_client.ResponseBody(resp, body)
+
+    def _get(self, entity_id=None, **kwargs):
+        url = self._build_path(entity_id)
+        resp, body = super(Federation, self).get(url, **kwargs)
+        self.expected_success(http_client.OK, resp.status)
+        body = json.loads(body)
+        return rest_client.ResponseBody(resp, body)
+
+    def _patch(self, entity_id, body, **kwargs):
+        url = self._build_path(entity_id)
+        resp, body = super(Federation, self).patch(url, body, **kwargs)
+        self.expected_success(http_client.OK, resp.status)
+        body = json.loads(body)
+        return rest_client.ResponseBody(resp, body)
+
+    def _put(self, entity_id, body, **kwargs):
+        url = self._build_path(entity_id)
+        resp, body = super(Federation, self).put(url, body, **kwargs)
+        self.expected_success(http_client.CREATED, resp.status)
+        body = json.loads(body)
+        return rest_client.ResponseBody(resp, body)

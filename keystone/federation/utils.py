@@ -21,11 +21,12 @@ from oslo_log import log
 from oslo_utils import timeutils
 import six
 
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _, _LW
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -268,6 +269,7 @@ def get_remote_id_parameter(protocol):
     try:
         remote_id_parameter = CONF[protocol]['remote_id_attribute']
     except AttributeError:
+        # TODO(dolph): Move configuration registration to keystone.conf
         CONF.register_opt(cfg.StrOpt('remote_id_attribute'),
                           group=protocol)
         try:
@@ -350,6 +352,8 @@ def validate_groups(group_ids, mapping_id, identity_api):
         is 0.
 
     """
+    # TODO(rderose): remove cardinality check, as federated users can now
+    #                receive direct role assignments
     validate_groups_cardinality(group_ids, mapping_id)
     validate_groups_in_backend(group_ids, mapping_id, identity_api)
 
@@ -422,10 +426,10 @@ def transform_to_group_ids(group_names, mapping_id,
                       group['name'])
 
 
-def get_assertion_params_from_env(context):
-    LOG.debug('Environment variables: %s', context['environment'])
+def get_assertion_params_from_env(request):
+    LOG.debug('Environment variables: %s', request.environ)
     prefix = CONF.federation.assertion_prefix
-    for k, v in list(context['environment'].items()):
+    for k, v in list(request.environ.items()):
         if not k.startswith(prefix):
             continue
         # These bytes may be decodable as ISO-8859-1 according to Section

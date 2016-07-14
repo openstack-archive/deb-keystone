@@ -13,10 +13,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_config import cfg
 from oslo_serialization import jsonutils
 from six.moves import range
 
+import keystone.conf
 from keystone.tests import unit
 from keystone.tests.unit import filtering
 from keystone.tests.unit import ksfixtures
@@ -24,7 +24,7 @@ from keystone.tests.unit.ksfixtures import temporaryfile
 from keystone.tests.unit import test_v3
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class IdentityTestFilteredCase(filtering.FilterTests,
@@ -272,7 +272,7 @@ class IdentityTestFilteredCase(filtering.FilterTests,
         url_by_name = '/users?name__endswith=of'
         r = self.get(url_by_name, auth=self.auth)
         self.assertEqual(1, len(r.result.get('users')))
-        self.assertEqual(r.result.get('users')[0]['id'], user_list[7]['id'])
+        self.assertEqual(user_list[7]['id'], r.result.get('users')[0]['id'])
 
         url_by_name = '/users?name__iendswith=OF'
         r = self.get(url_by_name, auth=self.auth)

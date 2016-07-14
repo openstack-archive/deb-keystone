@@ -345,11 +345,12 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
     def test_filter_list_services_by_name(self):
         """Call ``GET /services?name=<some name>``."""
-        target_ref = self._create_random_service()
-
         # create unrelated services
         self._create_random_service()
         self._create_random_service()
+
+        # create the desired service
+        target_ref = self._create_random_service()
 
         response = self.get('/services?name=' + target_ref['name'])
         self.assertValidServiceListResponse(response, ref=target_ref)
@@ -359,6 +360,12 @@ class CatalogTestCase(test_v3.RestfulTestCase):
 
         filtered_service = filtered_service_list[0]
         self.assertEqual(target_ref['name'], filtered_service['name'])
+
+    def test_filter_list_services_by_name_with_list_limit(self):
+        """Call ``GET /services?name=<some name>``."""
+        self.config_fixture.config(list_limit=1)
+
+        self.test_filter_list_services_by_name()
 
     def test_get_head_service(self):
         """Call ``GET & HEAD /services/{service_id}``."""
@@ -933,3 +940,36 @@ class TestCatalogAPISQLRegions(unit.TestCase):
         for k in keys:
             self.assertEqual(ref.get(k), entity[k], k)
         self.assertEqual(entity['region_id'], entity['region'])
+
+
+class TestCatalogAPITemplatedProject(test_v3.RestfulTestCase):
+    """Templated Catalog doesn't support full API.
+
+    Eg. No region/endpoint creation.
+
+    """
+
+    def config_overrides(self):
+        super(TestCatalogAPITemplatedProject, self).config_overrides()
+        self.config_fixture.config(group='catalog', driver='templated')
+
+    def load_fixtures(self, fixtures):
+        self.load_sample_data(create_region_and_endpoints=False)
+
+    def test_project_delete(self):
+        """Deleting a project should not result in an 500 ISE.
+
+        Deleting a project will create a notification, which the EndpointFilter
+        functionality will use to clean up any project->endpoint and
+        project->endpoint_group relationships. The templated catalog does not
+        support such relationships, but the act of attempting to delete them
+        should not cause a NotImplemented exception to be exposed to an API
+        caller.
+
+        Deleting an endpoint has a similar notification and clean up
+        mechanism, but since we do not allow deletion of endpoints with the
+        templated catalog, there is no testing to do for that action.
+        """
+        self.delete(
+            '/projects/%(project_id)s' % {
+                'project_id': self.project_id})

@@ -14,15 +14,13 @@
 
 import abc
 
-from oslo_config import cfg
-from oslo_log import log
 import six
 
+import keystone.conf
 from keystone import exception
 
 
-CONF = cfg.CONF
-LOG = log.getLogger(__name__)
+CONF = keystone.conf.CONF
 
 
 @six.add_metaclass(abc.ABCMeta)

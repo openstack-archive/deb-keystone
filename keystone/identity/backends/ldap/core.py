@@ -15,20 +15,20 @@ from __future__ import absolute_import
 import uuid
 
 import ldap.filter
-from oslo_config import cfg
 from oslo_log import log
 from oslo_log import versionutils
 import six
 
 from keystone.common import driver_hints
+import keystone.conf
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 from keystone.identity.backends import base
 from keystone.identity.backends.ldap import common as common_ldap
 from keystone.identity.backends.ldap import models
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 _DEPRECATION_MSG = _('%s for the LDAP identity backend has been deprecated in '
@@ -124,7 +124,15 @@ class Identity(base.IdentityDriverV8):
         user_dn = user['dn']
         groups = self.group.list_user_groups(user_dn)
         for group in groups:
-            self.group.remove_user(user_dn, group['id'], user_id)
+            group_ref = self.group.get(group['id'], '*')  # unfiltered
+            group_dn = group_ref['dn']
+            try:
+                super(GroupApi, self.group).remove_member(user_dn, group_dn)
+            except ldap.NO_SUCH_ATTRIBUTE:
+                LOG.warning(
+                    _LW('User %(user)s was not removed from group %(group)s '
+                        'because the relationship was not found'),
+                    {'user': user_id, 'group': group['id']})
 
         if hasattr(user, 'tenant_id'):
             self.project.remove_user(user.tenant_id, user_dn)
@@ -374,17 +382,15 @@ class GroupApi(common_ldap.BaseLdap):
     def list_user_groups(self, user_dn):
         """Return a list of groups for which the user is a member."""
         user_dn_esc = ldap.filter.escape_filter_chars(user_dn)
-        query = '(%s=%s)%s' % (self.member_attribute,
-                               user_dn_esc,
-                               self.ldap_filter or '')
+        query = '(%s=%s)' % (self.member_attribute,
+                             user_dn_esc)
         return self.get_all(query)
 
     def list_user_groups_filtered(self, user_dn, hints):
         """Return a filtered list of groups for which the user is a member."""
         user_dn_esc = ldap.filter.escape_filter_chars(user_dn)
-        query = '(%s=%s)%s' % (self.member_attribute,
-                               user_dn_esc,
-                               self.ldap_filter or '')
+        query = '(%s=%s)' % (self.member_attribute,
+                             user_dn_esc)
         return self.get_all_filtered(hints, query)
 
     def list_group_users(self, group_id):
@@ -416,6 +422,8 @@ class GroupApi(common_ldap.BaseLdap):
         return common_ldap.filter_entity(group)
 
     def get_all_filtered(self, hints, query=None):
+        if self.ldap_filter:
+            query = (query or '') + self.ldap_filter
         query = self.filter_query(hints, query)
         return [common_ldap.filter_entity(group)
                 for group in self.get_all(query, hints)]

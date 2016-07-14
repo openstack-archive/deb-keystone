@@ -13,7 +13,8 @@
 
 import fixtures
 
-from keystone.common import config as common_cfg
+from keystone import auth
+import keystone.conf
 
 
 class ConfigAuthPlugins(fixtures.Fixture):
@@ -29,6 +30,37 @@ class ConfigAuthPlugins(fixtures.Fixture):
         super(ConfigAuthPlugins, self).setUp()
         if self.methods:
             self.config_fixture.config(group='auth', methods=self.methods)
-            common_cfg.setup_authentication()
+            keystone.conf.auth.setup_authentication()
         if self.method_classes:
             self.config_fixture.config(group='auth', **self.method_classes)
+
+
+class LoadAuthPlugins(fixtures.Fixture):
+
+    def __init__(self, *method_names):
+        super(LoadAuthPlugins, self).__init__()
+        self.method_names = method_names
+        # NOTE(dstanek): This fixutre will load the requested auth
+        # methods as part of its setup. We need to save any exising
+        # plugins so that we care restore the in the cleanup.
+        self.saved = {}
+
+    def setUp(self):
+        super(LoadAuthPlugins, self).setUp()
+
+        AUTH_METHODS = auth.controllers.AUTH_METHODS
+        for method_name in self.method_names:
+            if method_name in AUTH_METHODS:
+                self.saved[method_name] = AUTH_METHODS[method_name]
+            AUTH_METHODS[method_name] = auth.controllers.load_auth_method(
+                method_name)
+        auth.controllers.AUTH_PLUGINS_LOADED = True
+
+    def cleanUp(self):
+        AUTH_METHODS = auth.controllers.AUTH_METHODS
+        for method_name in list(AUTH_METHODS):
+            if method_name in self.saved:
+                AUTH_METHODS[method_name] = self.saved[method_name]
+            else:
+                del AUTH_METHODS[method_name]
+        auth.controllers.AUTH_PLUGINS_LOADED = False

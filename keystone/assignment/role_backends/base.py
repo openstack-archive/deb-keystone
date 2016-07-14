@@ -14,17 +14,15 @@
 
 import abc
 
-from oslo_config import cfg
-from oslo_log import log
 from oslo_log import versionutils
 import six
 
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 
 
-CONF = cfg.CONF
-LOG = log.getLogger(__name__)
+CONF = keystone.conf.CONF
 
 
 # The RoleDriverBase class is the set of driver methods from earlier

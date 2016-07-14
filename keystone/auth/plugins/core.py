@@ -14,15 +14,15 @@
 
 import sys
 
-from oslo_config import cfg
 from oslo_log import log
 import six
 
 from keystone.common import dependency
+import keystone.conf
 from keystone import exception
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -147,7 +147,7 @@ class BaseUserInfo(object):
             else:
                 domain_ref = self.resource_api.get_domain(domain_id)
         except exception.DomainNotFound as e:
-            LOG.exception(six.text_type(e))
+            LOG.warning(six.text_type(e))
             raise exception.Unauthorized(e)
         self._assert_domain_is_enabled(domain_ref)
         return domain_ref
@@ -177,7 +177,7 @@ class BaseUserInfo(object):
                     user_ref['domain_id'])
                 self._assert_domain_is_enabled(domain_ref)
         except exception.UserNotFound as e:
-            LOG.exception(six.text_type(e))
+            LOG.warning(six.text_type(e))
             raise exception.Unauthorized(e)
         self._assert_user_is_enabled(user_ref)
         self.user_ref = user_ref

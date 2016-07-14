@@ -20,7 +20,7 @@ import datetime
 import sys
 import uuid
 
-from oslo_config import cfg
+from oslo_cache import core as oslo_cache
 from oslo_log import log
 from oslo_utils import timeutils
 import six
@@ -28,6 +28,7 @@ import six
 from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import manager
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _, _LE
 from keystone.models import token_model
@@ -37,9 +38,13 @@ from keystone.token import providers
 from keystone.token import utils
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
-MEMOIZE = cache.get_memoization_decorator(group='token')
+
+TOKENS_REGION = oslo_cache.create_region()
+MEMOIZE_TOKENS = cache.get_memoization_decorator(
+    group='token',
+    region=TOKENS_REGION)
 
 # NOTE(morganfainberg): This is for compatibility in case someone was relying
 # on the old location of the UnsupportedTokenVersionException for their code.
@@ -287,32 +292,36 @@ class Manager(manager.Manager):
             LOG.debug('Unable to validate token: %s', e)
             raise exception.TokenNotFound(token_id=token_id)
 
-    @MEMOIZE
+    @MEMOIZE_TOKENS
+    def validate_non_persistent_token(self, token_id):
+        return self.driver.validate_non_persistent_token(token_id)
+
+    @MEMOIZE_TOKENS
     def _validate_token(self, token_id):
         if not token_id:
             raise exception.TokenNotFound(_('No token in the request'))
 
-        if not self._needs_persistence:
-            # NOTE(lbragstad): This will validate v2 and v3 non-persistent
-            # tokens.
-            return self.driver.validate_non_persistent_token(token_id)
-        token_ref = self._persistence.get_token(token_id)
-        version = self.get_token_version(token_ref)
-        if version == self.V3:
-            try:
+        try:
+            if not self._needs_persistence:
+                # NOTE(lbragstad): This will validate v2 and v3 non-persistent
+                # tokens.
+                return self.driver.validate_non_persistent_token(token_id)
+            token_ref = self._persistence.get_token(token_id)
+            version = self.get_token_version(token_ref)
+            if version == self.V3:
                 return self.driver.validate_v3_token(token_ref)
-            except exception.Unauthorized as e:
-                LOG.debug('Unable to validate token: %s', e)
-                raise exception.TokenNotFound(token_id=token_id)
-        elif version == self.V2:
+        except exception.Unauthorized as e:
+            LOG.debug('Unable to validate token: %s', e)
+            raise exception.TokenNotFound(token_id=token_id)
+        if version == self.V2:
             return self.driver.validate_v2_token(token_ref)
         raise exception.UnsupportedTokenVersionException()
 
-    @MEMOIZE
+    @MEMOIZE_TOKENS
     def _validate_v2_token(self, token_id):
         return self.driver.validate_v2_token(token_id)
 
-    @MEMOIZE
+    @MEMOIZE_TOKENS
     def _validate_v3_token(self, token_id):
         return self.driver.validate_v3_token(token_id)
 
@@ -427,6 +436,10 @@ class Manager(manager.Manager):
         self._validate_token.invalidate(self, token_id)
         self._validate_v2_token.invalidate(self, token_id)
         self._validate_v3_token.invalidate(self, token_id)
+        # This method isn't actually called in the case of non-persistent
+        # tokens, but we include the invalidation in case this ever changes
+        # in the future.
+        self.validate_non_persistent_token.invalidate(self, token_id)
 
     def revoke_token(self, token_id, revoke_chain=False):
         token_ref = token_model.KeystoneToken(

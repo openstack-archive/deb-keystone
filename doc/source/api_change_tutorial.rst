@@ -101,7 +101,7 @@ created? You need to migrate their database schema!
 
 The directory `keystone/common/sql/migrate_repo/versions` owns all the
 migrations since keystone day 1. Create a new file there with the next
-migration number. For example, if the lastest migration number there is `101`,
+migration number. For example, if the latest migration number there is `101`,
 create yours as `102_add_role_description.py`, which will look like::
 
     def upgrade(migrate_engine):
@@ -155,20 +155,9 @@ representation or not. Role create and role update schemas are available at
 
 You will need to update their properties to include a `description` attribute::
 
-    role_create = {
-        'properties': {
-            'name': parameter_types.name,
-            'description': parameter_types.description
-        }
-        ...
-    }
-
-    role_update = {
-        'properties': {
-            'name': parameter_types.name,
-            'description': parameter_types.description
-        }
-        ...
+    _role_properties = {
+        'name': parameter_types.name,
+        'description': parameter_types.description
     }
 
 Besides doing the entity validation using such schemas, controllers pass and

@@ -17,16 +17,16 @@ import os
 import uuid
 
 import mock
-from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 
+import keystone.conf
 from keystone import exception
 from keystone import identity
 from keystone.tests import unit
 from keystone.tests.unit.ksfixtures import database
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class TestDomainConfigs(unit.BaseTestCase):
@@ -164,8 +164,10 @@ class TestDatabaseDomainConfigs(unit.TestCase):
 
         # Now turn off using database domain configuration and check that the
         # default config file values are now seen instead of the overrides.
-        CONF.set_override('domain_configurations_from_database', False,
-                          'identity', enforce_type=True)
+        self.config_fixture.config(
+            group='identity',
+            domain_configurations_from_database=False)
+
         domain_config = identity.DomainConfigs()
         domain_config.setup_domain_drivers(fake_standard_driver,
                                            self.resource_api)
@@ -174,3 +176,51 @@ class TestDatabaseDomainConfigs(unit.TestCase):
         self.assertEqual(CONF.ldap.suffix, res.ldap.suffix)
         self.assertEqual(CONF.ldap.use_tls, res.ldap.use_tls)
         self.assertEqual(CONF.ldap.query_scope, res.ldap.query_scope)
+
+
+class TestShadowUsers(unit.TestCase):
+
+    def setUp(self):
+        super(TestShadowUsers, self).setUp()
+        self.useFixture(database.Database())
+        self.load_backends()
+
+    def test_shadow_federated_user(self):
+        fed_user = unit.new_federated_user_ref()
+        user = (
+            self.identity_api.shadow_federated_user(fed_user['idp_id'],
+                                                    fed_user['protocol_id'],
+                                                    fed_user['unique_id'],
+                                                    fed_user['display_name'])
+        )
+        self.assertIsNotNone(user['id'])
+        self.assertEqual(4, len(user.keys()))
+        self.assertIsNotNone(user['name'])
+        self.assertIsNone(user['domain_id'])
+        self.assertEqual(True, user['enabled'])
+
+    def test_shadow_existing_federated_user(self):
+        fed_user = unit.new_federated_user_ref()
+
+        # introduce the user to keystone for the first time
+        shadow_user1 = self.identity_api.shadow_federated_user(
+            fed_user['idp_id'],
+            fed_user['protocol_id'],
+            fed_user['unique_id'],
+            fed_user['display_name'])
+        self.assertEqual(fed_user['display_name'], shadow_user1['name'])
+
+        # shadow the user again, with another name to invalidate the cache
+        # internally, this operation causes request to the driver. It should
+        # not fail.
+        fed_user['display_name'] = uuid.uuid4().hex
+        shadow_user2 = self.identity_api.shadow_federated_user(
+            fed_user['idp_id'],
+            fed_user['protocol_id'],
+            fed_user['unique_id'],
+            fed_user['display_name'])
+        self.assertEqual(fed_user['display_name'], shadow_user2['name'])
+        self.assertNotEqual(shadow_user1['name'], shadow_user2['name'])
+
+        # The shadowed users still share the same unique ID.
+        self.assertEqual(shadow_user1['id'], shadow_user2['id'])

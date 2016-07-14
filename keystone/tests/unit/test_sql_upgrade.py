@@ -38,7 +38,6 @@ import migrate
 from migrate.versioning import api as versioning_api
 from migrate.versioning import repository
 import mock
-from oslo_config import cfg
 from oslo_db import exception as db_exception
 from oslo_db.sqlalchemy import migration
 from oslo_db.sqlalchemy import test_base
@@ -48,13 +47,14 @@ from testtools import matchers
 
 from keystone.common import sql
 from keystone.common.sql import migration_helpers
+import keystone.conf
 from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import default_fixtures
 from keystone.tests.unit.ksfixtures import database
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 # NOTE(morganfainberg): This should be updated when each DB migration collapse
 # is done to mirror the expected structure of the DB in the format of
@@ -1053,6 +1053,31 @@ class SqlUpgradeTests(SqlMigrateBase):
         migrate.UniqueConstraint(role_table.c.name,
                                  name=constraint_name).drop()
 
+    def _add_unique_constraint_to_user_name_domainid(
+            self,
+            constraint_name='ixu_role_name'):
+        meta = sqlalchemy.MetaData()
+        meta.bind = self.engine
+        user_table = sqlalchemy.Table('user', meta, autoload=True)
+        migrate.UniqueConstraint(user_table.c.name, user_table.c.domain_id,
+                                 name=constraint_name).create()
+
+    def _add_name_domain_id_columns_to_user(self):
+        meta = sqlalchemy.MetaData()
+        meta.bind = self.engine
+        user_table = sqlalchemy.Table('user', meta, autoload=True)
+        column_name = sqlalchemy.Column('name', sql.String(255))
+        column_domain_id = sqlalchemy.Column('domain_id', sql.String(64))
+        user_table.create_column(column_name)
+        user_table.create_column(column_domain_id)
+
+    def _drop_unique_constraint_to_user_name_domainid(
+            self,
+            constraint_name='ixu_user_name_domain_id'):
+        user_table = sqlalchemy.Table('user', self.metadata, autoload=True)
+        migrate.UniqueConstraint(user_table.c.name, user_table.c.domain_id,
+                                 name=constraint_name).drop()
+
     def test_migration_88_drops_unique_constraint(self):
         self.upgrade(87)
         if self.engine.name == 'mysql':
@@ -1094,6 +1119,58 @@ class SqlUpgradeTests(SqlMigrateBase):
             self.assertFalse(self.does_constraint_exist('role',
                                                         'ixu_role_name'))
 
+    def test_migration_91_drops_unique_constraint(self):
+        self.upgrade(90)
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist('user',
+                                                  'ixu_user_name_domain_id'))
+        else:
+            self.assertTrue(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        self.upgrade(91)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+    def test_migration_91_inconsistent_constraint_name(self):
+        self.upgrade(90)
+        self._drop_unique_constraint_to_user_name_domainid()
+
+        constraint_name = uuid.uuid4().hex
+        self._add_unique_constraint_to_user_name_domainid(
+            constraint_name=constraint_name)
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist('user', constraint_name))
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertTrue(self.does_constraint_exist('user',
+                                                       constraint_name))
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+        self.upgrade(91)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('user', constraint_name))
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist('user',
+                                                        constraint_name))
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
     def test_migration_96(self):
         self.upgrade(95)
         if self.engine.name == 'mysql':
@@ -1125,6 +1202,72 @@ class SqlUpgradeTests(SqlMigrateBase):
         else:
             self.assertFalse(self.does_constraint_exist('role',
                                                         'ixu_role_name'))
+
+    def test_migration_97(self):
+        self.upgrade(96)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+        self.upgrade(97)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+    def test_migration_97_constraint_exists(self):
+        self.upgrade(96)
+        self._add_name_domain_id_columns_to_user()
+        self._add_unique_constraint_to_user_name_domainid(
+            constraint_name='ixu_user_name_domain_id')
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertTrue(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+        self.upgrade(97)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+    def test_migration_97_inconsistent_constraint_exists(self):
+        self.upgrade(96)
+        constraint_name = uuid.uuid4().hex
+        self._add_name_domain_id_columns_to_user()
+        self._add_unique_constraint_to_user_name_domainid(
+            constraint_name=constraint_name)
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist('user', constraint_name))
+        else:
+            self.assertTrue(self.does_constraint_exist('user',
+                                                       constraint_name))
+
+        self.upgrade(97)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('user', constraint_name))
+        else:
+            self.assertFalse(self.does_constraint_exist('user',
+                                                        constraint_name))
 
     def test_migration_101(self):
         self.upgrade(100)
@@ -1161,6 +1304,164 @@ class SqlUpgradeTests(SqlMigrateBase):
         self.assertTableExists('domain')
         self.upgrade(102)
         self.assertTableDoesNotExist('domain')
+
+    def test_add_nonlocal_user_table(self):
+        nonlocal_user_table = 'nonlocal_user'
+        self.upgrade(102)
+        self.assertTableDoesNotExist(nonlocal_user_table)
+        self.upgrade(103)
+        self.assertTableColumns(nonlocal_user_table,
+                                ['domain_id',
+                                 'name',
+                                 'user_id'])
+
+    def test_migration_104(self):
+        self.upgrade(103)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+        self.upgrade(104)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+    def test_migration_104_constraint_exists(self):
+        self.upgrade(103)
+        self._add_name_domain_id_columns_to_user()
+        self._add_unique_constraint_to_user_name_domainid(
+            constraint_name='ixu_user_name_domain_id')
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertTrue(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+        self.upgrade(104)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+        else:
+            self.assertFalse(self.does_constraint_exist(
+                'user',
+                'ixu_user_name_domain_id'))
+
+    def test_migration_104_inconsistent_constraint_exists(self):
+        self.upgrade(103)
+        constraint_name = uuid.uuid4().hex
+        self._add_name_domain_id_columns_to_user()
+        self._add_unique_constraint_to_user_name_domainid(
+            constraint_name=constraint_name)
+
+        if self.engine.name == 'mysql':
+            self.assertTrue(self.does_index_exist('user', constraint_name))
+        else:
+            self.assertTrue(self.does_constraint_exist('user',
+                                                       constraint_name))
+
+        self.upgrade(104)
+        if self.engine.name == 'mysql':
+            self.assertFalse(self.does_index_exist('user', constraint_name))
+        else:
+            self.assertFalse(self.does_constraint_exist('user',
+                                                        constraint_name))
+
+    def test_migration_105_add_password_date_columns(self):
+        def add_user_model_record(session):
+            # add a user
+            user = {'id': uuid.uuid4().hex}
+            self.insert_dict(session, 'user', user)
+            # add a local user
+            local_user = {
+                'id': 1,
+                'user_id': user['id'],
+                'domain_id': 'default',
+                'name': uuid.uuid4().hex
+            }
+            self.insert_dict(session, 'local_user', local_user)
+            # add a password
+            password = {
+                'local_user_id': local_user['id'],
+                'password': uuid.uuid4().hex
+            }
+            self.insert_dict(session, 'password', password)
+        self.upgrade(104)
+        session = self.sessionmaker()
+        password_name = 'password'
+        # columns before
+        self.assertTableColumns(password_name,
+                                ['id',
+                                 'local_user_id',
+                                 'password'])
+        # add record and verify table count is greater than zero
+        add_user_model_record(session)
+        password_table = sqlalchemy.Table(password_name, self.metadata,
+                                          autoload=True)
+        cnt = session.query(password_table).count()
+        self.assertGreater(cnt, 0)
+        self.metadata.clear()
+        self.upgrade(105)
+        # columns after
+        self.assertTableColumns(password_name,
+                                ['id',
+                                 'local_user_id',
+                                 'password',
+                                 'created_at',
+                                 'expires_at'])
+        password_table = sqlalchemy.Table(password_name, self.metadata,
+                                          autoload=True)
+        # verify created_at is not null
+        null_created_at_cnt = (
+            session.query(password_table).filter_by(created_at=None).count())
+        self.assertEqual(null_created_at_cnt, 0)
+        # verify expires_at is null
+        null_expires_at_cnt = (
+            session.query(password_table).filter_by(expires_at=None).count())
+        self.assertGreater(null_expires_at_cnt, 0)
+
+    def test_migration_106_allow_password_column_to_be_nullable(self):
+        password_table_name = 'password'
+        self.upgrade(105)
+        password_table = sqlalchemy.Table(password_table_name, self.metadata,
+                                          autoload=True)
+        self.assertFalse(password_table.c.password.nullable)
+        self.metadata.clear()
+        self.upgrade(106)
+        password_table = sqlalchemy.Table(password_table_name, self.metadata,
+                                          autoload=True)
+        self.assertTrue(password_table.c.password.nullable)
+
+    def test_migration_107_add_user_date_columns(self):
+        user_table = 'user'
+        self.upgrade(106)
+        self.assertTableColumns(user_table,
+                                ['id',
+                                 'extra',
+                                 'enabled',
+                                 'default_project_id'])
+        self.upgrade(107)
+        self.assertTableColumns(user_table,
+                                ['id',
+                                 'extra',
+                                 'enabled',
+                                 'default_project_id',
+                                 'created_at',
+                                 'last_active_at'])
 
 
 class MySQLOpportunisticUpgradeTestCase(SqlUpgradeTests):

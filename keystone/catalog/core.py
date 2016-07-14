@@ -16,8 +16,6 @@
 """Main entry point into the Catalog service."""
 
 from oslo_cache import core as oslo_cache
-from oslo_config import cfg
-from oslo_log import log
 from oslo_log import versionutils
 
 from keystone.catalog.backends import base
@@ -25,13 +23,13 @@ from keystone.common import cache
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 from keystone import notifications
 
 
-CONF = cfg.CONF
-LOG = log.getLogger(__name__)
+CONF = keystone.conf.CONF
 
 
 # This is a general cache region for catalog administration (CRUD operations).
@@ -251,6 +249,14 @@ class Manager(manager.Manager):
             endpoint_group_id, project_id)
         COMPUTED_CATALOG_REGION.invalidate()
 
+    def delete_endpoint_group_association_by_project(self, project_id):
+        try:
+            self.driver.delete_endpoint_group_association_by_project(
+                project_id)
+        except exception.NotImplemented:
+            # Some catalog drivers don't support this
+            pass
+
     def get_endpoint_groups_for_project(self, project_id):
         # recover the project endpoint group memberships and for each
         # membership recover the endpoint group
@@ -310,6 +316,20 @@ class Manager(manager.Manager):
                     filtered_endpoints[endpoint_ref['id']] = endpoint_ref
 
         return filtered_endpoints
+
+    def delete_association_by_endpoint(self, endpoint_id):
+        try:
+            self.driver.delete_association_by_endpoint(endpoint_id)
+        except exception.NotImplemented:
+            # Some catalog drivers don't support this
+            pass
+
+    def delete_association_by_project(self, project_id):
+        try:
+            self.driver.delete_association_by_project(project_id)
+        except exception.NotImplemented:
+            # Some catalog drivers don't support this
+            pass
 
 
 @versionutils.deprecated(

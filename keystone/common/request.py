@@ -10,17 +10,23 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_config import cfg
-import webob
+import logging
 
+import webob
+from webob.descriptors import environ_getter
+
+from keystone.common import authorization
+from keystone.common import context
+import keystone.conf
 from keystone import exception
-from keystone.i18n import _
+from keystone.i18n import _, _LW
 
 
 # Environment variable used to pass the request context
 CONTEXT_ENV = 'openstack.context'
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
+LOG = logging.getLogger(__name__)
 
 
 class Request(webob.Request):
@@ -31,15 +37,15 @@ class Request(webob.Request):
         # allow middleware up the stack to provide context, params and headers.
         context = self.environ.get(CONTEXT_ENV, {})
 
+        # NOTE(jamielennox): The webob package throws UnicodeError when a
+        # param cannot be decoded. If we make webob iterate them now we can
+        # catch this and throw an error early rather than on access.
         try:
-            context['query_string'] = dict(self.params.items())
+            self.params.items()
         except UnicodeDecodeError:
-            # The webob package throws UnicodeError when a request cannot be
-            # decoded. Raise ValidationError instead to avoid an UnknownError.
             msg = _('Query string is not UTF-8 encoded')
             raise exception.ValidationError(msg)
 
-        context['headers'] = dict(self.headers.items())
         context['path'] = self.environ['PATH_INFO']
         scheme = self.environ.get(CONF.secure_proxy_ssl_header)
         if scheme:
@@ -55,7 +61,6 @@ class Request(webob.Request):
         # values by the container and processed by the pipeline. The complete
         # set is not yet known.
         context['environment'] = self.environ
-        context['accept_header'] = self.accept
 
         context.setdefault('is_admin', False)
         return context
@@ -66,3 +71,25 @@ class Request(webob.Request):
             self._context_dict = self._get_context_dict()
 
         return self._context_dict
+
+    @property
+    def auth_context(self):
+        return self.environ.get(authorization.AUTH_CONTEXT_ENV, {})
+
+    def assert_authenticated(self):
+        """Ensure that the current request has been authenticated."""
+        if not self.context:
+            LOG.warning(_LW('An authenticated call was made and there is '
+                            'no request.context. This means the '
+                            'auth_context middleware is not in place. You '
+                            'must have this middleware in your pipeline '
+                            'to perform authenticated calls'))
+            raise exception.Unauthorized()
+
+        if not self.context.authenticated:
+            # auth_context didn't decode anything we can use
+            raise exception.Unauthorized()
+
+    auth_type = environ_getter('AUTH_TYPE', None)
+    remote_domain = environ_getter('REMOTE_DOMAIN', None)
+    context = environ_getter(context.REQUEST_CONTEXT_ENV, None)

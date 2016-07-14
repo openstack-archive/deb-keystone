@@ -1,8 +1,8 @@
 .. -*- rst -*-
 
-==================================================
-Authentication and token management (auth, tokens)
-==================================================
+=====================================
+ Authentication and token management
+=====================================
 
 In exchange for a set of authentication credentials, the Identity
 service generates tokens. A token represents the authenticated
@@ -16,8 +16,8 @@ scope. You can scope a token to a project or domain, or the token
 can be unscoped. You cannot scope a token to both a project and
 domain.
 
-Tokens have IDs, which the Identity API returns in the ``X-Subject-
-Token`` response header.
+Tokens have IDs, which the Identity API returns in the
+``X-Subject-Token`` response header.
 
 Also, validates an authentication token and lists the domains,
 projects, roles, and endpoints to which the token gives access.
@@ -96,7 +96,8 @@ The request body must include a payload that specifies the
 authentication method, which is ``password``, and the user, by ID
 or name, and password credentials.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -148,7 +149,8 @@ The request body must include a payload that specifies the
 ``password`` authentication method, the credentials, and the
 ``project`` or ``domain`` authorization scope.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -209,7 +211,8 @@ The request body must include a payload that specifies the
 ``password`` authentication method, the credentials, and the
 ``unscoped`` authorization scope.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -260,7 +263,8 @@ Authenticates an identity and generates a token. Uses the token authentication m
 
 In the request body, provide the token ID.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -299,7 +303,8 @@ Authenticates an identity and generates a token. Uses the token authentication m
 In the request body, provide the token ID and the ``project`` or
 ``domain`` authorization scope.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -343,7 +348,7 @@ Pass the token that you want to validate in the ``X-Subject-Token``
 request header.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+Error response codes: 413,405,404,403,401,400,503
 
 Request
 -------
@@ -399,7 +404,7 @@ indicates that the ``X-Subject-Token`` is valid.
 
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+Error response codes: 413,405,404,403,401,400,503
 
 Request
 -------
@@ -419,10 +424,11 @@ Revokes a token.
 
 This call is similar to the HEAD ``/auth/tokens`` call except that
 the ``X-Subject-Token`` token is immediately not valid, regardless
-of the ``expires_at`` attribute value. An additional ``X-Auth-
-Token`` is not required.
+of the ``expires_at`` attribute value. An additional
+``X-Auth-Token`` is not required.
 
-Error response codes:413,415,405,404,403,401,400,503,409,
+Normal response codes: 204
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------

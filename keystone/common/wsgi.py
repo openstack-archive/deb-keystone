@@ -24,7 +24,6 @@ import itertools
 import re
 import wsgiref.util
 
-from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log
 from oslo_serialization import jsonutils
@@ -32,6 +31,7 @@ from oslo_utils import importutils
 from oslo_utils import strutils
 import routes.middleware
 import six
+from six.moves import http_client
 import webob.dec
 import webob.exc
 
@@ -39,6 +39,7 @@ from keystone.common import dependency
 from keystone.common import json_home
 from keystone.common import request as request_mod
 from keystone.common import utils
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LI
@@ -46,7 +47,7 @@ from keystone.i18n import _LW
 from keystone.models import token_model
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 # Environment variable used to pass the request context
@@ -91,27 +92,31 @@ def validate_token_bind(context, token_ref):
 
     for bind_type, identifier in bind.items():
         if bind_type == 'kerberos':
-            if not (context['environment'].get('AUTH_TYPE', '').lower()
-                    == 'negotiate'):
-                LOG.info(_LI("Kerberos credentials required and not present"))
-                raise exception.Unauthorized()
+            if (context['environment'].get('AUTH_TYPE', '').lower() !=
+                    'negotiate'):
+                msg = _('Kerberos credentials required and not present')
+                LOG.info(msg)
+                raise exception.Unauthorized(msg)
 
-            if not context['environment'].get('REMOTE_USER') == identifier:
-                LOG.info(_LI("Kerberos credentials do not match "
-                             "those in bind"))
-                raise exception.Unauthorized()
+            if context['environment'].get('REMOTE_USER') != identifier:
+                msg = _('Kerberos credentials do not match those in bind')
+                LOG.info(msg)
+                raise exception.Unauthorized(msg)
 
-            LOG.info(_LI("Kerberos bind authentication successful"))
+            LOG.info(_LI('Kerberos bind authentication successful'))
 
         elif bind_mode == 'permissive':
-            LOG.debug(("Ignoring unknown bind for permissive mode: "
-                       "{%(bind_type)s: %(identifier)s}"),
-                      {'bind_type': bind_type, 'identifier': identifier})
+            LOG.debug(("Ignoring unknown bind (due to permissive mode): "
+                       "{%(bind_type)s: %(identifier)s}"), {
+                           'bind_type': bind_type,
+                           'identifier': identifier})
         else:
-            LOG.info(_LI("Couldn't verify unknown bind: "
-                         "{%(bind_type)s: %(identifier)s}"),
-                     {'bind_type': bind_type, 'identifier': identifier})
-            raise exception.Unauthorized()
+            msg = _('Could not verify unknown bind: {%(bind_type)s: '
+                    '%(identifier)s}') % {
+                        'bind_type': bind_type,
+                        'identifier': identifier}
+            LOG.info(msg)
+            raise exception.Unauthorized(msg)
 
 
 def best_match_language(req):
@@ -219,7 +224,7 @@ class Application(BaseApplication):
         params = self._normalize_dict(params)
 
         try:
-            result = method(req.context_dict, **params)
+            result = method(req, **params)
         except exception.Unauthorized as e:
             LOG.warning(
                 _LW("Authorization failed. %(exception)s from "
@@ -245,7 +250,9 @@ class Application(BaseApplication):
                                     user_locale=best_match_language(req))
 
         if result is None:
-            return render_response(status=(204, 'No Content'))
+            return render_response(
+                status=(http_client.NO_CONTENT,
+                        http_client.responses[http_client.NO_CONTENT]))
         elif isinstance(result, six.string_types):
             return result
         elif isinstance(result, webob.Response):
@@ -263,7 +270,8 @@ class Application(BaseApplication):
         controller = importutils.import_class('keystone.common.controller')
         code = None
         if isinstance(self, controller.V3Controller) and req_method == 'POST':
-            code = (201, 'Created')
+            code = (http_client.CREATED,
+                    http_client.responses[http_client.CREATED])
         return code
 
     def _normalize_arg(self, arg):
@@ -272,7 +280,7 @@ class Application(BaseApplication):
     def _normalize_dict(self, d):
         return {self._normalize_arg(k): v for (k, v) in d.items()}
 
-    def assert_admin(self, context):
+    def assert_admin(self, request):
         """Ensure the user is an admin.
 
         :raises keystone.exception.Unauthorized: if a token could not be
@@ -282,10 +290,10 @@ class Application(BaseApplication):
             does not have the admin role
 
         """
-        if not context['is_admin']:
-            user_token_ref = utils.get_token_ref(context)
+        if not request.context.is_admin:
+            user_token_ref = utils.get_token_ref(request.context_dict)
 
-            validate_token_bind(context, user_token_ref)
+            validate_token_bind(request.context_dict, user_token_ref)
             creds = copy.deepcopy(user_token_ref.metadata)
 
             try:
@@ -695,7 +703,7 @@ class V3ExtensionRouter(ExtensionRouter, RoutersBase):
 
         response = request.get_response(self.application)
 
-        if response.status_code != 200:
+        if response.status_code != http_client.OK:
             # The request failed, so don't update the response.
             return response
 
@@ -721,7 +729,8 @@ def render_response(body=None, status=None, headers=None, method=None):
 
     if body is None:
         body = b''
-        status = status or (204, 'No Content')
+        status = status or (http_client.NO_CONTENT,
+                            http_client.responses[http_client.NO_CONTENT])
     else:
         content_types = [v for h, v in headers if h == 'Content-Type']
         if content_types:
@@ -733,7 +742,8 @@ def render_response(body=None, status=None, headers=None, method=None):
             body = jsonutils.dump_as_bytes(body, cls=utils.SmarterEncoder)
             if content_type is None:
                 headers.append(('Content-Type', 'application/json'))
-        status = status or (200, 'OK')
+        status = status or (http_client.OK,
+                            http_client.responses[http_client.OK])
 
     # NOTE(davechen): `mod_wsgi` follows the standards from pep-3333 and
     # requires the value in response header to be binary type(str) on python2,
@@ -766,7 +776,7 @@ def render_response(body=None, status=None, headers=None, method=None):
     headers = _convert_to_str(headers)
 
     resp = webob.Response(body=body,
-                          status='%s %s' % status,
+                          status='%d %s' % status,
                           headerlist=headers)
 
     if method and method.upper() == 'HEAD':
@@ -805,7 +815,7 @@ def render_exception(error, context=None, request=None, user_locale=None):
         body['error']['identity'] = error.authentication
     elif isinstance(error, exception.Unauthorized):
         # NOTE(gyee): we only care about the request environment in the
-        # context. Also, its OK to pass the environemt as it is read-only in
+        # context. Also, its OK to pass the environment as it is read-only in
         # Application.base_url()
         local_context = {}
         if request:

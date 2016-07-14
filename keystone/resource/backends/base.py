@@ -15,17 +15,17 @@
 import abc
 import copy
 
-from oslo_config import cfg
 from oslo_log import log
 from oslo_log import versionutils
 import six
 
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 from keystone.i18n import _LE
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -516,7 +516,7 @@ class V9ResourceWrapperForV8Driver(ResourceDriverV9):
 
         If the filter includes domain_id==None, then we should only list
         domains (convert to a project acting as a domain) since regular
-        projcets always have a non-None value for domain_id.
+        projects always have a non-None value for domain_id.
 
         Likewise, if the filter includes domain_id==<non-None value>, then we
         should only list projects.

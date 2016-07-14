@@ -1,8 +1,8 @@
 .. -*- rst -*-
 
-=======================================
-Domains (domains, users, groups, roles)
-=======================================
+=========
+ Domains
+=========
 
 A domain is a collection of users, groups, and projects. Each group
 and project is owned by exactly one domain.
@@ -31,7 +31,7 @@ List domains
 Lists all domains.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+Error response codes: 413,405,404,403,401,400,503
 
 Request
 -------
@@ -67,7 +67,8 @@ Create domain
 
 Creates a domain.
 
-Error response codes:201,413,415,405,404,403,401,400,503,409,
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -106,7 +107,7 @@ Show domain details
 Shows details for a domain.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+Error response codes: 413,405,404,403,401,400,503
 
 Request
 -------
@@ -142,7 +143,7 @@ Update domain
 Updates a domain.
 
 Normal response codes: 200
-Error response codes:413,415,405,404,403,401,400,503,409,
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------
@@ -201,7 +202,8 @@ hierarchy tree is not allowed and fails with a ``Bad Request
 If you try to delete an enabled domain, this call returns the
 ``Forbidden (403)`` response code.
 
-Error response codes:204,413,415,405,404,403,401,400,503,409,
+Normal response codes: 204
+Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
 -------

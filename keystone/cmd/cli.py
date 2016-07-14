@@ -25,12 +25,12 @@ from oslo_log import versionutils
 from oslo_serialization import jsonutils
 import pbr.version
 
-from keystone.common import config
 from keystone.common import driver_hints
 from keystone.common import openssl
 from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone.common import utils
+import keystone.conf
 from keystone import exception
 from keystone.federation import idp
 from keystone.federation import utils as mapping_engine
@@ -39,7 +39,7 @@ from keystone.server import backends
 from keystone import token
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 
@@ -215,6 +215,24 @@ class BootStrap(BaseApp):
                                                           default_domain['id'])
             LOG.info(_LI('User %s already exists, skipping creation.'),
                      self.username)
+
+            # Remember whether the user was enabled or not, so that we can
+            # provide useful logging output later.
+            was_enabled = user['enabled']
+
+            # To keep bootstrap idempotent, try to reset the user's password
+            # and ensure that they are enabled. This allows bootstrap to act as
+            # a recovery tool, without having to create a new user.
+            user = self.identity_manager.update_user(
+                user['id'],
+                {'enabled': True,
+                 'password': self.password})
+            LOG.info(_LI('Reset password for user %s.'), self.username)
+            if not was_enabled and user['enabled']:
+                # Although we always try to enable the user, this log message
+                # only makes sense if we know that the user was previously
+                # disabled.
+                LOG.info(_LI('Enabled user %s.'), self.username)
         except exception.UserNotFound:
             user = self.identity_manager.create_user(
                 user_ref={'name': self.username,
@@ -612,7 +630,7 @@ DOMAIN_CONF_FTAIL = '.conf'
 def _domain_config_finder(conf_dir):
     """Return a generator of all domain config files found in a directory.
 
-    Donmain configs match the filename pattern of
+    Domain configs match the filename pattern of
     'keystone.<domain_name>.conf'.
 
     :returns: generator yeilding (filename, domain_name) tuples
@@ -794,6 +812,11 @@ class DomainConfigUpload(BaseApp):
 
     @staticmethod
     def main():
+        versionutils.report_deprecated_feature(
+            LOG,
+            _LW("keystone-manage domain_config_upload is deprecated as of "
+                "Newton in favor of setting domain config options via the API "
+                "and may be removed in 'P' release."))
         dcu = DomainConfigUploadFiles()
         status = dcu.run()
         if status is not None:
@@ -937,9 +960,9 @@ command_opt = cfg.SubCommandOpt('command',
 def main(argv=None, config_files=None):
     CONF.register_cli_opt(command_opt)
 
-    config.configure()
+    keystone.conf.configure()
     sql.initialize()
-    config.set_default_for_default_log_levels()
+    keystone.conf.set_default_for_default_log_levels()
 
     CONF(args=argv[1:],
          project='keystone',
@@ -948,5 +971,5 @@ def main(argv=None, config_files=None):
          default_config_files=config_files)
     if not CONF.default_config_files:
         LOG.warning(_LW('Config file not found, using default configs.'))
-    config.setup_logging()
+    keystone.conf.setup_logging()
     CONF.command.cmd_class.main()

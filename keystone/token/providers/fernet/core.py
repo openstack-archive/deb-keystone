@@ -12,17 +12,17 @@
 
 import os
 
-from oslo_config import cfg
 
 from keystone.common import dependency
 from keystone.common import utils as ks_utils
+import keystone.conf
 from keystone.federation import constants as federation_constants
 from keystone.i18n import _
 from keystone.token.providers import common
 from keystone.token.providers.fernet import token_formatters as tf
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 @dependency.requires('trust_api', 'oauth_api')
@@ -153,7 +153,7 @@ class Provider(common.BaseProvider):
 
         """
         group_ids = [x['id'] for x in federated_dict['group_ids']]
-        self.v3_token_data_helper.populate_roles_for_groups(
+        self.v3_token_data_helper.populate_roles_for_federated_user(
             token_dict, group_ids, project_id, domain_id, user_id)
 
     def _extract_v2_token_data(self, token_data):

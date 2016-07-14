@@ -14,15 +14,15 @@ import os
 import stat
 
 from cryptography import fernet
-from oslo_config import cfg
 from oslo_log import log
 
+import keystone.conf
 from keystone.i18n import _LE, _LW, _LI
 
 
 LOG = log.getLogger(__name__)
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 def validate_key_repository(requires_write=False):
@@ -209,12 +209,6 @@ def rotate_keys(keystone_user_id=None, keystone_group_id=None):
     _create_new_key(keystone_user_id, keystone_group_id)
 
     max_active_keys = CONF.fernet_tokens.max_active_keys
-    # check for bad configuration
-    if max_active_keys < 1:
-        LOG.warning(_LW(
-            '[fernet_tokens] max_active_keys must be at least 1 to maintain a '
-            'primary key.'))
-        max_active_keys = 1
 
     # purge excess keys
 

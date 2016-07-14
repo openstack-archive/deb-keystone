@@ -1,0 +1,505 @@
+# variables in header
+
+# variables in path
+access_token_id:
+  description: |
+    The UUID of the access token.
+  in: path
+  required: false
+  type: string
+consumer_id:
+  description: |
+    The UUID of the consumer.
+  in: path
+  required: false
+  type: string
+domain_id:
+  description: |
+    The UUID of the domain.
+  in: path
+  required: false
+  type: string
+endpoint_id:
+  description: |
+    The endpoint ID.
+  in: path
+  required: false
+  type: string
+group_id:
+  description: |
+    The UUID of the group.
+  in: path
+  required: false
+  type: string
+name:
+  description: |
+    The name of the group.
+  in: path
+  required: false
+  type: string
+policy_id:
+  description: |
+    The policy ID.
+  in: path
+  required: false
+  type: string
+project_id:
+  description: |
+    The UUID of the project.
+  in: path
+  required: false
+  type: string
+region_id:
+  description: |
+    The region ID.
+  in: path
+  required: false
+  type: string
+role_id:
+  description: |
+    The UUID of the role.
+  in: path
+  required: false
+  type: string
+service_id:
+  description: |
+    The service ID.
+  in: path
+  required: false
+  type: string
+trust_id:
+  description: |
+    The trust ID.
+  in: path
+  required: false
+  type: string
+user_id:
+  description: |
+    The UUID of the user.
+  in: path
+  required: false
+  type: string
+
+# variables in query
+
+since:
+  description: |
+    A timestamp used to limit the list of results to events
+    that occurred on or after the specified time.
+    (RFC 1123 format date time)
+  in: query
+  required: false
+  type: string
+
+# variables in body
+allow_redelegation:
+  description: |
+    If set to `true` then a trust between a ``trustor`` and any third-party
+    user may be issued by the ``trustee`` just like a regular trust.
+    If set to `false`, stops further redelegation. `false` by default.
+  in: body
+  required: false
+  type: boolean
+blob:
+  description: |
+    The policy rule itself, as a serialized blob.
+  in: body
+  required: true
+  type: object
+consumer_id:
+  description: |
+    The ID of the consumer.
+  in: path
+  required: false
+  type: string
+description:
+  description: |
+    The consumer description.
+  in: body
+  required: false
+  type: string
+endpoints:
+  description: |
+    An ``endpoints`` object.
+  in: body
+  required: true
+  type: array
+id:
+  description: |
+    The ID of the trust.
+  in: body
+  required: true
+  type: string
+id_1:
+  description: |
+    The endpoint UUID.
+  in: body
+  required: true
+  type: string
+id_2:
+  description: |
+    The ID of the policy.
+  in: body
+  required: true
+  type: string
+impersonation:
+  description: |
+    If set to `true`, then the user attribute of tokens generated based on the
+    trust will represent that of the ``trustor`` rather than the ``trustee``,
+    thus allowing the ``trustee`` to impersonate the ``trustor``. If impersonation
+    is set to `false`, then the token’s user attribute will represent that of the
+    ``trustee``.
+  in: body
+  required: true
+  type: boolean
+interface:
+  description: |
+    The interface type, which describes the
+    visibility of the endpoint.  Value is:  - ``public``. Visible by
+    end users on a publicly available network   interface.  -
+    ``internal``. Visible by end users on an unmetered internal
+    network interface.  - ``admin``. Visible by administrative users
+    on a secure network   interface.
+  in: body
+  required: true
+  type: string
+links:
+  description: |
+    A links object.
+  in: body
+  required: true
+  type: object
+links_1:
+  description: |
+    The links for the ``endpoints`` resource.
+  in: body
+  required: true
+  type: object
+links_2:
+  description: |
+    The links for the ``policy`` resource.
+  in: body
+  required: true
+  type: object
+name_1:
+  description: |
+    The role name.
+  in: body
+  required: true
+  type: string
+name_2:
+  description: |
+    The name of the group.
+  in: body
+  required: true
+  type: string
+next:
+  description: |
+    The ``next`` relative link for the ``endpoints``
+    resource.
+  in: body
+  required: true
+  type: string
+oauth_expires_at:
+  description: |
+    The date and time when a request token expires.
+
+    The date and time stamp format is `ISO 8601
+    <https://en.wikipedia.org/wiki/ISO_8601>`_:
+
+    ::
+
+       CCYY-MM-DDThh:mm:ss±hh:mm
+
+    The ``±hh:mm`` value, if included, is the time zone as an offset
+    from UTC.
+
+    For example, ``2015-08-27T09:49:58-05:00``.
+
+    If the Identity API does not include this attribute or its value is
+    ``null``, the token never expires.
+  in: body
+  required: false
+  type: string
+policy:
+  description: |
+    A ``policy`` object.
+  in: body
+  required: true
+  type: object
+previous:
+  description: |
+    The ``previous`` relative link for the
+    ``endpoints`` resource.
+  in: body
+  required: true
+  type: string
+project_id_1:
+  description: |
+    The ID of the project.
+  in: body
+  required: true
+  type: string
+redelegated_trust_id:
+  description: |
+    Returned with redelegated trust provides information about the predecessor
+    in the trust chain.
+  in: body
+  required: false
+  type: string
+redelegation_count:
+  description: |
+    Specifies the maximum remaining depth of the redelegated trust chain.
+    Each subsequent trust has this field decremented by `1` automatically.
+    The initial ``trustor`` issuing new trust that can be redelegated, must
+    set ``allow_redelegation`` to `true` and may set ``redelegation_count``
+    to an integer value less than or equal to ``max_redelegation_count``
+    configuration parameter in order to limit the possible length of derivated
+    trust chains. The trust issued by the trustor using a project-scoped token
+    (not redelegating), in which ``allow_redelegation`` is set to `true` (the new
+    trust is redelegatable), will be populated with the value specified in the
+    ``max_redelegation_count`` configuration parameter if ``redelegation_count``
+    is not set or set to `null`. If ``allow_redelegation`` is set to `false`
+    then ``redelegation_count`` will be set to `0` in the trust.
+
+    If the trust is being issued by the ``trustee`` of a redelegatable trust-scoped
+    token (redelegation case) then ``redelegation_count`` should not be set, as it
+    will automatically be set to the value in the redelegatable trust-scoped token
+    decremented by `1`. Note, if the resulting value is `0`, this means that the new
+    trust will not be redelegatable, regardless of the value of ``allow_redelegation``.
+
+  in: body
+  required: false
+  type: integer
+region:
+  description: |
+    (Deprecated in v3.2) The geographic location of
+    the service endpoint.
+  in: body
+  required: true
+  type: string
+remaining_uses:
+  description: |
+    Specifies how many times the trust can be used to obtain a token. This value
+    is decreased each time a token is issued through the trust. Once it reaches
+    `0`, no further tokens will be issued through the trust. The default value is
+    `null`, meaning there is no limit on the number of tokens issued through the
+    trust. If redelegation is enabled it must not be set.
+  in: body
+  required: false
+  type: boolean
+requested_project_id:
+  description: |
+    The ID of the requested project.
+  in: body
+  required: true
+  type: string
+revoke_audit_chain_id:
+  description: |
+    Specifies a group of tokens based upon the ``audit_id`` of the
+    first token in the chain.
+
+    If a revocation event specifies the ``audit_chain_id`` any
+    token that is part of the token chain (based upon the original
+    token at the start of the chain) will be revoked, including
+    the original token at the start of the chain.
+
+    If an event is issued for ``audit_chain_id`` then the event cannot
+    contain an ``audit_id``.
+  in: body
+  required: true
+  type: string
+revoke_audit_id:
+  description: |
+    Specifies the unique identifier (UUID) assigned to the token
+    itself.
+
+    This will revoke a single token only. This attribute mirrors
+    the use of the Token Revocation List (the mechanism used
+    prior to revocation events) but does not utilize data that
+    could convey authorization (the token id).
+
+    If an event is issued for ``audit_id`` then the event cannot
+    contain an ``audit_chain_id``.
+  in: body
+  required: true
+  type: string
+revoke_consumer_id:
+  description: |
+    Revoke tokens issued to a specific OAuth consumer, as part
+    of the OS-OAUTH1 API extension.
+  in: body
+  required: true
+  type: string
+revoke_domain_id:
+  description: |
+    Revoke tokens scoped to a particular domain.
+  in: body
+  required: true
+  type: string
+revoke_events:
+  description: |
+    List of recovation events.
+  in: body
+  required: true
+  type: string
+revoke_expires_at:
+  description: |
+    Specifies the exact expiration time of one or more tokens to
+    be revoked.
+
+    This attribute is useful for revoking chains of tokens, such
+    as those produced when re-scoping an existing token. When a
+    token is issued based on initial authentication, it is given
+    an expires_at value. When a token is used to get another
+    token, the new token will have the same expires_at value as
+    the original.
+  in: body
+  required: true
+  type: string
+revoke_issued_before:
+  description: |
+    (string, ISO 8601 extended format date time with
+    microseconds).
+
+    Tokens issued before this time are considered revoked.
+
+    This attribute can be used to determine how long the
+    expiration event is valid. It can also be used in
+    queries to filter events, so that only a subset that
+    have occurred since the last request are returned.
+  in: body
+  required: true
+  type: string
+revoke_project_id:
+  description: |
+    Revoke tokens scoped to a particular project.
+  in: body
+  required: true
+  type: string
+revoke_role_id:
+  description: |
+    Revoke tokens issued with a specific role.
+  in: body
+  required: true
+  type: string
+revoke_trust_id:
+  description: |
+    Revoke tokens issued as the result of a particular
+    trust, as part of the OS-TRUST API extension.
+  in: body
+  required: true
+  type: string
+revoke_user_id:
+  description: |
+    Revoke tokens expressing the identity of a particular user.
+  in: body
+  required: true
+  type: string
+roles:
+  description: |
+    A roles object.
+  in: body
+  required: true
+  type: array
+roles_links:
+  description: |
+    A roles links object. Includes ``next``,
+    ``previous``, and ``self`` links for roles.
+  in: body
+  required: true
+  type: object
+self:
+  description: |
+    The ``self`` relative link for the ``endpoints``
+    resource.
+  in: body
+  required: true
+  type: string
+service_id_1:
+  description: |
+    The UUID of the service to which the endpoint
+    belongs.
+  in: body
+  required: true
+  type: string
+trust:
+  description: |
+    A trust object.
+  in: body
+  required: true
+  type: object
+trust_expires_at:
+  description: |
+    Specifies the expiration time of the trust. A trust may be revoked ahead of
+    expiration. If the value represents a time in the past, the trust is deactivated.
+    In the redelegation case it must not exceed the value of the corresponding
+    ``expires_at`` field of the redelegated trust or it may be omitted, then the
+    ``expires_at`` value is copied from the redelegated trust.
+  in: body
+  required: false
+  type: string
+trust_links:
+  description: |
+    A trust links object. Includes ``next``, ``previous``, and ``self`` links for trusts.
+  in: body
+  required: true
+  type: object
+trust_project_id:
+  description: |
+    Identifies the project upon which the trustor is delegating authorization.
+  in: body
+  required: false
+  type: string
+trust_roles:
+  description: |
+    Specifies the subset of the trustor’s roles on the ``project_id`` to be granted
+    to the ``trustee`` when the token is consumed. The ``trustor`` must already be
+    granted these roles in the project referenced by the ``project_id`` attribute.
+    If redelegation is used (when trust-scoped token is used and consumed trust has
+    ``allow_redelegation`` set to `true`) this parameter should contain redelegated
+    trust’s roles only.
+
+    Roles are only provided when the trust is created, and are subsequently available
+    as a separate read-only collection. Each role can be specified by either ``id`` or
+    ``name``.
+  in: body
+  required: false
+  type: list
+trustee_user_id:
+  description: |
+    Represents the user who is capable of consuming the trust.
+  in: body
+  required: true
+  type: string
+trustor_user_id:
+  description: |
+    Represents the user who created the trust, and who’s authorization is being delegated.
+  in: body
+  required: true
+  type: string
+trusts:
+  description: |
+    An array of trust objects.
+  in: body
+  required: true
+  type: array
+type:
+  description: |
+    The MIME media type of the serialized policy
+    blob. From the perspective of the Identity API, a policy blob can
+    be based on any technology. In OpenStack, the ``policy.json`` blob
+    (``type="application/json"``) is the conventional solution.
+    However, you might want to use an alternative policy engine that
+    uses a different policy language type. For example,
+    ``type="application/xacml+xml"``.
+  in: body
+  required: true
+  type: string
+url:
+  description: |
+    The endpoint URL.
+  in: body
+  required: true
+  type: string
+

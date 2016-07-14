@@ -15,7 +15,6 @@
 import functools
 import uuid
 
-from oslo_config import cfg
 from oslo_log import log
 from oslo_log import versionutils
 from oslo_utils import strutils
@@ -26,13 +25,14 @@ from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import utils
 from keystone.common import wsgi
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _, _LW
 from keystone.models import token_model
 
 
 LOG = log.getLogger(__name__)
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 def v2_deprecated(f):
@@ -79,32 +79,7 @@ def _build_policy_check_credentials(self, action, context, kwargs):
         'action': action,
         'kwargs': kwargs_str})
 
-    # see if auth context has already been created. If so use it.
-    if ('environment' in context and
-            authorization.AUTH_CONTEXT_ENV in context['environment']):
-        LOG.debug('RBAC: using auth context from the request environment')
-        return context['environment'].get(authorization.AUTH_CONTEXT_ENV)
-
-    # There is no current auth context, build it from the incoming token.
-    # TODO(morganfainberg): Collapse this logic with AuthContextMiddleware
-    # in a sane manner as this just mirrors the logic in AuthContextMiddleware
-    try:
-        LOG.debug('RBAC: building auth context from the incoming auth token')
-        token_ref = token_model.KeystoneToken(
-            token_id=context['token_id'],
-            token_data=self.token_provider_api.validate_token(
-                context['token_id']))
-        # NOTE(jamielennox): whilst this maybe shouldn't be within this
-        # function it would otherwise need to reload the token_ref from
-        # backing store.
-        wsgi.validate_token_bind(context, token_ref)
-    except exception.TokenNotFound:
-        LOG.warning(_LW('RBAC: Invalid token'))
-        raise exception.Unauthorized()
-
-    auth_context = authorization.token_to_auth_context(token_ref)
-
-    return auth_context
+    return context['environment'].get(authorization.AUTH_CONTEXT_ENV, {})
 
 
 def protected(callback=None):
@@ -122,17 +97,25 @@ def protected(callback=None):
     """
     def wrapper(f):
         @functools.wraps(f)
-        def inner(self, context, *args, **kwargs):
-            if 'is_admin' in context and context['is_admin']:
+        def inner(self, request, *args, **kwargs):
+            request.assert_authenticated()
+
+            if request.context.is_admin:
                 LOG.warning(_LW('RBAC: Bypassing authorization'))
             elif callback is not None:
                 prep_info = {'f_name': f.__name__,
                              'input_attr': kwargs}
-                callback(self, context, prep_info, *args, **kwargs)
+                callback(self,
+                         request,
+                         prep_info,
+                         *args,
+                         **kwargs)
             else:
                 action = 'identity:%s' % f.__name__
-                creds = _build_policy_check_credentials(self, action,
-                                                        context, kwargs)
+                creds = _build_policy_check_credentials(self,
+                                                        action,
+                                                        request.context_dict,
+                                                        kwargs)
 
                 policy_dict = {}
 
@@ -149,11 +132,11 @@ def protected(callback=None):
 
                 # TODO(henry-nash): Move this entire code to a member
                 # method inside v3 Auth
-                if context.get('subject_token_id') is not None:
+                if request.context_dict.get('subject_token_id') is not None:
                     token_ref = token_model.KeystoneToken(
-                        token_id=context['subject_token_id'],
+                        token_id=request.context_dict['subject_token_id'],
                         token_data=self.token_provider_api.validate_token(
-                            context['subject_token_id']))
+                            request.context_dict['subject_token_id']))
                     policy_dict.setdefault('target', {})
                     policy_dict['target'].setdefault(self.member_name, {})
                     policy_dict['target'][self.member_name]['user_id'] = (
@@ -178,7 +161,7 @@ def protected(callback=None):
                                         action,
                                         utils.flatten_dict(policy_dict))
                 LOG.debug('RBAC: Authorization granted')
-            return f(self, context, *args, **kwargs)
+            return f(self, request, *args, **kwargs)
         return inner
     return wrapper
 
@@ -198,8 +181,10 @@ def filterprotected(*filters, **callback):
     """
     def _filterprotected(f):
         @functools.wraps(f)
-        def wrapper(self, context, **kwargs):
-            if not context['is_admin']:
+        def wrapper(self, request, **kwargs):
+            request.assert_authenticated()
+
+            if not request.context.is_admin:
                 # The target dict for the policy check will include:
                 #
                 # - Any query filter parameters
@@ -212,8 +197,8 @@ def filterprotected(*filters, **callback):
                 target = dict()
                 if filters:
                     for item in filters:
-                        if item in context['query_string']:
-                            target[item] = context['query_string'][item]
+                        if item in request.params:
+                            target[item] = request.params[item]
 
                     LOG.debug('RBAC: Adding query filter params (%s)', (
                         ', '.join(['%s=%s' % (item, target[item])
@@ -227,12 +212,15 @@ def filterprotected(*filters, **callback):
                     prep_info = {'f_name': f.__name__,
                                  'input_attr': kwargs,
                                  'filter_attr': target}
-                    callback['callback'](self, context, prep_info, **kwargs)
+                    callback['callback'](self,
+                                         request,
+                                         prep_info,
+                                         **kwargs)
                 else:
                     # No callback, so we are going to check the protection here
                     action = 'identity:%s' % f.__name__
-                    creds = _build_policy_check_credentials(self, action,
-                                                            context, kwargs)
+                    creds = _build_policy_check_credentials(
+                        self, action, request.context_dict, kwargs)
                     # Add in any formal url parameters
                     for key in kwargs:
                         target[key] = kwargs[key]
@@ -244,7 +232,7 @@ def filterprotected(*filters, **callback):
                     LOG.debug('RBAC: Authorization granted')
             else:
                 LOG.warning(_LW('RBAC: Bypassing authorization'))
-            return f(self, context, filters, **kwargs)
+            return f(self, request, filters, **kwargs)
         return wrapper
     return _filterprotected
 
@@ -440,12 +428,6 @@ class V3Controller(wsgi.Application):
 
         return '%s/%s/%s' % (endpoint, 'v3', path.lstrip('/'))
 
-    def get_auth_context(self, context):
-        # TODO(dolphm): this method of accessing the auth context is terrible,
-        # but context needs to be refactored to always have reasonable values.
-        env_context = context.get('environment', {})
-        return env_context.get(authorization.AUTH_CONTEXT_ENV, {})
-
     @classmethod
     def full_url(cls, context, path=None):
         url = cls.base_url(context, path)
@@ -621,25 +603,23 @@ class V3Controller(wsgi.Application):
         return refs
 
     @classmethod
-    def build_driver_hints(cls, context, supported_filters):
+    def build_driver_hints(cls, request, supported_filters):
         """Build list hints based on the context query string.
 
-        :param context: contains the query_string from which any list hints can
-                        be extracted
+        :param request: the current request
         :param supported_filters: list of filters supported, so ignore any
                                   keys in query_dict that are not in this list.
 
         """
-        query_dict = context['query_string']
         hints = driver_hints.Hints()
 
-        if query_dict is None:
+        if not request.params:
             return hints
 
-        for key in query_dict:
+        for key, value in request.params.items():
             # Check if this is an exact filter
             if supported_filters is None or key in supported_filters:
-                hints.add_filter(key, query_dict[key])
+                hints.add_filter(key, value)
                 continue
 
             # Check if it is an inexact filter
@@ -668,7 +648,7 @@ class V3Controller(wsgi.Application):
                 if comparator.startswith('i'):
                     case_sensitive = False
                     comparator = comparator[1:]
-                hints.add_filter(base_key, query_dict[key],
+                hints.add_filter(base_key, value,
                                  comparator=comparator,
                                  case_sensitive=case_sensitive)
 
@@ -710,7 +690,7 @@ class V3Controller(wsgi.Application):
         ref['id'] = uuid.uuid4().hex
         return ref
 
-    def _get_domain_id_for_list_request(self, context):
+    def _get_domain_id_for_list_request(self, request):
         """Get the domain_id for a v3 list call.
 
         If we running with multiple domain drivers, then the caller must
@@ -721,10 +701,11 @@ class V3Controller(wsgi.Application):
             # We don't need to specify a domain ID in this case
             return
 
-        if context['query_string'].get('domain_id') is not None:
-            return context['query_string'].get('domain_id')
+        domain_id = request.params.get('domain_id')
+        if domain_id:
+            return domain_id
 
-        token_ref = utils.get_token_ref(context)
+        token_ref = utils.get_token_ref(request.context_dict)
 
         if token_ref.domain_scoped:
             return token_ref.domain_id
@@ -787,7 +768,7 @@ class V3Controller(wsgi.Application):
         """Override v2 filter to let domain_id out for v3 calls."""
         return ref
 
-    def check_protection(self, context, prep_info, target_attr=None):
+    def check_protection(self, request, prep_info, target_attr=None):
         """Provide call protection for complex target attributes.
 
         As well as including the standard parameters from the original API
@@ -796,13 +777,13 @@ class V3Controller(wsgi.Application):
         they can be referenced by policy rules.
 
         """
-        if 'is_admin' in context and context['is_admin']:
+        if request.context.is_admin:
             LOG.warning(_LW('RBAC: Bypassing authorization'))
         else:
             action = 'identity:%s' % prep_info['f_name']
             # TODO(henry-nash) need to log the target attributes as well
             creds = _build_policy_check_credentials(self, action,
-                                                    context,
+                                                    request.context_dict,
                                                     prep_info['input_attr'])
             # Build the dict the policy engine will check against from both the
             # parameters passed into the call we are protecting (which was

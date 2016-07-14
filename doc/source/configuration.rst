@@ -225,6 +225,12 @@ specifying the domain name:
     domain-specific backend, perhaps for storing service users in a
     predominantly LDAP installation.
 
+.. NOTE::
+
+    Keystone has deprecated the ``keystone-manage domain_config_upload``
+    option. The keystone team recommends setting domain config options via the
+    API instead.
+
 Due to the need for user and group IDs to be unique across an OpenStack
 installation and for Keystone to be able to deduce which domain and backend to
 use from just a user or group ID, it dynamically builds a persistent identity
@@ -325,7 +331,7 @@ How to Implement an Authentication Plugin
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All authentication plugins must extend the
-:class:`keystone.auth.core.AuthMethodHandler` class and implement the
+:class:`keystone.auth.plugins.base.AuthMethodHandler` class and implement the
 ``authenticate()`` method. The ``authenticate()`` method expects the following
 parameters.
 
@@ -503,10 +509,9 @@ disabled.
     * ``dogpile.cache.redis`` - `Redis`_ backend
     * ``dogpile.cache.dbm`` - local DBM file backend
     * ``dogpile.cache.memory`` - in-memory cache
-    * ``keystone.cache.mongo`` - MongoDB as caching backend
-    * ``keystone.cache.memcache_pool`` - An eventlet-safe implementation of
-      ``dogpile.cache.memcached``. This implementation also provides client
-      connection re-use.
+    * ``oslo_cache.mongo`` - MongoDB as caching backend
+    * ``oslo_cache.memcache_pool`` - Memcache with pooling.
+      This implementation also provides client connection re-use.
 
         .. WARNING::
             ``dogpile.cache.memory`` is not suitable for use outside of unit

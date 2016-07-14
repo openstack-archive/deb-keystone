@@ -15,7 +15,6 @@
 import uuid
 
 import mock
-from oslo_config import cfg
 import oslo_context.context
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
@@ -27,6 +26,7 @@ from keystone import auth
 from keystone.common import authorization
 from keystone.common import cache
 from keystone.common.validation import validators
+import keystone.conf
 from keystone import exception
 from keystone import middleware
 from keystone.middleware import auth as middleware_auth
@@ -35,7 +35,7 @@ from keystone.tests import unit
 from keystone.tests.unit import rest
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 DEFAULT_DOMAIN_ID = 'default'
 
 TIME_FORMAT = unit.TIME_FORMAT
@@ -147,8 +147,14 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
                 'required': ['kerberos'],
                 'additionalProperties': False,
             },
-            'expires_at': {'type': 'string'},
-            'issued_at': {'type': 'string'},
+            'expires_at': {
+                'type': 'string',
+                'pattern': unit.TIME_FORMAT_REGEX,
+            },
+            'issued_at': {
+                'type': 'string',
+                'pattern': unit.TIME_FORMAT_REGEX,
+            },
             'methods': {
                 'type': 'array',
                 'items': {
@@ -305,7 +311,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
                 name=u'Default')
             self.resource_api.create_domain(DEFAULT_DOMAIN_ID, domain)
 
-    def load_sample_data(self):
+    def load_sample_data(self, create_region_and_endpoints=True):
         self._populate_default_domain()
         self.domain = unit.new_domain_ref()
         self.domain_id = self.domain['id']
@@ -354,22 +360,24 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
             self.default_domain_project_id,
             self.role_id)
 
-        self.region = unit.new_region_ref()
-        self.region_id = self.region['id']
-        self.catalog_api.create_region(self.region)
+        if create_region_and_endpoints:
+            self.region = unit.new_region_ref()
+            self.region_id = self.region['id']
+            self.catalog_api.create_region(self.region)
 
-        self.service = unit.new_service_ref()
-        self.service_id = self.service['id']
-        self.catalog_api.create_service(self.service_id, self.service.copy())
+            self.service = unit.new_service_ref()
+            self.service_id = self.service['id']
+            self.catalog_api.create_service(self.service_id,
+                                            self.service.copy())
 
-        self.endpoint = unit.new_endpoint_ref(service_id=self.service_id,
-                                              interface='public',
-                                              region_id=self.region_id)
-        self.endpoint_id = self.endpoint['id']
-        self.catalog_api.create_endpoint(self.endpoint_id,
-                                         self.endpoint.copy())
-        # The server adds 'enabled' and defaults to True.
-        self.endpoint['enabled'] = True
+            self.endpoint = unit.new_endpoint_ref(service_id=self.service_id,
+                                                  interface='public',
+                                                  region_id=self.region_id)
+            self.endpoint_id = self.endpoint['id']
+            self.catalog_api.create_endpoint(self.endpoint_id,
+                                             self.endpoint.copy())
+            # The server adds 'enabled' and defaults to True.
+            self.endpoint['enabled'] = True
 
     def create_new_default_project_for_user(self, user_id, domain_id,
                                             enable_project=True):
@@ -1301,17 +1309,16 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
     def build_external_auth_request(self, remote_user,
                                     remote_domain=None, auth_data=None,
                                     kerberos=False):
-        context = {'environment': {'REMOTE_USER': remote_user,
-                                   'AUTH_TYPE': 'Negotiate'}}
+        environment = {'REMOTE_USER': remote_user, 'AUTH_TYPE': 'Negotiate'}
         if remote_domain:
-            context['environment']['REMOTE_DOMAIN'] = remote_domain
+            environment['REMOTE_DOMAIN'] = remote_domain
         if not auth_data:
             auth_data = self.build_authentication_request(
                 kerberos=kerberos)['auth']
         no_context = None
         auth_info = auth.controllers.AuthInfo.create(no_context, auth_data)
         auth_context = {'extras': {}, 'method_names': []}
-        return context, auth_info, auth_context
+        return self.make_request(environ=environment), auth_info, auth_context
 
 
 class VersionTestCase(RestfulTestCase):

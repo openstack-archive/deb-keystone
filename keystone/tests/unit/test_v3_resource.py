@@ -12,19 +12,19 @@
 
 import uuid
 
-from oslo_config import cfg
 from six.moves import http_client
 from six.moves import range
 from testtools import matchers
 
 from keystone.common import controller
+import keystone.conf
 from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
 from keystone.tests.unit import utils as test_utils
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 
 
 class ResourceTestCase(test_v3.RestfulTestCase,
@@ -669,8 +669,8 @@ class ResourceTestCase(test_v3.RestfulTestCase,
         r = self.post(
             '/projects',
             body={'project': ref_child})
-        self.assertEqual(r.result['project']['domain_id'],
-                         self.project['domain_id'])
+        self.assertEqual(self.project['domain_id'],
+                         r.result['project']['domain_id'])
         ref_child['domain_id'] = self.domain['id']
         self.assertValidProjectResponse(r, ref_child)
 

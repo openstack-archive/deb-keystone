@@ -16,13 +16,16 @@
 import dogpile.cache
 from dogpile.cache import api
 from oslo_cache import core as cache
-from oslo_config import cfg
 
 from keystone.common.cache import _context_cache
+import keystone.conf
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 CACHE_REGION = cache.create_region()
+
+
+register_model_handler = _context_cache._register_model_handler
 
 
 def configure_cache(region=None):

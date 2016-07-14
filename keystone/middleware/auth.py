@@ -11,15 +11,15 @@
 # under the License.
 
 from keystonemiddleware import auth_token
-from oslo_config import cfg
-from oslo_context import context as oslo_context
 from oslo_log import log
 from oslo_log import versionutils
 
 from keystone.common import authorization
+from keystone.common import context
 from keystone.common import dependency
 from keystone.common import tokenless_auth
 from keystone.common import wsgi
+import keystone.conf
 from keystone import exception
 from keystone.federation import constants as federation_constants
 from keystone.federation import utils
@@ -28,7 +28,7 @@ from keystone.middleware import core
 from keystone.models import token_model
 from keystone.token.providers import common
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 __all__ = ('AuthContextMiddleware',)
@@ -152,8 +152,11 @@ class AuthContextMiddleware(auth_token.BaseAuthProtocol):
 
     def fill_context(self, request):
         # The request context stores itself in thread-local memory for logging.
-        request_context = oslo_context.RequestContext(
-            request_id=request.environ.get('openstack.request_id'))
+        request_context = context.RequestContext(
+            request_id=request.environ.get('openstack.request_id'),
+            authenticated=False,
+            overwrite=True)
+        request.environ[context.REQUEST_CONTEXT_ENV] = request_context
 
         if authorization.AUTH_CONTEXT_ENV in request.environ:
             msg = _LW('Auth context already exists in the request '
@@ -201,16 +204,33 @@ class AuthContextMiddleware(auth_token.BaseAuthProtocol):
                       'context will be set.')
             return
 
+        # set authenticated to flag to keystone that a token has been validated
+        request_context.authenticated = True
+
         # The attributes of request_context are put into the logs. This is a
         # common pattern for all the OpenStack services. In all the other
         # projects these are IDs, so set the attributes to IDs here rather than
         # the name.
-        request_context.user = auth_context.get('user_id')
-        request_context.tenant = auth_context.get('project_id')
-        request_context.domain = auth_context.get('domain_id')
-        request_context.user_domain = auth_context.get('user_domain_id')
-        request_context.project_domain = auth_context.get('project_domain_id')
-        request_context.update_store()
+        request_context.user_id = auth_context.get('user_id')
+        request_context.project_id = auth_context.get('project_id')
+        request_context.domain_id = auth_context.get('domain_id')
+        request_context.domain_name = auth_context.get('domain_name')
+        request_context.user_domain_id = auth_context.get('user_domain_id')
+        request_context.roles = auth_context.get('roles')
+
+        project_domain_id = auth_context.get('project_domain_id')
+        request_context.project_domain_id = project_domain_id
+
+        is_delegated_auth = auth_context.get('is_delegated_auth', False)
+        request_context.is_delegated_auth = is_delegated_auth
+
+        request_context.trust_id = auth_context.get('trust_id')
+        request_context.trustor_id = auth_context.get('trustor_id')
+        request_context.trustee_id = auth_context.get('trustee_id')
+
+        access_token_id = auth_context.get('access_token_id')
+        request_context.oauth_consumer_id = auth_context.get('consumer_id')
+        request_context.oauth_acess_token_id = access_token_id
 
         LOG.debug('RBAC: auth_context: %s', auth_context)
         request.environ[authorization.AUTH_CONTEXT_ENV] = auth_context

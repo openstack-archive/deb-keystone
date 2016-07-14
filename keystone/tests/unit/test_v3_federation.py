@@ -20,7 +20,6 @@ import uuid
 import fixtures
 from lxml import etree
 import mock
-from oslo_config import cfg
 from oslo_log import versionutils
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
@@ -34,6 +33,7 @@ if not xmldsig:
     xmldsig = importutils.try_import("xmldsig")
 
 from keystone.auth import controllers as auth_controllers
+import keystone.conf
 from keystone.contrib.federation import routers
 from keystone import exception
 from keystone.federation import controllers as federation_controllers
@@ -49,7 +49,7 @@ from keystone.tests.unit import utils
 from keystone.token.providers import common as token_common
 
 
-CONF = cfg.CONF
+CONF = keystone.conf.CONF
 ROOTDIR = os.path.dirname(os.path.abspath(__file__))
 XMLDIR = os.path.join(ROOTDIR, 'saml2/')
 
@@ -159,11 +159,12 @@ class FederatedSetupMixin(object):
                               assertion='EMPLOYEE_ASSERTION',
                               environment=None):
         api = federation_controllers.Auth()
-        context = {'environment': environment or {}}
-        self._inject_assertion(context, assertion)
+        environment = environment or {}
+        environment.update(getattr(mapping_fixtures, assertion))
+        request = self.make_request(environ=environment)
         if idp is None:
             idp = self.IDP
-        r = api.federated_authentication(context, idp, self.PROTOCOL)
+        r = api.federated_authentication(request, idp, self.PROTOCOL)
         return r
 
     def idp_ref(self, id=None):
@@ -206,10 +207,9 @@ class FederatedSetupMixin(object):
             }
         }
 
-    def _inject_assertion(self, context, variant, query_string=None):
+    def _inject_assertion(self, request, variant):
         assertion = getattr(mapping_fixtures, variant)
-        context['environment'].update(assertion)
-        context['query_string'] = query_string or []
+        request.context_dict['environment'].update(assertion)
 
     def load_federation_sample_data(self):
         """Inject additional data."""
@@ -719,15 +719,15 @@ class FederatedSetupMixin(object):
                                             self.proto_saml['id'],
                                             self.proto_saml)
         # Generate fake tokens
-        context = {'environment': {}}
+        request = self.make_request()
 
         self.tokens = {}
         VARIANTS = ('EMPLOYEE_ASSERTION', 'CUSTOMER_ASSERTION',
                     'ADMIN_ASSERTION')
         api = auth_controllers.Auth()
         for variant in VARIANTS:
-            self._inject_assertion(context, variant)
-            r = api.authenticate_for_token(context, self.UNSCOPED_V3_SAML2_REQ)
+            self._inject_assertion(request, variant)
+            r = api.authenticate_for_token(request, self.UNSCOPED_V3_SAML2_REQ)
             self.tokens[variant] = r.headers.get('X-Subject-Token')
 
         self.TOKEN_SCOPE_PROJECT_FROM_NONEXISTENT_TOKEN = self._scope_request(
@@ -1759,16 +1759,14 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
 
         """
         api = auth_controllers.Auth()
-        context = {
-            'environment': {
-                'malformed_object': object(),
-                'another_bad_idea': tuple(range(10)),
-                'yet_another_bad_param': dict(zip(uuid.uuid4().hex,
-                                                  range(32)))
-            }
+        environ = {
+            'malformed_object': object(),
+            'another_bad_idea': tuple(range(10)),
+            'yet_another_bad_param': dict(zip(uuid.uuid4().hex, range(32)))
         }
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
-        r = api.authenticate_for_token(context, self.UNSCOPED_V3_SAML2_REQ)
+        environ.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environ)
+        r = api.authenticate_for_token(request, self.UNSCOPED_V3_SAML2_REQ)
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_scope_to_project_once_notify(self):
@@ -1858,11 +1856,11 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
 
     def test_issue_token_from_rules_without_user(self):
         api = auth_controllers.Auth()
-        context = {'environment': {}}
-        self._inject_assertion(context, 'BAD_TESTER_ASSERTION')
+        environ = copy.deepcopy(mapping_fixtures.BAD_TESTER_ASSERTION)
+        request = self.make_request(environ=environ)
         self.assertRaises(exception.Unauthorized,
                           api.authenticate_for_token,
-                          context, self.UNSCOPED_V3_SAML2_REQ)
+                          request, self.UNSCOPED_V3_SAML2_REQ)
 
     def test_issue_token_with_nonexistent_group(self):
         """Inject assertion that matches rule issuing bad group id.
@@ -2639,6 +2637,258 @@ class FederatedUserTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         user_id2 = r.json_body['token']['user']['id']
         self.assertEqual(user_id, user_id2)
 
+    def test_user_role_assignment(self):
+        # create project and role
+        project_ref = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        self.resource_api.create_project(project_ref['id'], project_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # exchange an unscoped token for a scoped token; resulting in
+        # unauthorized because the user doesn't have any role assignments
+        v3_scope_request = self._scope_request(unscoped_token, 'project',
+                                               project_ref['id'])
+        r = self.v3_create_token(v3_scope_request,
+                                 expected_status=http_client.UNAUTHORIZED)
+
+        # assign project role to federated user
+        self.assignment_api.add_role_to_user_and_project(
+            user_id, project_ref['id'], role_ref['id'])
+
+        # exchange an unscoped token for a scoped token
+        r = self.v3_create_token(v3_scope_request,
+                                 expected_status=http_client.CREATED)
+        scoped_token = r.headers['X-Subject-Token']
+
+        # ensure user can access resource based on role assignment
+        path = '/projects/%(project_id)s' % {'project_id': project_ref['id']}
+        r = self.v3_request(path=path, method='GET',
+                            expected_status=http_client.OK,
+                            token=scoped_token)
+        self.assertValidProjectResponse(r, project_ref)
+
+        # create a 2nd project
+        project_ref2 = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        self.resource_api.create_project(project_ref2['id'], project_ref2)
+
+        # ensure the user cannot access the 2nd resource (forbidden)
+        path = '/projects/%(project_id)s' % {'project_id': project_ref2['id']}
+        r = self.v3_request(path=path, method='GET',
+                            expected_status=http_client.FORBIDDEN,
+                            token=scoped_token)
+
+    def test_domain_scoped_user_role_assignment(self):
+        # create domain and role
+        domain_ref = unit.new_domain_ref()
+        self.resource_api.create_domain(domain_ref['id'], domain_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # exchange an unscoped token for a scoped token; resulting in
+        # unauthorized because the user doesn't have any role assignments
+        v3_scope_request = self._scope_request(unscoped_token, 'domain',
+                                               domain_ref['id'])
+        r = self.v3_create_token(v3_scope_request,
+                                 expected_status=http_client.UNAUTHORIZED)
+
+        # assign domain role to user
+        self.assignment_api.create_grant(role_ref['id'],
+                                         user_id=user_id,
+                                         domain_id=domain_ref['id'])
+
+        # exchange an unscoped token for domain scoped token and test
+        r = self.v3_create_token(v3_scope_request,
+                                 expected_status=http_client.CREATED)
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+        token_resp = r.result['token']
+        self.assertIn('domain', token_resp)
+
+    def test_auth_projects_matches_federation_projects(self):
+        # create project and role
+        project_ref = unit.new_project_ref(
+            domain_id=CONF.identity.default_domain_id)
+        self.resource_api.create_project(project_ref['id'], project_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # assign project role to federated user
+        self.assignment_api.add_role_to_user_and_project(
+            user_id, project_ref['id'], role_ref['id'])
+
+        # get auth projects
+        r = self.get('/auth/projects', token=unscoped_token)
+        auth_projects = r.result['projects']
+
+        # get federation projects
+        r = self.get('/OS-FEDERATION/projects', token=unscoped_token)
+        fed_projects = r.result['projects']
+
+        # compare
+        self.assertItemsEqual(auth_projects, fed_projects)
+
+    def test_auth_projects_matches_federation_projects_with_group_assign(self):
+        # create project, role, group
+        domain_id = CONF.identity.default_domain_id
+        project_ref = unit.new_project_ref(domain_id=domain_id)
+        self.resource_api.create_project(project_ref['id'], project_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+        group_ref = unit.new_group_ref(domain_id=domain_id)
+        group_ref = self.identity_api.create_group(group_ref)
+
+        # authenticate via saml get back a user id
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # assign role to group at project
+        self.assignment_api.create_grant(role_ref['id'],
+                                         group_id=group_ref['id'],
+                                         project_id=project_ref['id'],
+                                         domain_id=domain_id)
+
+        # add user to group
+        self.identity_api.add_user_to_group(user_id=user_id,
+                                            group_id=group_ref['id'])
+
+        # get auth projects
+        r = self.get('/auth/projects', token=unscoped_token)
+        auth_projects = r.result['projects']
+
+        # get federation projects
+        r = self.get('/OS-FEDERATION/projects', token=unscoped_token)
+        fed_projects = r.result['projects']
+
+        # compare
+        self.assertItemsEqual(auth_projects, fed_projects)
+
+    def test_auth_domains_matches_federation_domains(self):
+        # create domain and role
+        domain_ref = unit.new_domain_ref()
+        self.resource_api.create_domain(domain_ref['id'], domain_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id and token
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # assign domain role to user
+        self.assignment_api.create_grant(role_ref['id'],
+                                         user_id=user_id,
+                                         domain_id=domain_ref['id'])
+
+        # get auth domains
+        r = self.get('/auth/domains', token=unscoped_token)
+        auth_domains = r.result['domains']
+
+        # get federation domains
+        r = self.get('/OS-FEDERATION/domains', token=unscoped_token)
+        fed_domains = r.result['domains']
+
+        # compare
+        self.assertItemsEqual(auth_domains, fed_domains)
+
+    def test_auth_domains_matches_federation_domains_with_group_assign(self):
+        # create role, group, and domain
+        domain_ref = unit.new_domain_ref()
+        self.resource_api.create_domain(domain_ref['id'], domain_ref)
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+        group_ref = unit.new_group_ref(domain_id=domain_ref['id'])
+        group_ref = self.identity_api.create_group(group_ref)
+
+        # authenticate via saml get back a user id and token
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # assign domain role to group
+        self.assignment_api.create_grant(role_ref['id'],
+                                         group_id=group_ref['id'],
+                                         domain_id=domain_ref['id'])
+
+        # add user to group
+        self.identity_api.add_user_to_group(user_id=user_id,
+                                            group_id=group_ref['id'])
+
+        # get auth domains
+        r = self.get('/auth/domains', token=unscoped_token)
+        auth_domains = r.result['domains']
+
+        # get federation domains
+        r = self.get('/OS-FEDERATION/domains', token=unscoped_token)
+        fed_domains = r.result['domains']
+
+        # compare
+        self.assertItemsEqual(auth_domains, fed_domains)
+
+    def test_list_domains_for_user_duplicates(self):
+        # create role
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id and token
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # get federation group domains
+        r = self.get('/OS-FEDERATION/domains', token=unscoped_token)
+        group_domains = r.result['domains']
+        domain_from_group = group_domains[0]
+
+        # assign group domain and role to user, this should create a
+        # duplicate domain
+        self.assignment_api.create_grant(role_ref['id'],
+                                         user_id=user_id,
+                                         domain_id=domain_from_group['id'])
+
+        # get user domains and test for duplicates
+        r = self.get('/OS-FEDERATION/domains', token=unscoped_token)
+        user_domains = r.result['domains']
+        user_domain_ids = []
+        for domain in user_domains:
+            self.assertNotIn(domain['id'], user_domain_ids)
+            user_domain_ids.append(domain['id'])
+
+    def test_list_projects_for_user_duplicates(self):
+        # create role
+        role_ref = unit.new_role_ref()
+        self.role_api.create_role(role_ref['id'], role_ref)
+
+        # authenticate via saml get back a user id and token
+        user_id, unscoped_token = self._authenticate_via_saml()
+
+        # get federation group projects
+        r = self.get('/OS-FEDERATION/projects', token=unscoped_token)
+        group_projects = r.result['projects']
+        project_from_group = group_projects[0]
+
+        # assign group project and role to user, this should create a
+        # duplicate project
+        self.assignment_api.add_role_to_user_and_project(
+            user_id, project_from_group['id'], role_ref['id'])
+
+        # get user projects and test for duplicates
+        r = self.get('/OS-FEDERATION/projects', token=unscoped_token)
+        user_projects = r.result['projects']
+        user_project_ids = []
+        for project in user_projects:
+            self.assertNotIn(project['id'], user_project_ids)
+            user_project_ids.append(project['id'])
+
+    def _authenticate_via_saml(self):
+        r = self._issue_unscoped_token()
+        unscoped_token = r.headers['X-Subject-Token']
+        token_resp = r.json_body['token']
+        self.assertValidMappedUser(token_resp)
+        return token_resp['user']['id'], unscoped_token
+
 
 class JsonHomeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
     JSON_HOME_DATA = {
@@ -2753,6 +3003,38 @@ class SAMLGenerationTests(test_v3.RestfulTestCase):
             assertion.attribute_statement[0].attribute[4])
         self.assertEqual(self.PROJECT_DOMAIN,
                          project_domain_attribute.attribute_value[0].text)
+
+    def test_comma_in_certfile_path(self):
+        self.config_fixture.config(
+            group='saml',
+            certfile=CONF.saml.certfile + ',')
+        generator = keystone_idp.SAMLGenerator()
+        self.assertRaises(
+            exception.UnexpectedError,
+            generator.samlize_token,
+            self.ISSUER,
+            self.RECIPIENT,
+            self.SUBJECT,
+            self.SUBJECT_DOMAIN,
+            self.ROLES,
+            self.PROJECT,
+            self.PROJECT_DOMAIN)
+
+    def test_comma_in_keyfile_path(self):
+        self.config_fixture.config(
+            group='saml',
+            keyfile=CONF.saml.keyfile + ',')
+        generator = keystone_idp.SAMLGenerator()
+        self.assertRaises(
+            exception.UnexpectedError,
+            generator.samlize_token,
+            self.ISSUER,
+            self.RECIPIENT,
+            self.SUBJECT,
+            self.SUBJECT_DOMAIN,
+            self.ROLES,
+            self.PROJECT,
+            self.PROJECT_DOMAIN)
 
     def test_verify_assertion_object(self):
         """Test that the Assertion object is built properly.
@@ -3333,6 +3615,105 @@ class ServiceProviderTests(test_v3.RestfulTestCase):
         self.assertValidEntity(resp.result['service_provider'],
                                keys_to_check=self.SP_KEYS)
 
+    @unit.skip_if_cache_disabled('federation')
+    def test_create_service_provider_invalidates_cache(self):
+        # List all service providers and make sure we only have one in the
+        # list. This service provider is from testing setup.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(1)
+        )
+
+        # Create a new service provider.
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        self.put(url, body={'service_provider': sp},
+                 expected_status=http_client.CREATED)
+
+        # List all service providers again and make sure we have two in the
+        # returned list.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(2)
+        )
+
+    @unit.skip_if_cache_disabled('federation')
+    def test_delete_service_provider_invalidates_cache(self):
+        # List all service providers and make sure we only have one in the
+        # list. This service provider is from testing setup.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(1)
+        )
+
+        # Create a new service provider.
+        url = self.base_url(suffix=uuid.uuid4().hex)
+        sp = self.sp_ref()
+        self.put(url, body={'service_provider': sp},
+                 expected_status=http_client.CREATED)
+
+        # List all service providers again and make sure we have two in the
+        # returned list.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(2)
+        )
+
+        # Delete the service provider we created, which should invalidate the
+        # service provider cache. Get the list of service providers again and
+        # if the cache invalidated properly then we should only have one
+        # service provider in the list.
+        self.delete(url, expected_status=http_client.NO_CONTENT)
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(1)
+        )
+
+    @unit.skip_if_cache_disabled('federation')
+    def test_update_service_provider_invalidates_cache(self):
+        # List all service providers and make sure we only have one in the
+        # list. This service provider is from testing setup.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(1)
+        )
+
+        # Create a new service provider.
+        service_provider_id = uuid.uuid4().hex
+        url = self.base_url(suffix=service_provider_id)
+        sp = self.sp_ref()
+        self.put(url, body={'service_provider': sp},
+                 expected_status=http_client.CREATED)
+
+        # List all service providers again and make sure we have two in the
+        # returned list.
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(2)
+        )
+
+        # Update the service provider we created, which should invalidate the
+        # service provider cache. Get the list of service providers again and
+        # if the cache invalidated properly then we see the value we updated.
+        updated_description = uuid.uuid4().hex
+        body = {'service_provider': {'description': updated_description}}
+        self.patch(url, body=body, expected_status=http_client.OK)
+        resp = self.get(self.base_url(), expected_status=http_client.OK)
+        self.assertThat(
+            resp.json_body['service_providers'],
+            matchers.HasLength(2)
+        )
+        for sp in resp.json_body['service_providers']:
+            if sp['id'] == service_provider_id:
+                self.assertEqual(sp['description'], updated_description)
+
     def test_create_sp_relay_state_default(self):
         """Create an SP without relay state, should default to `ss:mem`."""
         url = self.base_url(suffix=uuid.uuid4().hex)
@@ -3546,11 +3927,11 @@ class WebSSOTests(FederatedTokenTests):
         self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
     def test_federated_sso_auth(self):
-        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
-        context = {'environment': environment}
-        query_string = {'origin': self.ORIGIN}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
-        resp = self.api.federated_sso_auth(context, self.PROTOCOL)
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0],
+                       'QUERY_STRING': 'origin=%s' % self.ORIGIN}
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
+        resp = self.api.federated_sso_auth(request, self.PROTOCOL)
         # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
         # which is why expected value: `self.TRUSTED_DASHBOARD`
         # needs to be encoded
@@ -3558,17 +3939,14 @@ class WebSSOTests(FederatedTokenTests):
 
     def test_get_sso_origin_host_case_insensitive(self):
         # test lowercase hostname in trusted_dashboard
-        context = {
-            'query_string': {
-                'origin': "http://horizon.com",
-            },
-        }
-        host = self.api._get_sso_origin_host(context)
+        environ = {'QUERY_STRING': 'origin=http://horizon.com'}
+        request = self.make_request(environ=environ)
+        host = self.api._get_sso_origin_host(request)
         self.assertEqual("http://horizon.com", host)
         # test uppercase hostname in trusted_dashboard
         self.config_fixture.config(group='federation',
                                    trusted_dashboard=['http://Horizon.com'])
-        host = self.api._get_sso_origin_host(context)
+        host = self.api._get_sso_origin_host(request)
         self.assertEqual("http://horizon.com", host)
 
     def test_federated_sso_auth_with_protocol_specific_remote_id(self):
@@ -3576,73 +3954,73 @@ class WebSSOTests(FederatedTokenTests):
             group=self.PROTOCOL,
             remote_id_attribute=self.PROTOCOL_REMOTE_ID_ATTR)
 
-        environment = {self.PROTOCOL_REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
-        context = {'environment': environment}
-        query_string = {'origin': self.ORIGIN}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
-        resp = self.api.federated_sso_auth(context, self.PROTOCOL)
+        environment = {self.PROTOCOL_REMOTE_ID_ATTR: self.REMOTE_IDS[0],
+                       'QUERY_STRING': 'origin=%s' % self.ORIGIN}
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
+        resp = self.api.federated_sso_auth(request, self.PROTOCOL)
         # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
         # which is why expected value: `self.TRUSTED_DASHBOARD`
         # needs to be encoded
         self.assertIn(self.TRUSTED_DASHBOARD.encode('utf-8'), resp.body)
 
     def test_federated_sso_auth_bad_remote_id(self):
-        environment = {self.REMOTE_ID_ATTR: self.IDP}
-        context = {'environment': environment}
-        query_string = {'origin': self.ORIGIN}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        environment = {self.REMOTE_ID_ATTR: self.IDP,
+                       'QUERY_STRING': 'origin=%s' % self.ORIGIN}
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
         self.assertRaises(exception.IdentityProviderNotFound,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_federated_sso_missing_query(self):
         environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
-        context = {'environment': environment}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
         self.assertRaises(exception.ValidationError,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_federated_sso_missing_query_bad_remote_id(self):
         environment = {self.REMOTE_ID_ATTR: self.IDP}
-        context = {'environment': environment}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION')
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
         self.assertRaises(exception.ValidationError,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_federated_sso_untrusted_dashboard(self):
-        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
-        context = {'environment': environment}
-        query_string = {'origin': uuid.uuid4().hex}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0],
+                       'QUERY_STRING': 'origin=%s' % uuid.uuid4().hex}
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
         self.assertRaises(exception.Unauthorized,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_federated_sso_untrusted_dashboard_bad_remote_id(self):
-        environment = {self.REMOTE_ID_ATTR: self.IDP}
-        context = {'environment': environment}
-        query_string = {'origin': uuid.uuid4().hex}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        environment = {self.REMOTE_ID_ATTR: self.IDP,
+                       'QUERY_STRING': 'origin=%s' % uuid.uuid4().hex}
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment)
         self.assertRaises(exception.Unauthorized,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_federated_sso_missing_remote_id(self):
-        context = {'environment': {}}
-        query_string = {'origin': self.ORIGIN}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
+        environment = copy.deepcopy(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment,
+                                    query_string='origin=%s' % self.ORIGIN)
         self.assertRaises(exception.Unauthorized,
                           self.api.federated_sso_auth,
-                          context, self.PROTOCOL)
+                          request, self.PROTOCOL)
 
     def test_identity_provider_specific_federated_authentication(self):
         environment = {self.REMOTE_ID_ATTR: self.REMOTE_IDS[0]}
-        context = {'environment': environment}
-        query_string = {'origin': self.ORIGIN}
-        self._inject_assertion(context, 'EMPLOYEE_ASSERTION', query_string)
-        resp = self.api.federated_idp_specific_sso_auth(context,
+        environment.update(mapping_fixtures.EMPLOYEE_ASSERTION)
+        request = self.make_request(environ=environment,
+                                    query_string='origin=%s' % self.ORIGIN)
+        resp = self.api.federated_idp_specific_sso_auth(request,
                                                         self.idp['id'],
                                                         self.PROTOCOL)
         # `resp.body` will be `str` in Python 2 and `bytes` in Python 3
