@@ -12,8 +12,6 @@ export KSCTEST_PATH=/usr/lib/python2.7/dist-packages/keystoneclient
 
 include /usr/share/openstack-pkg-tools/pkgos.make
 
-export OSLO_PACKAGE_VERSION=$(shell dpkg-parsechangelog | grep Version: | cut -d' ' -f2 | sed -e 's/^[[:digit:]]*://' -e 's/[-].*//' -e 's/~/.0/' | head -n 1)
-
 %:
 	dh $@ --buildsystem=python_distutils --with python2,sphinxdoc,systemd
 
