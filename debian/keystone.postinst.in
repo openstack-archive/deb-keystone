@@ -155,40 +155,38 @@ if [ "$1" = "configure" ] ; then
 #		pkgos_init ${k}
 #	done
 
-	# On first install, create basics configuration and add roles
-	if [ -z "$2" ] ; then
-		a2enmod wsgi || true
-		a2ensite wsgi-keystone.conf || true
-		invoke-rc.d apache2 restart || true
-		db_get keystone/create-admin-tenant
+	a2enmod wsgi || true
+	a2ensite wsgi-keystone.conf || true
+	invoke-rc.d apache2 restart || true
+	db_get keystone/create-admin-tenant
+	if [ "$RET" = "true" ] ; then
+		echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
+		sleep 1
+		echo -n "4..."
+		sleep 1
+		echo -n "3..."
+		sleep 1
+		echo -n "2..."
+		sleep 1
+		echo -n "1..."
+		sleep 1
+		echo "0"
+
+		keystone_get_debconf_admin_credentials
+		echo "===> Bootstraping tenants with 'keystone-manage bootstrap':"
+		keystone_get_debconf_admin_credentials
+		keystone_bootstrap_admin
+		db_get keystone/register-endpoint
 		if [ "$RET" = "true" ] ; then
-			echo -n "Sleeping 5 seconds to make sure the keystone daemon is up and running: 5..."
-			sleep 1
-			echo -n "4..."
-			sleep 1
-			echo -n "3..."
-			sleep 1
-			echo -n "2..."
-			sleep 1
-			echo -n "1..."
-			sleep 1
-			echo "0"
-
-			keystone_get_debconf_admin_credentials
-			echo "===> Bootstraping tenants with 'keystone-manage bootstrap':"
-			keystone_get_debconf_admin_credentials
-			keystone_bootstrap_admin
-			db_get keystone/register-endpoint
-			if [ "$RET" = "true" ] ; then
-				echo "===> Registering keystone endpoint"
-				keystone_create_endpoint_postinst
-			fi
-			echo "===> Editing bootstraped tenants and adding default roles"
-			keystone_create_admin_tenant
-
-			echo "done!"
+			echo "===> Registering keystone endpoint"
+			keystone_create_endpoint_postinst
 		fi
+		db_unregister keystone/register-endpoint
+		echo "===> Editing bootstraped tenants and adding default roles"
+		keystone_create_admin_tenant
+		echo "done!"
 	fi
+	db_unregister keystone/create-admin-tenant
 	db_stop
 fi
 
