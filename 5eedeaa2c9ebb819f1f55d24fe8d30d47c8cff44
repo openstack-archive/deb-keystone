@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Rahul U Nair <rahulunair@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 04 Aug 2016 04:26:55 +0000
+Reviewed-on: https://review.openstack.org/345022
+Project: openstack/deb-keystone
+Branch: refs/heads/master

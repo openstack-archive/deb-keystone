@@ -1,0 +1,12 @@
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+2: Jamie Lennox <jamielennox@gmail.com>
+Workflow+1: henry-nash <henryn@linux.vnet.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 25 Jul 2016 22:05:58 +0000
+Reviewed-on: https://review.openstack.org/343886
+Project: openstack/deb-keystone
+Branch: refs/heads/master

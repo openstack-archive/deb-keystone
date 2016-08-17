@@ -1,0 +1,11 @@
+Code-Review+2: ayoung <ayoung@redhat.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+1: Mikhail Nikolaenko <mnikolaenko@mirantis.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Workflow+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 26 Jul 2016 14:28:01 +0000
+Reviewed-on: https://review.openstack.org/345685
+Project: openstack/deb-keystone
+Branch: refs/heads/master

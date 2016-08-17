@@ -1,0 +1,12 @@
+Code-Review+2: Marek Denis <marek.denis@cern.ch>
+Code-Review+1: Clenimar Filemon <clenimar@lsd.ufcg.edu.br>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+1: Eric Brown <browne@vmware.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 03 Aug 2016 04:57:33 +0000
+Reviewed-on: https://review.openstack.org/350128
+Project: openstack/deb-keystone
+Branch: refs/heads/master

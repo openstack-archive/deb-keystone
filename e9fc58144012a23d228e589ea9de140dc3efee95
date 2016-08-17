@@ -1,0 +1,9 @@
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Workflow+1: henry-nash <henryn@linux.vnet.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 25 Jul 2016 22:34:05 +0000
+Reviewed-on: https://review.openstack.org/345075
+Project: openstack/deb-keystone
+Branch: refs/heads/master

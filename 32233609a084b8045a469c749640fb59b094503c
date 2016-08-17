@@ -1,0 +1,13 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Code-Review+1: Jens Rosenboom <j.rosenboom@x-ion.de>
+Code-Review+1: venkatamahesh <Venkata.Kotha@infinite.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Workflow+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 20 Jul 2016 16:14:21 +0000
+Reviewed-on: https://review.openstack.org/343906
+Project: openstack/deb-keystone
+Branch: refs/heads/master

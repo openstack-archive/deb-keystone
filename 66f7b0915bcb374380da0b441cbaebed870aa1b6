@@ -1,0 +1,10 @@
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+2: ayoung <ayoung@redhat.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Code-Review+1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 25 Jul 2016 22:38:40 +0000
+Reviewed-on: https://review.openstack.org/345089
+Project: openstack/deb-keystone
+Branch: refs/heads/master

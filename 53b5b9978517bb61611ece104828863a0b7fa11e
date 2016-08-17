@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review-1: Clenimar Filemon <clenimar@lsd.ufcg.edu.br>
+Code-Review-1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 22 Jul 2016 18:21:32 +0000
+Reviewed-on: https://review.openstack.org/342322
+Project: openstack/deb-keystone
+Branch: refs/heads/master

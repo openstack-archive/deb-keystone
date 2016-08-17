@@ -1,0 +1,12 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Workflow+1: David Stanek <dstanek@dstanek.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 02 Aug 2016 14:27:49 +0000
+Reviewed-on: https://review.openstack.org/316118
+Project: openstack/deb-keystone
+Branch: refs/heads/master

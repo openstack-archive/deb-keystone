@@ -1,0 +1,10 @@
+Code-Review+1: Eric Brown <browne@vmware.com>
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 08 Aug 2016 18:14:00 +0000
+Reviewed-on: https://review.openstack.org/351979
+Project: openstack/deb-keystone
+Branch: refs/heads/master

@@ -1,0 +1,9 @@
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 18 Jul 2016 13:38:30 +0000
+Reviewed-on: https://review.openstack.org/342034
+Project: openstack/deb-keystone
+Branch: refs/heads/master

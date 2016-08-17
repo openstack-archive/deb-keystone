@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Dolph Mathews <dolph.mathews@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 29 Jul 2016 19:37:45 +0000
+Reviewed-on: https://review.openstack.org/345687
+Project: openstack/deb-keystone
+Branch: refs/heads/master

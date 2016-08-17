@@ -1,0 +1,12 @@
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+1: Eric Brown <browne@vmware.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Dolph Mathews <dolph.mathews@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 21 Jul 2016 21:47:49 +0000
+Reviewed-on: https://review.openstack.org/344210
+Project: openstack/deb-keystone
+Branch: refs/heads/master

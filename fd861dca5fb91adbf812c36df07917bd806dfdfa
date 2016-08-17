@@ -1,0 +1,11 @@
+Code-Review+2: Marek Denis <marek.denis@cern.ch>
+Code-Review+1: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 03 Aug 2016 03:15:07 +0000
+Reviewed-on: https://review.openstack.org/348085
+Project: openstack/deb-keystone
+Branch: refs/heads/master

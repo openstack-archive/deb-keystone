@@ -1,0 +1,11 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 23 Jul 2016 03:58:34 +0000
+Reviewed-on: https://review.openstack.org/320586
+Project: openstack/deb-keystone
+Branch: refs/heads/master

@@ -1,0 +1,8 @@
+Code-Review+2: henry-nash <henryn@linux.vnet.ibm.com>
+Workflow+1: henry-nash <henryn@linux.vnet.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 16 Jul 2016 18:40:02 +0000
+Reviewed-on: https://review.openstack.org/343066
+Project: openstack/deb-keystone
+Branch: refs/heads/master
