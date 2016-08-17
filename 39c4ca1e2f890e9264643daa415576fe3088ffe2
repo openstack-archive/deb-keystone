@@ -1,0 +1,9 @@
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Code-Review+2: Alan Pevec <alan.pevec@redhat.com>
+Workflow+1: Alan Pevec <alan.pevec@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 30 May 2013 18:01:04 +0000
+Reviewed-on: https://review.openstack.org/28423
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/grizzly

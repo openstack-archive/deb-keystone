@@ -1,0 +1,11 @@
+Code-Review+1: Dolph Mathews <dolph.mathews@gmail.com>
+Code-Review+1: guang-yee <guang.yee@hpe.com>
+Code-Review+1: ayoung <ayoung@redhat.com>
+Code-Review+2: Joe Heck <heckj@mac.com>
+Workflow+1: Joe Heck <heckj@mac.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 17 Dec 2012 23:24:06 +0000
+Reviewed-on: https://review.openstack.org/17901
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/folsom

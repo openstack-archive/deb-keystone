@@ -1,0 +1,8 @@
+Code-Review+2: Joe Heck <heckj@mac.com>
+Workflow+1: Joe Heck <heckj@mac.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 12 Jun 2012 17:08:45 +0000
+Reviewed-on: https://review.openstack.org/7792
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/essex

@@ -1,0 +1,10 @@
+Code-Review+1: ayoung <ayoung@redhat.com>
+Code-Review+1: guang-yee <guang.yee@hpe.com>
+Code-Review+2: Alan Pevec <alan.pevec@redhat.com>
+Workflow+1: Alan Pevec <alan.pevec@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 02 May 2013 17:08:51 +0000
+Reviewed-on: https://review.openstack.org/27979
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/grizzly

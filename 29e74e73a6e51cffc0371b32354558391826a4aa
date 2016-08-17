@@ -1,0 +1,9 @@
+Code-Review+2: Mark McLoughlin <markmc@redhat.com>
+Code-Review+1: Dave Walker <email@daviey.com>
+Workflow+1: Dave Walker <email@daviey.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 15 Jun 2012 16:22:08 +0000
+Reviewed-on: https://review.openstack.org/8573
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/essex

@@ -1,0 +1,8 @@
+Code-Review+2: Mark McLoughlin <markmc@redhat.com>
+Workflow+1: Mark McLoughlin <markmc@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 13 Dec 2012 22:12:15 +0000
+Reviewed-on: https://review.openstack.org/18078
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/folsom

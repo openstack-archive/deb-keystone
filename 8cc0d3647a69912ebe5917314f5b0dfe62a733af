@@ -1,0 +1,9 @@
+Code-Review+2: Ziad Sawalha <ziad.sawalha@rackspace.com>
+Workflow+1: Ziad Sawalha <ziad.sawalha@rackspace.com>
+Code-Review+1: Ralf Haferkamp <rhafer@suse.de>
+Verified+1: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 26 Jan 2012 00:16:33 +0000
+Reviewed-on: https://review.openstack.org/3410
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed

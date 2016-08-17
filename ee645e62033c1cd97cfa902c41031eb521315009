@@ -1,0 +1,9 @@
+Code-Review+2: p-draigbrady <P@draigBrady.com>
+Code-Review+2: Alan Pevec <alan.pevec@redhat.com>
+Workflow+1: Alan Pevec <alan.pevec@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 31 Oct 2012 18:29:05 +0000
+Reviewed-on: https://review.openstack.org/15112
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/folsom

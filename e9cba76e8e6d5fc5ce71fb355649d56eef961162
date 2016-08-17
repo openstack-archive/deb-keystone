@@ -1,0 +1,8 @@
+Code-Review+2: Ihar Hrachyshka <ihrachys@redhat.com>
+Workflow+1: Ihar Hrachyshka <ihrachys@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 17 Oct 2014 15:57:21 +0000
+Reviewed-on: https://review.openstack.org/128941
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/juno

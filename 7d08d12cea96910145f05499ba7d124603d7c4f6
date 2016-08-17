@@ -1,0 +1,8 @@
+Code-Review+2: Devin Carlen <devin@openstack.org>
+Workflow+1: Devin Carlen <devin@openstack.org>
+Verified+1: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 04 Apr 2012 02:22:39 +0000
+Reviewed-on: https://review.openstack.org/6207
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed

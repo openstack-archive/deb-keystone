@@ -1,0 +1,10 @@
+Code-Review+2: guang-yee <guang.yee@hpe.com>
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Workflow+1: Thierry Carrez <thierry@openstack.org>
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 18 Jul 2013 18:41:35 +0000
+Reviewed-on: https://review.openstack.org/37711
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed

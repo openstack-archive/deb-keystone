@@ -1,0 +1,11 @@
+Code-Review+2: Mark McLoughlin <markmc@redhat.com>
+Code-Review+2: Jay Pipes <jaypipes@gmail.com>
+Code-Review+1: Ghe Rivero <ghe.rivero@gmail.com>
+Code-Review+2: Devin Carlen <devin@openstack.org>
+Workflow+1: Devin Carlen <devin@openstack.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 14 May 2012 20:56:15 +0000
+Reviewed-on: https://review.openstack.org/7385
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/essex

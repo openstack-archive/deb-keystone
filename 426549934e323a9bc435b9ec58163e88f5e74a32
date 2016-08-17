@@ -1,0 +1,10 @@
+Code-Review+1: Sam Morrison <sorrison@gmail.com>
+Code-Review+2: Joe Heck <heckj@mac.com>
+Code-Review+2: Mark McLoughlin <markmc@redhat.com>
+Workflow+1: Mark McLoughlin <markmc@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 14 Jun 2012 15:42:01 +0000
+Reviewed-on: https://review.openstack.org/8404
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/essex

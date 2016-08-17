@@ -1,0 +1,10 @@
+Code-Review+1: Joe Heck <heckj@mac.com>
+Code-Review+1: termie <termie@openstack.org>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Alan Pevec <alan.pevec@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 10 May 2013 00:48:05 +0000
+Reviewed-on: https://review.openstack.org/28728
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/grizzly

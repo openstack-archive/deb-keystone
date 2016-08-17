@@ -1,0 +1,11 @@
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Grant Murphy <grant.murphy@hpe.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Code-Review+2: Alan Pevec <alan.pevec@redhat.com>
+Workflow+1: Alan Pevec <alan.pevec@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 22 May 2013 19:00:16 +0000
+Reviewed-on: https://review.openstack.org/28930
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/grizzly

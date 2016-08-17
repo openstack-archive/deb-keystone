@@ -1,0 +1,11 @@
+Code-Review+1: Lin Hua Cheng <os.lcheng@gmail.com>
+Code-Review+1: Nathan Kinder <nkinder@redhat.com>
+Code-Review+2: Alan Pevec <alan.pevec@redhat.com>
+Code-Review+2: Ihar Hrachyshka <ihrachys@redhat.com>
+Workflow+1: Ihar Hrachyshka <ihrachys@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 27 Oct 2014 10:39:15 +0000
+Reviewed-on: https://review.openstack.org/129770
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/juno

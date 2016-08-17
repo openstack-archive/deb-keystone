@@ -1,0 +1,8 @@
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Workflow+1: Thierry Carrez <thierry@openstack.org>
+Verified+1: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 03 Apr 2012 15:37:03 +0000
+Reviewed-on: https://review.openstack.org/6163
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed

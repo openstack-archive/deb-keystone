@@ -1,0 +1,9 @@
+Code-Review+2: Brant Knudson <bknudson@us.ibm.com>
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Workflow+1: Thierry Carrez <thierry@openstack.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 07 Apr 2014 18:18:22 +0000
+Reviewed-on: https://review.openstack.org/85460
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed

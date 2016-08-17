@@ -1,0 +1,8 @@
+Code-Review+2: Joe Heck <heckj@mac.com>
+Workflow+1: Joe Heck <heckj@mac.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 30 Nov 2012 09:17:41 +0000
+Reviewed-on: https://review.openstack.org/17160
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/folsom

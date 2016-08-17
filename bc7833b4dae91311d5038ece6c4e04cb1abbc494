@@ -1,0 +1,10 @@
+Code-Review+2: Joe Heck <heckj@mac.com>
+Workflow+1: Joe Heck <heckj@mac.com>
+Code-Review+2: Thierry Carrez <thierry@openstack.org>
+Workflow+1: Thierry Carrez <thierry@openstack.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 17 Aug 2012 13:09:30 +0000
+Reviewed-on: https://review.openstack.org/11505
+Project: openstack/deb-keystone
+Branch: refs/heads/milestone-proposed
