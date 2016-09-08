@@ -1,4 +1,5 @@
 [gerrit]
 host=review.openstack.org
 port=29418
-project=openstack/keystone.git
+project=openstack/deb-keystone.git
+defaultbranch=debian/newton
