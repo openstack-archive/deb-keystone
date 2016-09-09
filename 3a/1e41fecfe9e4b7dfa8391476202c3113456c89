@@ -1,0 +1,18 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+1: Matt Thompson <mattt@defunct.ca>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+1: Miguel Alex Cantu (alextricity25) <miguel.cantu@rackspace.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+1: Dave Chen <dave.jungler@gmail.com>
+Code-Review+1: Jean-Philippe Evrard <jean-philippe.evrard@rackspace.co.uk>
+Code-Review+1: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Dolph Mathews <dolph.mathews@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 20 Aug 2016 00:48:58 +0000
+Reviewed-on: https://review.openstack.org/357415
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/mitaka

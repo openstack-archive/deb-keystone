@@ -1,0 +1,18 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Raildo Mascena <raildom@gmail.com>
+Code-Review+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: guang-yee <guang.yee@hpe.com>
+Code-Review+1: Ryosuke Mizuno <r-mizuno@rs.jp.nec.com>
+Code-Review+1: Mikhail Nikolaenko <mnikolaenko@mirantis.com>
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+1: Alexander Makarov <amakarov@mirantis.com>
+Code-Review+1: henry-nash <henryn@linux.vnet.ibm.com>
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 11 Jul 2016 18:42:56 +0000
+Reviewed-on: https://review.openstack.org/332956
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/mitaka
