@@ -1,0 +1,10 @@
+Code-Review+1: Mikhail Nikolaenko <mnikolaenko@mirantis.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Marek Denis <marek.denis+openstack@gmail.com>
+Workflow+1: Marek Denis <marek.denis+openstack@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 31 Aug 2016 14:30:03 +0000
+Reviewed-on: https://review.openstack.org/363374
+Project: openstack/deb-keystone
+Branch: refs/heads/master

@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: huyupeng <huyp@inspur.com>
+Code-Review+1: Dave Chen <dave.jungler@gmail.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Dolph Mathews <dolph.mathews@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 18 Aug 2016 23:24:59 +0000
+Reviewed-on: https://review.openstack.org/350704
+Project: openstack/deb-keystone
+Branch: refs/heads/master

@@ -1,0 +1,8 @@
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 24 Aug 2016 09:10:35 +0000
+Reviewed-on: https://review.openstack.org/357950
+Project: openstack/deb-keystone
+Branch: refs/heads/master
