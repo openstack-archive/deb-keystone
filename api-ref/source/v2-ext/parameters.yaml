@@ -17,19 +17,19 @@ roleId:
   description: |
     The role ID.
   in: path
-  required: false
+  required: true
   type: string
 serviceId:
   description: |
     The service ID.
   in: path
-  required: false
+  required: true
   type: string
 tenantId:
   description: |
     The tenant ID.
   in: path
-  required: false
+  required: true
   type: string
 type_1:
   description: |
@@ -41,7 +41,7 @@ userId:
   description: |
     The user ID.
   in: path
-  required: false
+  required: true
   type: string
 
 # variables in query
@@ -78,10 +78,10 @@ enabled:
   in: body
   required: true
   type: boolean
-enabled_1:
+enabled_user:
   description: |
-    Indicates whether the user is enabled (``true``)
-    or disabled(``false``). The default value is ``true``.
+    Indicates whether the user should be enabled (``true``)
+    or disabled(``false``).
   in: body
   required: true
   type: boolean
@@ -174,6 +174,12 @@ user:
     The ``user`` object.
   in: body
   required: true
+  type: string
+username:
+  description: |
+    The user name.
+  in: body
+  required: false
   type: string
 users:
   description: |

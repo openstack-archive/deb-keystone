@@ -30,14 +30,16 @@ may not match the value of the user's `enabled` column in the user table.
 
 lockout_failure_attempts = cfg.IntOpt(
     'lockout_failure_attempts',
-    default=0,
-    min=0,
+    default=None,
+    min=1,
     help=utils.fmt("""
 The maximum number of times that a user can fail to authenticate before the
 user account is locked for the number of seconds specified by
-`[security_compliance] lockout_duration`. Setting this value to zero (the
-default) disables this feature. This feature depends on the `sql` backend for
-the `[identity] driver`.
+`[security_compliance] lockout_duration`. This feature is disabled by
+default. If this feature is enabled and `[security_compliance]
+lockout_duration` is not set, then users may be locked out indefinitely
+until the user is explicitly enabled via the API. This feature depends on
+the `sql` backend for the `[identity] driver`.
 """))
 
 lockout_duration = cfg.IntOpt(
@@ -55,44 +57,71 @@ driver`.
 
 password_expires_days = cfg.IntOpt(
     'password_expires_days',
-    default=0,
-    min=0,
+    default=None,
+    min=1,
     help=utils.fmt("""
-The number of days which a password will be considered valid before requiring
-the user to change it. Setting the value to zero (the default) disables this
-feature. This feature depends on the `sql` backend for the `[identity] driver`.
+The number of days for which a password will be considered valid
+before requiring it to be changed. This feature is disabled by default. If
+enabled, new password changes will have an expiration date, however existing
+passwords would not be impacted. This feature depends on the `sql` backend for
+the `[identity] driver`.
+"""))
+
+password_expires_ignore_user_ids = cfg.ListOpt(
+    'password_expires_ignore_user_ids',
+    default=[],
+    help=utils.fmt("""
+Comma separated list of user IDs to be ignored when checking if a password
+is expired. Passwords for users in this list will not expire. This feature
+will only be enabled if `[security_compliance] password_expires_days` is set.
 """))
 
 unique_last_password_count = cfg.IntOpt(
     'unique_last_password_count',
-    default=0,
-    min=0,
+    default=1,
+    min=1,
     help=utils.fmt("""
 This controls the number of previous user password iterations to keep in
 history, in order to enforce that newly created passwords are unique. Setting
-the value to zero (the default) disables this feature. This feature depends on
-the `sql` backend for the `[identity] driver`.
+the value to one (the default) disables this feature. Thus, to enable this
+feature, values must be greater than 1. This feature depends on the `sql`
+backend for the `[identity] driver`.
 """))
 
-password_change_limit_per_day = cfg.IntOpt(
-    'password_change_limit_per_day',
+minimum_password_age = cfg.IntOpt(
+    'minimum_password_age',
     default=0,
     min=0,
     help=utils.fmt("""
-The maximum number of times a user can change their password in a single day.
-Setting the value to zero (the default) disables this feature. This feature
-depends on the `sql` backend for the `[identity] driver`.
+The number of days that a password must be used before the user can change it.
+This prevents users from changing their passwords immediately in order to wipe
+out their password history and reuse an old password. This feature does not
+prevent administrators from manually resetting passwords. It is disabled by
+default and allows for immediate password changes. This feature depends on the
+`sql` backend for the `[identity] driver`. Note: If `[security_compliance]
+password_expires_days` is set, then the value for this option should be less
+than the `password_expires_days`.
 """))
 
 password_regex = cfg.StrOpt(
     'password_regex',
-    default='^$',
+    default=None,
     help=utils.fmt("""
 The regular expression used to validate password strength requirements. By
 default, the regular expression will match any password. The following is an
 example of a pattern which requires at least 1 letter, 1 digit, and have a
 minimum length of 7 characters: ^(?=.*\d)(?=.*[a-zA-Z]).{7,}$ This feature
 depends on the `sql` backend for the `[identity] driver`.
+"""))
+
+password_regex_description = cfg.StrOpt(
+    'password_regex_description',
+    default=None,
+    help=utils.fmt("""
+Describe your password regular expression here in language for humans. If a
+password fails to match the regular expression, the contents of this
+configuration variable will be returned to users to explain why their
+requested password was insufficient.
 """))
 
 
@@ -102,9 +131,11 @@ ALL_OPTS = [
     lockout_failure_attempts,
     lockout_duration,
     password_expires_days,
+    password_expires_ignore_user_ids,
     unique_last_password_count,
-    password_change_limit_per_day,
+    minimum_password_age,
     password_regex,
+    password_regex_description,
 ]
 
 

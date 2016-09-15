@@ -93,6 +93,19 @@ class URLValidationError(ValidationError):
                        " %(url)s")
 
 
+class PasswordValidationError(ValidationError):
+    message_format = _("Password validation error: %(detail)s")
+
+
+class PasswordAgeValidationError(PasswordValidationError):
+    message_format = _("You cannot change your password at this time due "
+                       "to the minimum password age. Once you change your "
+                       "password, it must be used for %(min_age_days)d day(s) "
+                       "before it can be changed. Please try again in "
+                       "%(days_left)d day(s) or contact your administrator to "
+                       "reset your password.")
+
+
 class SchemaValidationError(ValidationError):
     # NOTE(lbragstad): For whole OpenStack message consistency, this error
     # message has been written in a format consistent with WSME.
@@ -178,6 +191,35 @@ class SecurityError(Error):
 
     amendment = _('(Disable insecure_debug mode to suppress these details.)')
 
+    def __deepcopy__(self):
+        """Override the default deepcopy.
+
+        Keystone :class:`keystone.exception.Error` accepts an optional message
+        that will be used when rendering the exception object as a string. If
+        not provided the object's message_format attribute is used instead.
+        :class:`keystone.exception.SecurityError` is a little different in
+        that it only uses the message provided to the initializer when
+        keystone is in `insecure_debug` mode. Instead it will use its
+        `message_format`. This is to ensure that sensitive details are not
+        leaked back to the caller in a production deployment.
+
+        This dual mode for string rendering causes some odd behaviour when
+        combined with oslo_i18n translation. Any object used as a value for
+        formatting a translated string is deep copied.
+
+        The copy causes an issue. The deep copy process actually creates a new
+        exception instance with the rendered string. Then when that new
+        instance is rendered as a string to use for substitution a warning is
+        logged. This is because the code tries to use the `message_format` in
+        secure mode, but the required kwargs are not in the deep copy.
+
+        The end result is not an error because when the KeyError is caught the
+        instance's ``message`` is used instead and this has the properly
+        translated message. The only indication that something is wonky is a
+        message in the warning log.
+        """
+        return self
+
     def _build_message(self, message, **kwargs):
         """Only returns detailed messages in insecure_debug mode."""
         if message and CONF.insecure_debug:
@@ -199,6 +241,11 @@ class Unauthorized(SecurityError):
     title = 'Unauthorized'
 
 
+class PasswordExpired(Unauthorized):
+    message_format = _("The password is expired and needs to be reset by an "
+                       "administrator for user: %(user_id)s")
+
+
 class AuthPluginException(Unauthorized):
     message_format = _("Authentication plugin error.")
 
@@ -207,13 +254,12 @@ class AuthPluginException(Unauthorized):
         self.authentication = {}
 
 
-class MissingGroups(Unauthorized):
-    message_format = _("Unable to find valid groups while using "
-                       "mapping %(mapping_id)s")
-
-
 class UserDisabled(Unauthorized):
     message_format = _("The account is disabled for user: %(user_id)s")
+
+
+class AccountLocked(Unauthorized):
+    message_format = _("The account is locked for user: %(user_id)s")
 
 
 class AuthMethodNotSupported(AuthPluginException):
@@ -534,15 +580,10 @@ class TokenlessAuthConfigError(ValidationError):
                        'was not found in the request environment.')
 
 
-class MigrationMovedFailure(RuntimeError):
-    def __init__(self, extension):
-        self.extension = extension
-        msg = _("The %s extension has been moved into keystone core and as "
-                "such its migrations are maintained by the main keystone "
-                "database control. Use the command: keystone-manage "
-                "db_sync") % self.extension
-        super(MigrationMovedFailure, self).__init__(msg)
-
-
 class UnsupportedDriverVersion(UnexpectedError):
     debug_message_format = _('%(driver)s is not supported driver version')
+
+
+class CredentialEncryptionError(Exception):
+    message_format = _("An unexpected error prevented the server "
+                       "from accessing encrypted credentials.")

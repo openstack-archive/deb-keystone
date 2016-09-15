@@ -422,17 +422,16 @@ class LDAPHandler(object):
 
     """
 
-    @abc.abstractmethod
     def __init__(self, conn=None):
         self.conn = conn
 
     @abc.abstractmethod
     def connect(self, url, page_size=0, alias_dereferencing=None,
                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
-                tls_req_cert='demand', chase_referrals=None, debug_level=None,
-                use_pool=None, pool_size=None, pool_retry_max=None,
-                pool_retry_delay=None, pool_conn_timeout=None,
-                pool_conn_lifetime=None):
+                tls_req_cert=ldap.OPT_X_TLS_DEMAND, chase_referrals=None,
+                debug_level=None, use_pool=None, pool_size=None,
+                pool_retry_max=None, pool_retry_delay=None,
+                pool_conn_timeout=None, pool_conn_lifetime=None):
         raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
@@ -495,15 +494,12 @@ class PythonLDAPHandler(LDAPHandler):
 
     """
 
-    def __init__(self, conn=None):
-        super(PythonLDAPHandler, self).__init__(conn=conn)
-
     def connect(self, url, page_size=0, alias_dereferencing=None,
                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
-                tls_req_cert='demand', chase_referrals=None, debug_level=None,
-                use_pool=None, pool_size=None, pool_retry_max=None,
-                pool_retry_delay=None, pool_conn_timeout=None,
-                pool_conn_lifetime=None):
+                tls_req_cert=ldap.OPT_X_TLS_DEMAND, chase_referrals=None,
+                debug_level=None, use_pool=None, pool_size=None,
+                pool_retry_max=None, pool_retry_delay=None,
+                pool_conn_timeout=None, pool_conn_lifetime=None):
 
         _common_ldap_initialization(url=url,
                                     use_tls=use_tls,
@@ -687,10 +683,10 @@ class PooledLDAPHandler(LDAPHandler):
 
     def connect(self, url, page_size=0, alias_dereferencing=None,
                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
-                tls_req_cert='demand', chase_referrals=None, debug_level=None,
-                use_pool=None, pool_size=None, pool_retry_max=None,
-                pool_retry_delay=None, pool_conn_timeout=None,
-                pool_conn_lifetime=None):
+                tls_req_cert=ldap.OPT_X_TLS_DEMAND, chase_referrals=None,
+                debug_level=None, use_pool=None, pool_size=None,
+                pool_retry_max=None, pool_retry_delay=None,
+                pool_conn_timeout=None, pool_conn_lifetime=None):
 
         _common_ldap_initialization(url=url,
                                     use_tls=use_tls,
@@ -877,8 +873,8 @@ class KeystoneLDAPHandler(LDAPHandler):
 
     def connect(self, url, page_size=0, alias_dereferencing=None,
                 use_tls=False, tls_cacertfile=None, tls_cacertdir=None,
-                tls_req_cert='demand', chase_referrals=None, debug_level=None,
-                use_pool=None, pool_size=None,
+                tls_req_cert=ldap.OPT_X_TLS_DEMAND, chase_referrals=None,
+                debug_level=None, use_pool=None, pool_size=None,
                 pool_retry_max=None, pool_retry_delay=None,
                 pool_conn_timeout=None, pool_conn_lifetime=None):
         self.page_size = page_size

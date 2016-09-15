@@ -12,7 +12,6 @@
 
 """Main entry point into the Revoke service."""
 
-import oslo_cache
 from oslo_log import versionutils
 
 from keystone.common import cache
@@ -41,8 +40,8 @@ EXTENSION_DATA = {
         {
             'rel': 'describedby',
             'type': 'text/html',
-            'href': 'http://specs.openstack.org/openstack/keystone-specs/api/'
-                    'v3/identity-api-v3-os-revoke-ext.html',
+            'href': 'http://developer.openstack.org/'
+                    'api-ref-identity-v3-ext.html',
         }
     ]}
 extension.register_admin_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)
@@ -51,7 +50,7 @@ extension.register_public_extension(EXTENSION_DATA['alias'], EXTENSION_DATA)
 # This builds a discrete cache region dedicated to revoke events. The API can
 # return a filtered list based upon last fetchtime. This is deprecated but
 # must be maintained.
-REVOKE_REGION = oslo_cache.create_region()
+REVOKE_REGION = cache.create_region(name='revoke')
 MEMOIZE = cache.get_memoization_decorator(
     group='revoke',
     region=REVOKE_REGION)

@@ -27,9 +27,12 @@ Create policy
 
 .. rest_method::  POST /v3/policies
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/policies``
+
 Creates a policy.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -38,10 +41,10 @@ Request
 .. rest_parameters:: parameters.yaml
 
    - policy: policy
-   - user_id: user_id
+   - user_id: policy_user_id
    - project_id: project_id
-   - type: type
-   - blob: blob
+   - type: policy_type
+   - blob: policy_blob_str
 
 Request Example
 ---------------
@@ -54,13 +57,13 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - user_id: user_id
-   - links: links
-   - blob: blob
+   - user_id: policy_user_id
+   - links: policy_links
+   - blob: policy_blob_str
    - policy: policy
    - project_id: project_id
-   - type: type
-   - id: id
+   - type: policy_type
+   - id: policy_id
 
 
 List policies
@@ -68,9 +71,12 @@ List policies
 
 .. rest_method::  GET /v3/policies
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/policies``
+
 Lists policies.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -78,20 +84,20 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - type: type
+   - type: policy_type_query
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - user_id: user_id
-   - links: links
-   - blob: blob
+   - user_id: policy_user_id
+   - links: policy_links
+   - blob: policy_blob_obj
    - policies: policies
    - project_id: project_id
-   - type: type
-   - id: id
+   - type: policy_type
+   - id: policy_id
 
 Response Example
 ----------------
@@ -105,9 +111,12 @@ Show policy details
 
 .. rest_method::  GET /v3/policies/{policy_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/policy``
+
 Shows details for a policy.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -115,20 +124,20 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - policy_id: policy_id
+   - policy_id: policy_id_path
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - user_id: user_id
-   - links: links
-   - blob: blob
+   - user_id: policy_user_id
+   - links: policy_links
+   - blob: policy_blob_obj
    - policy: policy
    - project_id: project_id
-   - type: type
-   - id: id
+   - type: policy_type
+   - id: policy_id
 
 Response Example
 ----------------
@@ -142,9 +151,12 @@ Update policy
 
 .. rest_method::  PATCH /v3/policies/{policy_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/policy``
+
 Updates a policy.
 
 Normal response codes: 200
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -152,12 +164,12 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+   - policy_id: policy_id_path
    - policy: policy
-   - user_id: user_id
+   - user_id: policy_user_id
    - project_id: project_id
-   - type: type
-   - blob: blob
-   - policy_id: policy_id
+   - type: policy_type
+   - blob: policy_blob_obj
 
 Request Example
 ---------------
@@ -170,13 +182,13 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - user_id: user_id
-   - links: links
-   - blob: blob
+   - user_id: policy_user_id
+   - links: policy_links
+   - blob: policy_blob_obj
    - policy: policy
    - project_id: project_id
-   - type: type
-   - id: id
+   - type: policy_type
+   - id: policy_id
 
 Response Example
 ----------------
@@ -190,9 +202,12 @@ Delete policy
 
 .. rest_method::  DELETE /v3/policies/{policy_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/policy``
+
 Deletes a policy.
 
 Normal response codes: 204
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -200,4 +215,4 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - policy_id: policy_id
+   - policy_id: policy_id_path

@@ -20,6 +20,7 @@ import msgpack
 from oslo_utils import timeutils
 from six.moves import urllib
 
+from keystone.common import fernet_utils
 from keystone.common import utils
 import keystone.conf
 from keystone import exception
@@ -30,7 +31,6 @@ from keystone.tests.unit.ksfixtures import database
 from keystone.token import provider
 from keystone.token.providers import fernet
 from keystone.token.providers.fernet import token_formatters
-from keystone.token.providers.fernet import utils as fernet_utils
 
 
 CONF = keystone.conf.CONF
@@ -39,7 +39,13 @@ CONF = keystone.conf.CONF
 class TestFernetTokenProvider(unit.TestCase):
     def setUp(self):
         super(TestFernetTokenProvider, self).setUp()
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
         self.provider = fernet.Provider()
 
     def test_supports_bind_authentication_returns_false(self):
@@ -72,7 +78,13 @@ class TestFernetTokenProvider(unit.TestCase):
 class TestValidate(unit.TestCase):
     def setUp(self):
         super(TestValidate, self).setUp()
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
         self.useFixture(database.Database())
         self.load_backends()
 
@@ -129,6 +141,7 @@ class TestValidate(unit.TestCase):
         protocol = uuid.uuid4().hex
         auth_context = {
             'user_id': user_ref['id'],
+            'user_name': user_ref['name'],
             'group_ids': group_ids,
             federation_constants.IDENTITY_PROVIDER: identity_provider,
             federation_constants.PROTOCOL: protocol,
@@ -140,7 +153,7 @@ class TestValidate(unit.TestCase):
         token = token_data['token']
         exp_user_info = {
             'id': user_ref['id'],
-            'name': user_ref['id'],
+            'name': user_ref['name'],
             'domain': {'id': CONF.federation.federated_domain_name,
                        'name': CONF.federation.federated_domain_name, },
             federation_constants.FEDERATION: {
@@ -216,7 +229,13 @@ class TestValidate(unit.TestCase):
 class TestTokenFormatter(unit.TestCase):
     def setUp(self):
         super(TestTokenFormatter, self).setUp()
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def test_restore_padding(self):
         # 'a' will result in '==' padding, 'aa' will result in '=' padding, and
@@ -506,7 +525,11 @@ class TestFernetKeyRotation(unit.TestCase):
 
         """
         # Load the keys into a list, keys is list of six.text_type.
-        keys = fernet_utils.load_keys()
+        key_utils = fernet_utils.FernetUtils(
+            CONF.fernet_tokens.key_repository,
+            CONF.fernet_tokens.max_active_keys
+        )
+        keys = key_utils.load_keys()
 
         # Sort the list of keys by the keys themselves (they were previously
         # sorted by filename).
@@ -550,7 +573,13 @@ class TestFernetKeyRotation(unit.TestCase):
 
             # Ensure that resetting the key repository always results in 2
             # active keys.
-            self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+            self.useFixture(
+                ksfixtures.KeyRepository(
+                    self.config_fixture,
+                    'fernet_tokens',
+                    CONF.fernet_tokens.max_active_keys
+                )
+            )
 
             # Validate the initial repository state.
             self.assertRepositoryState(expected_size=min_active_keys)
@@ -563,8 +592,12 @@ class TestFernetKeyRotation(unit.TestCase):
 
             # Rotate the keys just enough times to fully populate the key
             # repository.
+            key_utils = fernet_utils.FernetUtils(
+                CONF.fernet_tokens.key_repository,
+                CONF.fernet_tokens.max_active_keys
+            )
             for rotation in range(max_active_keys - min_active_keys):
-                fernet_utils.rotate_keys()
+                key_utils.rotate_keys()
                 self.assertRepositoryState(expected_size=rotation + 3)
 
                 exp_keys.append(next_key_number)
@@ -576,8 +609,12 @@ class TestFernetKeyRotation(unit.TestCase):
 
             # Rotate an additional number of times to ensure that we maintain
             # the desired number of active keys.
+            key_utils = fernet_utils.FernetUtils(
+                CONF.fernet_tokens.key_repository,
+                CONF.fernet_tokens.max_active_keys
+            )
             for rotation in range(10):
-                fernet_utils.rotate_keys()
+                key_utils.rotate_keys()
                 self.assertRepositoryState(expected_size=max_active_keys)
 
                 exp_keys.pop(1)
@@ -586,11 +623,21 @@ class TestFernetKeyRotation(unit.TestCase):
                 self.assertEqual(exp_keys, self.keys)
 
     def test_non_numeric_files(self):
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
         evil_file = os.path.join(CONF.fernet_tokens.key_repository, '99.bak')
         with open(evil_file, 'w'):
             pass
-        fernet_utils.rotate_keys()
+        key_utils = fernet_utils.FernetUtils(
+            CONF.fernet_tokens.key_repository,
+            CONF.fernet_tokens.max_active_keys
+        )
+        key_utils.rotate_keys()
         self.assertTrue(os.path.isfile(evil_file))
         keys = 0
         for x in os.listdir(CONF.fernet_tokens.key_repository):
@@ -602,10 +649,20 @@ class TestFernetKeyRotation(unit.TestCase):
 
 class TestLoadKeys(unit.TestCase):
     def test_non_numeric_files(self):
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
         evil_file = os.path.join(CONF.fernet_tokens.key_repository, '~1')
         with open(evil_file, 'w'):
             pass
-        keys = fernet_utils.load_keys()
+        key_utils = fernet_utils.FernetUtils(
+            CONF.fernet_tokens.key_repository,
+            CONF.fernet_tokens.max_active_keys
+        )
+        keys = key_utils.load_keys()
         self.assertEqual(2, len(keys))
         self.assertTrue(len(keys[0]))

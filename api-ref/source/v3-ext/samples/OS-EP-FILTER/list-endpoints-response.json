@@ -1,0 +1,29 @@
+{
+    "endpoints": [
+        {
+            "id": "6fedc0",
+            "interface": "public",
+            "url": "http://example.com/identity/",
+            "region": "north",
+            "links": {
+                "self": "http://example.com/identity/v3/endpoints/6fedc0"
+            },
+            "service_id": "1b501a"
+        },
+        {
+            "id": "6fedc0",
+            "interface": "internal",
+            "region": "south",
+            "url": "http://example.com/identity/",
+            "links": {
+                "self": "http://example.com/identity/v3/endpoints/6fedc0"
+            },
+            "service_id": "1b501a"
+        }
+    ],
+    "links": {
+        "self": "http://example.com/identity/v3/OS-EP-FILTER/projects/263fd9/endpoints",
+        "previous": null,
+        "next": null
+    }
+}

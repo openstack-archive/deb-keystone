@@ -1,0 +1,31 @@
+{
+    "links": {
+        "next": null,
+        "previous": null,
+        "self": "http://example.com/identity/v3/OS-FEDERATION/service_providers"
+    },
+    "service_providers": [
+        {
+            "auth_url": "https://example.com/identity/v3/OS-FEDERATION/identity_providers/acme/protocols/saml2/auth",
+            "description": "Stores ACME identities",
+            "enabled": true,
+            "id": "ACME",
+            "links": {
+                "self": "http://example.com/identity/v3/OS-FEDERATION/service_providers/ACME"
+            },
+            "relay_state_prefix": "ss:mem:",
+            "sp_url": "https://example.com/identity/Shibboleth.sso/SAML2/ECP"
+        },
+        {
+            "auth_url": "https://other.example.com/identity/v3/OS-FEDERATION/identity_providers/acme/protocols/saml2/auth",
+            "description": "Stores contractor identities",
+            "enabled": false,
+            "id": "ACME-contractors",
+            "links": {
+                "self": "http://example.com/identity/v3/OS-FEDERATION/service_providers/ACME-contractors"
+            },
+            "relay_state_prefix": "ss:mem:",
+            "sp_url": "https://other.example.com/identity/Shibboleth.sso/SAML2/ECP"
+        }
+    ]
+}

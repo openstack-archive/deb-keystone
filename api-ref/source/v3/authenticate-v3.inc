@@ -90,6 +90,8 @@ Password authentication with unscoped authorization
 
 .. rest_method::  POST /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Authenticates an identity and generates a token. Uses the password authentication method. Authorization is unscoped.
 
 The request body must include a payload that specifies the
@@ -97,6 +99,7 @@ authentication method, which is ``password``, and the user, by ID
 or name, and password credentials.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -104,15 +107,15 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+   - nocatalog: nocatalog
    - domain: domain
-   - name: name
+   - name: user_name
    - auth: auth
    - user: user
    - password: password
-   - id: id
+   - id: user_id
    - identity: identity
-   - methods: methods
-   - nocatalog: nocatalog
+   - methods: auth_methods_passwd
 
 Request Example
 ---------------
@@ -127,21 +130,29 @@ Response Parameters
 
    - X-Subject-Token: X-Subject-Token
    - domain: domain
-   - methods: methods
+   - methods: auth_methods_passwd
    - expires_at: expires_at
    - token: token
    - extras: extras
    - user: user
    - audit_ids: audit_ids
    - issued_at: issued_at
-   - id: id
-   - name: name
+   - id: user_id
+   - name: user_name
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/auth-password-unscoped-response.json
+   :language: javascript
 
 
 Password authentication with scoped authorization
 =================================================
 
 .. rest_method::  POST /v3/auth/tokens
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
 
 Authenticates an identity and generates a token. Uses the password authentication method and scopes authorization to a project or domain.
 
@@ -150,6 +161,7 @@ The request body must include a payload that specifies the
 ``project`` or ``domain`` authorization scope.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -157,15 +169,15 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - name: name
+   - nocatalog: nocatalog
+   - name: user_name
    - auth: auth
    - user: user
    - scope: scope
    - password: password
-   - id: id
+   - id: user_id
    - identity: identity
-   - methods: methods
-   - nocatalog: nocatalog
+   - methods: auth_methods_passwd
 
 Request Example
 ---------------
@@ -181,10 +193,10 @@ Response Parameters
    - X-Subject-Token: X-Subject-Token
    - domain: domain
    - region_id: region_id
-   - methods: methods
+   - methods: auth_methods_passwd
    - roles: roles
-   - url: url
-   - region: region
+   - url: endpoint_url
+   - region: endpoint_region
    - token: token
    - expires_at: expires_at
    - project: project
@@ -193,17 +205,19 @@ Response Parameters
    - extras: extras
    - user: user
    - audit_ids: audit_ids
-   - interface: interface
+   - interface: endpoint_interface
    - endpoints: endpoints
-   - type: type
-   - id: id
-   - name: name
+   - type: endpoint_type
+   - id: user_id
+   - name: user_name
 
 
 Password authentication with explicit unscoped authorization
 ============================================================
 
 .. rest_method::  POST /v3/auth/tokens
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
 
 Authenticates an identity and generates a token. Uses the password authentication method with explicit unscoped authorization.
 
@@ -212,6 +226,7 @@ The request body must include a payload that specifies the
 ``unscoped`` authorization scope.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -219,15 +234,15 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - name: name
+   - nocatalog: nocatalog
+   - name: user_name
    - auth: auth
    - user: user
    - scope: scope
    - password: password
-   - id: id
+   - id: user_id
    - identity: identity
-   - methods: methods
-   - nocatalog: nocatalog
+   - methods: auth_methods_passwd
 
 Request Example
 ---------------
@@ -242,7 +257,7 @@ Response Parameters
 
    - X-Subject-Token: X-Subject-Token
    - domain: domain
-   - methods: methods
+   - methods: auth_methods_passwd
    - roles: roles
    - expires_at: expires_at
    - token: token
@@ -250,8 +265,8 @@ Response Parameters
    - user: user
    - audit_ids: audit_ids
    - issued_at: issued_at
-   - id: id
-   - name: name
+   - id: user_id
+   - name: user_name
 
 
 Token authentication with unscoped authorization
@@ -259,11 +274,14 @@ Token authentication with unscoped authorization
 
 .. rest_method::  POST /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Authenticates an identity and generates a token. Uses the token authentication method. Authorization is unscoped.
 
 In the request body, provide the token ID.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -271,12 +289,12 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - identity: identity
-   - token: token
-   - id: id
-   - auth: auth
-   - methods: methods
    - nocatalog: nocatalog
+   - identity: identity
+   - token: auth_token
+   - id: auth_token_id
+   - auth: auth
+   - methods: auth_methods_token
 
 Request Example
 ---------------
@@ -298,12 +316,15 @@ Token authentication with scoped authorization
 
 .. rest_method::  POST /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Authenticates an identity and generates a token. Uses the token authentication method and scopes authorization to a project or domain.
 
 In the request body, provide the token ID and the ``project`` or
 ``domain`` authorization scope.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -311,14 +332,14 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - methods: methods
+   - nocatalog: nocatalog
+   - methods: auth_methods_token
    - auth: auth
-   - token: token
+   - token: auth_token
    - audit_ids: audit_ids
    - scope: scope
-   - id: id
+   - id: auth_token_id
    - identity: identity
-   - nocatalog: nocatalog
 
 Request Example
 ---------------
@@ -340,6 +361,8 @@ Validate and show information for token
 
 .. rest_method::  GET /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Validates and shows information for a token, including its expiration date and authorization scope.
 
 Pass your own token in the ``X-Auth-Token`` request header.
@@ -348,6 +371,7 @@ Pass the token that you want to validate in the ``X-Subject-Token``
 request header.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -357,6 +381,7 @@ Request
 
    - X-Auth-Token: X-Auth-Token
    - X-Subject-Token: X-Subject-Token
+   - nocatalog: nocatalog
 
 Response Parameters
 -------------------
@@ -366,8 +391,8 @@ Response Parameters
    - X-Subject-Token: X-Subject-Token
    - X-Auth-Token: X-Auth-Token
    - domain: domain
-   - methods: methods
-   - links: links
+   - methods: auth_methods
+   - links: domain_link_response_body
    - user: user
    - token: token
    - expires_at: expires_at
@@ -377,8 +402,8 @@ Response Parameters
    - roles: roles
    - audit_ids: audit_ids
    - issued_at: issued_at
-   - id: id
-   - name: name
+   - id: user_id
+   - name: user_name
 
 Response Example
 ----------------
@@ -392,6 +417,8 @@ Check token
 
 .. rest_method::  HEAD /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Validates a token.
 
 This call is similar to ``GET /auth/tokens`` but no response body
@@ -404,6 +431,7 @@ indicates that the ``X-Subject-Token`` is valid.
 
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -420,6 +448,8 @@ Revoke token
 
 .. rest_method::  DELETE /v3/auth/tokens
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_tokens``
+
 Revokes a token.
 
 This call is similar to the HEAD ``/auth/tokens`` call except that
@@ -428,6 +458,7 @@ of the ``expires_at`` attribute value. An additional
 ``X-Auth-Token`` is not required.
 
 Normal response codes: 204
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -437,3 +468,136 @@ Request
 
    - X-Auth-Token: X-Auth-Token
    - X-Subject-Token: X-Subject-Token
+
+
+Get service catalog
+===================
+
+.. rest_method:: GET /v3/auth/catalog
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_catalog``
+
+New in version 3.3
+
+This call returns a service catalog for the X-Auth-Token provided in the
+request, even if the token does not contain a catalog itself (for example,
+if it was generated using ?nocatalog).
+
+The structure of the catalog object is identical to that contained in a token.
+
+Normal response codes: 204
+
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - X-Auth-Token: X-Auth-Token
+   - X-Subject-Token: X-Subject-Token
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - endpoints: endpoints
+   - id: service_id
+   - type: service_type
+   - name: service_name
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/get-service-catalog-response.json
+   :language: javascript
+
+
+Get available project scopes
+============================
+
+.. rest_method:: GET /v3/auth/projects
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_projects``
+
+New in version 3.3
+
+This call returns the list of projects that are available to be scoped
+to based on the X-Auth-Token provided in the request.
+
+The structure of the response is exactly the same as listing projects
+for a user.
+
+Normal response codes: 204
+
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - X-Auth-Token: X-Auth-Token
+   - X-Subject-Token: X-Subject-Token
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - domain_id: project_domain_id_response_body
+   - enabled: project_enabled_response_body
+   - id: project_id
+   - links: links_project
+   - name: project_name_response_body
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/get-available-project-scopes-response.json
+   :language: javascript
+
+
+Get available domain scopes
+===========================
+
+.. rest_method:: GET /v3/auth/domains
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/auth_domains``
+
+New in version 3.3
+
+This call returns the list of domains that are available to be scoped
+to based on the X-Auth-Token provided in the request.
+
+The structure is the same as listing domains.
+
+Normal response codes: 204
+
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - X-Auth-Token: X-Auth-Token
+   - X-Subject-Token: X-Subject-Token
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - description: domain_description_response_body
+   - enabled: domain_enabled_response_body
+   - id: domain_id_response_body
+   - links: domain_link_response_body
+   - name: domain_name_response_body
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/get-available-domain-scopes-response.json
+   :language: javascript

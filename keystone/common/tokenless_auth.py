@@ -92,7 +92,7 @@ class TokenlessAuthHelper(object):
         auth['scope'] = self._build_scope_info()
 
         # NOTE(chioleong): We'll let AuthInfo validate the scope for us
-        auth_info = controllers.AuthInfo.create({}, auth, scope_only=True)
+        auth_info = controllers.AuthInfo.create(auth, scope_only=True)
         return auth_info.get_scope()
 
     def get_mapped_user(self, project_id=None, domain_id=None):
@@ -131,9 +131,9 @@ class TokenlessAuthHelper(object):
         if user_type == utils.UserType.EPHEMERAL:
             user_ref = {'type': utils.UserType.EPHEMERAL}
             group_ids = mapped_properties['group_ids']
-            utils.validate_groups_in_backend(group_ids,
-                                             mapping_id,
-                                             self.identity_api)
+            utils.validate_mapped_group_ids(group_ids,
+                                            mapping_id,
+                                            self.identity_api)
             group_ids.extend(
                 utils.transform_to_group_ids(
                     mapped_properties['group_names'], mapping_id,

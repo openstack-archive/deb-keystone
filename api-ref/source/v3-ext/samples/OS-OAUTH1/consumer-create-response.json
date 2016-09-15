@@ -1,0 +1,10 @@
+{
+    "consumer": {
+        "secret": "secretsecret",
+        "description": "My consumer",
+        "id": "7fea2d",
+        "links": {
+            "self": "http://example.com/identity/v3/OS-OAUTH1/consumers/7fea2d"
+        }
+    }
+}

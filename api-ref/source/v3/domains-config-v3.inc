@@ -34,11 +34,124 @@ For information about how to integrate the Identity service with
 LDAP, see `Integrate Identity with LDAP <http://docs.openstack.org
 /admin-guide/keystone_integrate_with_ldap.html>`_.
 
+Show default configuration settings
+===================================
+
+.. rest_method:: GET /v3/domains/config/default
+
+The default configuration settings for the options that can be overridden
+can be retrieved.
+
+Relationship:: 
+``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - config: domain_config
+   - ldap: domain_ldap
+   - url: domain_url
+   - user_tree_dn: domain_user_tree_dn
+   - identity: identity
+   - driver: domain_driver
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/domain-config-default-response.json
+   :language: javascript
+
+Show default configuration for a group
+======================================
+
+.. rest_method:: GET /v3/domains/config/{group}/default
+
+Reads the default configuration settings for a specific group.
+
+Relationship:
+``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
+The API supports only the ``identity`` and ``ldap`` groups.
+
+Normal response codes: 200
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - group: group_id_path
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - ldap: domain_ldap
+   - url: domain_url
+   - user_tree_dn: domain_user_tree_dn
+   - identity: identity
+   - driver: domain_driver
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/domain-config-group-default-response.json
+   :language: javascript
+
+Show default option for a group
+===============================
+
+.. rest_method:: GET /v3/domains/config/{group}/{option}/default
+
+Reads the default configuration setting for an option within a group.
+
+Relationship:
+``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
+
+The API supports only the ``identity`` and ``ldap`` groups. For the
+``ldap`` group, a valid value is ``url`` or ``user_tree_dn``. For
+the ``identity`` group, a valid value is ``driver``.
+
+Normal response codes: 200
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - group: group_id_path
+   - option: option
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - url: domain_url
+   - driver: domain_driver
+   - user_tree_dn: domain_user_tree_dn
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/domain-config-group-option-default-response.json
+   :language: javascript
+
 
 Show domain group option configuration
 ======================================
 
 .. rest_method::  GET /v3/domains/{domain_id}/config/{group}/{option}
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
 
 Shows details for a domain group option configuration.
 
@@ -47,15 +160,16 @@ The API supports only the ``identity`` and ``ldap`` groups. For the
 the ``identity`` group, a valid value is ``driver``.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
-   - group: group
+   - domain_id: domain_id_path
+   - group: group_id_path
    - option: option
 
 Response Parameters
@@ -63,11 +177,11 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -82,6 +196,8 @@ Update domain group option configuration
 
 .. rest_method::  PATCH /v3/domains/{domain_id}/config/{group}/{option}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
 Updates a domain group option configuration.
 
 The API supports only the ``identity`` and ``ldap`` groups. For the
@@ -89,22 +205,23 @@ The API supports only the ``identity`` and ``ldap`` groups. For the
 the ``identity`` group, a valid value is ``driver``.
 
 Normal response codes: 200
-Error response codes:413,415,405,404,403,401,400,503,409,
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
-   - identity: identity
-   - domain_id: domain_id
-   - group: group
+   - domain_id: domain_id_path
+   - group: group_id_path
    - option: option
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
+   - identity: identity
 
 Request Example
 ---------------
@@ -117,11 +234,11 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -136,21 +253,25 @@ Delete domain group option configuration
 
 .. rest_method::  DELETE /v3/domains/{domain_id}/config/{group}/{option}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
 Deletes a domain group option configuration.
 
 The API supports only the ``identity`` and ``ldap`` groups. For the
 ``ldap`` group, a valid value is ``url`` or ``user_tree_dn``. For
 the ``identity`` group, a valid value is ``driver``.
 
-Error response codes:204,413,415,405,404,403,401,400,503,409,
+Normal response codes: 204
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
-   - group: group
+   - domain_id: domain_id_path
+   - group: group_id_path
    - option: option
 
 
@@ -159,31 +280,34 @@ Show domain group configuration
 
 .. rest_method::  GET /v3/domains/{domain_id}/config/{group}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
 Shows details for a domain group configuration.
 
 The API supports only the ``identity`` and ``ldap`` groups.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
-   - group: group
+   - domain_id: domain_id_path
+   - group: group_id_path
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -198,6 +322,8 @@ Update domain group configuration
 
 .. rest_method::  PATCH /v3/domains/{domain_id}/config/{group}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
 Updates a domain group configuration.
 
 The API supports only the ``identity`` and ``ldap`` groups. If you
@@ -205,21 +331,22 @@ try to set configuration options for other groups, this call fails
 with the ``Forbidden (403)`` response code.
 
 Normal response codes: 200
-Error response codes:413,415,405,404,403,401,400,503,409,
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - domain_id: domain_id_path
+   - group: group_id_path
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
-   - domain_id: domain_id
-   - group: group
 
 Request Example
 ---------------
@@ -232,11 +359,11 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -251,19 +378,74 @@ Delete domain group configuration
 
 .. rest_method::  DELETE /v3/domains/{domain_id}/config/{group}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config_default``
+
 Deletes a domain group configuration.
 
 The API supports only the ``identity`` and ``ldap`` groups.
 
-Error response codes:204,413,415,405,404,403,401,400,503,409,
+Normal response codes: 204
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
-   - group: group
+   - domain_id: domain_id_path
+   - group: group_id_path
+
+
+Create domain configuration
+===========================
+
+.. rest_method::  PUT /v3/domains/{domain_id}/config
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config``
+
+Creates a domain configuration.
+
+Normal response codes: 200, 201
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - domain_id: domain_id_path
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
+   - identity: identity
+
+Request Example
+---------------
+
+.. literalinclude:: ./samples/admin/domain-config-create-request.json
+   :language: javascript
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
+   - identity: identity
+
+Response Example
+----------------
+
+.. literalinclude:: ./samples/admin/domain-config-create-response.json
+   :language: javascript
 
 
 Show domain configuration
@@ -271,28 +453,31 @@ Show domain configuration
 
 .. rest_method::  GET /v3/domains/{domain_id}/config
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config``
+
 Shows details for a domain configuration.
 
 Normal response codes: 200
-Error response codes:413,405,404,403,401,400,503,
+
+Error response codes: 413, 405, 404, 403, 401, 400, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
+   - domain_id: domain_id_path
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -307,23 +492,26 @@ Update domain configuration
 
 .. rest_method::  PATCH /v3/domains/{domain_id}/config
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config``
+
 Updates a domain configuration.
 
 Normal response codes: 200
-Error response codes:413,415,405,404,403,401,400,503,409,
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - domain_id: domain_id_path
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
-   - domain_id: domain_id
 
 Request Example
 ---------------
@@ -336,11 +524,11 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - url: url
-   - driver: driver
-   - ldap: ldap
-   - config: config
-   - user_tree_dn: user_tree_dn
+   - url: domain_url
+   - driver: domain_driver
+   - ldap: domain_ldap
+   - config: domain_config
+   - user_tree_dn: domain_user_tree_dn
    - identity: identity
 
 Response Example
@@ -355,13 +543,17 @@ Delete domain configuration
 
 .. rest_method::  DELETE /v3/domains/{domain_id}/config
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain_config``
+
 Deletes a domain configuration.
 
-Error response codes:204,413,415,405,404,403,401,400,503,409,
+Normal response codes: 204
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
+   - domain_id: domain_id_path

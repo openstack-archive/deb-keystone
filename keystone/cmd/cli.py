@@ -25,12 +25,14 @@ from oslo_log import versionutils
 from oslo_serialization import jsonutils
 import pbr.version
 
+from keystone.cmd import doctor
 from keystone.common import driver_hints
 from keystone.common import openssl
 from keystone.common import sql
 from keystone.common.sql import migration_helpers
 from keystone.common import utils
 import keystone.conf
+from keystone.credential.providers import fernet as credential_fernet
 from keystone import exception
 from keystone.federation import idp
 from keystone.federation import utils as mapping_engine
@@ -361,6 +363,31 @@ class BootStrap(BaseApp):
         klass.do_bootstrap()
 
 
+class Doctor(BaseApp):
+    """Diagnose common problems with keystone deployments."""
+
+    name = 'doctor'
+
+    @classmethod
+    def add_argument_parser(cls, subparsers):
+        parser = super(Doctor, cls).add_argument_parser(subparsers)
+        return parser
+
+    @staticmethod
+    def main():
+        # Return a non-zero exit code if we detect any symptoms.
+        raise SystemExit(doctor.diagnose())
+
+
+def assert_not_extension(extension):
+    if extension:
+        print(_("All extensions have been moved into keystone core and as "
+                "such its migrations are maintained by the main keystone "
+                "database control. Use the command: keystone-manage "
+                "db_sync"))
+        raise RuntimeError
+
+
 class DbSync(BaseApp):
     """Sync the database."""
 
@@ -376,17 +403,46 @@ class DbSync(BaseApp):
                                   'version. Schema downgrades are not '
                                   'supported.'))
         parser.add_argument('--extension', default=None,
-                            help=('Migrate the database for the specified '
-                                  'extension. If not provided, db_sync will '
-                                  'migrate the common repository.'))
+                            help=('This is a deprecated option to migrate a '
+                                  'specified extension. Since extensions are '
+                                  'now part of the main repository, '
+                                  'specifying db_sync without this option '
+                                  'will cause all extensions to be migrated.'))
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('--expand', default=False, action='store_true',
+                           help=('Expand the database schema in preparation '
+                                 'for data migration.'))
+        group.add_argument('--migrate', default=False,
+                           action='store_true',
+                           help=('Copy all data that needs to be migrated '
+                                 'within the database ahead of starting the '
+                                 'first keystone node upgraded to the new '
+                                 'release. This command should be run '
+                                 'after the --expand command. Once the '
+                                 '--migrate command has completed, you can '
+                                 'upgrade all your keystone nodes to the new '
+                                 'release and restart them.'))
 
+        group.add_argument('--contract', default=False, action='store_true',
+                           help=('Remove any database tables and columns '
+                                 'that are no longer required. This command '
+                                 'should be run after all keystone nodes are '
+                                 'running the new release.'))
         return parser
 
     @staticmethod
     def main():
-        version = CONF.command.version
-        extension = CONF.command.extension
-        migration_helpers.sync_database_to_version(extension, version)
+        assert_not_extension(CONF.command.extension)
+
+        if CONF.command.expand:
+            migration_helpers.expand_schema()
+        elif CONF.command.migrate:
+            migration_helpers.migrate_data()
+        elif CONF.command.contract:
+            migration_helpers.contract_schema()
+        else:
+            migration_helpers.offline_sync_database_to_version(
+                CONF.command.version)
 
 
 class DbVersion(BaseApp):
@@ -398,15 +454,17 @@ class DbVersion(BaseApp):
     def add_argument_parser(cls, subparsers):
         parser = super(DbVersion, cls).add_argument_parser(subparsers)
         parser.add_argument('--extension', default=None,
-                            help=('Print the migration version of the '
-                                  'database for the specified extension. If '
-                                  'not provided, print it for the common '
+                            help=('This is a deprecated option to print the '
+                                  'version of a specified extension. Since '
+                                  'extensions are now part of the main '
+                                  'repository, the version of an extension is '
+                                  'implicit in the version of the main '
                                   'repository.'))
 
     @staticmethod
     def main():
-        extension = CONF.command.extension
-        migration_helpers.print_db_version(extension)
+        assert_not_extension(CONF.command.extension)
+        migration_helpers.print_db_version()
 
 
 class BasePermissionsSetup(BaseApp):
@@ -494,12 +552,16 @@ class FernetSetup(BasePermissionsSetup):
 
     @classmethod
     def main(cls):
-        from keystone.token.providers.fernet import utils as fernet
+        from keystone.common import fernet_utils as utils
+        fernet_utils = utils.FernetUtils(
+            CONF.fernet_tokens.key_repository,
+            CONF.fernet_tokens.max_active_keys
+        )
 
         keystone_user_id, keystone_group_id = cls.get_user_group()
-        fernet.create_key_directory(keystone_user_id, keystone_group_id)
-        if fernet.validate_key_repository(requires_write=True):
-            fernet.initialize_key_repository(
+        fernet_utils.create_key_directory(keystone_user_id, keystone_group_id)
+        if fernet_utils.validate_key_repository(requires_write=True):
+            fernet_utils.initialize_key_repository(
                 keystone_user_id, keystone_group_id)
 
 
@@ -525,11 +587,43 @@ class FernetRotate(BasePermissionsSetup):
 
     @classmethod
     def main(cls):
-        from keystone.token.providers.fernet import utils as fernet
+        from keystone.common import fernet_utils as utils
+        fernet_utils = utils.FernetUtils(
+            CONF.fernet_tokens.key_repository,
+            CONF.fernet_tokens.max_active_keys
+        )
 
         keystone_user_id, keystone_group_id = cls.get_user_group()
-        if fernet.validate_key_repository(requires_write=True):
-            fernet.rotate_keys(keystone_user_id, keystone_group_id)
+        if fernet_utils.validate_key_repository(requires_write=True):
+            fernet_utils.rotate_keys(keystone_user_id, keystone_group_id)
+
+
+class CredentialSetup(BasePermissionsSetup):
+    """Setup a Fernet key repository for credential encryption.
+
+    The purpose of this command is very similar to `keystone-manage
+    fernet_setup` only the keys included in this repository are for encrypting
+    and decrypting credential secrets instead of token payloads. Keys can be
+    rotated using `keystone-manage credential_rotate`.
+    """
+
+    name = 'credential_setup'
+
+    @classmethod
+    def main(cls):
+        from keystone.common import fernet_utils as utils
+        fernet_utils = utils.FernetUtils(
+            CONF.credential.key_repository,
+            credential_fernet.MAX_ACTIVE_KEYS
+        )
+
+        keystone_user_id, keystone_group_id = cls.get_user_group()
+        fernet_utils.create_key_directory(keystone_user_id, keystone_group_id)
+        if fernet_utils.validate_key_repository(requires_write=True):
+            fernet_utils.initialize_key_repository(
+                keystone_user_id,
+                keystone_group_id
+            )
 
 
 class TokenFlush(BaseApp):
@@ -540,7 +634,14 @@ class TokenFlush(BaseApp):
     @classmethod
     def main(cls):
         token_manager = token.persistence.PersistenceManager()
-        token_manager.flush_expired_tokens()
+        try:
+            token_manager.flush_expired_tokens()
+        except exception.NotImplemented:
+            # NOTE(ravelar159): Stop NotImplemented from unsupported token
+            # driver when using token_flush and print out warning instead
+            LOG.warning(_LW('Token driver %s does not support token_flush. '
+                            'The token_flush command had no effect.'),
+                        CONF.token.driver)
 
 
 class MappingPurge(BaseApp):
@@ -633,7 +734,7 @@ def _domain_config_finder(conf_dir):
     Domain configs match the filename pattern of
     'keystone.<domain_name>.conf'.
 
-    :returns: generator yeilding (filename, domain_name) tuples
+    :returns: generator yielding (filename, domain_name) tuples
     """
     LOG.info(_LI('Scanning %r for domain config files'), conf_dir)
     for r, d, f in os.walk(conf_dir):
@@ -931,13 +1032,62 @@ class MappingEngineTester(BaseApp):
                                   "engine."))
 
 
+class MappingPopulate(BaseApp):
+    """Pre-populate entries from domain-specific backends.
+
+    Running this command is not required. It should only be run right after
+    the LDAP was configured, when many new users were added, or when
+    "mapping_purge" is run.
+
+    This command will take a while to run. It is perfectly fine for it to run
+    more than several minutes.
+    """
+
+    name = "mapping_populate"
+
+    @classmethod
+    def load_backends(cls):
+        drivers = backends.load_backends()
+        cls.identity_api = drivers['identity_api']
+        cls.resource_api = drivers['resource_api']
+
+    @classmethod
+    def add_argument_parser(cls, subparsers):
+        parser = super(MappingPopulate, cls).add_argument_parser(
+            subparsers)
+
+        parser.add_argument('--domain-name', default=None, required=True,
+                            help=("Name of the domain configured to use "
+                                  "domain-specific backend"))
+        return parser
+
+    @classmethod
+    def main(cls):
+        """Process entries for id_mapping_api."""
+        cls.load_backends()
+        domain_name = CONF.command.domain_name
+        try:
+            domain_id = cls.resource_api.get_domain_by_name(domain_name)['id']
+        except exception.DomainNotFound:
+            print(_('Invalid domain name or ID: %(domain)s') % {
+                'domain': domain_id})
+            return False
+        # We don't actually need to tackle id_mapping_api in order to get
+        # entries there, because list_users does this anyway. That's why it
+        # will be enough to just make the call below.
+        cls.identity_api.list_users(domain_scope=domain_id)
+
+
 CMDS = [
     BootStrap,
+    CredentialSetup,
     DbSync,
     DbVersion,
+    Doctor,
     DomainConfigUpload,
     FernetRotate,
     FernetSetup,
+    MappingPopulate,
     MappingPurge,
     MappingEngineTester,
     PKISetup,

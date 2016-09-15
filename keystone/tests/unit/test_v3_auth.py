@@ -16,6 +16,7 @@ import copy
 import datetime
 import itertools
 import operator
+import re
 import uuid
 
 from keystoneclient.common import cms
@@ -56,7 +57,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data['identity']['token'] = {'id': uuid.uuid4().hex}
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_unsupported_auth_method(self):
@@ -65,7 +65,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data = {'identity': auth_data}
         self.assertRaises(exception.AuthMethodNotSupported,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_missing_auth_method_data(self):
@@ -73,7 +72,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data = {'identity': auth_data}
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_project_name_no_domain(self):
@@ -83,7 +81,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
             project_name='abc')['auth']
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_both_project_and_domain_in_scope(self):
@@ -94,7 +91,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
             domain_name='test')['auth']
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_get_method_names_duplicates(self):
@@ -104,8 +100,7 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
             password='test')['auth']
         auth_data['identity']['methods'] = ['password', 'token',
                                             'password', 'password']
-        context = None
-        auth_info = auth.controllers.AuthInfo.create(context, auth_data)
+        auth_info = auth.controllers.AuthInfo.create(auth_data)
         self.assertEqual(['password', 'token'],
                          auth_info.get_method_names())
 
@@ -113,8 +108,7 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data = self.build_authentication_request(
             user_id='test',
             password='test')['auth']
-        context = None
-        auth_info = auth.controllers.AuthInfo.create(context, auth_data)
+        auth_info = auth.controllers.AuthInfo.create(auth_data)
 
         method_name = uuid.uuid4().hex
         self.assertRaises(exception.ValidationError,
@@ -129,7 +123,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data['scope']['domain'] = []
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
     def test_empty_project_in_scope(self):
@@ -140,7 +133,6 @@ class TestAuthInfo(common_auth.AuthTestMixin, testcase.TestCase):
         auth_data['scope']['project'] = []
         self.assertRaises(exception.ValidationError,
                           auth.controllers.AuthInfo.create,
-                          None,
                           auth_data)
 
 
@@ -1195,9 +1187,9 @@ class TokenAPITests(object):
                           self.token_provider_api.validate_token,
                           trust_scoped_token)
 
-    def test_v2_validate_trust_scoped_token(self):
-        # Test that validating an trust scoped token in v2.0 returns
-        # unauthorized.
+    def test_validate_trust_token_on_v2_fails_outside_default_domain(self):
+        # NOTE(lbragstad): This fails validation against the v2.0 API because
+        # the actors of the trust are not within the default domain.
         trustee_user, trust = self._create_trust()
         trust_scoped_token = self._get_trust_scoped_token(trustee_user, trust)
         self.assertRaises(exception.Unauthorized,
@@ -1748,7 +1740,7 @@ class TokenAPITests(object):
         token_roles = self._get_scoped_token_roles()
         self.assertEqual(2, len(token_roles))
 
-    def test_domain_scpecific_roles_do_not_show_v3_token(self):
+    def test_domain_specific_roles_do_not_show_v3_token(self):
         self.config_fixture.config(group='token', infer_roles=True)
         initial_token_roles = self._get_scoped_token_roles()
 
@@ -2070,7 +2062,7 @@ class TokenAPITests(object):
         auth_data['identity']['methods'] = ["password", "external"]
         auth_data['identity']['external'] = {}
         api = auth.controllers.Auth()
-        auth_info = auth.controllers.AuthInfo(None, auth_data)
+        auth_info = auth.controllers.AuthInfo(auth_data)
         auth_context = {'extras': {}, 'method_names': []}
         self.assertRaises(exception.Unauthorized,
                           api.authenticate,
@@ -2434,8 +2426,15 @@ class TestFernetTokenAPIs(test_v3.RestfulTestCase, TokenAPITests,
                           TokenDataTests):
     def config_overrides(self):
         super(TestFernetTokenAPIs, self).config_overrides()
-        self.config_fixture.config(group='token', provider='fernet')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.config_fixture.config(group='token', provider='fernet',
+                                   cache_on_issue=True)
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def setUp(self):
         super(TestFernetTokenAPIs, self).setUp()
@@ -2505,6 +2504,13 @@ class TestFernetTokenAPIs(test_v3.RestfulTestCase, TokenAPITests,
         # Bind not current supported by Fernet, see bug 1433311.
         self.v3_create_token(auth_data,
                              expected_status=http_client.NOT_IMPLEMENTED)
+
+    def test_trust_scoped_token_is_invalid_after_disabling_trustor(self):
+        # NOTE(amakarov): have to override this test for non-persistent tokens
+        # as TokenNotFound exception makes no sense for those.
+        self.assertRaises(
+            exception.Forbidden, super(TestFernetTokenAPIs, self)
+            .test_trust_scoped_token_is_invalid_after_disabling_trustor)
 
 
 class TestTokenRevokeSelfAndAdmin(test_v3.RestfulTestCase):
@@ -3601,13 +3607,8 @@ class TestAuthExternalDisabled(test_v3.RestfulTestCase):
                           auth_context)
 
 
-class TestAuthExternalDomain(test_v3.RestfulTestCase):
+class AuthExternalDomainBehavior(object):
     content_type = 'json'
-
-    def config_overrides(self):
-        super(TestAuthExternalDomain, self).config_overrides()
-        self.kerberos = False
-        self.auth_plugin_config_override(external='Domain')
 
     def test_remote_user_with_realm(self):
         api = auth.controllers.Auth()
@@ -3657,7 +3658,38 @@ class TestAuthExternalDomain(test_v3.RestfulTestCase):
         self.assertEqual(self.user['name'], token['bind']['kerberos'])
 
 
-class TestAuthExternalDefaultDomain(test_v3.RestfulTestCase):
+class TestAuthExternalDomainBehaviorWithUUID(AuthExternalDomainBehavior,
+                                             test_v3.RestfulTestCase):
+    def config_overrides(self):
+        super(TestAuthExternalDomainBehaviorWithUUID, self).config_overrides()
+        self.kerberos = False
+        self.auth_plugin_config_override(external='Domain')
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class TestAuthExternalDomainBehaviorWithPKI(AuthExternalDomainBehavior,
+                                            test_v3.RestfulTestCase):
+    def config_overrides(self):
+        super(TestAuthExternalDomainBehaviorWithPKI, self).config_overrides()
+        self.kerberos = False
+        self.auth_plugin_config_override(external='Domain')
+        self.config_fixture.config(group='token', provider='pki')
+
+
+class TestAuthExternalDomainBehaviorWithPKIZ(AuthExternalDomainBehavior,
+                                             test_v3.RestfulTestCase):
+    def config_overrides(self):
+        super(TestAuthExternalDomainBehaviorWithPKIZ, self).config_overrides()
+        self.kerberos = False
+        self.auth_plugin_config_override(external='Domain')
+        self.config_fixture.config(group='token', provider='pkiz')
+
+
+# NOTE(lbragstad): The Fernet token provider doesn't support bind
+# authentication so we don't inhereit TestAuthExternalDomain here to test it.
+
+
+class TestAuthExternalDefaultDomain(object):
     content_type = 'json'
 
     def config_overrides(self):
@@ -3713,13 +3745,63 @@ class TestAuthExternalDefaultDomain(test_v3.RestfulTestCase):
                          token['bind']['kerberos'])
 
 
-class TestAuthKerberos(TestAuthExternalDomain):
+class UUIDAuthExternalDefaultDomain(TestAuthExternalDefaultDomain,
+                                    test_v3.RestfulTestCase):
 
     def config_overrides(self):
-        super(TestAuthKerberos, self).config_overrides()
+        super(UUIDAuthExternalDefaultDomain, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class PKIAuthExternalDefaultDomain(TestAuthExternalDefaultDomain,
+                                   test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(PKIAuthExternalDefaultDomain, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pki')
+
+
+class PKIZAuthExternalDefaultDomain(TestAuthExternalDefaultDomain,
+                                    test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(PKIZAuthExternalDefaultDomain, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pkiz')
+
+
+class UUIDAuthKerberos(AuthExternalDomainBehavior, test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(UUIDAuthKerberos, self).config_overrides()
         self.kerberos = True
+        self.config_fixture.config(group='token', provider='uuid')
         self.auth_plugin_config_override(
             methods=['kerberos', 'password', 'token'])
+
+
+class PKIAuthKerberos(AuthExternalDomainBehavior, test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(PKIAuthKerberos, self).config_overrides()
+        self.kerberos = True
+        self.config_fixture.config(group='token', provider='pki')
+        self.auth_plugin_config_override(
+            methods=['kerberos', 'password', 'token'])
+
+
+class PKIZAuthKerberos(AuthExternalDomainBehavior, test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(PKIZAuthKerberos, self).config_overrides()
+        self.kerberos = True
+        self.config_fixture.config(group='token', provider='pkiz')
+        self.auth_plugin_config_override(
+            methods=['kerberos', 'password', 'token'])
+
+
+# NOTE(lbragstad): The Fernet token provider doesn't support bind
+# authentication so we don't inherit AuthExternalDomainBehavior here to test
+# it.
 
 
 class TestAuthJSONExternal(test_v3.RestfulTestCase):
@@ -4831,7 +4913,13 @@ class TestTrustAuthFernetTokenProvider(TrustAPIBehavior, TestTrustChain):
                                    revoke_by_id=False)
         self.config_fixture.config(group='trust',
                                    enabled=True)
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
 
 class TestAuthTOTP(test_v3.RestfulTestCase):
@@ -5003,8 +5091,14 @@ class TestAuthTOTP(test_v3.RestfulTestCase):
 
         self.v3_create_token(auth_data, expected_status=http_client.CREATED)
 
+    def test_generated_passcode_is_correct_format(self):
+        secret = self._make_credentials('totp')[-1]['blob']
+        passcode = totp._generate_totp_passcode(secret)
+        reg = re.compile(r'^-?[0-9]+$')
+        self.assertTrue(reg.match(passcode))
 
-class TestFetchRevocationList(test_v3.RestfulTestCase):
+
+class TestFetchRevocationList(object):
     """Test fetch token revocation list on the v3 Identity API."""
 
     def config_overrides(self):
@@ -5083,3 +5177,15 @@ class TestFetchRevocationList(test_v3.RestfulTestCase):
         }
 
         self.assertEqual({'revoked': [exp_token_revoke_data]}, res.json)
+
+
+class UUIDFetchRevocationList(TestFetchRevocationList,
+                              test_v3.RestfulTestCase):
+
+    def config_overrides(self):
+        super(UUIDFetchRevocationList, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+# NOTE(lbragstad): The Fernet token provider doesn't use Revocation lists so
+# don't inherit TestFetchRevocationList here to test it.

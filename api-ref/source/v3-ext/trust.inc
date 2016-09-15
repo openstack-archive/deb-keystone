@@ -95,11 +95,15 @@ Create trust
 
 .. rest_method::  POST /v3/OS-TRUST/trusts
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trusts``
+
 Creates a trust.
 
 Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trusts
 
-Response codes: 201, 400, 401, 403, 404, 405, 409, 413, 415, 503
+Normal response codes: 201
+
+Error response codes: 413, 415, 405, 404, 403, 401, 400, 503, 409
 
 Request
 -------
@@ -132,7 +136,7 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - trust: trust
-   - id: id
+   - id: trust_id
    - impersonation: impersonation
    - trustee_user_id: trustee_user_id
    - trustor_user_id: trustor_user_id
@@ -159,11 +163,13 @@ List trusts
 
 .. rest_method:: GET /v3/OS-TRUST/trusts
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trusts``
+
 Lists all trusts.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trusts
+Normal response codes: 200
 
-Response codes: 200, 400, 401, 403, 404, 405, 413, 503
+Error response codes: 400, 401, 403, 404, 405, 413, 503
 
 The following optional query strings are supported:
 
@@ -192,7 +198,7 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - trust: trust
-   - id: id
+   - id: trust_id
    - impersonation: impersonation
    - trustee_user_id: trustee_user_id
    - trustor_user_id: trustor_user_id
@@ -220,18 +226,20 @@ Get trust
 
 .. rest_method:: GET /v3/OS-TRUST/trusts/{trust_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust``
+
 Gets the trust information for ``{trust_id}``.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust
+Normal response codes: 200
 
-Response codes: 200, 400, 401, 403, 404, 405, 413, 503
+Error response codes: 400, 401, 403, 404, 405, 413, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - trust_id: trust_id
+   - trust_id: trust_id_path
 
 Response Parameters
 -------------------
@@ -239,7 +247,7 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - trust: trust
-   - id: id
+   - id: trust_id
    - impersonation: impersonation
    - trustee_user_id: trustee_user_id
    - trustor_user_id: trustor_user_id
@@ -267,18 +275,20 @@ Delete trust
 
 .. rest_method:: DELETE /v3/OS-TRUST/trusts/{trust_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust``
+
 Deletes a trust with ``{trust_id}``.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust
+Normal response codes: 204
 
-Response codes: 204, 400, 401, 403, 404, 405, 409, 413, 415, 503
+Error response codes: 400, 401, 403, 404, 405, 409, 413, 415, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - trust_id: trust_id
+   - trust_id: trust_id_path
 
 Response Example
 ----------------
@@ -291,18 +301,20 @@ List roles delegated by a trust
 
 .. rest_method:: GET /v3/OS-TRUST/trusts/{trust_id}/roles
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_roles``
+
 Lists roles delegated by a trust with ``{trust_id}``.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_roles
+Normal response codes: 200
 
-Response codes: 200, 400, 401, 403, 404, 405, 413, 503
+Error response codes: 400, 401, 403, 404, 405, 413, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - trust_id: trust_id
+   - trust_id: trust_id_path
 
 Response Example
 ----------------
@@ -318,19 +330,21 @@ Check if a role is delegated by a trust
 
 .. rest_method:: HEAD /v3/OS-TRUST/trusts/{trust_id}/roles/{role_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_role``
+
 Checks if a role is delegated by a trust.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_role
+Normal response codes: 200
 
-Response Codes: 200, 400, 401, 403, 404, 405, 413, 503
+Error response codes: 400, 401, 403, 404, 405, 413, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - trust_id: trust_id
-   - role_id: role_id
+   - trust_id: trust_id_path
+   - role_id: role_id_path
 
 Response Example
 ----------------
@@ -343,19 +357,21 @@ Get role delegated by a trust
 
 .. rest_method:: GET /v3/OS-TRUST/trusts/{trust_id}/roles/{role_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_role``
+
 Gets a role with delegated by a trust.
 
-Relationship: http://docs.openstack.org/api/openstack-identity/3/ext/OS-TRUST/1.0/rel/trust_role
+Normal response codes: 200
 
-Response Codes: 200, 400, 401, 403, 404, 405, 413, 503
+Error response codes: 400, 401, 403, 404, 405, 413, 503
 
 Request
 -------
 
 .. rest_parameters:: parameters.yaml
 
-   - trust_id: trust_id
-   - role_id: role_id
+   - trust_id: trust_id_path
+   - role_id: role_id_path
 
 Response Example
 ----------------

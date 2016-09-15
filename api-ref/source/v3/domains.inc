@@ -28,9 +28,12 @@ List domains
 
 .. rest_method::  GET /v3/domains
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domains``
+
 Lists all domains.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -38,20 +41,20 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - name: name
-   - enabled: enabled
+   - name: domain_name_query
+   - enabled: domain_enabled_query
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - name: name
-   - links: links
-   - enabled: enabled
    - domains: domains
-   - id: id
-   - description: description
+   - description: domain_description_response_body
+   - enabled: domain_enabled_response_body
+   - id: domain_id_response_body
+   - links: domain_link_response_body
+   - name: domain_name_response_body
 
 Response Example
 ----------------
@@ -65,9 +68,12 @@ Create domain
 
 .. rest_method::  POST /v3/domains
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domains``
+
 Creates a domain.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -76,10 +82,10 @@ Request
 .. rest_parameters:: parameters.yaml
 
    - domain: domain
-   - enabled: enabled
-   - description: description
-   - name: name
-
+   - enabled: domain_enabled_request_body
+   - description: domain_description_request_body
+   - name: domain_name_request_body
+ 
 Request Example
 ---------------
 
@@ -92,11 +98,11 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - domain: domain
-   - name: name
-   - links: links
-   - enabled: enabled
-   - id: id
-   - description: description
+   - description: domain_description_response_body
+   - enabled: domain_enabled_response_body
+   - id: domain_id_response_body
+   - links: domain_link_response_body
+   - name: domain_name_response_body
 
 
 Show domain details
@@ -104,9 +110,12 @@ Show domain details
 
 .. rest_method::  GET /v3/domains/{domain_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domains``
+
 Shows details for a domain.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -114,7 +123,7 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
+   - domain_id: domain_id_path
 
 Response Parameters
 -------------------
@@ -122,11 +131,11 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - domain: domain
-   - name: name
-   - links: links
-   - enabled: enabled
-   - id: id
-   - description: description
+   - description: domain_description_response_body
+   - enabled: domain_enabled_response_body
+   - id: domain_id_response_body
+   - links: domain_link_response_body
+   - name: domain_name_response_body
 
 Response Example
 ----------------
@@ -140,9 +149,12 @@ Update domain
 
 .. rest_method::  PATCH /v3/domains/{domain_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain``
+
 Updates a domain.
 
 Normal response codes: 200
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -150,11 +162,11 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+   - domain_id: domain_id_path
    - domain: domain
-   - enabled: enabled
-   - description: description
-   - name: name
-   - domain_id: domain_id
+   - enabled: domain_enabled_update_request_body
+   - description: domain_description_update_request_body
+   - name: domain_name_update_request_body
 
 Request Example
 ---------------
@@ -168,11 +180,11 @@ Response Parameters
 .. rest_parameters:: parameters.yaml
 
    - domain: domain
-   - name: name
-   - links: links
-   - enabled: enabled
-   - id: id
-   - description: description
+   - description: domain_description_response_body
+   - enabled: domain_enabled_response_body
+   - id: domain_id_response_body
+   - links: domain_link_response_body
+   - name: domain_name_response_body
 
 Response Example
 ----------------
@@ -186,6 +198,8 @@ Delete domain
 
 .. rest_method::  DELETE /v3/domains/{domain_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/domain``
+
 Deletes a domain.
 
 To minimize the risk of accidentally deleting a domain, you must
@@ -195,14 +209,11 @@ When you delete a domain, this call also deletes all entities owned
 by it, such as users, groups, and projects, and any credentials and
 granted roles that relate to those entities.
 
-(Since v3.6) The deletion of a non-leaf domain in a domain
-hierarchy tree is not allowed and fails with a ``Bad Request
-(400)`` response code.
-
 If you try to delete an enabled domain, this call returns the
 ``Forbidden (403)`` response code.
 
 Normal response codes: 204
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -210,4 +221,4 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - domain_id: domain_id
+   - domain_id: domain_id_path

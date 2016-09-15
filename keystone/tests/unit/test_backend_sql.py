@@ -141,15 +141,18 @@ class SqlModels(SqlTests):
         cols = (('id', sql.Integer, None),
                 ('user_id', sql.String, 64),
                 ('name', sql.String, 255),
-                ('domain_id', sql.String, 64))
+                ('domain_id', sql.String, 64),
+                ('failed_auth_count', sql.Integer, None),
+                ('failed_auth_at', sql.DateTime, None))
         self.assertExpectedSchema('local_user', cols)
 
     def test_password_model(self):
         cols = (('id', sql.Integer, None),
                 ('local_user_id', sql.Integer, None),
                 ('password', sql.String, 128),
-                ('created_at', sql.DateTime, None),
-                ('expires_at', sql.DateTime, None))
+                ('created_at', sql.TIMESTAMP, None),
+                ('expires_at', sql.DateTime, None),
+                ('self_service', sql.Boolean, False))
         self.assertExpectedSchema('password', cols)
 
     def test_federated_user_model(self):
@@ -299,21 +302,6 @@ class SqlIdentity(SqlTests,
         ref['id'] = uuid.uuid4().hex
         ref['name'] = ref['name'].upper()
         self.resource_api.create_project(ref['id'], ref)
-
-    def test_create_null_project_name(self):
-        project = unit.new_project_ref(
-            name=None, domain_id=CONF.identity.default_domain_id)
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.create_project,
-                          project['id'],
-                          project)
-        self.assertRaises(exception.ProjectNotFound,
-                          self.resource_api.get_project,
-                          project['id'])
-        self.assertRaises(exception.ProjectNotFound,
-                          self.resource_api.get_project_by_name,
-                          project['name'],
-                          CONF.identity.default_domain_id)
 
     def test_delete_project_with_user_association(self):
         user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
@@ -602,6 +590,43 @@ class SqlIdentity(SqlTests,
         _exercise_project_api(uuid.uuid4().hex)
         _exercise_project_api(resource.NULL_DOMAIN_ID)
 
+    def test_list_users_call_count(self):
+        """There should not be O(N) queries."""
+        # create 10 users. 10 is just a random number
+        for i in range(10):
+            user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
+            self.identity_api.create_user(user)
+
+        # sqlalchemy emits various events and allows to listen to them. Here
+        # bound method `query_counter` will be called each time when a query
+        # is compiled
+        class CallCounter(object):
+            def __init__(self):
+                self.calls = 0
+
+            def reset(self):
+                self.calls = 0
+
+            def query_counter(self, query):
+                self.calls += 1
+
+        counter = CallCounter()
+        sqlalchemy.event.listen(sqlalchemy.orm.query.Query, 'before_compile',
+                                counter.query_counter)
+
+        first_call_users = self.identity_api.list_users()
+        first_call_counter = counter.calls
+        # add 10 more users
+        for i in range(10):
+            user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
+            self.identity_api.create_user(user)
+        counter.reset()
+        second_call_users = self.identity_api.list_users()
+        # ensure that the number of calls does not depend on the number of
+        # users fetched.
+        self.assertNotEqual(len(first_call_users), len(second_call_users))
+        self.assertEqual(first_call_counter, counter.calls)
+
 
 class SqlTrust(SqlTests, trust_tests.TrustTests):
     pass
@@ -813,10 +838,49 @@ class SqlImpliedRoles(SqlTests, assignment_tests.ImpliedRoleTests):
     pass
 
 
-class SqlTokenCacheInvalidation(SqlTests, token_tests.TokenCacheInvalidation):
+class SqlTokenCacheInvalidationWithUUID(SqlTests,
+                                        token_tests.TokenCacheInvalidation):
     def setUp(self):
-        super(SqlTokenCacheInvalidation, self).setUp()
+        super(SqlTokenCacheInvalidationWithUUID, self).setUp()
         self._create_test_data()
+
+    def config_overrides(self):
+        super(SqlTokenCacheInvalidationWithUUID, self).config_overrides()
+        # NOTE(lbragstad): The TokenCacheInvalidation tests are coded to work
+        # against a persistent token backend. Only run these with token
+        # providers that issue persistent tokens.
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class SqlTokenCacheInvalidationWithPKI(SqlTests,
+                                       token_tests.TokenCacheInvalidation):
+    def setUp(self):
+        super(SqlTokenCacheInvalidationWithPKI, self).setUp()
+        self._create_test_data()
+
+    def config_overrides(self):
+        super(SqlTokenCacheInvalidationWithPKI, self).config_overrides()
+        # NOTE(lbragstad): The TokenCacheInvalidation tests are coded to work
+        # against a persistent token backend. Only run these with token
+        # providers that issue persistent tokens.
+        self.config_fixture.config(group='token', provider='pki')
+
+
+class SqlTokenCacheInvalidationWithPKIZ(SqlTests,
+                                        token_tests.TokenCacheInvalidation):
+    def setUp(self):
+        super(SqlTokenCacheInvalidationWithPKIZ, self).setUp()
+        self._create_test_data()
+
+    def config_overrides(self):
+        super(SqlTokenCacheInvalidationWithPKIZ, self).config_overrides()
+        # NOTE(lbragstad): The TokenCacheInvalidation tests are coded to work
+        # against a persistent token backend. Only run these with token
+        # providers that issue persistent tokens.
+        self.config_fixture.config(group='token', provider='pkiz')
+
+# NOTE(lbragstad): The Fernet token provider doesn't persist tokens in a
+# backend, so running the TokenCacheInvalidation tests here doesn't make sense.
 
 
 class SqlFilterTests(SqlTests, identity_tests.FilterTests):
@@ -870,7 +934,7 @@ class SqlFilterTests(SqlTests, identity_tests.FilterTests):
         """
         # Check we have some users
         users = self.identity_api.list_users()
-        self.assertTrue(len(users) > 0)
+        self.assertGreater(len(users), 0)
 
         hints = driver_hints.Hints()
         hints.add_filter('name', "anything' or 'x'='x")
@@ -888,7 +952,7 @@ class SqlFilterTests(SqlTests, identity_tests.FilterTests):
         self.assertEqual(0, len(groups))
 
         groups = self.identity_api.list_groups()
-        self.assertTrue(len(groups) > 0)
+        self.assertGreater(len(groups), 0)
 
 
 class SqlLimitTests(SqlTests, identity_tests.LimitTests):

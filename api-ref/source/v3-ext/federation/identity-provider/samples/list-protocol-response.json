@@ -1,0 +1,17 @@
+{
+    "links": {
+        "next": null,
+        "previous": null,
+        "self": "http://example.com/identity/v3/OS-FEDERATION/identity_providers/ACME/protocols"
+    },
+    "protocols": [
+        {
+            "id": "saml2",
+            "links": {
+                "identity_provider": "http://example.com/identity/v3/OS-FEDERATION/identity_providers/ACME",
+                "self": "http://example.com/identity/v3/OS-FEDERATION/identity_providers/ACME/protocols/saml2"
+            },
+            "mapping_id": "xyz234"
+        }
+    ]
+}

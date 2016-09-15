@@ -29,6 +29,7 @@ from keystone.common import clean
 from keystone.common import dependency
 from keystone.common import driver_hints
 from keystone.common import manager
+from keystone.common.validation import validators
 import keystone.conf
 from keystone import exception
 from keystone.i18n import _, _LW
@@ -44,6 +45,10 @@ CONF = keystone.conf.CONF
 LOG = log.getLogger(__name__)
 
 MEMOIZE = cache.get_memoization_decorator(group='identity')
+
+ID_MAPPING_REGION = cache.create_region(name='id mapping')
+MEMOIZE_ID_MAPPING = cache.get_memoization_decorator(group='identity',
+                                                     region=ID_MAPPING_REGION)
 
 DOMAIN_CONF_FHEAD = 'keystone.'
 DOMAIN_CONF_FTAIL = '.conf'
@@ -821,7 +826,7 @@ class Manager(manager.Manager):
     @notifications.emit_event('authenticate')
     @domains_configured
     @exception_translated('assertion')
-    def authenticate(self, context, user_id, password):
+    def authenticate(self, request, user_id, password):
         domain_id, driver, entity_id = (
             self._get_domain_driver_and_entity_id(user_id))
         ref = driver.authenticate(entity_id, password)
@@ -850,6 +855,8 @@ class Manager(manager.Manager):
     @exception_translated('user')
     def create_user(self, user_ref, initiator=None):
         user = user_ref.copy()
+        if 'password' in user:
+            validators.validate_password(user['password'])
         user['name'] = clean.user_name(user['name'])
         user.setdefault('enabled', True)
         user['enabled'] = clean.user_enabled(user['enabled'])
@@ -933,6 +940,8 @@ class Manager(manager.Manager):
     def update_user(self, user_id, user_ref, initiator=None):
         old_user_ref = self.get_user(user_id)
         user = user_ref.copy()
+        if 'password' in user:
+            validators.validate_password(user['password'])
         if 'name' in user:
             user['name'] = clean.user_name(user['name'])
         if 'enabled' in user:
@@ -1219,14 +1228,19 @@ class Manager(manager.Manager):
                                                 group_entity_id)
 
     @domains_configured
-    def change_password(self, context, user_id, original_password,
+    def change_password(self, request, user_id, original_password,
                         new_password):
 
         # authenticate() will raise an AssertionError if authentication fails
-        self.authenticate(context, user_id, original_password)
+        self.authenticate(request, user_id, original_password)
 
-        update_dict = {'password': new_password}
-        self.update_user(user_id, update_dict)
+        validators.validate_password(new_password)
+
+        domain_id, driver, entity_id = (
+            self._get_domain_driver_and_entity_id(user_id))
+        driver.change_password(entity_id, new_password)
+        notifications.Audit.updated(self._USER, user_id)
+        self.emit_invalidate_user_token_persistence(user_id)
 
     @MEMOIZE
     def _shadow_nonlocal_user(self, user):
@@ -1285,6 +1299,48 @@ class MappingManager(manager.Manager):
 
     def __init__(self):
         super(MappingManager, self).__init__(CONF.identity_mapping.driver)
+
+    @MEMOIZE_ID_MAPPING
+    def _get_public_id(self, domain_id, local_id, entity_type):
+        return self.driver.get_public_id({'domain_id': domain_id,
+                                          'local_id': local_id,
+                                          'entity_type': entity_type})
+
+    def get_public_id(self, local_entity):
+        return self._get_public_id(local_entity['domain_id'],
+                                   local_entity['local_id'],
+                                   local_entity['entity_type'])
+
+    @MEMOIZE_ID_MAPPING
+    def get_id_mapping(self, public_id):
+        return self.driver.get_id_mapping(public_id)
+
+    def create_id_mapping(self, local_entity, public_id=None):
+        public_id = self.driver.create_id_mapping(local_entity, public_id)
+        if MEMOIZE_ID_MAPPING.should_cache(public_id):
+            self._get_public_id.set(public_id, self,
+                                    local_entity['domain_id'],
+                                    local_entity['local_id'],
+                                    local_entity['entity_type'])
+            self.get_id_mapping.set(local_entity, self, public_id)
+        return public_id
+
+    def delete_id_mapping(self, public_id):
+        local_entity = self.get_id_mapping.get(self, public_id)
+        self.driver.delete_id_mapping(public_id)
+        # Delete the key of entity from cache
+        if local_entity:
+            self._get_public_id.invalidate(self, local_entity['domain_id'],
+                                           local_entity['local_id'],
+                                           local_entity['entity_type'])
+        self.get_id_mapping.invalidate(self, public_id)
+
+    def purge_mappings(self, purge_filter):
+        # Purge mapping is rarely used and only used by the command client,
+        # it's quite complex to invalidate part of the cache based on the purge
+        # filters, so here invalidate the whole cache when purging mappings.
+        self.driver.purge_mappings(purge_filter)
+        ID_MAPPING_REGION.invalidate()
 
 
 @versionutils.deprecated(

@@ -29,36 +29,48 @@ access_token_id:
   in: path
   required: true
   type: string
-credential_id:
+credential_id_path:
   description: |
     The UUID for the credential.
   in: path
-  required: false
+  required: true
   type: string
-domain_id:
-  description: |
-    Filters the response by a domain ID.
-  in: path
-  required: false
-  type: string
-endpoint_id:
-  description: |
-    The endpoint ID.
-  in: path
-  required: false
-  type: string
-group_1:
+domain_group_template:
   description: |
     The group name, which is ``ldap`` or
     ``identity``.
   in: path
-  required: false
+  required: true
+  type: string
+domain_id_path:
+  description: |
+    The domain ID.
+  in: path
+  required: true
+  type: string
+endpoint_id_path:
+  description: |
+    The endpoint ID.
+  in: path
+  required: true
   type: string
 group_id:
   description: |
     The group ID.
   in: path
-  required: false
+  required: true
+  type: string
+group_id_path:
+  description: |
+    The group ID.
+  in: path
+  required: true
+  type: string
+implies_role_id:
+  description: |
+    Role ID for an implied role.
+  in: path
+  required: true
   type: string
 option:
   description: |
@@ -66,59 +78,85 @@ option:
     value is ``url`` or ``user_tree_dn``. For the ``identity`` group,
     a valid value is ``driver``.
   in: path
-  required: false
+  required: true
   type: string
-policy_id:
+policy_id_path:
   description: |
     The policy ID.
   in: path
-  required: false
+  required: true
   type: string
-project_id:
+prior_role_id:
+  description: |
+    Role ID for a prior role.
+  in: path
+  required: true
+  type: string
+project_id_path:
   description: |
     The project ID.
   in: path
-  required: false
+  required: true
   type: string
-region_id_2:
+region_id_path:
   description: |
     The region ID.
   in: path
-  required: false
+  required: true
   type: string
 role_id:
   description: |
     The role ID.
   in: path
-  required: false
+  required: true
   type: string
-service_id_2:
+role_id_path:
+  description: |
+    The role ID.
+  in: path
+  required: true
+  type: string
+service_id_path:
   description: |
     The service ID.
   in: path
-  required: false
+  required: true
   type: string
-user_id:
+user_id_path:
   description: |
     The user ID.
   in: path
-  required: false
+  required: true
   type: string
 
 # variables in query
-domain_id_7:
+domain_enabled_query:
+  description: |
+    If set to true, then only domains that are enabled will be returned, if set
+    to false only that are disabled will be returned. Any value other than
+    ``0``, including no value, will be interpreted as true.
+  in: query
+  required: false
+  type: string
+domain_id_query:
   description: |
     Filters the response by a domain ID.
   in: query
   required: false
   type: string
-enabled_11:
+domain_name_query:
   description: |
-    Filters the response by either enabled (``true``)
-    or disabled (``false``) users.
+    Filters the response by a domain name.
   in: query
   required: false
   type: string
+effective_query:
+  description: |
+    Returns the effective assignments, including any assignments gained by
+    virtue of group membership.
+  in: query
+  required: false
+  type: key-only (no value required)
 enabled_6:
   description: |
     Filters the response by either enabled (``true``)
@@ -141,31 +179,60 @@ enabled_9:
   in: query
   required: false
   type: string
-interface_2:
+enabled_user_query:
+  description: |
+    Filters the response by either enabled (``true``)
+    or disabled (``false``) users.
+  in: query
+  required: false
+  type: string
+group_id_query:
+  description: |
+    Filters the response by a group ID.
+  in: query
+  required: false
+  type: string
+group_name_query:
+  description: |
+    Filters the response by a group name.
+  in: query
+  required: false
+  type: string
+include_names_query:
+  description: |
+    If set to true, then the names of any entities returned will be include as
+    well as their IDs. Any value other than ``0`` (including no value) will be
+    interpreted as true.
+  in: query
+  required: false
+  type: boolean
+  min_version: 3.6
+include_subtree_query:
+  description: |
+    If set to true, then relevant assignments in the project hierarchy below
+    the project specified in the ``scope.project_id`` query parameter are also
+    included in the response. Any value other than ``0`` (including no value)
+    for ``include_subtree`` will be interpreted as true.
+  in: query
+  required: false
+  type: boolean
+  min_version: 3.6
+interface_query:
   description: |
     Filters the response by an interface.
   in: query
   required: false
   type: string
-name_10:
+is_domain_query:
   description: |
-    Filters the response by a domain name.
+    If this is specified as true, then only projects acting as a domain are
+    included. Otherwise, only projects that are not acting as a domain are
+    included.
   in: query
   required: false
-  type: string
-name_13:
-  description: |
-    Filters the response by a project name.
-  in: query
-  required: false
-  type: string
-name_14:
-  description: |
-    Filters the response by a role name.
-  in: query
-  required: false
-  type: string
-name_16:
+  type: boolen
+  min_version: 3.6
+name_user_query:
   description: |
     Filters the response by a user name.
   in: query
@@ -179,32 +246,97 @@ nocatalog:
   in: query
   required: false
   type: string
-parent_id_2:
+parent_id_query:
   description: |
-    (Since v3.4) Filters the response by a parent ID.
+    Filters the response by a parent ID.
   in: query
   required: false
   type: string
-parent_region_id_1:
+  min_version: 3.4
+parent_region_id_query:
   description: |
     Filters the response by a parent region, by ID.
   in: query
   required: false
   type: string
-service_id_3:
+parents_as_ids:
   description: |
-    Filters the response by a service ID.
+    The entire parent hierarchy will be included as
+    nested dictionaries in the response. It will contain
+    all projects ids found by traversing up the hierarchy
+    to the top-level project.
   in: query
   required: false
-  type: string
-type_4:
+  type: key-only, no value expected
+  min_version: 3.4
+parents_as_list:
+  description: |
+    The parent hierarchy will be included as a list in the response.
+    This list will contain the projects found by traversing up the
+    hierarchy to the top-level project.
+  in: query
+  required: false
+  type: key-only, no value expected
+  min_version: 3.4
+policy_type_query:
   description: |
     Filters the response by a MIME media type for the
     serialized policy blob. For example, ``application/json``.
   in: query
   required: false
   type: string
-type_5:
+project_enabled_query:
+  description: |
+    If set to true, then only enabled projects will be returned. Any value
+    other than ``0`` (including no value) will be interpreted as true.
+  in: query
+  required: false
+  type: boolen
+project_name_query:
+  description: |
+    Filters the response by a project name.
+  in: query
+  required: false
+  type: string
+role_id_query:
+  description: |
+    Filters the response by a role ID.
+  in: query
+  required: false
+  type: string
+role_name_query:
+  description: |
+    Filters the response by a role name.
+  in: query
+  required: false
+  type: string
+scope_domain_id_query:
+  description: |
+    Filters the response by a domain ID.
+  in: query
+  required: false
+  type: string
+scope_os_inherit_inherited_to:
+  description: |
+    Filters based on role assignments that are inherited.
+    The only value of ``inherited_to`` that is currently
+    supported is ``projects``.
+  in: query
+  required: false
+  type: string
+scope_project_id_query:
+  description: |
+    Filters the response by a project ID.
+  in: query
+  required: false
+  type: string
+service_id_query:
+  description: |
+    Filters the response by a service ID.
+  in: query
+  required: false
+  type: string
+service_type_query:
   description: |
     Filters the response by a service type. A valid
     value is ``compute``, ``ec2``, ``identity``, ``image``,
@@ -212,7 +344,25 @@ type_5:
   in: query
   required: false
   type: string
-user_id_3:
+subtree_as_ids:
+  description: |
+    The entire child hierarchy will be included as nested dictionaries
+    in the response. It will contain all the projects ids found by
+    traversing down the hierarchy.
+  in: query
+  required: false
+  type: key-only, no value expected
+  min_version: 3.4
+subtree_as_list:
+  description: |
+    The child hierarchy will be included as a list in the response.
+    This list will contain the projects found by traversing down
+    the hierarchy.
+  in: query
+  required: false
+  type: key-only, no value expected
+  min_version: 3.4
+user_id_query:
   description: |
     Filters the response by a user ID.
   in: query
@@ -240,29 +390,64 @@ auth:
   in: body
   required: true
   type: object
-blob:
+auth_domain:
   description: |
-    The credential itself, as a serialized blob.
+    Specify either ``id`` or ``name`` to uniquely
+    identify the domain.
+  in: body
+  required: false
+  type: object
+auth_domain_id:
+  description: |
+    The ID of the domain.  If you specify a user
+    name, you must specify either a domain ID or domain name.
+  in: body
+  required: false
+  type: string
+auth_methods:
+  description: |
+    The authentication method, which is ``password``,
+    ``token``, or both methods.  Indicates the accumulated set of
+    authentication methods that were used to obtain the token. For
+    example, if the token was obtained by password authentication, it
+    contains ``password``. Later, if the token is exchanged by using
+    the token authentication method one or more times, the
+    subsequently created tokens contain both ``password`` and
+    ``token`` in their ``methods`` attribute.  Unlike multi-factor
+    authentication, the ``methods`` attribute merely indicates the
+    methods that were used to authenticate the user in exchange for a
+    token. The client is responsible for determining the total number
+    of authentication factors.
   in: body
   required: true
-  type: string
-blob_1:
+  type: array
+auth_methods_passwd:
   description: |
-    The policy rule set itself, as a serialized blob.
+    The authentication method. For password
+    authentication, specify ``password``.
   in: body
   required: true
-  type: string
-blob_2:
+  type: array
+auth_methods_token:
   description: |
-    The policy rule itself, as a serialized blob.
+    The authentication method. For token
+    authentication, specify ``token``.
+  in: body
+  required: true
+  type: array
+auth_token:
+  description: |
+    A ``token`` object. The token authentication
+    method is used. This method is typically used in combination with
+    a request to change authorization scope.
   in: body
   required: true
   type: object
-blob_3:
+auth_token_id:
   description: |
-    The credential itself, as a serialized blob.
+    A token ID.
   in: body
-  required: false
+  required: true
   type: string
 catalog:
   description: |
@@ -270,25 +455,75 @@ catalog:
   in: body
   required: true
   type: array
-config:
-  description: |
-    A ``config`` object.
-  in: body
-  required: true
-  type: object
 credential:
   description: |
     A ``credential`` object.
   in: body
   required: true
   type: object
+credential_blob:
+  description: |
+    The credential itself, as a serialized blob.
+  in: body
+  required: true
+  type: string
+credential_blob_notRequired:
+  description: |
+    The credential itself, as a serialized blob.
+  in: body
+  required: false
+  type: string
+credential_id:
+  description: |
+    The UUID for the credential.
+  in: body
+  required: true
+  type: string
+credential_links:
+  description: |
+    The links for the ``credential`` resource.
+  in: body
+  required: true
+  type: object
+credential_type:
+  description: |
+    The credential type, such as ``ec2`` or ``cert``.
+    The implementation determines the list of supported types.
+  in: body
+  required: true
+  type: string
+credential_type_notRequired:
+  description: |
+    The credential type, such as ``ec2`` or ``cert``.
+    The implementation determines the list of supported types.
+  in: body
+  required: false
+  type: string
+credential_user_id:
+  description: |
+    The ID of the user who owns the credential.
+  in: body
+  required: true
+  type: string
+credential_user_id_notRequired:
+  description: |
+    The ID of the user who owns the credential.
+  in: body
+  required: false
+  type: string
 credentials:
   description: |
-    A ``credentials`` object.
+    A list of ``credential`` objects.
   in: body
   required: true
   type: array
-default_project_id:
+credentials_links:
+  description: |
+    The links for the ``credentials`` resource.
+  in: body
+  required: true
+  type: object
+default_project_id_request_body:
   description: |
     The ID of the default project for the user.
     Setting this attribute does not grant any actual authorization on
@@ -302,79 +537,25 @@ default_project_id:
   in: body
   required: false
   type: string
-default_project_id_1:
+default_project_id_response_body:
   description: |
     The ID of the default project for the user.
   in: body
-  required: true
+  required: false
   type: string
-description:
+default_project_id_update_body:
   description: |
-    The domain description.
+    The new ID of the default project for the user.
   in: body
   required: false
   type: string
-description_1:
-  description: |
-    The group description.
-  in: body
-  required: false
-  type: string
-description_10:
-  description: |
-    The service description.
-  in: body
-  required: true
-  type: string
-description_11:
-  description: |
-    The user description.
-  in: body
-  required: true
-  type: string
-description_2:
-  description: |
-    The project description.
-  in: body
-  required: false
-  type: string
-description_3:
+description_region_request_body:
   description: |
     The region description.
   in: body
   required: false
   type: string
-description_4:
-  description: |
-    The service description.
-  in: body
-  required: false
-  type: string
-description_5:
-  description: |
-    The user description.
-  in: body
-  required: false
-  type: string
-description_6:
-  description: |
-    The project description.
-  in: body
-  required: true
-  type: string
-description_7:
-  description: |
-    The domain description.
-  in: body
-  required: true
-  type: string
-description_8:
-  description: |
-    The group description.
-  in: body
-  required: true
-  type: string
-description_9:
+description_region_response_body:
   description: |
     The region description.
   in: body
@@ -382,93 +563,173 @@ description_9:
   type: string
 domain:
   description: |
-    A ``domain`` object.
+    A ``domain`` object, containing:
   in: body
   required: true
   type: object
-domain_1:
+domain_config:
   description: |
-    A ``domain`` object. Required if you specify a
-    user name.
+    A ``config`` object.
   in: body
-  required: false
+  required: true
   type: object
-domain_2:
+domain_description_request_body:
   description: |
-    Specify either ``id`` or ``name`` to uniquely
-    identify the domain.
+    The description of the domain.
   in: body
   required: false
+  type: string
+domain_description_response_body:
+  description: |
+    The description of the domain.
+  in: body
+  required: true
+  type: string
+domain_description_update_request_body:
+  description: |
+    The new description of the domain.
+  in: body
+  required: false
+  type: string
+domain_driver:
+  description: |
+    The Identity backend driver.
+  in: body
+  required: true
+  type: string
+domain_driver_notRequired:
+  description: |
+    The Identity backend driver.
+  in: body
+  required: false
+  type: string
+domain_enabled_request_body:
+  description: |
+    If set to ``true``, domain is created enabled. If set to
+    ``false``, domain is created disabled. The default is ``true``.
+
+    Users can only authorize against an enabled domain (and any of its
+    projects). In addition, users can only authenticate if the domain that owns
+    them is also enabled. Disabling a domain prevents both of these things.
+  in: body
+  required: false
+  type: string
+domain_enabled_response_body:
+  description: |
+    If set to ``true``, domain is enabled. If set to
+    ``false``, domain is disabled.
+  in: body
+  required: true
+  type: string
+domain_enabled_update_request_body:
+  description: |
+    If set to ``true``, domain is enabled. If set to
+    ``false``, domain is disabled. The default is ``true``.
+
+    Users can only authorize against an enabled domain (and any of its
+    projects). In addition, users can only authenticate if the domain that owns
+    them is also enabled. Disabling a domain prevents both of these things.
+    When you disable a domain, all tokens that are authorized for that domain
+    become no longer valid. If you reenable the domain, these tokens
+    are not re-enabled.
+  in: body
+  required: false
+  type: string
+domain_group_identity:
+  description: |
+    An ``identity`` object. Required to set the
+    identity group configuration options.
+  in: body
+  required: true
   type: object
-domain_id_1:
+domain_id_response_body:
   description: |
-    The ID of the domain that owns the group.  If you
-    omit the domain ID, defaults to the domain to which the client
-    token is scoped.
-  in: body
-  required: false
-  type: string
-domain_id_2:
-  description: |
-    The ID of the domain for the project.  If you
-    omit the domain ID, default is the domain to which your token is
-    scoped.
-  in: body
-  required: false
-  type: string
-domain_id_3:
-  description: |
-    The ID of the domain for the user.
-  in: body
-  required: false
-  type: string
-domain_id_4:
-  description: |
-    The ID of the domain for the project.
+    The ID of the domain.
   in: body
   required: true
   type: string
-domain_id_5:
+domain_ldap:
   description: |
-    The ID of the domain for the group.
+    An ``ldap`` object. Required to set the LDAP
+    group configuration options.
+  in: body
+  required: true
+  type: object
+domain_link_response_body:
+  description: |
+    The links to the ``domain`` resource.
+  in: body
+  required: true
+  type: object
+domain_name_request_body:
+  description: |
+    The name of the domain.
   in: body
   required: true
   type: string
-domain_id_6:
+domain_name_response_body:
   description: |
-    The ID of the domain for the user.
+    The name of the domain.
   in: body
   required: true
+  type: string
+domain_name_update_request_body:
+  description: |
+    The new name of the domain.
+  in: body
+  required: false
+  type: string
+domain_url:
+  description: |
+    The LDAP URL.
+  in: body
+  required: true
+  type: string
+domain_url_notRequired:
+  description: |
+    The LDAP URL.
+  in: body
+  required: false
+  type: string
+domain_user_tree_dn:
+  description: |
+    The base distinguished name (DN) of LDAP, from
+    where all users can be reached. For example,
+    ``ou=Users,dc=root,dc=org``.
+  in: body
+  required: true
+  type: string
+domain_user_tree_dn_notRequired:
+  description: |
+    The base distinguished name (DN) of LDAP, from
+    where all users can be reached. For example,
+    ``ou=Users,dc=root,dc=org``.
+  in: body
+  required: false
   type: string
 domains:
   description: |
-    A ``domains`` object.
+    A list of ``domain`` objects, each containing:
   in: body
   required: true
   type: array
-driver:
+domains_links:
   description: |
-    The Identity back-end driver.
+    The links for the ``domains`` resource.
   in: body
   required: true
-  type: string
-driver_1:
-  description: |
-    The Identity back-end driver.
-  in: body
-  required: false
-  type: string
+  type: object
 email:
   description: |
     The email address for the user.
   in: body
-  required: false
+  required: true
   type: string
-email_1:
+email_notRequired:
   description: |
     The email address for the user.
   in: body
-  required: true
+  required: false
   type: string
 enabled:
   description: |
@@ -486,47 +747,6 @@ enabled:
   in: body
   required: false
   type: boolean
-enabled_1:
-  description: |
-    Defines whether the endpoint appears in the
-    service catalog:  - ``false``. The endpoint does not appear in the
-    service catalog.  - ``true``. The endpoint appears in the service
-    catalog.  Default is ``true``.
-  in: body
-  required: false
-  type: boolean
-enabled_10:
-  description: |
-    Defines whether the service and its endpoints
-    appear in the service catalog:  - ``false``. The service and its
-    endpoints do not appear in the   service catalog.  - ``true``. The
-    service and its endpoints appear in the service   catalog.
-  in: body
-  required: true
-  type: boolean
-enabled_12:
-  description: |
-    Indicates whether the domain is enabled or
-    disabled.  If set to ``true``, the domain is enabled. Users can
-    authorize against an enabled domain and any of its projects. Users
-    that are owned by an enabled domain can authenticate and receive
-    additional authorization.  If set to ``false``, the domain is
-    disabled. Users cannot authorize against a disabled domain or any
-    of its projects. Users that are owned by a disabled domain cannot
-    authenticate or receive additional authorization. All tokens that
-    are authorized for a disabled domain or its projects become no
-    longer valid. If you reenable the domain, these tokens are not re-
-    enabled.
-  in: body
-  required: true
-  type: boolean
-enabled_13:
-  description: |
-    If set to ``true``, project is enabled. If set to
-    ``false``, project is disabled.
-  in: body
-  required: true
-  type: boolean
 enabled_2:
   description: |
     Enables or disables the project.  Users can
@@ -539,17 +759,21 @@ enabled_2:
   in: body
   required: false
   type: boolean
-enabled_3:
+enabled_user_request_body:
   description: |
-    Defines whether the service and its endpoints
-    appear in the service catalog:  - ``false``. The service and its
-    endpoints do not appear in the   service catalog.  - ``true``. The
-    service and its endpoints appear in the service   catalog.
-    Default is ``true``.
+    If the user is enabled, this value is ``true``.
+    If the user is disabled, this value is ``false``.
   in: body
   required: false
   type: boolean
-enabled_4:
+enabled_user_response_body:
+  description: |
+    If the user is enabled, this value is ``true``.
+    If the user is disabled, this value is ``false``.
+  in: body
+  required: true
+  type: boolean
+enabled_user_update_body:
   description: |
     Enables or disables the user.  An enabled user
     can authenticate and receive authorization.  A disabled user
@@ -561,19 +785,13 @@ enabled_4:
   in: body
   required: false
   type: boolean
-enabled_5:
+endpoint:
   description: |
-    Enables or disables the project and its subtree.
-    Users can authorize against an enabled project.  Users cannot
-    authorize against a disabled project. All tokens that are
-    authorized for a disabled project become no longer valid. If you
-    reenable the project, these tokens are not re-enabled.  To enable
-    the project and its subtree, set to ``true``. To disable the
-    project and its subtree, set to ``false``. Default is ``true``.
+    An ``endpoint`` object.
   in: body
   required: true
-  type: boolean
-enabled_7:
+  type: object
+endpoint_enabled:
   description: |
     Indicates whether the endpoint appears in the
     service catalog:  - ``false``. The endpoint does not appear in the
@@ -582,25 +800,82 @@ enabled_7:
   in: body
   required: true
   type: boolean
-enabled_8:
+endpoint_enabled_notRequired:
   description: |
-    If the user is enabled, this value is ``true``.
-    If the user is disabled, this value is ``false``.
+    Defines whether the endpoint appears in the
+    service catalog:  - ``false``. The endpoint does not appear in the
+    service catalog.  - ``true``. The endpoint appears in the service
+    catalog.  Default is ``true``.
+  in: body
+  required: false
+  type: boolean
+endpoint_id:
+  description: |
+    The endpoint ID.
   in: body
   required: true
-  type: boolean
-endpoint:
+  type: string
+endpoint_interface:
   description: |
-    An ``endpoint`` object.
+    The interface type, which describes the
+    visibility of the endpoint.  Value is:  - ``public``. Visible by
+    end users on a publicly available network   interface.  -
+    ``internal``. Visible by end users on an unmetered internal
+    network interface.  - ``admin``. Visible by administrative users
+    on a secure network   interface.
+  in: body
+  required: true
+  type: string
+endpoint_links:
+  description: |
+    The links for the ``endpoint`` resource.
   in: body
   required: true
   type: object
+endpoint_name:
+  description: |
+    The endpoint name.
+  in: body
+  required: true
+  type: string
+endpoint_region:
+  description: |
+    (Deprecated in v3.2) The geographic location of
+    the service endpoint.
+  in: body
+  required: true
+  type: string
+endpoint_region_notRequired:
+  description: |
+    (Deprecated in v3.2) The geographic location of
+    the service endpoint.  Use the ``region_id`` parameter instead.
+  in: body
+  required: false
+  type: string
+endpoint_type:
+  description: |
+    The endpoint type.
+  in: body
+  required: true
+  type: string
+endpoint_url:
+  description: |
+    The endpoint URL.
+  in: body
+  required: true
+  type: string
 endpoints:
   description: |
-    An ``endpoints`` object.
+    A list of ``endpoint`` objects.
   in: body
   required: true
   type: array
+endpoints_links:
+  description: |
+    The links for the ``endpoints`` resource.
+  in: body
+  required: true
+  type: object
 expires_at:
   description: |
     The date and time when the token expires.
@@ -629,110 +904,109 @@ extras:
   type: object
 group:
   description: |
-    A ``group`` object.
+    A ``group`` object, containing:
   in: body
   required: true
   type: object
+group_description_request_body:
+  description: |
+    The description of the group.
+  in: body
+  required: true
+  type: string
+group_description_response_body:
+  description: |
+    The description of the group.
+  in: body
+  required: true
+  type: string
+group_description_update_request_body:
+  description: |
+    The new description of the group.
+  in: body
+  required: false
+  type: string
+group_domain_id:
+  description: |
+    The ID of the domain that owns the group.  If you
+    omit the domain ID, defaults to the domain to which the client
+    token is scoped.
+  in: body
+  required: false
+  type: string
+group_domain_id_request_body:
+  description: |
+    The ID of the domain of the group.
+  in: body
+  required: true
+  type: string
+group_domain_id_response_body:
+  description: |
+    The ID of the domain of the group.
+  in: body
+  required: true
+  type: string
+group_domain_id_update_request_body:
+  description: |
+    The ID of the new domain for the group. The ability to change the domain
+    of a group is now deprecated, and will be removed in subsequent release.
+    It is already disabled by default in most Identity service implementations.
+  in: body
+  required: false
+  type: string
+group_id_response_body:
+  description: |
+    The ID of the group.
+  in: body
+  required: true
+  type: string
+group_links:
+  description: |
+    The links for the ``group`` resource.
+  in: body
+  required: true
+  type: object
+group_name_request_body:
+  description: |
+    The name of the group.
+  in: body
+  required: true
+  type: string
+group_name_response_body:
+  description: |
+    The name of the group.
+  in: body
+  required: true
+  type: string
+group_name_update_request_body:
+  description: |
+    The new name of the group.
+  in: body
+  required: false
+  type: string
 groups:
   description: |
-    A ``groups`` object.
+    A list of ``group`` objects, each containing:
   in: body
   required: true
   type: array
-id:
-  description: |
-    The ID of the user.  Required if you do not
-    specify the user name.
-  in: body
-  required: false
-  type: string
-id_1:
-  description: |
-    The ID of the domain.  If you specify a user
-    name, you must specify either a domain ID or domain name.
-  in: body
-  required: false
-  type: string
-id_10:
-  description: |
-    The role ID.
-  in: body
-  required: true
-  type: string
-id_11:
-  description: |
-    The ID of the service.
-  in: body
-  required: true
-  type: string
-id_12:
-  description: |
-    The ID for the user.
-  in: body
-  required: true
-  type: string
-id_13:
+id_region_response_body:
   description: |
     The ID for the region.
   in: body
   required: true
   type: string
-id_14:
+id_region_resquest_body:
+  description: |
+    The ID for the region.
+  in: body
+  required: false
+  type: string
+id_user_body:
   description: |
     The user ID.
   in: body
   required: true
-  type: string
-id_2:
-  description: |
-    A token ID.
-  in: body
-  required: false
-  type: string
-id_3:
-  description: |
-    The UUID for the credential.
-  in: body
-  required: true
-  type: string
-id_4:
-  description: |
-    The domain ID.
-  in: body
-  required: true
-  type: string
-id_5:
-  description: |
-    The endpoint UUID.
-  in: body
-  required: true
-  type: string
-id_6:
-  description: |
-    The ID for the group.
-  in: body
-  required: true
-  type: string
-id_7:
-  description: |
-    The ID of the policy.
-  in: body
-  required: true
-  type: string
-id_8:
-  description: |
-    The ID for the project.
-  in: body
-  required: true
-  type: string
-id_9:
-  description: |
-    A user-defined region ID.  If you include
-    characters in the region ID that are not allowed in a URI, you
-    must URL-encode the ID. If you omit an ID, the API assigns an ID
-    to the region.
-  in: body
-  required: false
   type: string
 identity:
   description: |
@@ -740,58 +1014,41 @@ identity:
   in: body
   required: true
   type: object
-identity_1:
+implies_role_array_body:
   description: |
-    An ``identity`` object. Required to set the
-    identity group configuration options.
+    An array of implied role objects.
+  in: body
+  required: true
+  type: array
+implies_role_object_body:
+  description: |
+    An implied role object.
   in: body
   required: true
   type: object
-interface:
+is_domain_request_body:
   description: |
-    The interface type, which describes the
-    visibility of the endpoint.  Value is:  - ``public``. Visible by
-    end users on a publicly available network   interface.  -
-    ``internal``. Visible by end users on an unmetered internal
-    network interface.  - ``admin``. Visible by administrative users
-    on a secure network   interface.
-  in: body
-  required: true
-  type: string
-interface_1:
-  description: |
-    The interface type, which describes the
-    visibility of the endpoint.  A valid value is:  - ``public``.
-    Visible by end users on a publicly available network   interface.
-    - ``internal``. Visible by end users on an unmetered internal
-    network interface.  - ``admin``. Visible by administrative users
-    on a secure network   interface.
-  in: body
-  required: true
-  type: string
-is_domain:
-  description: |
-    (Since v3.6) Indicates whether the project also
-    acts as a domain.  Set to ``true`` to define this project as both
-    a project and domain. As a domain, the project provides a name
-    space in which you can create users, groups, and other projects.
-    Set to ``false`` to define this project as a regular project that
-    contains only resources.  Default is ``false``.  You cannot update
+    Indicates whether the project also acts as a domain. If set to ``true``,
+    this project acts as both a project and domain. As a domain, the project
+    provides a name space in which you can create users, groups, and other
+    projects. If set to ``false``, this project behaves as a regular project
+    that contains only resources. Default is ``false``. You cannot update
     this parameter after you create the project.
   in: body
   required: false
   type: boolean
-is_domain_1:
+  min_version: 3.6
+is_domain_response_body:
   description: |
-    (Since v3.6) Indicates whether the project also
-    acts as a domain.  If set to ``true``, this project acts as both a
-    project and domain. As a domain, the project provides a name space
-    in which you can create users, groups, and other projects.
-    Otherwise, this field does not appear in the response and this
-    project behaves as a regular project that contains only resources.
+    Indicates whether the project also acts as a domain. If set to ``true``,
+    this project acts as both a project and domain. As a domain, the project
+    provides a name space in which you can create users, groups, and other
+    projects. If set to ``false``, this project behaves as a regular project
+    that contains only resources.
   in: body
-  required: false
+  required: true
   type: boolean
+  min_version: 3.6
 issued_at:
   description: |
     The date and time when the token was issued.
@@ -810,236 +1067,36 @@ issued_at:
   in: body
   required: true
   type: string
-ldap:
+link_collection:
   description: |
-    An ``ldap`` object. Required to set the LDAP
-    group configuration options.
+    The link to the collection of resources.
   in: body
   required: true
-  type: object
-links:
+  type: string
+link_response_body:
   description: |
-    The links for the ``credential`` resource.
+    The link to the resources in question.
   in: body
   required: true
-  type: object
-links_1:
-  description: |
-    The links for the ``domain`` resource.
-  in: body
-  required: true
-  type: object
-links_10:
-  description: |
-    The links for the ``credentials`` resource.
-  in: body
-  required: true
-  type: object
-links_11:
-  description: |
-    The links for the ``domains`` resource.
-  in: body
-  required: true
-  type: object
-links_12:
-  description: |
-    The links for the ``roles`` resource.
-  in: body
-  required: true
-  type: object
-links_13:
-  description: |
-    The links for the ``endpoints`` resource.
-  in: body
-  required: true
-  type: object
-links_14:
-  description: |
-    The links for the ``users`` resource.
-  in: body
-  required: true
-  type: object
-links_2:
-  description: |
-    The links for the ``endpoint`` resource.
-  in: body
-  required: true
-  type: object
-links_3:
-  description: |
-    The links for the ``group`` resource.
-  in: body
-  required: true
-  type: object
-links_4:
-  description: |
-    The links for the ``policy`` resource.
-  in: body
-  required: true
-  type: object
-links_5:
+  type: string
+links_project:
   description: |
     The links for the ``project`` resource.
   in: body
   required: true
   type: object
-links_6:
+links_region:
   description: |
     The links for the ``region`` resource.
   in: body
   required: true
   type: object
-links_7:
-  description: |
-    The links for the ``role`` resource.
-  in: body
-  required: true
-  type: object
-links_8:
-  description: |
-    The links for the ``service`` resource.
-  in: body
-  required: true
-  type: object
-links_9:
+links_user:
   description: |
     The links for the ``user`` resource.
   in: body
   required: true
   type: object
-methods:
-  description: |
-    The authentication method. For password
-    authentication, specify ``password``.
-  in: body
-  required: true
-  type: array
-methods_1:
-  description: |
-    The authentication method. For token
-    authentication, specify ``token``.
-  in: body
-  required: true
-  type: array
-methods_2:
-  description: |
-    The authentication method, which is ``password``,
-    ``token``, or both methods.  Indicates the accumulated set of
-    authentication methods that were used to obtain the token. For
-    example, if the token was obtained by password authentication, it
-    contains ``password``. Later, if the token is exchanged by using
-    the token authentication method one or more times, the
-    subsequently created tokens contain both ``password`` and
-    ``token`` in their ``methods`` attribute.  Unlike multi-factor
-    authentication, the ``methods`` attribute merely indicates the
-    methods that were used to authenticate the user in exchange for a
-    token. The client is responsible for determining the total number
-    of authentication factors.
-  in: body
-  required: true
-  type: array
-name:
-  description: |
-    The user name.  Required if you do not specify
-    the ID of the user.  If you specify the user name, you must also
-    specify the domain, by ID or name.
-  in: body
-  required: false
-  type: string
-name_1:
-  description: |
-    The name of the domain.  If you specify a user
-    name, you must specify either a domain ID or domain name.
-  in: body
-  required: false
-  type: string
-name_11:
-  description: |
-    The name of the group.
-  in: body
-  required: true
-  type: string
-name_12:
-  description: |
-    The user name. Must be unique within the domain.
-  in: body
-  required: true
-  type: string
-name_15:
-  description: |
-    The service name.
-  in: body
-  required: true
-  type: string
-name_17:
-  description: |
-    The domain name.
-  in: body
-  required: false
-  type: string
-name_18:
-  description: |
-    The group name.
-  in: body
-  required: false
-  type: string
-name_19:
-  description: |
-    The user name.
-  in: body
-  required: true
-  type: string
-name_2:
-  description: |
-    The domain name.
-  in: body
-  required: true
-  type: string
-name_3:
-  description: |
-    The endpoint name.
-  in: body
-  required: true
-  type: string
-name_4:
-  description: |
-    The group name.
-  in: body
-  required: true
-  type: string
-name_5:
-  description: |
-    The project name, which must be unique within the
-    owning domain. The project can have the same name as its domain.
-  in: body
-  required: true
-  type: string
-name_6:
-  description: |
-    The role name.
-  in: body
-  required: true
-  type: string
-name_7:
-  description: |
-    The service name.
-  in: body
-  required: false
-  type: string
-name_8:
-  description: |
-    The user name, which must be unique within the
-    owning domain.
-  in: body
-  required: true
-  type: string
-name_9:
-  description: |
-    The project name. The project can have the same
-    name as its domain.
-  in: body
-  required: true
-  type: string
 original_password:
   description: |
     The original password for the user.
@@ -1061,13 +1118,6 @@ parent_id_1:
   in: body
   required: true
   type: string
-parent_region_id:
-  description: |
-    To make this region a child of another region,
-    set this parameter to the ID of the parent region.
-  in: body
-  required: false
-  type: string
 parent_region_id_2:
   description: |
     If the region is a child of another region, the
@@ -1075,23 +1125,56 @@ parent_region_id_2:
   in: body
   required: true
   type: string
-password:
+parent_region_id_request_body:
   description: |
-    The user password.
+    To make this region a child of another region,
+    set this parameter to the ID of the parent region.
+  in: body
+  required: false
+  type: string
+parent_region_id_response_body:
+  description: |
+    To make this region a child of another region,
+    set this parameter to the ID of the parent region.
   in: body
   required: true
   type: string
-password_1:
+password:
+  description: |
+    The ``password`` object, contains the authentication information.
+  in: body
+  required: true
+  type: object
+password_auth_domain:
+  description: |
+    A ``domain`` object. Required if you specify a
+    user name.
+  in: body
+  required: false
+  type: object
+password_auth_domain_name:
+  description: |
+    The name of the domain.  If you specify a user
+    name, you must specify either a domain ID or domain name.
+  in: body
+  required: false
+  type: string
+password_expires_at:
+  description: |
+    The date and time when the password expires. The time zone
+    is UTC.
+
+    This is a response object attribute; not valid for requests.
+    A ``null`` value indicates that the password never expires.
+  in: body
+  required: true
+  type: string
+  min_version: 3.7
+password_request_body:
   description: |
     The password for the user.
   in: body
-  required: true
-  type: string
-password_2:
-  description: |
-    The new password for the user.
-  in: body
-  required: true
+  required: false
   type: string
 policies:
   description: |
@@ -1105,50 +1188,201 @@ policy:
   in: body
   required: true
   type: object
-project:
+policy_blob_obj:
   description: |
-    A ``project`` object.
+    The policy rule itself, as a serialized blob.
   in: body
   required: true
   type: object
-project_id_1:
+policy_blob_str:
   description: |
-    The UUID for the associated project.
+    The policy rule set itself, as a serialized blob.
   in: body
   required: true
   type: string
-project_id_2:
+policy_id:
   description: |
-    The UUID for the associated project.
+    The policy ID.
+  in: body
+  required: true
+  type: string
+policy_links:
+  description: |
+    The links for the ``policy`` resource.
+  in: body
+  required: true
+  type: object
+policy_type:
+  description: |
+    The MIME media type of the serialized policy
+    blob.
+  in: body
+  required: true
+  type: string
+policy_user_id:
+  description: |
+    The ID of the user who owns the policy.
+  in: body
+  required: true
+  type: string
+policy_user_id_notRequired:
+  description: |
+    The ID of the user who owns the policy.
   in: body
   required: false
   type: string
+prior_role_body:
+  description: |
+    A prior role object.
+  in: body
+  required: true
+  type: object
+project:
+  description: |
+    A ``project`` object, containing:
+  in: body
+  required: true
+  type: object
+project_description_request_body:
+  description: |
+    The description of the project.
+  in: body
+  required: false
+  type: string
+project_description_response_body:
+  description: |
+    The description of the project.
+  in: body
+  required: true
+  type: string
+project_domain_id:
+  description: |
+    The ID of the domain for the project.  If you
+    omit the domain ID, default is the domain to which your token is
+    scoped.
+  in: body
+  required: false
+  type: string
+project_domain_id_request_body:
+  description: |
+    The ID of the domain for the project.
+
+    For projects acting as a domain, the ``domain_id`` must not be specified,
+    it will be generated by the Identity service implementation.
+
+    For regular projects (i.e. those not acing as a domain), if ``domain_id``
+    is not specified, but ``parent_id`` is specified, then the domain ID of the
+    parent will be used. If neither ``domain_id`` or ``parent_id`` is
+    specified, the Identity service implementation will default to the domain
+    to which the client's token is scoped. If both ``domain_id`` and
+    ``parent_id`` are specified, and they do not indicate the same domain, an
+    ``Bad Request (400)`` will be returned.
+  in: body
+  required: false
+  type: string
+project_domain_id_response_body:
+  description: |
+    The ID of the domain for the project.
+  in: body
+  required: true
+  type: string
+project_domain_id_update_request_body:
+  description: |
+    The ID of the new domain for the project. The ability to change the domain
+    of a project is now deprecated, and will be removed in subequent release.
+    It is already disabled by default in most Identity service implementations.
+  in: body
+  required: false
+  type: string
+project_enabled_cascade_request_body:
+  description: |
+    Enables or disables the project and its subtree.
+    Users can authorize against an enabled project, but not against a disabled
+    project. All tokens that are authorized for all projects in the affected
+    hierarchy become no longer valid. If you reenable the projects, these tokens
+    are not re-enabled.  To enable the project and its subtree, set to ``true``.
+    To disable the project and its subtree, set to ``false``.
+  in: body
+  required: true
+  type: boolean
+project_enabled_request_body:
+  description: |
+    If set to ``true``, project is enabled. If set to
+    ``false``, project is disabled. The default is ``true``.
+  in: body
+  required: false
+  type: boolean
+project_enabled_response_body:
+  description: |
+    If set to ``true``, project is enabled. If set to
+    ``false``, project is disabled.
+  in: body
+  required: true
+  type: boolean
+project_enabled_update_request_body:
+  description: |
+    If set to ``true``, project is enabled. If set to
+    ``false``, project is disabled.
+  in: body
+  required: false
+  type: boolean
+project_id:
+  description: |
+    The ID for the project.
+  in: body
+  required: true
+  type: string
+project_name_request_body:
+  description: |
+    The name of the project, which must be unique within the
+    owning domain. A project can have the same name as its domain.
+  in: body
+  required: true
+  type: string
+project_name_response_body:
+  description: |
+    The name of the project.
+  in: body
+  required: true
+  type: string
+project_name_update_request_body:
+  description: |
+    The name of the project, which must be unique within the
+    owning domain. A project can have the same name as its domain.
+  in: body
+  required: false
+  type: string
+project_parent_id_request_body:
+  description: |
+    The ID of the parent of the project.
+
+    If specified on project creation, this places the project within a
+    hierarchy and implicitly defines the owning domain, which will be the
+    same domain as the parent specified. If ``parent_id`` is
+    not specified and ``is_domain`` is ``false``, then the project will use its
+    owning domain as its parent. If ``is_domain`` is ``true`` (i.e. the project
+    is acting as a domain), then ``parent_id`` must not specified (or if it is,
+    it must be ``null``) since domains have no parents.
+
+    ``parent_id`` is immutable, and can't be updated after the project is
+    created - hence a project cannot be moved within the hierarchy.
+  in: body
+  required: false
+  type: string
+  min_version: 3.4
+project_parent_id_response_body:
+  description: |
+    The ID of the parent for the project.
+  in: body
+  required: true
+  type: string
+  min_version: 3.4
 projects:
   description: |
-    A ``projects`` object.
+    A list of ``project`` objects, each containing:
   in: body
   required: true
   type: array
-region:
-  description: |
-    (Deprecated in v3.2) The geographic location of
-    the service endpoint.
-  in: body
-  required: true
-  type: string
-region_1:
-  description: |
-    A ``region`` object.
-  in: body
-  required: true
-  type: object
-region_2:
-  description: |
-    (Deprecated in v3.2) The geographic location of
-    the service endpoint.  Use the ``region_id`` parameter instead.
-  in: body
-  required: false
-  type: string
 region_id:
   description: |
     (Since v3.2) The ID of the region that contains
@@ -1163,30 +1397,94 @@ region_id_1:
   in: body
   required: false
   type: string
-regions:
+region_id_notRequired:
   description: |
-    A ``regions`` object.
+    A user-defined region ID.  If you include
+    characters in the region ID that are not allowed in a URI, you
+    must URL-encode the ID. If you omit an ID, the API assigns an ID
+    to the region.
+  in: body
+  required: false
+  type: string
+region_object:
+  description: |
+    A ``region`` object, containing the following:
+  in: body
+  required: true
+  type: object
+regions_object:
+  description: |
+    A list of ``region`` object, each containing the following:
   in: body
   required: true
   type: array
 role:
   description: |
-    A ``role`` object.
+    A ``role`` object, containing:
   in: body
   required: true
   type: object
 role_assignments:
   description: |
-    A ``role_assignments`` object.
+    A list of ``role_assignment`` objects.
   in: body
   required: true
   type: array
+role_id_response_body:
+  description: |
+    The role ID.
+  in: body
+  required: true
+  type: string
+role_inference_array_body:
+  description: |
+    An array of ``role_inference`` object.
+  in: body
+  required: true
+  type: array
+role_inference_body:
+  description: |
+    Role inference object that contains ``prior_role`` object
+    and ``implies`` object.
+  in: body
+  required: true
+  type: object
+role_links:
+  description: |
+    The links for the ``role`` resource.
+  in: body
+  required: true
+  type: object
+role_name_create_body:
+  description: |
+    The role name.
+  in: body
+  required: true
+  type: string
+role_name_response_body:
+  description: |
+    The role name.
+  in: body
+  required: true
+  type: string
+role_name_update_body:
+  description: |
+    The new role name.
+  in: body
+  required: false
+  type: string
 roles:
   description: |
-    A ``roles`` object.
+    A list of ``role`` objects, each containing:
   in: body
   required: true
   type: array
+roles_links:
+  description: |
+    The links for the ``roles`` resource.
+  in: body
+  required: true
+  type: object
 scope:
   description: |
     The authorization scope.  (Since v3.4) Specify
@@ -1233,6 +1531,31 @@ service:
   in: body
   required: true
   type: object
+service_description:
+  description: |
+    The service description.
+  in: body
+  required: true
+  type: string
+service_enabled:
+  description: |
+    Defines whether the service and its endpoints
+    appear in the service catalog:  - ``false``. The service and its
+    endpoints do not appear in the   service catalog.  - ``true``. The
+    service and its endpoints appear in the service   catalog.
+  in: body
+  required: true
+  type: boolean
+service_enabled_notRequired:
+  description: |
+    Defines whether the service and its endpoints
+    appear in the service catalog:  - ``false``. The service and its
+    endpoints do not appear in the   service catalog.  - ``true``. The
+    service and its endpoints appear in the service   catalog.
+    Default is ``true``.
+  in: body
+  required: false
+  type: boolean
 service_id:
   description: |
     The UUID of the service to which the endpoint
@@ -1240,15 +1563,29 @@ service_id:
   in: body
   required: true
   type: string
-service_id_1:
+service_links:
   description: |
-    The service ID.
+    The links for the ``service`` resource.
+  in: body
+  required: true
+  type: object
+service_name:
+  description: |
+    The service name.
   in: body
   required: false
   type: string
+service_type:
+  description: |
+    The service type, which describes the API
+    implemented by the service. Value is ``compute``, ``ec2``,
+    ``identity``, ``image``, ``network``, or ``volume``.
+  in: body
+  required: true
+  type: string
 services:
   description: |
-    A ``services`` object.
+    A list of ``service`` object.
   in: body
   required: true
   type: array
@@ -1258,118 +1595,86 @@ token:
   in: body
   required: true
   type: object
-token_1:
-  description: |
-    A ``token`` object. The token authentication
-    method is used. This method is typically used in combination with
-    a request to change authorization scope.
-  in: body
-  required: true
-  type: object
-type:
-  description: |
-    The endpoint type.
-  in: body
-  required: true
-  type: string
-type_1:
-  description: |
-    The credential type, such as ``ec2`` or ``cert``.
-    The implementation determines the list of supported types.
-  in: body
-  required: true
-  type: string
-type_2:
-  description: |
-    The MIME media type of the serialized policy
-    blob.
-  in: body
-  required: true
-  type: string
-type_3:
-  description: |
-    The service type, which describes the API
-    implemented by the service.  A valid value is ``compute``,
-    ``ec2``, ``identity``, ``image``, ``network``, or ``volume``.
-  in: body
-  required: true
-  type: string
-type_6:
-  description: |
-    The service type, which describes the API
-    implemented by the service. Value is ``compute``, ``ec2``,
-    ``identity``, ``image``, ``network``, or ``volume``.
-  in: body
-  required: true
-  type: string
-type_7:
-  description: |
-    The credential type, such as ``ec2`` or ``cert``.
-    The implementation determines the list of supported types.
-  in: body
-  required: false
-  type: string
-url:
-  description: |
-    The endpoint URL.
-  in: body
-  required: true
-  type: string
-url_1:
-  description: |
-    The LDAP URL.
-  in: body
-  required: true
-  type: string
-url_2:
-  description: |
-    The LDAP URL.
-  in: body
-  required: false
-  type: string
 user:
   description: |
     A ``user`` object.
   in: body
   required: true
   type: object
-user_id_1:
+user_description:
   description: |
-    The ID of the user who owns the credential.
+    The user description.
   in: body
   required: true
   type: string
-user_id_2:
+user_domain_id:
   description: |
-    The ID of the user who owns the policy.
+    The ID of the domain for the user.
   in: body
   required: false
   type: string
-user_id_4:
+user_domain_id_request_body:
   description: |
-    The ID of the user who owns the policy.
-  in: body
-  required: true
-  type: string
-user_id_5:
-  description: |
-    The ID of the user who owns the credential.
+    The ID of the domain for the user.
   in: body
   required: false
   type: string
-user_tree_dn:
+user_domain_id_update_body:
   description: |
-    The base distinguished name (DN) of LDAP, from
-    where all users can be reached. For example,
-    ``ou=Users,dc=root,dc=org``.
+    The ID of the new domain for the user. The ability to change the domain
+    of a user is now deprecated, and will be removed in subequent release.
+    It is already disabled by default in most Identity service implementations.
+  in: body
+  required: false
+  type: string
+user_id:
+  description: |
+    The ID of the user.  Required if you do not
+    specify the user name.
+  in: body
+  required: false
+  type: string
+user_name:
+  description: |
+    The user name.  Required if you do not specify
+    the ID of the user.  If you specify the user name, you must also
+    specify the domain, by ID or name.
+  in: body
+  required: false
+  type: string
+user_name_create_request_body:
+  description: |
+    The user name. Must be unique within the owning domain.
   in: body
   required: true
   type: string
-user_tree_dn_1:
+user_name_response_body:
   description: |
-    The base distinguished name (DN) of LDAP, from
-    where all users can be reached. For example,
-    ``ou=Users,dc=root,dc=org``.
+    The user name. Must be unique within the owning domain.
+  in: body
+  required: true
+  type: string
+user_name_update_body:
+  description: |
+    The new name for the user. Must be unique within the owning domain.
+  in: body
+  required: false
+  type: string
+user_object:
+  description: |
+    A ``user`` object, containing:
+  in: body
+  required: true
+  type: object
+user_password_update_body:
+  description: |
+    The new password for the user.
+  in: body
+  required: true
+  type: string
+user_update_password_body:
+  description: |
+    The new password for the user.
   in: body
   required: false
   type: string
@@ -1379,4 +1684,9 @@ users:
   in: body
   required: true
   type: array
-
+users_object:
+  description: |
+    A list of ``user`` object, each containing:
+  in: body
+  required: true
+  type: array

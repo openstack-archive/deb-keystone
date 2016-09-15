@@ -151,8 +151,8 @@ class FederatedSetupMixin(object):
         self.assertIn('identity_provider', user['OS-FEDERATION'])
         self.assertIn('protocol', user['OS-FEDERATION'])
 
-        # Make sure user_id is url safe
-        self.assertEqual(urllib.parse.quote(user['name']), user['id'])
+        # Make sure user_name is url safe
+        self.assertEqual(urllib.parse.quote(user['name']), user['name'])
 
     def _issue_unscoped_token(self,
                               idp=None,
@@ -688,6 +688,31 @@ class FederatedSetupMixin(object):
                             "type": "Position",
                             "any_one_of": [
                                 "DirectorGeneral"
+                            ]
+                        }
+                    ]
+                },
+                # rules for users with no groups
+                {
+                    "local": [
+                        {
+                            'user': {
+                                'name': '{0}',
+                                'id': '{1}'
+                            }
+                        }
+                    ],
+                    "remote": [
+                        {
+                            'type': 'UserName',
+                        },
+                        {
+                            'type': 'Email',
+                        },
+                        {
+                            'type': 'orgPersonType',
+                            'any_one_of': [
+                                'NoGroupsOrg'
                             ]
                         }
                     ]
@@ -1668,7 +1693,7 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         self.assertEqual(ref_groups, token_groups)
 
     def test_issue_unscoped_tokens_nonexisting_group(self):
-        self.assertRaises(exception.MissingGroups,
+        self.assertRaises(exception.MappedGroupNotFound,
                           self._issue_unscoped_token,
                           assertion='ANOTHER_TESTER_ASSERTION')
 
@@ -1745,9 +1770,11 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
         self.assertIsNotNone(r.headers.get('X-Subject-Token'))
 
     def test_issue_unscoped_token_no_groups(self):
-        self.assertRaises(exception.Unauthorized,
-                          self._issue_unscoped_token,
-                          assertion='BAD_TESTER_ASSERTION')
+        r = self._issue_unscoped_token(assertion='USER_NO_GROUPS_ASSERTION')
+        self.assertIsNotNone(r.headers.get('X-Subject-Token'))
+        token_resp = r.json_body
+        token_groups = token_resp['token']['user']['OS-FEDERATION']['groups']
+        self.assertEqual(0, len(token_groups))
 
     def test_issue_unscoped_token_malformed_environment(self):
         """Test whether non string objects are filtered out.
@@ -2314,9 +2341,8 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
          - Create group ``EXISTS``
          - Set mapping rules for existing IdP with an empty whitelist
            that whould discard any values from the assertion
-         - Try issuing unscoped token, expect server to raise
-           ``exception.MissingGroups`` as no groups were matched and ephemeral
-           user does not have any group assigned.
+         - Try issuing unscoped token, no groups were matched and that the
+           federated user does not have any group assigned.
 
         """
         domain_id = self.domainA['id']
@@ -2357,10 +2383,9 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
             ]
         }
         self.federation_api.update_mapping(self.mapping['id'], rules)
-
-        self.assertRaises(exception.MissingGroups,
-                          self._issue_unscoped_token,
-                          assertion='UNMATCHED_GROUP_ASSERTION')
+        r = self._issue_unscoped_token(assertion='UNMATCHED_GROUP_ASSERTION')
+        assigned_groups = r.json['token']['user']['OS-FEDERATION']['groups']
+        self.assertEqual(len(assigned_groups), 0)
 
     def test_not_setting_whitelist_accepts_all_values(self):
         """Test that not setting whitelist passes.
@@ -2504,6 +2529,21 @@ class FederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
                           self._issue_unscoped_token,
                           assertion='ANOTHER_LOCAL_USER_ASSERTION')
 
+    def test_user_name_and_id_in_federation_token(self):
+        r = self._issue_unscoped_token(assertion='EMPLOYEE_ASSERTION')
+        token = r.json_body['token']
+        self.assertEqual(
+            mapping_fixtures.EMPLOYEE_ASSERTION['UserName'],
+            token['user']['name'])
+        self.assertNotEqual(token['user']['name'], token['user']['id'])
+        r = self.v3_create_token(
+            self.TOKEN_SCOPE_PROJECT_EMPLOYEE_FROM_EMPLOYEE)
+        token = r.json_body['token']
+        self.assertEqual(
+            mapping_fixtures.EMPLOYEE_ASSERTION['UserName'],
+            token['user']['name'])
+        self.assertNotEqual(token['user']['name'], token['user']['id'])
+
 
 class FernetFederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
     AUTH_METHOD = 'token'
@@ -2515,7 +2555,13 @@ class FernetFederatedTokenTests(test_v3.RestfulTestCase, FederatedSetupMixin):
     def config_overrides(self):
         super(FernetFederatedTokenTests, self).config_overrides()
         self.config_fixture.config(group='token', provider='fernet')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def auth_plugin_config_override(self):
         methods = ['saml2', 'token', 'password']

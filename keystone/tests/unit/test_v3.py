@@ -258,36 +258,8 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         config_files.append(unit.dirs.tests_conf('backend_sql.conf'))
         return config_files
 
-    def get_extensions(self):
-        extensions = set(['revoke'])
-        if hasattr(self, 'EXTENSION_NAME'):
-            extensions.add(self.EXTENSION_NAME)
-        return extensions
-
-    def generate_paste_config(self):
-        new_paste_file = None
-        try:
-            new_paste_file = unit.generate_paste_config(self.EXTENSION_TO_ADD)
-        except AttributeError:
-            # no need to report this error here, as most tests will not have
-            # EXTENSION_TO_ADD defined.
-            pass
-        finally:
-            return new_paste_file
-
-    def remove_generated_paste_config(self):
-        try:
-            unit.remove_generated_paste_config(self.EXTENSION_TO_ADD)
-        except AttributeError:
-            pass
-
     def setUp(self, app_conf='keystone'):
         """Setup for v3 Restful Test Cases."""
-        new_paste_file = self.generate_paste_config()
-        self.addCleanup(self.remove_generated_paste_config)
-        if new_paste_file:
-            app_conf = 'config:%s' % (new_paste_file)
-
         super(RestfulTestCase, self).setUp(app_conf=app_conf)
 
         self.empty_context = {'environment': {}}
@@ -676,7 +648,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.assertIsNotNone(token.get('issued_at'))
         issued_at = self.assertValidISO8601ExtendedFormatDatetime(
             token['issued_at'])
-        self.assertTrue(issued_at < expires_at)
+        self.assertLess(issued_at, expires_at)
 
         self.assertIn('user', token)
         self.assertIn('id', token['user'])
@@ -831,13 +803,13 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
 
     def assertValidCatalog(self, entity):
         self.assertIsInstance(entity, list)
-        self.assertTrue(len(entity) > 0)
+        self.assertGreater(len(entity), 0)
         for service in entity:
             self.assertIsNotNone(service.get('id'))
             self.assertIsNotNone(service.get('name'))
             self.assertIsNotNone(service.get('type'))
             self.assertNotIn('enabled', service)
-            self.assertTrue(len(service['endpoints']) > 0)
+            self.assertGreater(len(service['endpoints']), 0)
             for endpoint in service['endpoints']:
                 self.assertIsNotNone(endpoint.get('id'))
                 self.assertIsNotNone(endpoint.get('interface'))
@@ -1010,6 +982,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         self.assertIsNotNone(entity.get('email'))
         self.assertIsNone(entity.get('password'))
         self.assertNotIn('tenantId', entity)
+        self.assertIn('password_expires_at', entity)
         if ref:
             self.assertEqual(ref['domain_id'], entity['domain_id'])
             self.assertEqual(ref['email'], entity['email'])
@@ -1315,8 +1288,7 @@ class RestfulTestCase(unit.SQLDriverOverrides, rest.RestfulTestCase,
         if not auth_data:
             auth_data = self.build_authentication_request(
                 kerberos=kerberos)['auth']
-        no_context = None
-        auth_info = auth.controllers.AuthInfo.create(no_context, auth_data)
+        auth_info = auth.controllers.AuthInfo.create(auth_data)
         auth_context = {'extras': {}, 'method_names': []}
         return self.make_request(environ=environment), auth_info, auth_context
 

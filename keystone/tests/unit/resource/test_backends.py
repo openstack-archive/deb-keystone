@@ -302,28 +302,6 @@ class ResourceTests(object):
                           project['id'],
                           project)
 
-    def test_create_project_blank_name_fails(self):
-        project = unit.new_project_ref(
-            name='', domain_id=CONF.identity.default_domain_id)
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.create_project,
-                          project['id'],
-                          project)
-
-    def test_create_project_invalid_name_fails(self):
-        project = unit.new_project_ref(
-            name=None, domain_id=CONF.identity.default_domain_id)
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.create_project,
-                          project['id'],
-                          project)
-        project = unit.new_project_ref(
-            name=123, domain_id=CONF.identity.default_domain_id)
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.create_project,
-                          project['id'],
-                          project)
-
     def test_update_project_blank_name_fails(self):
         project = unit.new_project_ref(
             name='fake1', domain_id=CONF.identity.default_domain_id)
@@ -357,30 +335,6 @@ class ResourceTests(object):
         project['name'] = 123
         self.assertRaises(exception.ValidationError,
                           self.resource_api.update_project,
-                          project['id'],
-                          project)
-
-    def test_update_project_invalid_enabled_type_string(self):
-        project = unit.new_project_ref(
-            domain_id=CONF.identity.default_domain_id)
-        self.resource_api.create_project(project['id'], project)
-        project_ref = self.resource_api.get_project(project['id'])
-        self.assertTrue(project_ref['enabled'])
-
-        # Strings are not valid boolean values
-        project['enabled'] = "false"
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.update_project,
-                          project['id'],
-                          project)
-
-    def test_create_project_invalid_enabled_type_string(self):
-        project = unit.new_project_ref(
-            domain_id=CONF.identity.default_domain_id,
-            # invalid string value
-            enabled="true")
-        self.assertRaises(exception.ValidationError,
-                          self.resource_api.create_project,
                           project['id'],
                           project)
 
@@ -1050,7 +1004,7 @@ class ResourceTests(object):
         """Test the resource backend call delete_projects_from_ids.
 
         Tests the normal flow of the delete_projects_from_ids backend call,
-        that ensures no project on the list exists after it is succesfully
+        that ensures no project on the list exists after it is successfully
         called.
         """
         project1_ref = unit.new_project_ref(

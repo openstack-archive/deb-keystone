@@ -88,15 +88,7 @@ class Tenant(controller.V2Controller):
     def create_project(self, request, tenant):
         tenant_ref = self._normalize_dict(tenant)
 
-        if 'name' not in tenant_ref or not tenant_ref['name']:
-            msg = _('Name field is required and cannot be empty')
-            raise exception.ValidationError(message=msg)
-
-        if 'is_domain' in tenant_ref:
-            msg = _('The creation of projects acting as domains is not '
-                    'allowed in v2.')
-            raise exception.ValidationError(message=msg)
-
+        validation.lazy_validate(schema.tenant_create, tenant)
         self.assert_admin(request)
 
         self.resource_api.ensure_default_domain_exists()
@@ -105,22 +97,19 @@ class Tenant(controller.V2Controller):
         initiator = notifications._get_request_audit_info(request.context_dict)
         tenant = self.resource_api.create_project(
             tenant_ref['id'],
-            self._normalize_domain_id(request.context_dict, tenant_ref),
+            self._normalize_domain_id(request, tenant_ref),
             initiator)
         return {'tenant': self.v3_to_v2_project(tenant)}
 
     @controller.v2_deprecated
     def update_project(self, request, tenant_id, tenant):
+        validation.lazy_validate(schema.tenant_update, tenant)
         self.assert_admin(request)
         self._assert_not_is_domain_project(tenant_id)
-        # Remove domain_id and is_domain if specified - a v2 api caller
-        # should not be specifying that
-        clean_tenant = tenant.copy()
-        clean_tenant.pop('domain_id', None)
-        clean_tenant.pop('is_domain', None)
+
         initiator = notifications._get_request_audit_info(request.context_dict)
         tenant_ref = self.resource_api.update_project(
-            tenant_id, clean_tenant, initiator)
+            tenant_id, tenant, initiator)
         return {'tenant': self.v3_to_v2_project(tenant_ref)}
 
     @controller.v2_deprecated
@@ -245,7 +234,7 @@ class ProjectV3(controller.V3Controller):
         ref = self._assign_unique_id(self._normalize_dict(project))
 
         if not ref.get('is_domain'):
-            ref = self._normalize_domain_id(request.context_dict, ref)
+            ref = self._normalize_domain_id(request, ref)
         # Our API requires that you specify the location in the hierarchy
         # unambiguously. This could be by parent_id or, if it is a top level
         # project, just by providing a domain_id.

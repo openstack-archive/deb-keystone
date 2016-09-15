@@ -19,10 +19,14 @@ import sqlalchemy
 from keystone.common import driver_hints
 from keystone.common import sql
 from keystone.common import utils
+import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 from keystone.identity.backends import base
 from keystone.identity.backends import sql_model as model
+
+
+CONF = keystone.conf.CONF
 
 
 class Identity(base.IdentityDriverV8):
@@ -54,11 +58,59 @@ class Identity(base.IdentityDriverV8):
                 user_ref = self._get_user(session, user_id)
             except exception.UserNotFound:
                 raise AssertionError(_('Invalid user / password'))
-        if not self._check_password(password, user_ref):
+        if self._is_account_locked(user_id, user_ref):
+            raise exception.AccountLocked(user_id=user_id)
+        elif not self._check_password(password, user_ref):
+            self._record_failed_auth(user_id)
             raise AssertionError(_('Invalid user / password'))
         elif not user_ref.enabled:
             raise exception.UserDisabled(user_id=user_id)
+        elif user_ref.password_is_expired:
+            raise exception.PasswordExpired(user_id=user_id)
+        # successful auth, reset failed count if present
+        if user_ref.local_user.failed_auth_count:
+            self._reset_failed_auth(user_id)
         return base.filter_user(user_ref.to_dict())
+
+    def _is_account_locked(self, user_id, user_ref):
+        """Check if the user account is locked.
+
+        Checks if the user account is locked based on the number of failed
+        authentication attempts.
+
+        :param user_id: The user ID
+        :param user_ref: Reference to the user object
+        :returns Boolean: True if the account is locked; False otherwise
+
+        """
+        attempts = user_ref.local_user.failed_auth_count or 0
+        max_attempts = CONF.security_compliance.lockout_failure_attempts
+        lockout_duration = CONF.security_compliance.lockout_duration
+        if max_attempts and (attempts >= max_attempts):
+            if not lockout_duration:
+                return True
+            else:
+                delta = datetime.timedelta(seconds=lockout_duration)
+                last_failure = user_ref.local_user.failed_auth_at
+                if (last_failure + delta) > datetime.datetime.utcnow():
+                    return True
+                else:
+                    self._reset_failed_auth(user_id)
+        return False
+
+    def _record_failed_auth(self, user_id):
+        with sql.session_for_write() as session:
+            user_ref = session.query(model.User).get(user_id)
+            if not user_ref.local_user.failed_auth_count:
+                user_ref.local_user.failed_auth_count = 0
+            user_ref.local_user.failed_auth_count += 1
+            user_ref.local_user.failed_auth_at = datetime.datetime.utcnow()
+
+    def _reset_failed_auth(self, user_id):
+        with sql.session_for_write() as session:
+            user_ref = session.query(model.User).get(user_id)
+            user_ref.local_user.failed_auth_count = 0
+            user_ref.local_user.failed_auth_at = None
 
     # user crud
 
@@ -105,17 +157,51 @@ class Identity(base.IdentityDriverV8):
     def update_user(self, user_id, user):
         with sql.session_for_write() as session:
             user_ref = self._get_user(session, user_id)
+            if 'password' in user:
+                self._validate_password_history(user['password'], user_ref)
             old_user_dict = user_ref.to_dict()
             user = utils.hash_user_password(user)
             for k in user:
                 old_user_dict[k] = user[k]
             new_user = model.User.from_dict(old_user_dict)
             for attr in model.User.attributes:
-                if attr != 'id':
+                if attr not in model.User.readonly_attributes:
                     setattr(user_ref, attr, getattr(new_user, attr))
             user_ref.extra = new_user.extra
             return base.filter_user(
                 user_ref.to_dict(include_extra_dict=True))
+
+    def _validate_password_history(self, password, user_ref):
+        unique_cnt = CONF.security_compliance.unique_last_password_count
+        # Slice off all of the extra passwords.
+        user_ref.local_user.passwords = (
+            user_ref.local_user.passwords[-unique_cnt:])
+        # Validate the new password against the remaining passwords.
+        if unique_cnt > 1:
+            for password_ref in user_ref.local_user.passwords:
+                if utils.check_password(password, password_ref.password):
+                    detail = _('The new password cannot be identical to a '
+                               'previous password. The number of previous '
+                               'passwords that must be unique is: '
+                               '%(unique_cnt)d') % {'unique_cnt': unique_cnt}
+                    raise exception.PasswordValidationError(detail=detail)
+
+    def change_password(self, user_id, new_password):
+        with sql.session_for_write() as session:
+            user_ref = session.query(model.User).get(user_id)
+            if user_ref.password_ref and user_ref.password_ref.self_service:
+                self._validate_minimum_password_age(user_ref)
+            user_ref.password = utils.hash_password(new_password)
+            user_ref.password_ref.self_service = True
+
+    def _validate_minimum_password_age(self, user_ref):
+        min_age_days = CONF.security_compliance.minimum_password_age
+        min_age = (user_ref.password_created_at +
+                   datetime.timedelta(days=min_age_days))
+        if datetime.datetime.utcnow() < min_age:
+            days_left = (min_age - datetime.datetime.utcnow()).days
+            raise exception.PasswordAgeValidationError(
+                min_age_days=min_age_days, days_left=days_left)
 
     def add_user_to_group(self, user_id, group_id):
         with sql.session_for_write() as session:

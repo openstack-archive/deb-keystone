@@ -11,6 +11,7 @@
 # under the License.
 
 import hashlib
+import sys
 
 from oslo_config import cfg
 
@@ -46,6 +47,8 @@ binding metadata be supported by keystone.
 expiration = cfg.IntOpt(
     'expiration',
     default=3600,
+    min=0,
+    max=sys.maxsize,
     help=utils.fmt("""
 The amount of time that a token should remain valid (in seconds). Drastically
 reducing this value may break "long-running" operations that involve multiple
@@ -96,6 +99,8 @@ unless global caching is enabled.
 
 cache_time = cfg.IntOpt(
     'cache_time',
+    min=0,
+    max=sys.maxsize,
     help=utils.fmt("""
 The number of seconds to cache token creation and validation data. This has no
 effect unless both global and `[token] caching` are enabled.
@@ -125,11 +130,12 @@ request for a scoped token to avoid re-scoping altogether.
 """))
 
 # This attribute only exists in Python 2.7.8+ or 3.2+
-hash_algorithm_choices = getattr(hashlib, 'algorithms_guaranteed', None)
+hash_choices = getattr(hashlib, 'algorithms_guaranteed', None)
+hash_choices = sorted(hash_choices) if hash_choices else None
 hash_algorithm = cfg.StrOpt(
     'hash_algorithm',
     default='md5',
-    choices=hash_algorithm_choices,
+    choices=hash_choices,
     deprecated_for_removal=True,
     deprecated_reason=constants._DEPRECATE_PKI_MSG,
     help=utils.fmt("""
@@ -151,6 +157,13 @@ directly assigned to the token's scope, but are instead linked implicitly to
 other role assignments.
 """))
 
+cache_on_issue = cfg.BoolOpt(
+    'cache_on_issue',
+    default=False,
+    help=utils.fmt("""
+Enable storing issued token data to token validation cache so that first token
+validation doesn't actually cause full validation cycle.
+"""))
 
 GROUP_NAME = __name__.split('.')[-1]
 ALL_OPTS = [
@@ -165,6 +178,7 @@ ALL_OPTS = [
     allow_rescope_scoped_token,
     hash_algorithm,
     infer_roles,
+    cache_on_issue,
 ]
 
 

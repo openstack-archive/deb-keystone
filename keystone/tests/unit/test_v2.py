@@ -990,7 +990,7 @@ class RestfulTestCase(rest.RestfulTestCase):
             self.role_admin['id'])
 
 
-class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
+class V2TestCase(object):
 
     def config_overrides(self):
         super(V2TestCase, self).config_overrides()
@@ -1398,8 +1398,77 @@ class V2TestCase(RestfulTestCase, CoreApiTests, LegacyV2UsernameTests):
             },
             expected_status=http_client.OK)
 
+    def test_enable_or_disable_user(self):
+        token = self.get_scoped_token()
+        user_id = self.user_badguy['id']
 
-class RevokeApiTestCase(V2TestCase):
+        self.assertFalse(self.user_badguy['enabled'])
+
+        def _admin_request(body, status):
+            resp = self.admin_request(
+                method='PUT',
+                path='/v2.0/users/%s/OS-KSADM/enabled' % user_id,
+                token=token,
+                body=body,
+                expected_status=status)
+            return resp
+
+        # Enable the user.
+        body = {'user': {'enabled': True}}
+        resp = _admin_request(body, http_client.OK)
+        self.assertTrue(resp.json['user']['enabled'])
+
+        # Disable the user.
+        body = {'user': {'enabled': False}}
+        resp = _admin_request(body, http_client.OK)
+        self.assertFalse(resp.json['user']['enabled'])
+
+        # Attributes other than `enabled` should still work due to bug 1607751
+        body = {
+            'user': {
+                'description': uuid.uuid4().hex,
+                'name': uuid.uuid4().hex,
+                'enabled': True
+            }
+        }
+        _admin_request(body, http_client.OK)
+
+        #  `enabled` is boolean, type other than boolean is not allowed.
+        body = {'user': {'enabled': uuid.uuid4().hex}}
+        _admin_request(body, http_client.BAD_REQUEST)
+
+
+class V2TestCaseUUID(V2TestCase, RestfulTestCase, CoreApiTests,
+                     LegacyV2UsernameTests):
+
+    def config_overrides(self):
+        super(V2TestCaseUUID, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class V2TestCaseFernet(V2TestCase, RestfulTestCase, CoreApiTests,
+                       LegacyV2UsernameTests):
+
+    def config_overrides(self):
+        super(V2TestCaseFernet, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
+
+    def test_fetch_revocation_list_md5(self):
+        self.skipTest('Revocation lists do not support Fernet')
+
+    def test_fetch_revocation_list_sha256(self):
+        self.skipTest('Revocation lists do not support Fernet')
+
+
+class RevokeApiTestCase(V2TestCase, RestfulTestCase, CoreApiTests,
+                        LegacyV2UsernameTests):
     def config_overrides(self):
         super(RevokeApiTestCase, self).config_overrides()
         self.config_fixture.config(
@@ -1456,7 +1525,13 @@ class TestFernetTokenProviderV2(RestfulTestCase):
     def config_overrides(self):
         super(TestFernetTokenProviderV2, self).config_overrides()
         self.config_fixture.config(group='token', provider='fernet')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def test_authenticate_unscoped_token(self):
         unscoped_token = self.get_unscoped_token()

@@ -256,7 +256,7 @@ class AuthBadRequests(AuthTest):
                           empty_request, body_dict)
 
 
-class AuthWithToken(AuthTest):
+class AuthWithToken(object):
     def test_unscoped_token(self):
         """Verify getting an unscoped token with password creds."""
         body_dict = _build_user_auth(username='FOO',
@@ -614,11 +614,23 @@ class AuthWithToken(AuthTest):
         return [None, None]
 
 
-class FernetAuthWithToken(AuthWithToken):
+class UUIDAuthWithToken(AuthWithToken, AuthTest):
+    def config_overrides(self):
+        super(UUIDAuthWithToken, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class FernetAuthWithToken(AuthWithToken, AuthTest):
     def config_overrides(self):
         super(FernetAuthWithToken, self).config_overrides()
         self.config_fixture.config(group='token', provider='fernet')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def test_token_auth_with_binding(self):
         self.config_fixture.config(group='token', bind=['kerberos'])
@@ -630,6 +642,18 @@ class FernetAuthWithToken(AuthWithToken):
 
     def test_deleting_role_revokes_token(self):
         self.skip_test_overrides('Fernet with v2.0 and revocation is broken')
+
+
+class PKIAuthWithToken(AuthWithToken, AuthTest):
+    def config_overrides(self):
+        super(PKIAuthWithToken, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pki')
+
+
+class PKIZAuthWithToken(AuthWithToken, AuthTest):
+    def config_overrides(self):
+        super(PKIZAuthWithToken, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pkiz')
 
 
 class AuthWithPasswordCredentials(AuthTest):
@@ -724,7 +748,7 @@ class AuthWithPasswordCredentials(AuthTest):
         self.controller.authenticate(self.make_request(), body_dict)
 
 
-class AuthWithRemoteUser(AuthTest):
+class AuthWithRemoteUser(object):
     def test_unscoped_remote_authn(self):
         """Verify getting an unscoped token with external authn."""
         body_dict = _build_user_auth(
@@ -805,7 +829,52 @@ class AuthWithRemoteUser(AuthTest):
         self.assertNotIn('bind', token['access']['token'])
 
 
-class AuthWithTrust(AuthTest):
+class FernetAuthWithRemoteUser(AuthWithRemoteUser, AuthTest):
+
+    def config_overrides(self):
+        super(FernetAuthWithRemoteUser, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet')
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
+
+    def test_bind_with_kerberos(self):
+        self.config_fixture.config(group='token', bind=['kerberos'])
+        body_dict = _build_user_auth(tenant_name="BAR")
+        # NOTE(lbragstad): Bind authentication is not supported by the Fernet
+        # provider.
+        self.assertRaises(exception.NotImplemented,
+                          self.controller.authenticate,
+                          self.request_with_remote_user,
+                          body_dict)
+
+
+class UUIDAuthWithRemoteUser(AuthWithRemoteUser, AuthTest):
+
+    def config_overrides(self):
+        super(UUIDAuthWithRemoteUser, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+
+class PKIAuthWithRemoteUser(AuthWithRemoteUser, AuthTest):
+
+    def config_overrides(self):
+        super(PKIAuthWithRemoteUser, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pki')
+
+
+class PKIZAuthWithRemoteUser(AuthWithRemoteUser, AuthTest):
+
+    def config_overrides(self):
+        super(PKIZAuthWithRemoteUser, self).config_overrides()
+        self.config_fixture.config(group='token', provider='pkiz')
+
+
+class AuthWithTrust(object):
     def setUp(self):
         super(AuthWithTrust, self).setUp()
 
@@ -849,6 +918,20 @@ class AuthWithTrust(AuthTest):
 
         req = self.make_request(environ=environ)
         req.context_dict['token_id'] = token_id
+
+        # NOTE(jamielennox): This wouldn't be necessary if these were calls via
+        # the wsgi interface instead of directly creating a request to pass to
+        # a controller.
+        req.context.auth_token = token_id
+        req.context.user_id = auth_context.get('user_id')
+        req.context.project_id = auth_context.get('project_id')
+        req.context.domain_id = auth_context.get('domain_id')
+        req.context.domain_name = auth_context.get('domain_name')
+        req.context.user_domain_id = auth_context.get('user_domain_id')
+        req.context.roles = auth_context.get('roles')
+        req.context.trust_id = auth_context.get('trust_id')
+        req.context.trustor_id = auth_context.get('trustor_id')
+        req.context.trustee_id = auth_context.get('trustee_id')
 
         return req
 
@@ -970,19 +1053,6 @@ class AuthWithTrust(AuthTest):
         for role in new_trust['roles']:
             self.assertIn(role['id'], role_ids)
 
-    def test_get_trust_without_auth_context(self):
-        """Verify a trust cannot be retrieved if auth context is missing."""
-        unscoped_token = self.get_unscoped_token(self.trustor['name'])
-        request = self._create_auth_request(
-            unscoped_token['access']['token']['id'])
-        new_trust = self.trust_controller.create_trust(
-            request, trust=self.sample_data)['trust']
-        # Delete the auth context before calling get_trust().
-        del request.context_dict['environment'][authorization.AUTH_CONTEXT_ENV]
-        self.assertRaises(exception.Forbidden,
-                          self.trust_controller.get_trust, request,
-                          new_trust['id'])
-
     def test_create_trust_no_impersonation(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'],
                                       expires_at=None, impersonation=False)
@@ -1055,6 +1125,13 @@ class AuthWithTrust(AuthTest):
             self.make_request(), v3_req_with_trust)
         return token_auth_response
 
+    def test_validate_v3_trust_scoped_token_against_v2_succeeds(self):
+        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
+        auth_response = self.fetch_v3_token_from_trust(new_trust, self.trustee)
+        trust_token = auth_response.headers['X-Subject-Token']
+        self.controller.validate_token(self.make_request(is_admin=True),
+                                       trust_token)
+
     def test_create_v3_token_from_trust(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'])
         auth_response = self.fetch_v3_token_from_trust(new_trust, self.trustee)
@@ -1117,7 +1194,7 @@ class AuthWithTrust(AuthTest):
         request_body = _build_user_auth(token={'id': trust_token_id},
                                         tenant_id=self.tenant_bar['id'])
         self.assertRaises(
-            exception.Unauthorized,
+            exception.Forbidden,
             self.controller.authenticate, self.make_request(), request_body)
 
     def test_delete_trust_revokes_token(self):
@@ -1125,17 +1202,21 @@ class AuthWithTrust(AuthTest):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'])
         request = self._create_auth_request(
             unscoped_token['access']['token']['id'])
-        self.fetch_v2_token_from_trust(new_trust)
+        trust_token_resp = self.fetch_v2_token_from_trust(new_trust)
+        trust_scoped_token_id = trust_token_resp['access']['token']['id']
+        self.controller.validate_token(
+            self.make_request(is_admin=True),
+            token_id=trust_scoped_token_id)
         trust_id = new_trust['id']
-        tokens = self.token_provider_api._persistence._list_tokens(
-            self.trustor['id'],
-            trust_id=trust_id)
-        self.assertEqual(1, len(tokens))
+
+        self.time_fixture.advance_time_seconds(1)
+
         self.trust_controller.delete_trust(request, trust_id=trust_id)
-        tokens = self.token_provider_api._persistence._list_tokens(
-            self.trustor['id'],
-            trust_id=trust_id)
-        self.assertEqual(0, len(tokens))
+        self.assertRaises(
+            exception.TokenNotFound,
+            self.controller.validate_token,
+            self.make_request(is_admin=True),
+            token_id=trust_scoped_token_id)
 
     def test_token_from_trust_with_no_role_fails(self):
         new_trust = self.create_trust(self.sample_data, self.trustor['name'])
@@ -1219,10 +1300,60 @@ class AuthWithTrust(AuthTest):
         request_body = self.build_v2_token_request(self.trustee['name'],
                                                    self.trustee['password'],
                                                    new_trust)
+        self.time_fixture.advance_time_seconds(1)
         self.disable_user(self.trustee)
         self.assertRaises(
             exception.Unauthorized,
             self.controller.authenticate, self.make_request(), request_body)
+
+    def test_validate_trust_scoped_token_against_v2(self):
+        new_trust = self.create_trust(self.sample_data, self.trustor['name'])
+        trust_token_resp = self.fetch_v2_token_from_trust(new_trust)
+        trust_scoped_token_id = trust_token_resp['access']['token']['id']
+        self.controller.validate_token(self.make_request(is_admin=True),
+                                       token_id=trust_scoped_token_id)
+
+
+class UUIDAuthWithTrust(AuthWithTrust, AuthTest):
+
+    def config_overrides(self):
+        super(UUIDAuthWithTrust, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
+
+    def setUp(self):
+        super(UUIDAuthWithTrust, self).setUp()
+
+
+class FernetAuthWithTrust(AuthWithTrust, AuthTest):
+
+    def config_overrides(self):
+        super(FernetAuthWithTrust, self).config_overrides()
+        self.config_fixture.config(group='token', provider='fernet',
+                                   cache_on_issue=True)
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
+
+    def setUp(self):
+        super(FernetAuthWithTrust, self).setUp()
+
+    def test_delete_tokens_for_user_invalidates_tokens_from_trust(self):
+        # TODO(lbragstad): Rewrite this test to not rely on the persistence
+        # backend. This same test can be exercised through the API.
+        msg = 'The Fernet token provider does not support token persistence'
+        self.skipTest(msg)
+
+    def test_delete_trust_revokes_token(self):
+        # NOTE(amakarov): have to override this for Fernet as TokenNotFound
+        # can't be raised for non-persistent token, but deleted trust will
+        # cause TrustNotFound exception.
+        self.assertRaises(
+            exception.TrustNotFound,
+            super(FernetAuthWithTrust, self).test_delete_trust_revokes_token)
 
 
 class TokenExpirationTest(AuthTest):
@@ -1249,7 +1380,10 @@ class TokenExpirationTest(AuthTest):
         r = self.controller.validate_token(
             self.make_request(is_admin=True),
             token_id=unscoped_token_id)
-        self.assertEqual(original_expiration, r['access']['token']['expires'])
+        self.assertEqual(
+            timeutils.parse_isotime(original_expiration),
+            timeutils.parse_isotime(r['access']['token']['expires'])
+        )
 
         mock_utcnow.return_value = now + datetime.timedelta(seconds=2)
 
@@ -1269,7 +1403,10 @@ class TokenExpirationTest(AuthTest):
         r = self.controller.validate_token(
             self.make_request(is_admin=True),
             token_id=scoped_token_id)
-        self.assertEqual(original_expiration, r['access']['token']['expires'])
+        self.assertEqual(
+            timeutils.parse_isotime(original_expiration),
+            timeutils.parse_isotime(r['access']['token']['expires'])
+        )
 
     def test_maintain_uuid_token_expiration(self):
         self.config_fixture.config(group='token', provider='uuid')

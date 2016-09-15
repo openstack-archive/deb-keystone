@@ -1,0 +1,13 @@
+{
+    "service_provider": {
+        "auth_url": "https://new.example.com/identity/v3/OS-FEDERATION/identity_providers/protocol/saml2/auth",
+        "description": "Remote Service Provider",
+        "enabled": true,
+        "id": "ACME",
+        "links": {
+            "self": "https://example.com/identity/v3/OS-FEDERATION/service_providers/ACME"
+        },
+        "relay_state_prefix": "ss:temp:",
+        "sp_url": "https://new.example.com/identity/Shibboleth.sso/SAML2/ECP"
+    }
+}

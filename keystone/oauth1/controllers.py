@@ -260,7 +260,7 @@ class OAuthControllerV3(controller.V3Controller):
             expiry_bit = '&oauth_expires_at=%s' % token_ref['expires_at']
             result += expiry_bit
 
-        headers = [('Content-Type', 'application/x-www-urlformencoded')]
+        headers = [('Content-Type', 'application/x-www-form-urlencoded')]
         response = wsgi.render_response(
             result,
             status=(http_client.CREATED,
@@ -341,7 +341,7 @@ class OAuthControllerV3(controller.V3Controller):
             expiry_bit = '&oauth_expires_at=%s' % (token_ref['expires_at'])
             result += expiry_bit
 
-        headers = [('Content-Type', 'application/x-www-urlformencoded')]
+        headers = [('Content-Type', 'application/x-www-form-urlencoded')]
         response = wsgi.render_response(
             result,
             status=(http_client.CREATED,
@@ -393,16 +393,6 @@ class OAuthControllerV3(controller.V3Controller):
 
         # create list of just the id's for the backend
         role_ids = list(authed_roles)
-
-        # verify the user has the project too
-        req_project_id = req_token['requested_project_id']
-        user_projects = self.assignment_api.list_projects_for_user(user_id)
-        for user_project in user_projects:
-            if user_project['id'] == req_project_id:
-                break
-        else:
-            msg = _("User is not a member of the requested project")
-            raise exception.Unauthorized(message=msg)
 
         # finally authorize the token
         authed_token = self.oauth_api.authorize_request_token(

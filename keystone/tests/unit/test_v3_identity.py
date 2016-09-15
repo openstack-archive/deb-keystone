@@ -316,6 +316,16 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         user = self.identity_api.create_user(user)
         self.assertNotIn('created_at', user)
         self.assertNotIn('last_active_at', user)
+
+    def test_get_user_includes_required_attributes(self):
+        """Call ``GET /users/{user_id}`` required attributes are included."""
+        user = unit.new_user_ref(domain_id=self.domain_id,
+                                 project_id=self.project_id)
+        user = self.identity_api.create_user(user)
+        self.assertIn('id', user)
+        self.assertIn('name', user)
+        self.assertIn('enabled', user)
+        self.assertIn('password_expires_at', user)
         r = self.get('/users/%(user_id)s' % {'user_id': user['id']})
         self.assertValidUserResponse(r, user)
 
@@ -440,6 +450,25 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                              expected_status=http_client.NOT_FOUND)
 
         # new password should work
+        new_password_auth = self.build_authentication_request(
+            user_id=user_ref['id'],
+            password=new_password)
+        self.v3_create_token(new_password_auth)
+
+    def test_admin_password_reset_with_min_password_age_enabled(self):
+        # enable minimum_password_age, this should have no effect on admin
+        # password reset
+        self.config_fixture.config(group='security_compliance',
+                                   minimum_password_age=1)
+        # create user
+        user_ref = unit.create_user(self.identity_api,
+                                    domain_id=self.domain['id'])
+        # administrative password reset
+        new_password = uuid.uuid4().hex
+        r = self.patch('/users/%s' % user_ref['id'],
+                       body={'user': {'password': new_password}})
+        self.assertValidUserResponse(r, user_ref)
+        # authenticate with new password
         new_password_auth = self.build_authentication_request(
             user_id=user_ref['id'],
             password=new_password)
@@ -674,6 +703,13 @@ class IdentityV3toV2MethodsTestCase(unit.TestCase):
             name=user_id,
             tenantId=project_id,
             domain_id=CONF.identity.default_domain_id)
+        # User with password_expires_at
+        self.user5 = self.new_user_ref(
+            id=user_id,
+            name=user_id,
+            project_id=project_id,
+            domain_id=CONF.identity.default_domain_id,
+            password_expires_at=None)
 
         # Expected result if the user is meant to have a tenantId element
         self.expected_user = {'id': user_id,
@@ -700,9 +736,16 @@ class IdentityV3toV2MethodsTestCase(unit.TestCase):
         updated_user4 = controller.V2Controller.v3_to_v2_user(self.user4)
         self.assertIs(self.user4, updated_user4)
         self.assertDictEqual(self.expected_user_no_tenant_id, self.user4)
+        # password_expires_at filter test
+        password_expires_at_key = 'password_expires_at'
+        self.assertIn(password_expires_at_key, self.user5)
+        updated_user5 = controller.V2Controller.v3_to_v2_user(self.user5)
+        self.assertIs(self.user5, updated_user5)
+        self.assertNotIn(password_expires_at_key, updated_user5)
 
     def test_v3_to_v2_user_method_list(self):
-        user_list = [self.user1, self.user2, self.user3, self.user4]
+        user_list = [self.user1, self.user2, self.user3, self.user4,
+                     self.user5]
         updated_list = controller.V2Controller.v3_to_v2_user(user_list)
 
         self.assertEqual(len(user_list), len(updated_list))
@@ -710,6 +753,7 @@ class IdentityV3toV2MethodsTestCase(unit.TestCase):
         for i, ref in enumerate(updated_list):
             # Order should not change.
             self.assertIs(ref, user_list[i])
+            self.assertNotIn('password_expires_at', user_list[i])
 
         self.assertDictEqual(self.expected_user, self.user1)
         self.assertDictEqual(self.expected_user_no_tenant_id, self.user2)
@@ -767,6 +811,27 @@ class UserSelfServiceChangingPasswordsTestCase(test_v3.RestfulTestCase):
         self.get_request_token(new_password,
                                expected_status=http_client.CREATED)
 
+    def test_changing_password_with_min_password_age(self):
+        # enable minimum_password_age and attempt to change password
+        new_password = uuid.uuid4().hex
+        self.config_fixture.config(group='security_compliance',
+                                   minimum_password_age=1)
+        # able to change password after create user
+        self.change_password(password=new_password,
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.NO_CONTENT)
+        # 2nd change password should fail due to minimum password age
+        self.token = self.get_request_token(new_password, http_client.CREATED)
+        self.change_password(password=uuid.uuid4().hex,
+                             original_password=new_password,
+                             expected_status=http_client.BAD_REQUEST)
+        # disable minimum_password_age and attempt to change password
+        self.config_fixture.config(group='security_compliance',
+                                   minimum_password_age=0)
+        self.change_password(password=uuid.uuid4().hex,
+                             original_password=new_password,
+                             expected_status=http_client.NO_CONTENT)
+
     def test_changing_password_with_missing_original_password_fails(self):
         r = self.change_password(password=uuid.uuid4().hex,
                                  expected_status=http_client.BAD_REQUEST)
@@ -808,3 +873,58 @@ class UserSelfServiceChangingPasswordsTestCase(test_v3.RestfulTestCase):
 
         self.assertNotIn(self.user_ref['password'], log_fix.output)
         self.assertNotIn(new_password, log_fix.output)
+
+
+class PasswordValidationTestCase(UserSelfServiceChangingPasswordsTestCase):
+    """Test password validation."""
+
+    def setUp(self):
+        super(PasswordValidationTestCase, self).setUp()
+        # passwords requires: 1 letter, 1 digit, 7 chars
+        self.config_fixture.config(group='security_compliance',
+                                   password_regex=(
+                                       '^(?=.*\d)(?=.*[a-zA-Z]).{7,}$'))
+
+    def test_create_user_with_invalid_password(self):
+        user = unit.new_user_ref(domain_id=self.domain_id)
+        user['password'] = 'simple'
+        self.post('/users', body={'user': user}, token=self.get_admin_token(),
+                  expected_status=http_client.BAD_REQUEST)
+
+    def test_update_user_with_invalid_password(self):
+        user = unit.create_user(self.identity_api,
+                                domain_id=self.domain['id'])
+        user['password'] = 'simple'
+        self.patch('/users/%(user_id)s' % {
+            'user_id': user['id']},
+            body={'user': user},
+            expected_status=http_client.BAD_REQUEST)
+
+    def test_changing_password_with_simple_password_strength(self):
+        # password requires: any non-whitespace character
+        self.config_fixture.config(group='security_compliance',
+                                   password_regex='[\S]+')
+        self.change_password(password='simple',
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.NO_CONTENT)
+
+    def test_changing_password_with_strong_password_strength(self):
+        self.change_password(password='mypassword2',
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.NO_CONTENT)
+
+    def test_changing_password_with_strong_password_strength_fails(self):
+        # no digit
+        self.change_password(password='mypassword',
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.BAD_REQUEST)
+
+        # no letter
+        self.change_password(password='12345678',
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.BAD_REQUEST)
+
+        # less than 7 chars
+        self.change_password(password='mypas2',
+                             original_password=self.user_ref['password'],
+                             expected_status=http_client.BAD_REQUEST)

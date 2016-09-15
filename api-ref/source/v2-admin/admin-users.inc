@@ -108,7 +108,7 @@ Response Parameters
 Response Example
 ----------------
 
-.. literalinclude:: samples/admin/user-show-response.json
+.. literalinclude:: samples/admin/users-list-response.json
    :language: javascript
 
 
@@ -127,11 +127,12 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+   - userId: userId
    - username: username
    - enabled: enabled
    - email: email
    - name: name
-   - userId: userId
+   - tenantId: tenantId
 
 Request Example
 ---------------
@@ -144,10 +145,18 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
+   - users: users
    - enabled: enabled
    - email: email
    - name: name
    - id: id
+   - tenantId: tenantId
+
+Response Example
+----------------
+
+.. literalinclude:: samples/admin/user-update-response.json
+   :language: javascript
 
 
 Delete user (admin endpoint)

@@ -41,9 +41,7 @@ from keystone.common import request as request_mod
 from keystone.common import utils
 import keystone.conf
 from keystone import exception
-from keystone.i18n import _
-from keystone.i18n import _LI
-from keystone.i18n import _LW
+from keystone.i18n import _, _LI, _LW
 from keystone.models import token_model
 
 
@@ -290,10 +288,11 @@ class Application(BaseApplication):
             does not have the admin role
 
         """
+        request.assert_authenticated()
+
         if not request.context.is_admin:
             user_token_ref = utils.get_token_ref(request.context_dict)
 
-            validate_token_bind(request.context_dict, user_token_ref)
             creds = copy.deepcopy(user_token_ref.metadata)
 
             try:
@@ -336,20 +335,6 @@ class Application(BaseApplication):
         if missing_attrs:
             msg = _('%s field(s) cannot be empty') % ', '.join(missing_attrs)
             raise exception.ValidationError(message=msg)
-
-    def _get_trust_id_for_request(self, context):
-        """Get the trust_id for a call.
-
-        Retrieve the trust_id from the token
-        Returns None if token is not trust scoped
-        """
-        if ('token_id' not in context or
-                context.get('token_id') == CONF.admin_token):
-            LOG.debug(('will not lookup trust as the request auth token is '
-                       'either absent or it is the system admin token'))
-            return None
-        token_ref = utils.get_token_ref(context)
-        return token_ref.trust_id
 
     @classmethod
     def base_url(cls, context, endpoint_type):

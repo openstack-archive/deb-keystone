@@ -47,20 +47,20 @@ class IdentityTests(object):
     def test_authenticate_bad_user(self):
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=uuid.uuid4().hex,
                           password=self.user_foo['password'])
 
     def test_authenticate_bad_password(self):
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=self.user_foo['id'],
                           password=uuid.uuid4().hex)
 
     def test_authenticate(self):
         user_ref = self.identity_api.authenticate(
-            context={},
+            self.make_request(),
             user_id=self.user_sna['id'],
             password=self.user_sna['password'])
         # NOTE(termie): the password field is left in user_sna to make
@@ -81,7 +81,7 @@ class IdentityTests(object):
         self.assignment_api.add_user_to_project(self.tenant_baz['id'],
                                                 new_user['id'])
         user_ref = self.identity_api.authenticate(
-            context={},
+            self.make_request(),
             user_id=new_user['id'],
             password=user['password'])
         self.assertNotIn('password', user_ref)
@@ -102,7 +102,7 @@ class IdentityTests(object):
 
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=id_,
                           password='password')
 
@@ -120,6 +120,13 @@ class IdentityTests(object):
         #               not be returned by the api
         self.user_foo.pop('password')
         self.assertDictEqual(self.user_foo, user_ref)
+
+    def test_get_user_returns_required_attributes(self):
+        user_ref = self.identity_api.get_user(self.user_foo['id'])
+        self.assertIn('id', user_ref)
+        self.assertIn('name', user_ref)
+        self.assertIn('enabled', user_ref)
+        self.assertIn('password_expires_at', user_ref)
 
     @unit.skip_if_cache_disabled('identity')
     def test_cache_layer_get_user(self):
@@ -390,12 +397,12 @@ class IdentityTests(object):
         # with a password that  is empty string or None
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=user['id'],
                           password='')
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=user['id'],
                           password=None)
 
@@ -408,12 +415,12 @@ class IdentityTests(object):
         # with a password that  is empty string or None
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=user['id'],
                           password='')
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=user['id'],
                           password=None)
 
@@ -442,31 +449,6 @@ class IdentityTests(object):
         user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
         user = self.identity_api.create_user(user)
         user['name'] = 'a' * 256
-        self.assertRaises(exception.ValidationError,
-                          self.identity_api.update_user,
-                          user['id'],
-                          user)
-
-    def test_update_user_blank_name_fails(self):
-        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
-        user = self.identity_api.create_user(user)
-        user['name'] = ''
-        self.assertRaises(exception.ValidationError,
-                          self.identity_api.update_user,
-                          user['id'],
-                          user)
-
-    def test_update_user_invalid_name_fails(self):
-        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
-        user = self.identity_api.create_user(user)
-
-        user['name'] = None
-        self.assertRaises(exception.ValidationError,
-                          self.identity_api.update_user,
-                          user['id'],
-                          user)
-
-        user['name'] = 123
         self.assertRaises(exception.ValidationError,
                           self.identity_api.update_user,
                           user['id'],
@@ -567,19 +549,6 @@ class IdentityTests(object):
 
         user_ref = self.identity_api.get_user(user_ref['id'])
         self.assertEqual(changed_name, user_ref['name'])
-
-    def test_update_user_enable_fails(self):
-        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
-        user = self.identity_api.create_user(user)
-        user_ref = self.identity_api.get_user(user['id'])
-        self.assertTrue(user_ref['enabled'])
-
-        # Strings are not valid boolean values
-        user['enabled'] = 'false'
-        self.assertRaises(exception.ValidationError,
-                          self.identity_api.update_user,
-                          user['id'],
-                          user)
 
     def test_add_user_to_group(self):
         domain = self._get_domain_fixture()
@@ -1349,7 +1318,7 @@ class LimitTests(filtering.FilterTests):
         # return at least the 20 entries we created (there may be other
         # entities lying around created by other tests/setup).
         entities = self._list_entities(entity)()
-        self.assertTrue(len(entities) >= 20)
+        self.assertGreaterEqual(len(entities), 20)
         self._match_with_list(self.entity_lists[entity], entities)
 
     def test_list_users_filtered_and_limited(self):
@@ -1375,6 +1344,12 @@ class ShadowUsersTests(object):
         self.assertRaises(exception.Conflict,
                           self.shadow_users_api.create_nonlocal_user,
                           new_user)
+
+    def test_create_nonlocal_user_does_not_create_local_user(self):
+        user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
+        new_nonlocal_user = self.shadow_users_api.create_nonlocal_user(user)
+        user_ref = self._get_user_ref(new_nonlocal_user['id'])
+        self.assertIsNone(user_ref.local_user)
 
     def test_get_user(self):
         user = unit.new_user_ref(domain_id=CONF.identity.default_domain_id)
@@ -1428,7 +1403,7 @@ class ShadowUsersTests(object):
                                    disable_user_account_days_inactive=90)
         now = datetime.datetime.utcnow().date()
         user_ref = self.identity_api.authenticate(
-            context={},
+            self.make_request(),
             user_id=self.user_sna['id'],
             password=self.user_sna['password'])
         user_ref = self._get_user_ref(user_ref['id'])
@@ -1438,7 +1413,7 @@ class ShadowUsersTests(object):
         self.config_fixture.config(group='security_compliance',
                                    disable_user_account_days_inactive=None)
         user_ref = self.identity_api.authenticate(
-            context={},
+            self.make_request(),
             user_id=self.user_sna['id'],
             password=self.user_sna['password'])
         user_ref = self._get_user_ref(user_ref['id'])

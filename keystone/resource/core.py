@@ -196,8 +196,7 @@ class Manager(manager.Manager):
                                                      project['name'])
 
         project.setdefault('enabled', True)
-        project['enabled'] = clean.project_enabled(project['enabled'])
-        project['name'] = clean.project_name(project['name'])
+        project['name'] = project['name'].strip()
         project.setdefault('description', '')
 
         # For regular projects, the controller will ensure we have a valid
@@ -359,9 +358,6 @@ class Manager(manager.Manager):
                 _('update of domain_id is deprecated as of Mitaka '
                   'and will be removed in O.')
             )
-
-        if 'enabled' in project:
-            project['enabled'] = clean.project_enabled(project['enabled'])
 
         original_project_enabled = original_project.get('enabled', True)
         project_enabled = project.get('enabled', True)

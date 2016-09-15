@@ -9,7 +9,7 @@ associate zero or more sub-regions with a region to create a tree-
 like structured hierarchy.
 
 Although a region does not have a geographical connotation, a
-deployment can use a geographical name for a region, such as ``us-
+deployment can use a geographical name for a region ID, such as ``us-
 east``.
 
 You can list, create, update, show details for, and delete regions.
@@ -20,9 +20,12 @@ Show region details
 
 .. rest_method::  GET /v3/regions/{region_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/regions``
+
 Shows details for a region, by ID.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -30,18 +33,18 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - region_id: region_id
+   - region_id: region_id_path
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
-   - region: region
-   - description: description
-   - links: links
-   - id: id
+   - region: region_object
+   - description: description_region_response_body
+   - id: id_region_response_body
+   - links: links_region
+   - parent_region_id: parent_region_id_response_body
 
 Response Example
 ----------------
@@ -55,6 +58,8 @@ Update region
 
 .. rest_method::  PATCH /v3/regions/{region_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/region``
+
 Updates a region.
 
 You can update the description or parent region ID for a region.
@@ -65,6 +70,7 @@ The following error might occur:
 - ``Not Found (404)``. The parent region ID does not exist.
 
 Normal response codes: 200
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -72,10 +78,10 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
-   - region: region
-   - description: description
-   - region_id: region_id
+   - region_id: region_id_path
+   - region: region_object
+   - description: description_region_request_body
+   - parent_region_id: parent_region_id_request_body
 
 Request Example
 ---------------
@@ -88,11 +94,11 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
-   - region: region
-   - description: description
-   - links: links
-   - id: id
+   - region: region_object
+   - description: description_region_response_body
+   - id: id_region_response_body
+   - links: links_region
+   - parent_region_id: parent_region_id_response_body
 
 Response Example
 ----------------
@@ -106,6 +112,8 @@ Delete region
 
 .. rest_method::  DELETE /v3/regions/{region_id}
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/region``
+
 Deletes a region.
 
 The following error might occur:
@@ -114,6 +122,7 @@ The following error might occur:
   child regions.
 
 Normal response codes: 204
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -121,7 +130,7 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - region_id: region_id
+   - region_id: region_id_path
 
 
 List regions
@@ -129,9 +138,12 @@ List regions
 
 .. rest_method::  GET /v3/regions
 
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/regions``
+
 Lists regions.
 
 Normal response codes: 200
+
 Error response codes: 413,405,404,403,401,400,503
 
 Request
@@ -139,18 +151,18 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
+   - parent_region_id: parent_region_id_query
 
 Response Parameters
 -------------------
 
 .. rest_parameters:: parameters.yaml
 
-   - regions: regions
-   - parent_region_id: parent_region_id
-   - description: description
-   - links: links
-   - id: id
+   - regions: regions_object
+   - description: description_region_response_body
+   - id: id_region_response_body
+   - links: links_region
+   - parent_region_id: parent_region_id_response_body
 
 Response Example
 ----------------
@@ -163,6 +175,8 @@ Create region
 =============
 
 .. rest_method::  POST /v3/regions
+
+Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/regions``
 
 Creates a region.
 
@@ -182,6 +196,7 @@ The following errors might occur:
   the OpenStack deployment.
 
 Normal response codes: 201
+
 Error response codes: 413,415,405,404,403,401,400,503,409
 
 Request
@@ -189,10 +204,10 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
-   - region: region
-   - description: description
-   - id: id
+   - region: region_object
+   - description: description_region_request_body
+   - id: id_region_resquest_body
+   - parent_region_id: parent_region_id_request_body
 
 Request Example
 ---------------
@@ -205,8 +220,8 @@ Response Parameters
 
 .. rest_parameters:: parameters.yaml
 
-   - parent_region_id: parent_region_id
-   - region: region
-   - description: description
-   - links: links
-   - id: id
+   - region: region_object
+   - description: description_region_response_body
+   - id: id_region_response_body
+   - links: links_region
+   - parent_region_id: parent_region_id_response_body

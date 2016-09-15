@@ -11,8 +11,11 @@
 # under the License.
 
 import datetime
+import mock
 import uuid
 
+import freezegun
+from oslo_db import exception as oslo_db_exception
 from oslo_utils import timeutils
 import six
 from six.moves import http_client
@@ -51,13 +54,13 @@ class OSRevokeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
         after_time = timeutils.utcnow()
         event_issued_before = timeutils.normalize_time(
             timeutils.parse_isotime(event['issued_before']))
-        self.assertTrue(
-            before_time <= event_issued_before,
+        self.assertLessEqual(
+            before_time, event_issued_before,
             'invalid event issued_before time; %s is not later than %s.' % (
                 utils.isotime(event_issued_before, subsecond=True),
                 utils.isotime(before_time, subsecond=True)))
-        self.assertTrue(
-            event_issued_before <= after_time,
+        self.assertLessEqual(
+            event_issued_before, after_time,
             'invalid event issued_before time; %s is not earlier than %s.' % (
                 utils.isotime(event_issued_before, subsecond=True),
                 utils.isotime(after_time, subsecond=True)))
@@ -134,14 +137,71 @@ class OSRevokeTests(test_v3.RestfulTestCase, test_v3.JsonHomeTestMixin):
         self.assertEqual([], events)
 
     def test_revoked_at_in_list(self):
-        revoked_at = timeutils.utcnow()
-        # Given or not, `revoked_at` will always be set in the backend.
-        self.revoke_api.revoke(
-            revoke_model.RevokeEvent(revoked_at=revoked_at))
+        time = datetime.datetime.utcnow()
+        with freezegun.freeze_time(time) as frozen_datetime:
+            revoked_at = timeutils.utcnow()
+            # Given or not, `revoked_at` will always be set in the backend.
+            self.revoke_api.revoke(
+                revoke_model.RevokeEvent(revoked_at=revoked_at))
+
+            frozen_datetime.tick(delta=datetime.timedelta(seconds=1))
+
+            resp = self.get('/OS-REVOKE/events')
+            events = resp.json_body['events']
+            self.assertThat(events, matchers.HasLength(1))
+            # Strip off the microseconds from `revoked_at`.
+            self.assertTimestampEqual(utils.isotime(revoked_at),
+                                      events[0]['revoked_at'])
+
+    def test_access_token_id_not_in_event(self):
+        ref = {'description': uuid.uuid4().hex}
+        resp = self.post('/OS-OAUTH1/consumers', body={'consumer': ref})
+        consumer_id = resp.result['consumer']['id']
+        self.oauth_api.delete_consumer(consumer_id)
 
         resp = self.get('/OS-REVOKE/events')
         events = resp.json_body['events']
         self.assertThat(events, matchers.HasLength(1))
-        # Strip off the microseconds from `revoked_at`.
-        self.assertTimestampEqual(utils.isotime(revoked_at),
-                                  events[0]['revoked_at'])
+        event = events[0]
+        self.assertEqual(consumer_id, event['OS-OAUTH1:consumer_id'])
+        # `OS-OAUTH1:access_token_id` is None and won't be returned to
+        # end user.
+        self.assertNotIn('OS-OAUTH1:access_token_id', event)
+
+    def test_retries_on_deadlock(self):
+        patcher = mock.patch('sqlalchemy.orm.query.Query.delete',
+                             autospec=True)
+
+        # NOTE(mnikolaenko): raise 2 deadlocks and back to normal work of
+        # method. Two attempts is enough to check that retry decorator works.
+        # Otherwise it will take very much time to pass this test
+        class FakeDeadlock(object):
+            def __init__(self, mock_patcher):
+                self.deadlock_count = 2
+                self.mock_patcher = mock_patcher
+                self.patched = True
+
+            def __call__(self, *args, **kwargs):
+                if self.deadlock_count > 1:
+                    self.deadlock_count -= 1
+                else:
+                    self.mock_patcher.stop()
+                    self.patched = False
+                raise oslo_db_exception.DBDeadlock
+
+        sql_delete_mock = patcher.start()
+        side_effect = FakeDeadlock(patcher)
+        sql_delete_mock.side_effect = side_effect
+
+        try:
+            self.revoke_api.revoke(revoke_model.RevokeEvent(
+                user_id=uuid.uuid4().hex))
+        finally:
+            if side_effect.patched:
+                patcher.stop()
+
+        call_count = sql_delete_mock.call_count
+
+        # initial attempt + 1 retry
+        revoke_attempt_count = 2
+        self.assertEqual(call_count, revoke_attempt_count)

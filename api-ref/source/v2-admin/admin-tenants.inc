@@ -22,10 +22,57 @@ Request
 
    - tenantId: tenantId
 
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant: tenant
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id
+
 Response Example
 ----------------
 
 .. literalinclude:: samples/admin/tenant-show-response.json
+   :language: javascript
+
+
+List users on a tenant
+======================
+
+.. rest_method::  GET /v2.0/tenants/{tenantId}/users
+
+Lists all users for a tenant.
+
+Normal response codes: 200, 203
+Error response codes: 413, 405, 404, 403, 401, 400, 503
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenantId: tenantId
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - users_link: users_link
+   - users: users
+   - enabled: enabled
+   - username: username
+   - email: email
+   - id: id
+
+Response Example
+----------------
+
+.. literalinclude:: samples/admin/users-list-response.json
    :language: javascript
 
 
@@ -75,6 +122,18 @@ Lists all tenants.
 Normal response codes: 200,203
 Error response codes: 413,405,404,403,401,400,503
 
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant_links: tenant_links
+   - tenants: tenants
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id
+
 Response Example
 ----------------
 
@@ -99,8 +158,111 @@ Request
 
    - name: name
 
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant: tenant
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id
+
 Response Example
 ----------------
 
 .. literalinclude:: samples/admin/tenant-show-response.json
    :language: javascript
+
+
+Delete tenant
+=============
+
+.. rest_method::  DELETE /v2.0/tenants/{tenantId}
+
+Deletes a tenant.
+
+Normal response codes: 204
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenantId: tenantId
+
+
+Update tenant
+=============
+
+.. rest_method::  POST /v2.0/tenants/{tenantId}
+
+Updates a tenant.
+
+Normal response codes: 200
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request
+-------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant: tenant
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id
+   - tenantId: tenantId
+
+Request Example
+---------------
+
+.. literalinclude:: samples/admin/tenant-update-request.json
+   :language: javascript
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant: tenant
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id
+
+Response Example
+----------------
+
+.. literalinclude:: samples/admin/tenant-show-response.json
+   :language: javascript
+
+
+Create tenant
+=============
+
+.. rest_method::  POST /v2.0/tenants
+
+Creates a tenant.
+
+Normal response codes: 201
+Error response codes: 413,415,405,404,403,401,400,503,409
+
+Request Example
+---------------
+
+.. literalinclude:: samples/admin/tenantwithoutid-create-request.json
+   :language: javascript
+
+Response Parameters
+-------------------
+
+.. rest_parameters:: parameters.yaml
+
+   - tenant: tenant
+   - enabled: enabled
+   - description: description
+   - name: name
+   - id: id

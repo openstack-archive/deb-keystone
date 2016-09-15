@@ -22,6 +22,7 @@ from pycadf import cadftaxonomy
 from six.moves import http_client
 from six.moves import urllib
 
+import keystone.conf
 from keystone.contrib.oauth1 import routers
 from keystone import exception
 from keystone import oauth1
@@ -32,6 +33,9 @@ from keystone.tests.unit.common import test_notifications
 from keystone.tests.unit import ksfixtures
 from keystone.tests.unit.ksfixtures import temporaryfile
 from keystone.tests.unit import test_v3
+
+
+CONF = keystone.conf.CONF
 
 
 def _urllib_parse_qs_text_keys(content):
@@ -268,7 +272,7 @@ class OAuthFlowTests(OAuth1Tests):
                                                   self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -287,7 +291,7 @@ class OAuthFlowTests(OAuth1Tests):
                                                  self.request_token)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         access_key = credentials['oauth_token'][0]
         access_secret = credentials['oauth_token_secret'][0]
@@ -389,7 +393,7 @@ class AccessTokenCRUDTests(OAuthFlowTests):
         self.assertValidListLinks(resp.result['links'])
 
 
-class AuthTokenTests(OAuthFlowTests):
+class AuthTokenTests(object):
 
     def test_keystone_token_is_valid(self):
         self.test_oauth_flow()
@@ -544,7 +548,7 @@ class AuthTokenTests(OAuthFlowTests):
                                                   self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -611,16 +615,28 @@ class AuthTokenTests(OAuthFlowTests):
                  expected_status=http_client.FORBIDDEN)
 
 
-class FernetAuthTokenTests(AuthTokenTests):
+class FernetAuthTokenTests(AuthTokenTests, OAuthFlowTests):
 
     def config_overrides(self):
         super(FernetAuthTokenTests, self).config_overrides()
         self.config_fixture.config(group='token', provider='fernet')
-        self.useFixture(ksfixtures.KeyRepository(self.config_fixture))
+        self.useFixture(
+            ksfixtures.KeyRepository(
+                self.config_fixture,
+                'fernet_tokens',
+                CONF.fernet_tokens.max_active_keys
+            )
+        )
 
     def test_delete_keystone_tokens_by_consumer_id(self):
-        # NOTE(lbragstad): Fernet tokens are never persisted in the backend.
-        pass
+        self.skipTest('Fernet tokens are never persisted in the backend.')
+
+
+class UUIDAuthTokenTests(AuthTokenTests, OAuthFlowTests):
+
+    def config_overrides(self):
+        super(UUIDAuthTokenTests, self).config_overrides()
+        self.config_fixture.config(group='token', provider='uuid')
 
 
 class MaliciousOAuth1Tests(OAuth1Tests):
@@ -641,7 +657,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         url, headers = self._create_request_token(consumer, self.project_id)
         self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         url = self._authorize_request_token(uuid.uuid4().hex)
         body = {'roles': [{'id': self.role_id}]}
         self.put(url, body=body, expected_status=http_client.NOT_FOUND)
@@ -672,7 +688,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         url, headers = self._create_request_token(consumer, self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -698,7 +714,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
         url, headers = self._create_request_token(consumer, self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
 
@@ -722,7 +738,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
                                                   self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -745,7 +761,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
                                                   self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -762,7 +778,7 @@ class MaliciousOAuth1Tests(OAuth1Tests):
                                                  self.request_token)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         access_key = credentials['oauth_token'][0]
         access_secret = credentials['oauth_token_secret'][0]
@@ -846,7 +862,7 @@ class OAuthNotificationTests(OAuth1Tests,
                                                   self.project_id)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         request_key = credentials['oauth_token'][0]
         request_secret = credentials['oauth_token_secret'][0]
@@ -875,7 +891,7 @@ class OAuthNotificationTests(OAuth1Tests,
                                                  self.request_token)
         content = self.post(
             url, headers=headers,
-            response_content_type='application/x-www-urlformencoded')
+            response_content_type='application/x-www-form-urlencoded')
         credentials = _urllib_parse_qs_text_keys(content.result)
         access_key = credentials['oauth_token'][0]
         access_secret = credentials['oauth_token_secret'][0]

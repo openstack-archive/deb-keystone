@@ -21,7 +21,7 @@ from keystone.common import dependency
 from keystone.common import validation
 import keystone.conf
 from keystone import exception
-from keystone.i18n import _, _LW
+from keystone.i18n import _LW
 from keystone.identity import schema
 from keystone import notifications
 
@@ -61,17 +61,11 @@ class User(controller.V2Controller):
     # CRUD extension
     @controller.v2_deprecated
     def create_user(self, request, user):
+        validation.lazy_validate(schema.user_create_v2, user)
         user = self._normalize_OSKSADM_password_on_request(user)
         user = self.normalize_username_in_request(user)
         user = self._normalize_dict(user)
         self.assert_admin(request)
-
-        if 'name' not in user or not user['name']:
-            msg = _('Name field is required and cannot be empty')
-            raise exception.ValidationError(message=msg)
-        if 'enabled' in user and not isinstance(user['enabled'], bool):
-            msg = _('Enabled field must be a boolean')
-            raise exception.ValidationError(message=msg)
 
         default_project_id = user.pop('tenantId', None)
         if default_project_id is not None:
@@ -82,7 +76,7 @@ class User(controller.V2Controller):
         self.resource_api.ensure_default_domain_exists()
 
         # The manager layer will generate the unique ID for users
-        user_ref = self._normalize_domain_id(request.context_dict, user.copy())
+        user_ref = self._normalize_domain_id(request, user.copy())
         initiator = notifications._get_request_audit_info(request.context_dict)
         new_user_ref = self.v3_to_v2_user(
             self.identity_api.create_user(user_ref, initiator))
@@ -95,12 +89,9 @@ class User(controller.V2Controller):
     @controller.v2_deprecated
     def update_user(self, request, user_id, user):
         # NOTE(termie): this is really more of a patch than a put
+        validation.lazy_validate(schema.user_update_v2, user)
         user = self.normalize_username_in_request(user)
         self.assert_admin(request)
-
-        if 'enabled' in user and not isinstance(user['enabled'], bool):
-            msg = _('Enabled field should be a boolean')
-            raise exception.ValidationError(message=msg)
 
         default_project_id = user.pop('tenantId', None)
         if default_project_id is not None:
@@ -174,6 +165,7 @@ class User(controller.V2Controller):
 
     @controller.v2_deprecated
     def set_user_enabled(self, request, user_id, user):
+        validation.lazy_validate(schema.enable_user_v2, user)
         return self.update_user(request, user_id, user)
 
     @controller.v2_deprecated
@@ -220,7 +212,7 @@ class UserV3(controller.V3Controller):
         validation.lazy_validate(schema.user_create, user)
         # The manager layer will generate the unique ID for users
         ref = self._normalize_dict(user)
-        ref = self._normalize_domain_id(request.context_dict, ref)
+        ref = self._normalize_domain_id(request, ref)
         initiator = notifications._get_request_audit_info(request.context_dict)
         ref = self.identity_api.create_user(ref, initiator)
         return UserV3.wrap_member(request.context_dict, ref)
@@ -289,7 +281,7 @@ class UserV3(controller.V3Controller):
                                             attribute='password')
         try:
             self.identity_api.change_password(
-                request.context_dict, user_id, original_password, password)
+                request, user_id, original_password, password)
         except AssertionError:
             raise exception.Unauthorized()
 
@@ -313,7 +305,7 @@ class GroupV3(controller.V3Controller):
         validation.lazy_validate(schema.group_create, group)
         # The manager layer will generate the unique ID for groups
         ref = self._normalize_dict(group)
-        ref = self._normalize_domain_id(request.context_dict, ref)
+        ref = self._normalize_domain_id(request, ref)
         initiator = notifications._get_request_audit_info(request.context_dict)
         ref = self.identity_api.create_group(ref, initiator)
         return GroupV3.wrap_member(request.context_dict, ref)

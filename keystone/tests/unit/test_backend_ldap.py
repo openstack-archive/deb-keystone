@@ -303,6 +303,17 @@ class ResourceTests(resource_tests.ResourceTests):
         self.skip_test_overrides('N/A: LDAP does not support multiple domains')
 
 
+class LDAPTestSetup(unit.TestCase):
+    """Common setup for LDAP tests."""
+
+    def setUp(self):
+        super(LDAPTestSetup, self).setUp()
+        self.ldapdb = self.useFixture(ldapdb.LDAPDatabase())
+        self.load_backends()
+        self.load_fixtures(default_fixtures)
+        self.config_fixture.config(group='os_inherit', enabled=False)
+
+
 class BaseLDAPIdentity(IdentityTests, AssignmentTests, ResourceTests):
 
     def setUp(self):
@@ -834,7 +845,7 @@ class BaseLDAPIdentity(IdentityTests, AssignmentTests, ResourceTests):
 
         self.assertRaises(AssertionError,
                           self.identity_api.authenticate,
-                          context={},
+                          self.make_request(),
                           user_id=user['id'],
                           password=None)
 
@@ -1959,18 +1970,15 @@ class LDAPLimitTests(unit.TestCase, identity_tests.LimitTests):
 class LDAPIdentityEnabledEmulation(LDAPIdentity):
     def setUp(self):
         super(LDAPIdentityEnabledEmulation, self).setUp()
-        self.ldapdb.clear()
-        self.load_backends()
-        self.load_fixtures(default_fixtures)
-        for obj in [self.tenant_bar, self.tenant_baz, self.user_foo,
-                    self.user_two, self.user_badguy]:
-            obj.setdefault('enabled', True)
         _assert_backends(self, identity='ldap')
 
     def load_fixtures(self, fixtures):
         # Override super impl since need to create group container.
         create_group_container(self.identity_api)
         super(LDAPIdentity, self).load_fixtures(fixtures)
+        for obj in [self.tenant_bar, self.tenant_baz, self.user_foo,
+                    self.user_two, self.user_badguy]:
+            obj.setdefault('enabled', True)
 
     def config_files(self):
         config_files = super(LDAPIdentityEnabledEmulation, self).config_files()
@@ -2075,7 +2083,7 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             CONF.identity.default_domain_id)
         driver.user.enabled_emulation_dn = 'cn=test,dc=test'
         self.identity_api.authenticate(
-            context={},
+            self.make_request(),
             user_id=self.user_foo['id'],
             password=self.user_foo['password'])
 
@@ -2215,18 +2223,11 @@ class LDAPIdentityEnabledEmulation(LDAPIdentity):
             self.assertEqual(exp_filter, m.call_args[0][2])
 
 
-class LDAPPosixGroupsTest(unit.TestCase):
+class LDAPPosixGroupsTest(LDAPTestSetup):
 
     def setUp(self):
-
-        super(LDAPPosixGroupsTest, self).setUp()
-
-        self.useFixture(ldapdb.LDAPDatabase())
         self.useFixture(database.Database())
-
-        self.load_backends()
-        self.load_fixtures(default_fixtures)
-
+        super(LDAPPosixGroupsTest, self).setUp()
         _assert_backends(self, identity='ldap')
 
     def load_fixtures(self, fixtures):
@@ -2295,16 +2296,11 @@ class LdapIdentityWithMapping(
         return config_files
 
     def setUp(self):
-        sqldb = self.useFixture(database.Database())
+        self.useFixture(database.Database())
         super(LdapIdentityWithMapping, self).setUp()
-        self.ldapdb.clear()
-        self.load_backends()
+
         cache.configure_cache()
 
-        sqldb.recreate()
-        self.load_fixtures(default_fixtures)
-        # defaulted by the data load
-        self.user_foo['enabled'] = True
         _assert_backends(self, identity='ldap')
 
     def config_overrides(self):
@@ -2441,7 +2437,7 @@ class BaseMultiLDAPandSQLIdentity(object):
         for user_num in range(self.domain_count):
             user = 'user%s' % user_num
             self.identity_api.authenticate(
-                context={},
+                self.make_request(),
                 user_id=self.users[user]['id'],
                 password=self.users[user]['password'])
 
@@ -2467,12 +2463,11 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
     """
 
     def setUp(self):
-        sqldb = self.useFixture(database.Database())
+        self.useFixture(database.Database())
         super(MultiLDAPandSQLIdentity, self).setUp()
+        self.assert_backends()
 
-        self.load_backends()
-        sqldb.recreate()
-
+    def load_fixtures(self, fixtures):
         self.domain_count = 5
         self.domain_specific_count = 3
         self.setup_initial_domains()
@@ -2482,10 +2477,9 @@ class MultiLDAPandSQLIdentity(BaseLDAPIdentity, unit.SQLDriverOverrides,
         # for separate backends per domain.
         self.enable_multi_domain()
 
-        self.ldapdb.clear()
-        self.load_fixtures(default_fixtures)
+        super(MultiLDAPandSQLIdentity, self).load_fixtures(fixtures)
+
         self.create_users_across_domains()
-        self.assert_backends()
 
     def assert_backends(self):
         _assert_backends(self,
@@ -3257,16 +3251,11 @@ class DomainSpecificSQLIdentity(DomainSpecificLDAPandSQLIdentity):
             'domain2')
 
 
-class LdapFilterTests(identity_tests.FilterTests, unit.TestCase):
+class LdapFilterTests(identity_tests.FilterTests, LDAPTestSetup):
 
     def setUp(self):
+        self.useFixture(database.Database())
         super(LdapFilterTests, self).setUp()
-        sqldb = self.useFixture(database.Database())
-        self.useFixture(ldapdb.LDAPDatabase())
-
-        self.load_backends()
-        self.load_fixtures(default_fixtures)
-        sqldb.recreate()
         _assert_backends(self, identity='ldap')
 
     def config_overrides(self):

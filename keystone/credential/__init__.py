@@ -14,3 +14,4 @@
 
 from keystone.credential import controllers  # noqa
 from keystone.credential.core import *  # noqa
+from keystone.credential import provider  # noqa
