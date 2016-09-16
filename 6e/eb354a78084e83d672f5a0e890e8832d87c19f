@@ -1,0 +1,8 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 16 Sep 2016 03:18:27 +0000
+Reviewed-on: https://review.openstack.org/370877
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/newton
