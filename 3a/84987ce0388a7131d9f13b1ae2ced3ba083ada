@@ -1,0 +1,10 @@
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 20 Sep 2016 00:22:50 +0000
+Reviewed-on: https://review.openstack.org/372639
+Project: openstack/deb-keystone
+Branch: refs/heads/master
