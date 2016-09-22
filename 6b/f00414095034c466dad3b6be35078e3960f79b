@@ -1,0 +1,9 @@
+Workflow+1: Ivan Udovichenko <iudovichenko@mirantis.com>
+Code-Review+2: Thomas Goirand <thomas@goirand.fr>
+Workflow+1: Thomas Goirand <thomas@goirand.fr>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 22 Sep 2016 22:15:01 +0000
+Reviewed-on: https://review.openstack.org/374588
+Project: openstack/deb-keystone
+Branch: refs/heads/debian/newton
