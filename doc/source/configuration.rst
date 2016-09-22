@@ -70,9 +70,11 @@ The primary configuration file is organized into the following sections:
 * ``[cache]`` - Caching layer configuration
 * ``[catalog]`` - Service catalog driver configuration
 * ``[credential]`` - Credential system driver configuration
+* ``[domain_config]`` - Domain configuration
 * ``[endpoint_filter]`` - Endpoint filtering configuration
 * ``[endpoint_policy]`` - Endpoint policy configuration
 * ``[federation]`` - Federation driver configuration
+* ``[fernet_tokens]`` - Fernet token configuration
 * ``[identity]`` - Identity system driver configuration
 * ``[identity_mapping]`` - Identity mapping system driver configuration
 * ``[kvs]`` - KVS storage backend configuration
@@ -86,8 +88,11 @@ The primary configuration file is organized into the following sections:
 * ``[revoke]`` - Revocation system driver configuration
 * ``[role]`` - Role system driver configuration
 * ``[saml]`` - SAML configuration options
+* ``[security_compliance]`` - Security compliance configuration
+* ``[shadow_users]`` - Shadow user configuration
 * ``[signing]`` - Cryptographic signatures for PKI based tokens
 * ``[token]`` - Token driver & token provider configuration
+* ``[tokenless_auth]`` - Tokenless authentication configuration
 * ``[trust]`` - Trust configuration
 
 The Keystone primary configuration file is expected to be named
@@ -1226,6 +1231,7 @@ List of object attributes:
     * target.user.enabled
     * target.user.id
     * target.user.name
+    * target.user.password_expires_at
 
 * group:
     * target.group.description
@@ -1234,6 +1240,7 @@ List of object attributes:
     * target.group.name
 
 * domain:
+    * target.domain.description
     * target.domain.enabled
     * target.domain.id
     * target.domain.name
@@ -1243,7 +1250,9 @@ List of object attributes:
     * target.project.domain_id
     * target.project.enabled
     * target.project.id
+    * target.project.is_domain
     * target.project.name
+    * target.project.parent_id
 
 * token
     * target.token.user_id
@@ -1328,8 +1337,13 @@ Initializing Keystone
 ``keystone-manage`` is designed to execute commands that cannot be administered
 through the normal REST API. At the moment, the following calls are supported:
 
+* ``bootstrap``: Perform the basic bootstrap process.
+* ``credential_migrate``: Encrypt credentials using a new primary key.
+* ``credential_rotate``: Rotate Fernet keys for credential encryption.
+* ``credential_setup``: Setup a Fernet key repository for credential encryption.
 * ``db_sync``: Sync the database.
 * ``db_version``: Print the current migration version of the database.
+* ``doctor``: Diagnose common problems with keystone deployments.
 * ``domain_config_upload``: Upload domain configuration file.
 * ``fernet_rotate``: Rotate keys in the Fernet key repository.
 * ``fernet_setup``: Setup a Fernet key repository.
@@ -1902,7 +1916,15 @@ will become read-only until the database is contracted. After the contract
 phase is complete, credentials will be writeable to the backend. A
 ``[credential] key_repository`` location must be specified through
 configuration and bootstrapped with keys using ``keystone-manage
-credential_setup`` prior to migrating any existing credentials.
+credential_setup`` prior to migrating any existing credentials. If a new key
+repository isn't setup using ``keystone-manage credential_setup`` keystone will
+assume a null key to encrypt and decrypt credentials until a proper key
+repository is present. The null key is a key consisting of all null bytes and
+its only purpose is to ease the upgrade process from Mitaka to Newton. It is
+highly recommended that the null key isn't used. It is no more secure than
+storing credentials in plain text. If the null key is used, you should migrate
+to a proper key repository using ``keystone-manage credential_setup`` and
+``keystone-manage credential_migrate``.
 
 Encryption key management
 -------------------------
@@ -1916,7 +1938,8 @@ Key management of ``[credential] key_repository`` is handled with three
 
 ``keystone-manage credential_setup`` will populate ``[credential]
 key_repository`` with new encryption keys. This must be done in order for
-credential encryption to work. This step should only be done once.
+proper credential encryption to work, with the exception of the null key. This
+step should only be done once.
 
 ``keystone-manage credential_rotate`` will create and rotate a new encryption
 key in the ``[credential] key_repository``. This will only be done if all

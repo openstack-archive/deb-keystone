@@ -20,6 +20,7 @@ from six.moves import range
 from testtools import matchers
 
 import keystone.conf
+from keystone import exception
 from keystone.tests import unit
 from keystone.tests.unit import test_v3
 
@@ -2748,6 +2749,21 @@ class ImpliedRolesTests(test_v3.RestfulTestCase, test_v3.AssignmentTestMixin,
             self.assertIn(role, token['roles'])
         self.assertNotIn(self.role_list[0], token['roles'])
 
+    def test_global_role_cannot_imply_domain_specific_role(self):
+        domain = unit.new_domain_ref()
+        self.resource_api.create_domain(domain['id'], domain)
+
+        domain_role_ref = unit.new_role_ref(domain_id=domain['id'])
+        domain_role = self.role_api.create_role(domain_role_ref['id'],
+                                                domain_role_ref)
+        global_role_ref = unit.new_role_ref()
+        global_role = self.role_api.create_role(global_role_ref['id'],
+                                                global_role_ref)
+
+        self.put('/roles/%s/implies/%s' % (global_role['id'],
+                                           domain_role['id']),
+                 expected_status=http_client.FORBIDDEN)
+
 
 class DomainSpecificRoleTests(test_v3.RestfulTestCase, unit.TestCase):
     def setUp(self):
@@ -2819,6 +2835,45 @@ class DomainSpecificRoleTests(test_v3.RestfulTestCase, unit.TestCase):
         r = self.get('/roles?domain_id=%s' % self.domainA['id'])
         self.assertValidRoleListResponse(r, expected_length=1)
         self.assertRoleInListResponse(r, self.domainA_role2)
+
+    def test_same_domain_assignment(self):
+        user = unit.create_user(self.identity_api,
+                                domain_id=self.domainA['id'])
+
+        projectA = unit.new_project_ref(domain_id=self.domainA['id'])
+        self.resource_api.create_project(projectA['id'], projectA)
+
+        self.assignment_api.create_grant(self.domainA_role1['id'],
+                                         user_id=user['id'],
+                                         project_id=projectA['id'])
+
+    def test_cross_domain_assignment_valid(self):
+        user = unit.create_user(self.identity_api,
+                                domain_id=self.domainB['id'])
+
+        projectA = unit.new_project_ref(domain_id=self.domainA['id'])
+        self.resource_api.create_project(projectA['id'], projectA)
+
+        # Positive: a role on domainA can be assigned to a user from domainB
+        # but only for use on a project from domainA
+        self.assignment_api.create_grant(self.domainA_role1['id'],
+                                         user_id=user['id'],
+                                         project_id=projectA['id'])
+
+    def test_cross_domain_assignment_invalid(self):
+        user = unit.create_user(self.identity_api,
+                                domain_id=self.domainB['id'])
+
+        projectB = unit.new_project_ref(domain_id=self.domainB['id'])
+        self.resource_api.create_project(projectB['id'], projectB)
+
+        # Negative: a role on domainA can be assigned to a user from domainB
+        # only for a project from domainA
+        self.assertRaises(exception.DomainSpecificRoleMismatch,
+                          self.assignment_api.create_grant,
+                          self.domainA_role1['id'],
+                          user_id=user['id'],
+                          project_id=projectB['id'])
 
 
 class ListUserProjectsTestCase(test_v3.RestfulTestCase):

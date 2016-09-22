@@ -28,8 +28,7 @@ from keystone.common import driver_hints
 from keystone.common import manager
 import keystone.conf
 from keystone import exception
-from keystone.i18n import _
-from keystone.i18n import _LI, _LE
+from keystone.i18n import _, _LI, _LE
 from keystone import notifications
 
 
@@ -339,11 +338,19 @@ class Manager(manager.Manager):
     def create_grant(self, role_id, user_id=None, group_id=None,
                      domain_id=None, project_id=None,
                      inherited_to_projects=False, context=None):
-        self.role_api.get_role(role_id)
+        role = self.role_api.get_role(role_id)
         if domain_id:
             self.resource_api.get_domain(domain_id)
         if project_id:
-            self.resource_api.get_project(project_id)
+            project = self.resource_api.get_project(project_id)
+
+            # For domain specific roles, the domain of the project
+            # and role must match
+            if role['domain_id'] and project['domain_id'] != role['domain_id']:
+                raise exception.DomainSpecificRoleMismatch(
+                    role_id=role_id,
+                    project_id=project_id)
+
         self.driver.create_grant(role_id, user_id, group_id, domain_id,
                                  project_id, inherited_to_projects)
         COMPUTED_ASSIGNMENTS_REGION.invalidate()
@@ -1222,9 +1229,13 @@ class RoleManager(manager.Manager):
     # TODO(ayoung): Add notification
     def create_implied_role(self, prior_role_id, implied_role_id):
         implied_role = self.driver.get_role(implied_role_id)
-        self.driver.get_role(prior_role_id)
+        prior_role = self.driver.get_role(prior_role_id)
         if implied_role['name'] in CONF.assignment.prohibited_implied_role:
             raise exception.InvalidImpliedRole(role_id=implied_role_id)
+        if prior_role['domain_id'] is None and implied_role['domain_id']:
+            msg = _('Global role cannot imply a domain-specific role')
+            raise exception.InvalidImpliedRole(msg,
+                                               role_id=implied_role_id)
         response = self.driver.create_implied_role(
             prior_role_id, implied_role_id)
         COMPUTED_ASSIGNMENTS_REGION.invalidate()

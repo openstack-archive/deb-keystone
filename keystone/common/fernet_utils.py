@@ -10,6 +10,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import base64
 import os
 import stat
 
@@ -23,6 +24,14 @@ from keystone.i18n import _LE, _LW, _LI
 LOG = log.getLogger(__name__)
 
 CONF = keystone.conf.CONF
+
+# NOTE(lbragstad): In the event there are no encryption keys on disk, let's use
+# a default one until a proper key repository is set up. This allows operators
+# to gracefully upgrade from Mitaka to Newton without a key repository,
+# especially in multi-node deployments. The NULL_KEY is specific to credential
+# encryption only and has absolutely no beneficial purpose outside of easing
+# upgrades.
+NULL_KEY = base64.urlsafe_b64encode(b'\x00' * 32)
 
 
 class FernetUtils(object):
@@ -58,21 +67,6 @@ class FernetUtils(object):
                     self.key_repository)
 
         return is_valid
-
-    def _convert_to_integers(self, id_value):
-        """Cast user and group system identifiers to integers."""
-        # NOTE(lbragstad) os.chown() will raise a TypeError here if
-        # keystone_user_id and keystone_group_id are not integers. Let's cast
-        # them to integers if we can because it's possible to pass non-integer
-        # values into the fernet_setup utility.
-        try:
-            id_int = int(id_value)
-        except ValueError as e:
-            msg = _LE('Unable to convert Keystone user or group ID. Error: %s')
-            LOG.error(msg, e)
-            raise
-
-        return id_int
 
     def create_key_directory(self, keystone_user_id=None,
                              keystone_group_id=None):
@@ -229,15 +223,20 @@ class FernetUtils(object):
             LOG.info(_LI('Excess key to purge: %s'), key_to_purge)
             os.remove(key_to_purge)
 
-    def load_keys(self):
+    def load_keys(self, use_null_key=False):
         """Load keys from disk into a list.
 
         The first key in the list is the primary key used for encryption. All
         other keys are active secondary keys that can be used for decrypting
         tokens.
 
+        :param use_null_key: If true, a known key containing null bytes will be
+                             appended to the list of returned keys.
+
         """
         if not self.validate_key_repository():
+            if use_null_key:
+                return [NULL_KEY]
             return []
 
         # build a dictionary of key_number:encryption_key pairs
@@ -256,15 +255,23 @@ class FernetUtils(object):
 
         if len(keys) != self.max_active_keys:
             # Once the number of keys matches max_active_keys, this log entry
-            # is too repetitive to be useful.
-            LOG.debug(
-                'Loaded %(count)d Fernet keys from %(dir)s, but '
-                '`[fernet_tokens] max_active_keys = %(max)d`; perhaps there '
-                'have not been enough key rotations to reach '
-                '`max_active_keys` yet?', {
-                    'count': len(keys),
-                    'max': self.max_active_keys,
-                    'dir': self.key_repository})
+            # is too repetitive to be useful. Also note that it only makes
+            # sense to log this message for tokens since credentials doesn't
+            # have a `max_active_key` configuration option.
+            if self.key_repository == CONF.fernet_tokens.key_repository:
+                LOG.debug(
+                    'Loaded %(count)d Fernet keys from %(dir)s, but '
+                    '`[fernet_tokens] max_active_keys = %(max)d`; perhaps '
+                    'there have not been enough key rotations to reach '
+                    '`max_active_keys` yet?', {
+                        'count': len(keys),
+                        'max': self.max_active_keys,
+                        'dir': self.key_repository})
 
         # return the encryption_keys, sorted by key number, descending
-        return [keys[x] for x in sorted(keys.keys(), reverse=True)]
+        key_list = [keys[x] for x in sorted(keys.keys(), reverse=True)]
+
+        if use_null_key:
+            key_list.append(NULL_KEY)
+
+        return key_list

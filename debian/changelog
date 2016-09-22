@@ -1,9 +1,10 @@
-keystone (2:10.0.0~b3-2) UNRELEASED; urgency=medium
+keystone (2:10.0.0~rc1-1) experimental; urgency=medium
 
+  * New upstream release.
   * Add --parallel when running unit tests.
   * Add python-pep8 as build-depends-indep.
 
- -- Thomas Goirand <zigo@debian.org>  Wed, 21 Sep 2016 10:23:55 +0200
+ -- Thomas Goirand <zigo@debian.org>  Thu, 22 Sep 2016 09:50:50 +0200
 
 keystone (2:10.0.0~b3-1) experimental; urgency=medium
 

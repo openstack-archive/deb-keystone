@@ -1072,13 +1072,13 @@ link_collection:
     The link to the collection of resources.
   in: body
   required: true
-  type: string
+  type: object
 link_response_body:
   description: |
     The link to the resources in question.
   in: body
   required: true
-  type: string
+  type: object
 links_project:
   description: |
     The links for the ``project`` resource.
@@ -1537,6 +1537,12 @@ service_description:
   in: body
   required: true
   type: string
+service_description_notRequired:
+  description: |
+    The service description.
+  in: body
+  required: false
+  type: string
 service_enabled:
   description: |
     Defines whether the service and its endpoints
@@ -1573,7 +1579,7 @@ service_name:
   description: |
     The service name.
   in: body
-  required: false
+  required: true
   type: string
 service_type:
   description: |

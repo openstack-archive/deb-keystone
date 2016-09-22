@@ -36,12 +36,21 @@ Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/projects`
 
 Lists projects.
 
-Normal response codes: 200
+Response Codes
+--------------
 
-Error response codes: 413,405,404,403,401,400,503
+.. rest_status_code:: success status.yaml
 
-Request
--------
+   - 200
+
+.. rest_status_code:: error status.yaml
+
+   - 400
+   - 401
+   - 403
+
+Request Parameters
+------------------
 
 .. rest_parameters:: parameters.yaml
 
@@ -81,14 +90,24 @@ Create project
 
 Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/projects``
 
-Creates a project, including a project acting as a domain.
+Creates a project, where the project may act as a domain.
 
-Normal response codes: 201
+Response Codes
+--------------
 
-Error response codes: 413,415,405,404,403,401,400,503,409
+.. rest_status_code:: success status.yaml
 
-Request
--------
+   - 201
+
+.. rest_status_code:: error status.yaml
+
+   - 400
+   - 401
+   - 403
+   - 409
+
+Request Parameters
+------------------
 
 .. rest_parameters:: parameters.yaml
 
@@ -103,8 +122,12 @@ Request
 Request Examples
 ----------------
 
+Sample for creating a regular project:
+
 .. literalinclude:: ./samples/admin/project-create-request.json
    :language: javascript
+
+Sample for creating a project that also acts as a domain:
 
 .. literalinclude:: ./samples/admin/project-create-domain-request.json
    :language: javascript
@@ -124,7 +147,6 @@ Response Parameters
    - name: project_name_response_body
    - parent_id: project_parent_id_response_body
 
-
 Show project details
 ====================
 
@@ -134,12 +156,22 @@ Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/project``
 
 Shows details for a project.
 
-Normal response codes: 200
+Response Codes
+--------------
 
-Error response codes: 413,405,404,403,401,400,503
+.. rest_status_code:: success status.yaml
 
-Request
--------
+   - 200
+
+.. rest_status_code:: error status.yaml
+
+   - 400
+   - 401
+   - 403
+   - 404
+
+Request Parameters
+------------------
 
 .. rest_parameters:: parameters.yaml
 
@@ -192,12 +224,23 @@ Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/project``
 
 Updates a project.
 
-Normal response codes: 200
+Response Codes
+--------------
 
-Error response codes: 413,415,405,404,403,401,400,503,409
+.. rest_status_code:: success status.yaml
 
-Request
--------
+   - 200
+
+.. rest_status_code:: error status.yaml
+
+   - 400
+   - 401
+   - 403
+   - 404
+   - 409
+
+Request Parameters
+------------------
 
 .. rest_parameters:: parameters.yaml
 
@@ -246,98 +289,22 @@ Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/project``
 
 Deletes a project.
 
-Normal response codes: 204
+Response Codes
+--------------
 
-Error response codes: 413,415,405,404,403,401,400,503,409
+.. rest_status_code:: success status.yaml
 
-Request
--------
+   - 204
 
-.. rest_parameters:: parameters.yaml
+.. rest_status_code:: error status.yaml
 
-   - project_id: project_id_path
+   - 400
+   - 401
+   - 403
+   - 404
 
-
-Enable or disable project and its subtree
-=========================================
-
-.. rest_method::  PATCH /v3/projects/{project_id}/cascade
-
-Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/project``
-
-(Since Identity API v3.7) Enables or disables a project and its entire subtree.
-
-A project subtree includes all projects beneath the parent project
-in the hierarchy.
-
-If you include attributes other than the ``enabled`` attribute,
-this call fails and returns the ``Bad Request (400)`` response
-code.
-
-If you perform this action against a project that acts as a domain
-(``is_domain`` is set to ``true``), this call fails and returns the
-``Forbidden (403)`` response code.
-
-Normal response codes: 200
-
-Error response codes: 413,415,405,404,403,401,400,503,409
-
-Request
--------
-
-.. rest_parameters:: parameters.yaml
-
-   - project_id: project_id_path
-   - project: project
-   - enabled: project_enabled_cascade_request_body
-
-Request Example
----------------
-
-.. literalinclude:: ./samples/admin/project-enable-request.json
-   :language: javascript
-
-Response Parameters
--------------------
-
-.. rest_parameters:: parameters.yaml
-
-   - project: project
-   - is_domain: is_domain_response_body
-   - description: project_description_response_body
-   - domain_id: project_domain_id_response_body
-   - enabled: project_enabled_response_body
-   - id: project_id
-   - name: project_name_response_body
-   - links: link_response_body
-   - parent_id: project_parent_id_response_body
-
-Response Example
-----------------
-
-.. literalinclude:: ./samples/admin/project-update-response.json
-   :language: javascript
-
-
-Delete project subtree
-======================
-
-.. rest_method::  DELETE /v3/projects/{project_id}/cascade
-
-Relationship: ``http://docs.openstack.org/api/openstack-identity/3/rel/project``
-
-(Since Identity API v3.7) Deletes a project and its entire subtree.
-
-A project subtree includes all projects beneath the parent project
-in the hierarchy. You must disable all the projects in the subtree
-before you perform this operation.
-
-Normal response codes: 204
-
-Error response codes: 413,415,405,404,403,401,400,503,409
-
-Request
--------
+Request Parameters
+------------------
 
 .. rest_parameters:: parameters.yaml
 
