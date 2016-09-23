@@ -1,0 +1,11 @@
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Workflow+1: Ron De Rose <ronald.de.rose@intel.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 22 Sep 2016 19:57:44 +0000
+Reviewed-on: https://review.openstack.org/374499
+Project: openstack/deb-keystone
+Branch: refs/heads/master
