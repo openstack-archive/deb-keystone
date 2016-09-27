@@ -1,0 +1,12 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Brad Topol <btopol@us.ibm.com>
+Code-Review+1: Alexander Makarov <amakarov@mirantis.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 27 Sep 2016 09:00:30 +0000
+Reviewed-on: https://review.openstack.org/375524
+Project: openstack/deb-keystone
+Branch: refs/heads/master
