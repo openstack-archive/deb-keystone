@@ -1,0 +1,9 @@
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Workflow+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 05 Oct 2016 19:10:58 +0000
+Reviewed-on: https://review.openstack.org/382487
+Project: openstack/deb-keystone
+Branch: refs/heads/master
