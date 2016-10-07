@@ -1,0 +1,13 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+1: Martin Schuppert <mschuppert@redhat.com>
+Code-Review+1: Clenimar Filemon <clenimar@lsd.ufcg.edu.br>
+Code-Review+1: Boris Bobrov <bbobrov@mirantis.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 06 Oct 2016 18:44:28 +0000
+Reviewed-on: https://review.openstack.org/379905
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/mitaka

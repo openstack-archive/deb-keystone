@@ -1,0 +1,12 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: David Stanek <dstanek@dstanek.com>
+Code-Review+1: Brad Topol <btopol@us.ibm.com>
+Code-Review+1: Alexander Makarov <amakarov@mirantis.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 06 Oct 2016 19:01:59 +0000
+Reviewed-on: https://review.openstack.org/374245
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/mitaka
