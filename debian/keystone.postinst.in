@@ -155,6 +155,8 @@ if [ "$1" = "configure" ] ; then
 #		pkgos_init ${k}
 #	done
 
+	chown keystone:adm /var/log/keystone
+
 	a2enmod wsgi || true
 	a2ensite wsgi-keystone.conf || true
 	invoke-rc.d apache2 restart || true
