@@ -1,4 +1,4 @@
-keystone (2:10.0.0-2) UNRELEASED; urgency=medium
+keystone (2:10.0.0-2) unstable; urgency=medium
 
   * Fixed unix right of /var/log/keystone (Closes: #840221).
 
