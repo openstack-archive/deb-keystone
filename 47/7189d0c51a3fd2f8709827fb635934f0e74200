@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Clint 'SpamapS' Byrum <clint@fewbar.com>
+Code-Review+2: ayoung <ayoung@redhat.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 13 Oct 2016 19:39:58 +0000
+Reviewed-on: https://review.openstack.org/376523
+Project: openstack/deb-keystone
+Branch: refs/heads/master
