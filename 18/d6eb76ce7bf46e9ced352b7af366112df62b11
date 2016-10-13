@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+1: Dave Chen <dave.jungler@gmail.com>
+Code-Review+2: Dolph Mathews <dolph.mathews@gmail.com>
+Workflow+1: Dolph Mathews <dolph.mathews@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 13 Oct 2016 03:06:20 +0000
+Reviewed-on: https://review.openstack.org/383846
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/newton
