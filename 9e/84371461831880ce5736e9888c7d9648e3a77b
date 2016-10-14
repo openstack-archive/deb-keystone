@@ -1,0 +1,11 @@
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Code-Review+1: Clint 'SpamapS' Byrum <clint@fewbar.com>
+Workflow+1: Ron De Rose <ronald.de.rose@intel.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 13 Oct 2016 20:47:42 +0000
+Reviewed-on: https://review.openstack.org/382107
+Project: openstack/deb-keystone
+Branch: refs/heads/master
