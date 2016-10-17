@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Eric Brown <browne@vmware.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 15 Oct 2016 08:45:49 +0000
+Reviewed-on: https://review.openstack.org/386413
+Project: openstack/deb-keystone
+Branch: refs/heads/master

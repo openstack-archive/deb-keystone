@@ -1,0 +1,9 @@
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: ayoung <ayoung@redhat.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 14 Oct 2016 15:59:07 +0000
+Reviewed-on: https://review.openstack.org/371856
+Project: openstack/deb-keystone
+Branch: refs/heads/master
