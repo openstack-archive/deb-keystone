@@ -1,0 +1,14 @@
+Code-Review+1: Nathan Kinder <nkinder@redhat.com>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: Julie Pichon <jpichon@redhat.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 31 Oct 2016 16:27:10 +0000
+Reviewed-on: https://review.openstack.org/389783
+Project: openstack/deb-keystone
+Branch: refs/heads/master
