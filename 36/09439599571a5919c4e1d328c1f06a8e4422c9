@@ -1,0 +1,13 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: ayoung <ayoung@redhat.com>
+Code-Review+1: Chuck Short <chuck.short@canonical.com>
+Code-Review+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+2: Davanum Srinivas (dims) <davanum@gmail.com>
+Workflow+1: Davanum Srinivas (dims) <davanum@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 01 Nov 2016 15:41:49 +0000
+Reviewed-on: https://review.openstack.org/391678
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/newton
