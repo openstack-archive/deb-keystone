@@ -1,0 +1,9 @@
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+2: Boris Bobrov <bbobrov@mirantis.com>
+Workflow+1: Boris Bobrov <bbobrov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 18 Nov 2016 11:47:25 +0000
+Reviewed-on: https://review.openstack.org/399301
+Project: openstack/deb-keystone
+Branch: refs/heads/master
