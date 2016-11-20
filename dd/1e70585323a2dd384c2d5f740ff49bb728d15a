@@ -1,0 +1,9 @@
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 20 Nov 2016 08:25:40 +0000
+Reviewed-on: https://review.openstack.org/386762
+Project: openstack/deb-keystone
+Branch: refs/heads/master
