@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Workflow+1: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+1: sandeep nandal <sandeep@nandal.in>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 22 Nov 2016 20:48:11 +0000
+Reviewed-on: https://review.openstack.org/400333
+Project: openstack/deb-keystone
+Branch: refs/heads/master
