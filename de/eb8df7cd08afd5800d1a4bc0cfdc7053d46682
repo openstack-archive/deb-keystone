@@ -1,0 +1,11 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+1: yuhui <yuhui@inspur.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 22 Nov 2016 22:49:58 +0000
+Reviewed-on: https://review.openstack.org/399767
+Project: openstack/deb-keystone
+Branch: refs/heads/master
