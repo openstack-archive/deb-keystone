@@ -1,0 +1,10 @@
+Code-Review+1: Jeremy Liu <liujiong@gohighsec.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 25 Nov 2016 02:40:20 +0000
+Reviewed-on: https://review.openstack.org/401936
+Project: openstack/deb-keystone
+Branch: refs/heads/master
