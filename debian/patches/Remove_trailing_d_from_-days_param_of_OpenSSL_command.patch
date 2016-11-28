@@ -1,0 +1,23 @@
+From: Ondřej Nový <ondrej.novy@firma.seznam.cz>
+Date: Mon, 21 Nov 2016 22:49:53 +0000 (+0100)
+Subject: Remove trailing "d" from -days param of OpenSSL command
+X-Git-Url: https://review.openstack.org/gitweb?p=openstack%2Fkeystone.git;a=commitdiff_plain;h=cfcf39585744723a6b088f209ba6d58bda20dc06
+
+Remove trailing "d" from -days param of OpenSSL command
+
+Change-Id: I30422ec6547ca5d1f6200e0ab3ef8d9af22daaea
+---
+
+diff --git a/keystone/common/openssl.py b/keystone/common/openssl.py
+index c581e8d..4ea2410 100644
+--- a/keystone/common/openssl.py
++++ b/keystone/common/openssl.py
+@@ -217,7 +217,7 @@ class BaseCertificateConfigure(object):
+             self.exec_command(['openssl', 'ca', '-batch',
+                                '-out', '%(signing_cert)s',
+                                '-config', '%(ssl_config)s',
+-                               '-days', '%(valid_days)dd',
++                               '-days', '%(valid_days)d',
+                                '-cert', '%(ca_cert)s',
+                                '-keyfile', '%(ca_private_key)s',
+                                '-infiles', '%(request_file)s'])

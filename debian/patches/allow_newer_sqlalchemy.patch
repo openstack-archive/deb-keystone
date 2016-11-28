@@ -1,0 +1,11 @@
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -11,7 +11,7 @@
+ PasteDeploy>=1.5.0 # MIT
+ Paste # MIT
+ six>=1.9.0 # MIT
+-SQLAlchemy<1.1.0,>=1.0.10 # MIT
++SQLAlchemy>=1.0.10 # MIT
+ sqlalchemy-migrate>=0.9.6 # Apache-2.0
+ stevedore>=1.16.0 # Apache-2.0
+ passlib>=1.6 # BSD

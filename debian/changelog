@@ -1,8 +1,16 @@
-keystone (2:10.0.0-3) UNRELEASED; urgency=medium
+keystone (2:10.0.0-3) unstable; urgency=medium
 
+  * Team upload.
+
+  [ Ondřej Nový ]
   * Bumped debhelper compat version to 10
 
- -- Ondřej Nový <onovy@debian.org>  Wed, 23 Nov 2016 23:59:10 +0100
+  [ Ondřej Kobližek ]
+  * Add upstream patch Remove_trailing_d_from_-days_param_of_OpenSSL_command.patch
+    (Closes: #843865)
+  * Patch-out upper constraints of SQLAlchemy
+
+ -- Ondřej Kobližek <koblizeko@gmail.com>  Mon, 28 Nov 2016 13:04:02 +0100
 
 keystone (2:10.0.0-2) unstable; urgency=medium
 
