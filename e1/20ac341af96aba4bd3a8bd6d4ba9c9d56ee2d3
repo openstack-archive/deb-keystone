@@ -1,0 +1,11 @@
+Code-Review+1: zhangjl <luoyan_cn@outlook.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Workflow+1: David Stanek <dstanek@dstanek.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 29 Nov 2016 14:47:02 +0000
+Reviewed-on: https://review.openstack.org/403944
+Project: openstack/deb-keystone
+Branch: refs/heads/master
