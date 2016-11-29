@@ -1,0 +1,10 @@
+Code-Review+1: Jesse Keating <omgjlk@us.ibm.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 29 Nov 2016 06:51:59 +0000
+Reviewed-on: https://review.openstack.org/383333
+Project: openstack/deb-keystone
+Branch: refs/heads/master
