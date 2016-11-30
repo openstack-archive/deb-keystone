@@ -1,0 +1,9 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Brant Knudson <bknudson@us.ibm.com>
+Workflow+1: Brant Knudson <bknudson@us.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 29 Nov 2016 22:22:21 +0000
+Reviewed-on: https://review.openstack.org/404350
+Project: openstack/deb-keystone
+Branch: refs/heads/master
