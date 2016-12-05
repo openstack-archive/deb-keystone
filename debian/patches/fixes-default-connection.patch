@@ -4,11 +4,11 @@ Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
 Last-Update: 2014-03-28
 
-Index: keystone/etc/keystone.conf.sample
+Index: deb-keystone/etc/keystone.conf.sample
 ===================================================================
---- keystone.orig/etc/keystone.conf.sample
-+++ keystone/etc/keystone.conf.sample
-@@ -546,7 +546,7 @@
+--- deb-keystone.orig/etc/keystone.conf.sample
++++ deb-keystone/etc/keystone.conf.sample
+@@ -637,7 +637,7 @@
  # Deprecated group/name - [DEFAULT]/sql_connection
  # Deprecated group/name - [DATABASE]/sql_connection
  # Deprecated group/name - [sql]/connection
