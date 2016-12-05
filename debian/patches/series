@@ -3,3 +3,4 @@ fixes-default-connection.patch
 fix-requirements.txt.patch
 Remove_trailing_d_from_-days_param_of_OpenSSL_command.patch
 allow_newer_sqlalchemy.patch
+uses-hash-instead-of-encrypt-for-passlib.patch

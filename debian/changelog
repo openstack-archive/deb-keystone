@@ -1,3 +1,10 @@
+keystone (2:10.0.0-4) unstable; urgency=medium
+
+  * Fix passlib call of encrypt() which is replaced by hash() upstream
+    (Closes: #846729).
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 05 Dec 2016 12:33:54 +0100
+
 keystone (2:10.0.0-3) unstable; urgency=medium
 
   * Team upload.
