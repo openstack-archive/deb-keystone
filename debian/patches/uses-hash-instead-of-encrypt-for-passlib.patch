@@ -1,0 +1,24 @@
+Description: Uses hash() instead of encrypt() for passlib
+ Otherwise, this generates this warning:
+  DeprecationWarning: the method
+  passlib.handlers.sha2_crypt.sha512_crypt.encrypt()
+  is deprecated as of Passlib 1.7, and will be removed in Passlib 2.0, use
+  .hash() instead.
+ .
+ Unfortunately, this warning fails 3459 unit tests.
+Author: Thomas Goirand <zigo@debian.org>
+Bug-Debian: https://bugs.debian.org/846729
+Forwarded: no
+Last-Update: 2016-12-05
+
+--- keystone-10.0.0.orig/keystone/common/utils.py
++++ keystone-10.0.0/keystone/common/utils.py
+@@ -139,7 +139,7 @@ def hash_user_password(user):
+ def hash_password(password):
+     """Hash a password. Hard."""
+     password_utf8 = verify_length_and_trunc_password(password).encode('utf-8')
+-    return passlib.hash.sha512_crypt.encrypt(
++    return passlib.hash.sha512_crypt.hash(
+         password_utf8, rounds=CONF.crypt_strength)
+ 
+ 
