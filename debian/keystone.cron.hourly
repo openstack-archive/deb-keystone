@@ -10,7 +10,7 @@ if [ -x /usr/bin/keystone-manage ] ; then
 	else
 		PROVIDER=uuid
 	fi
-	if [ "${PROVIDER}" = "uuid" ] ; then
+	if [ "${PROVIDER}" = "uuid" ] && [ -d /var/log/keystone ] ; then
 		su -c '/usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' keystone
 	fi
 fi

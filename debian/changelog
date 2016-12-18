@@ -1,3 +1,9 @@
+keystone (2:10.0.0-5) unstable; urgency=medium
+
+  * Check if /var/log/keystone exists in cron job (Closes: #847692).
+
+ -- Thomas Goirand <zigo@debian.org>  Sun, 18 Dec 2016 11:52:15 +0100
+
 keystone (2:10.0.0-4) unstable; urgency=medium
 
   * Fix passlib call of encrypt() which is replaced by hash() upstream
