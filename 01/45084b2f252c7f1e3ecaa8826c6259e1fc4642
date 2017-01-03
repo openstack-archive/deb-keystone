@@ -1,0 +1,11 @@
+Code-Review+1: Eric Brown <browne@vmware.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Workflow+1: henry-nash <henry.nash@uk.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 23 Dec 2016 11:10:14 +0000
+Reviewed-on: https://review.openstack.org/414258
+Project: openstack/deb-keystone
+Branch: refs/heads/master
