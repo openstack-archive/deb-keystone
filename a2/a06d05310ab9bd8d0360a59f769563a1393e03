@@ -1,0 +1,11 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: wanghongtaozz <wanghongtaozz@inspur.com>
+Code-Review+1: JiXuefeng <jixuefeng@awcloud.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 06 Jan 2017 12:13:07 +0000
+Reviewed-on: https://review.openstack.org/417235
+Project: openstack/deb-keystone
+Branch: refs/heads/master
