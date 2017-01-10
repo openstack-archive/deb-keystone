@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Adam Williamson <awilliam@redhat.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 09 Jan 2017 23:30:53 +0000
+Reviewed-on: https://review.openstack.org/416830
+Project: openstack/deb-keystone
+Branch: refs/heads/master
