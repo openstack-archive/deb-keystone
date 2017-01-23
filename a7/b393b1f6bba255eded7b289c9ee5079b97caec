@@ -1,0 +1,10 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Code-Review+1: zhangtao <zhangtao@awcloud.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 22 Jan 2017 05:23:34 +0000
+Reviewed-on: https://review.openstack.org/423572
+Project: openstack/deb-keystone
+Branch: refs/heads/master
