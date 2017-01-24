@@ -1,3 +1,10 @@
+keystone (2:10.0.0-6) unstable; urgency=medium
+
+  * Team upload.
+  * Require newer python-routes (Closes: #851152)
+
+ -- Ondřej Nový <onovy@debian.org>  Tue, 24 Jan 2017 10:52:37 +0100
+
 keystone (2:10.0.0-5) unstable; urgency=medium
 
   * Check if /var/log/keystone exists in cron job (Closes: #847692).
