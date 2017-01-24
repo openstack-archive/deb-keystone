@@ -1,0 +1,8 @@
+Code-Review+2: Ondřej Nový <novy@ondrej.org>
+Workflow+1: Ondřej Nový <novy@ondrej.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 24 Jan 2017 11:16:05 +0000
+Reviewed-on: https://review.openstack.org/424548
+Project: openstack/deb-keystone
+Branch: refs/heads/debian/newton
