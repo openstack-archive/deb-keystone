@@ -1,0 +1,9 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+2: David Stanek <dstanek@dstanek.com>
+Workflow+1: David Stanek <dstanek@dstanek.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 27 Jan 2017 23:06:55 +0000
+Reviewed-on: https://review.openstack.org/426095
+Project: openstack/deb-keystone
+Branch: refs/heads/master
