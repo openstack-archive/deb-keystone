@@ -1,0 +1,12 @@
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Workflow+1: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 31 Jan 2017 13:24:34 +0000
+Reviewed-on: https://review.openstack.org/426463
+Project: openstack/deb-keystone
+Branch: refs/heads/master
