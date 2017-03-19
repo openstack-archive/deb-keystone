@@ -1,3 +1,10 @@
+keystone (2:10.0.0-7) unstable; urgency=medium
+
+  * Team upload.
+  * Dependency added: net-tools (Closes: #858215)
+
+ -- David Rabel <david.rabel@noresoft.com>  Sun, 19 Mar 2017 22:31:50 +0100
+
 keystone (2:10.0.0-6) unstable; urgency=medium
 
   * Team upload.
