@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+2: Brant Knudson <blk@acm.org>
+Workflow+1: Brant Knudson <blk@acm.org>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 03 Mar 2017 23:12:38 +0000
+Reviewed-on: https://review.openstack.org/440918
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/ocata
