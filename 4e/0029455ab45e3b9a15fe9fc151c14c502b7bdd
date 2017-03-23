@@ -1,0 +1,8 @@
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 24 Feb 2017 15:27:18 +0000
+Reviewed-on: https://review.openstack.org/437402
+Project: openstack/deb-keystone
+Branch: refs/heads/master

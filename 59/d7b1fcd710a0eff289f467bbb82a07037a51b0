@@ -1,0 +1,10 @@
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Workflow+1: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 03 Mar 2017 21:27:53 +0000
+Reviewed-on: https://review.openstack.org/438896
+Project: openstack/deb-keystone
+Branch: refs/heads/master

@@ -1,0 +1,11 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: liyanhang <liyh@gohighsec.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 24 Feb 2017 17:41:49 +0000
+Reviewed-on: https://review.openstack.org/432376
+Project: openstack/deb-keystone
+Branch: refs/heads/master

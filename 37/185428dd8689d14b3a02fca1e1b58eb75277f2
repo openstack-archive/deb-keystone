@@ -1,0 +1,10 @@
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Workflow+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 18 Mar 2017 15:11:24 +0000
+Reviewed-on: https://review.openstack.org/445245
+Project: openstack/deb-keystone
+Branch: refs/heads/master

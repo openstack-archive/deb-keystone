@@ -1,0 +1,15 @@
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+1: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: David Stanek <dstanek@dstanek.com>
+Code-Review+1: Richard Avelar <csravelar@gmail.com>
+Code-Review+2: Boris Bobrov <breton@cynicmansion.ru>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Boris Bobrov <breton@cynicmansion.ru>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 24 Feb 2017 22:23:52 +0000
+Reviewed-on: https://review.openstack.org/429047
+Project: openstack/deb-keystone
+Branch: refs/heads/master

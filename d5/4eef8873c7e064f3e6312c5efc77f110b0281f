@@ -1,0 +1,11 @@
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Workflow+1: Dave Chen <dave.jungler@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 05 Mar 2017 06:34:16 +0000
+Reviewed-on: https://review.openstack.org/438714
+Project: openstack/deb-keystone
+Branch: refs/heads/master

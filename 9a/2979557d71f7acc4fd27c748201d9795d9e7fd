@@ -1,0 +1,14 @@
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: Jeremy Zhang <zhangjun_inspur@163.com>
+Code-Review+1: qtlu <qtlu@fiberhome.com>
+Code-Review+1: Zhongwei He <zwhe@fiberhome.com>
+Code-Review+1: Anthony Washington <anthony.washington@intel.com>
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Workflow+1: Steve Martinelli <s.martinelli@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 22 Mar 2017 16:30:39 +0000
+Reviewed-on: https://review.openstack.org/446279
+Project: openstack/deb-keystone
+Branch: refs/heads/master
