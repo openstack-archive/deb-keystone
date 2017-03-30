@@ -1,0 +1,10 @@
+Code-Review+2: ayoung <ayoung@redhat.com>
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 30 Mar 2017 05:50:40 +0000
+Reviewed-on: https://review.openstack.org/450991
+Project: openstack/deb-keystone
+Branch: refs/heads/master
