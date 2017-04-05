@@ -1,0 +1,10 @@
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+2: Ron De Rose <ronald.de.rose@intel.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 05 Apr 2017 23:30:49 +0000
+Reviewed-on: https://review.openstack.org/452772
+Project: openstack/deb-keystone
+Branch: refs/heads/master
