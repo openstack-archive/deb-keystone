@@ -1,0 +1,8 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 10 Apr 2017 18:17:04 +0000
+Reviewed-on: https://review.openstack.org/453881
+Project: openstack/deb-keystone
+Branch: refs/heads/master
