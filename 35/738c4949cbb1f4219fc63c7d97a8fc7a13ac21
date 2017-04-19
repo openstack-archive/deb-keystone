@@ -1,0 +1,11 @@
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Workflow+1: henry-nash <henry.nash@uk.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 19 Apr 2017 17:56:55 +0000
+Reviewed-on: https://review.openstack.org/457847
+Project: openstack/deb-keystone
+Branch: refs/heads/master
