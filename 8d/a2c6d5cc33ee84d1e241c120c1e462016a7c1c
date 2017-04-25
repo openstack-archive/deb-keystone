@@ -1,0 +1,13 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+1: Nisha Yadav <ynisha11@gmail.com>
+Code-Review+1: Shan Guo <guoshan@awcloud.com>
+Code-Review+1: Zhaokun Fu <fuzk@inspur.com>
+Code-Review+2: ayoung <ayoung@redhat.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 25 Apr 2017 18:30:25 +0000
+Reviewed-on: https://review.openstack.org/450038
+Project: openstack/deb-keystone
+Branch: refs/heads/master
