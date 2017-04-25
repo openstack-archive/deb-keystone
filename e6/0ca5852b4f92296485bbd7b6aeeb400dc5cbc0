@@ -1,0 +1,8 @@
+Code-Review+2: Thomas Goirand <thomas@goirand.fr>
+Workflow+1: Thomas Goirand <thomas@goirand.fr>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 25 Apr 2017 23:01:33 +0000
+Reviewed-on: https://review.openstack.org/459854
+Project: openstack/deb-keystone
+Branch: refs/heads/debian/newton
