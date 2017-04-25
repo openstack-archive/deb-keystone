@@ -1,3 +1,11 @@
+keystone (2:10.0.0-9) unstable; urgency=high
+
+  * CVE-2017-2673 (OSSA-2017-004): Incorrect role assignment with federated
+    Keystone. Applied upstream patch: Do not fetch group assignments without
+    groups (Closes: #861189).
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 25 Apr 2017 22:29:13 +0200
+
 keystone (2:10.0.0-8) unstable; urgency=medium
 
   * Do not use /sbin/route at all, and use ip only if it is available. The
