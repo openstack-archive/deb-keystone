@@ -1,0 +1,12 @@
+Code-Review+2: Steve Martinelli <s.martinelli@gmail.com>
+Code-Review+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: David Stanek <dstanek@dstanek.com>
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 25 Apr 2017 18:17:48 +0000
+Reviewed-on: https://review.openstack.org/459713
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/newton
