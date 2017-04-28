@@ -1,0 +1,11 @@
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+1: yuhui <yuhui@inspur.com>
+Code-Review+1: Colleen Murphy <colleen@gazlene.net>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 28 Apr 2017 16:14:30 +0000
+Reviewed-on: https://review.openstack.org/460826
+Project: openstack/deb-keystone
+Branch: refs/heads/master
