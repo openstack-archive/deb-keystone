@@ -1,0 +1,11 @@
+Code-Review+2: Dave Chen <dave.jungler@gmail.com>
+Code-Review+1: rocky <haigang.xu@easystack.cn>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Workflow+1: Colleen Murphy <colleen@gazlene.net>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 24 May 2017 22:55:39 +0000
+Reviewed-on: https://review.openstack.org/467071
+Project: openstack/deb-keystone
+Branch: refs/heads/master
