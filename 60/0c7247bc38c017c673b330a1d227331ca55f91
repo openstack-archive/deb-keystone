@@ -1,0 +1,13 @@
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+1: zhengliuyang <hfzhengliuyang@163.com>
+Code-Review+1: liyanhang <liyh@gohighsec.com>
+Code-Review+1: gongysh <gong.yongsheng@99cloud.net>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 16 Jun 2017 10:33:24 +0000
+Reviewed-on: https://review.openstack.org/462967
+Project: openstack/deb-keystone
+Branch: refs/heads/master
