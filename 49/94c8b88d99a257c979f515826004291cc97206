@@ -1,0 +1,10 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Harry Rybacki <hrybacki@redhat.com>
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Workflow+1: Colleen Murphy <colleen@gazlene.net>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 22 Jun 2017 21:35:57 +0000
+Reviewed-on: https://review.openstack.org/449244
+Project: openstack/deb-keystone
+Branch: refs/heads/master
