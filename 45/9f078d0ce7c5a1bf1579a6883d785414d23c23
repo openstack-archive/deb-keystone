@@ -1,0 +1,10 @@
+Code-Review+1: Alexandra Settle <a.settle@outlook.com>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 22 Jun 2017 19:05:53 +0000
+Reviewed-on: https://review.openstack.org/475119
+Project: openstack/deb-keystone
+Branch: refs/heads/master
