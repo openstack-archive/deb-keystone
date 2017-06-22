@@ -1,0 +1,11 @@
+Code-Review+1: Jaewoo Park <jp655p@att.com>
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Code-Review+1: Tin Lam <tin@irrational.io>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 22 Jun 2017 20:18:29 +0000
+Reviewed-on: https://review.openstack.org/475460
+Project: openstack/deb-keystone
+Branch: refs/heads/master
