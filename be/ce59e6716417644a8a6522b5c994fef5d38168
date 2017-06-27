@@ -1,0 +1,10 @@
+Code-Review+1: Jaewoo Park <jp655p@att.com>
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 27 Jun 2017 22:59:31 +0000
+Reviewed-on: https://review.openstack.org/473912
+Project: openstack/deb-keystone
+Branch: refs/heads/master
