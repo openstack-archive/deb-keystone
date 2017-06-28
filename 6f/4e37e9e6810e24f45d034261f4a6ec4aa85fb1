@@ -1,0 +1,11 @@
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 28 Jun 2017 15:56:23 +0000
+Reviewed-on: https://review.openstack.org/471060
+Project: openstack/deb-keystone
+Branch: refs/heads/master
