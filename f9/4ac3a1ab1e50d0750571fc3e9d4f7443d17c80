@@ -1,0 +1,10 @@
+Code-Review+2: Rodrigo Duarte <rodrigodsousa@gmail.com>
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Code-Review+2: Boris Bobrov <breton@cynicmansion.ru>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 03 Jul 2017 19:15:15 +0000
+Reviewed-on: https://review.openstack.org/479026
+Project: openstack/deb-keystone
+Branch: refs/heads/master
