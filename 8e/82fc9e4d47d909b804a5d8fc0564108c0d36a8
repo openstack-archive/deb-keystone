@@ -1,0 +1,12 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+1: liyanhang <liyh@gohighsec.com>
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Workflow+1: Lance Bragstad <lbragstad@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 06 Jul 2017 17:39:33 +0000
+Reviewed-on: https://review.openstack.org/476200
+Project: openstack/deb-keystone
+Branch: refs/heads/master
