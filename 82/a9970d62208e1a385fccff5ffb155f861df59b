@@ -1,0 +1,9 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: YuYang <yuyangwang1985@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 07 Jul 2017 04:47:35 +0000
+Reviewed-on: https://review.openstack.org/476676
+Project: openstack/deb-keystone
+Branch: refs/heads/master
