@@ -1,0 +1,10 @@
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Code-Review+1: Alexandra Settle <a.settle@outlook.com>
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Workflow+1: Colleen Murphy <colleen@gazlene.net>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 11 Jul 2017 13:35:25 +0000
+Reviewed-on: https://review.openstack.org/481381
+Project: openstack/deb-keystone
+Branch: refs/heads/master
