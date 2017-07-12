@@ -1,0 +1,9 @@
+Code-Review+1: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Workflow+1: Boris Bobrov <breton@cynicmansion.ru>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 12 Jul 2017 20:15:27 +0000
+Reviewed-on: https://review.openstack.org/437441
+Project: openstack/deb-keystone
+Branch: refs/heads/master
