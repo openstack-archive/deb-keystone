@@ -1,0 +1,9 @@
+Code-Review+2: Colleen Murphy <colleen@gazlene.net>
+Code-Review+2: henry-nash <henry.nash@uk.ibm.com>
+Workflow+1: henry-nash <henry.nash@uk.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 16 Jul 2017 10:33:49 +0000
+Reviewed-on: https://review.openstack.org/484172
+Project: openstack/deb-keystone
+Branch: refs/heads/master
