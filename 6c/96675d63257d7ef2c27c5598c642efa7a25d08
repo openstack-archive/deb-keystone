@@ -1,0 +1,9 @@
+Code-Review+2: Morgan Fainberg <morgan.fainberg@gmail.com>
+Workflow+1: Morgan Fainberg <morgan.fainberg@gmail.com>
+Code-Review+1: Matthew Edmonds <edmondsw@us.ibm.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 21 Jul 2017 00:12:50 +0000
+Reviewed-on: https://review.openstack.org/485694
+Project: openstack/deb-keystone
+Branch: refs/heads/stable/ocata
