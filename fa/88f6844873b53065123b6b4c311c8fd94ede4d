@@ -1,0 +1,14 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Gage Hugo <gagehugo@gmail.com>
+Code-Review+1: Kien Nguyen <KienNT@vn.fujitsu.com>
+Code-Review+1: Harry Rybacki <hrybacki@redhat.com>
+Code-Review+1: Kairat Kushaev <kkushaev@mirantis.com>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+2: ayoung <ayoung@redhat.com>
+Workflow+1: ayoung <ayoung@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 22 Jul 2017 01:33:29 +0000
+Reviewed-on: https://review.openstack.org/482359
+Project: openstack/deb-keystone
+Branch: refs/heads/master
