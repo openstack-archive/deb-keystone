@@ -1,0 +1,11 @@
+Code-Review+2: Lance Bragstad <lbragstad@gmail.com>
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+1: Gábor Antal <antal@inf.u-szeged.hu>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 24 Jul 2017 15:39:25 +0000
+Reviewed-on: https://review.openstack.org/484250
+Project: openstack/deb-keystone
+Branch: refs/heads/master

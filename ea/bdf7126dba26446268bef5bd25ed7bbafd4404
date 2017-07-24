@@ -1,0 +1,9 @@
+Code-Review+1: Kristi Nikolla <knikolla@bu.edu>
+Code-Review+2: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Workflow+1: Samuel de Medeiros Queiroz <samueldmq@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 24 Jul 2017 15:39:33 +0000
+Reviewed-on: https://review.openstack.org/485760
+Project: openstack/deb-keystone
+Branch: refs/heads/master
