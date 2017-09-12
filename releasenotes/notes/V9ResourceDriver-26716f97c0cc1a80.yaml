@@ -1,5 +1,0 @@
----
-deprecations:
-  - The V8 Resource driver interface is deprecated. Support for the V8
-    Resource driver interface is planned to be removed in the 'O' release of
-    OpenStack.

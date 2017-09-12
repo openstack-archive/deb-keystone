@@ -1,7 +1,0 @@
----
-fixes:
-  - >
-    [`bug 1616424 <https://bugs.launchpad.net/keystone/+bug/1616424>`_]
-    Provide better exception messages when creating OAuth request tokens and
-    OAuth access tokens via the ``/v3/OS-OAUTH1/request_token`` and
-    ``/v3/OS-OAUTH1/access_token`` APIs, respectively.

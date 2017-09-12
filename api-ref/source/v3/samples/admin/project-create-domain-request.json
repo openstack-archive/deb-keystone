@@ -1,8 +1,0 @@
-{
-    "project": {
-        "description": "My new domain",
-        "enabled": true,
-        "is_domain": true,
-        "name": "myNewDomain"
-    }
-}

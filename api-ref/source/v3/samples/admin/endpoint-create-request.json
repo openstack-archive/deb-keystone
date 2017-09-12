@@ -1,8 +1,0 @@
-{
-    "endpoint": {
-        "interface": "public",
-        "region_id": "RegionOne",
-        "url": "http://example.com/identity/v3/endpoints/828384",
-        "service_id": "9242e05f0c23467bbd1cf1f7a6e5e596"
-    }
-}

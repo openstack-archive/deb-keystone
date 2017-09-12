@@ -1,7 +1,0 @@
-{
-    "endpoint_group": {
-        "filters": {
-            "interface": "public"
-        }
-    }
-}

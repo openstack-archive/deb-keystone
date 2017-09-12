@@ -1,5 +1,0 @@
----
-upgrade:
-  - >
-    [`bug 1541092 <https://bugs.launchpad.net/keystone/+bug/1541092>`_]
-    Only database upgrades from Kilo and newer are supported.

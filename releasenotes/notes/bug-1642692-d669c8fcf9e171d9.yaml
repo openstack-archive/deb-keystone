@@ -1,6 +1,0 @@
----
-fixes:
-  - |
-    [`bug 1642692 <https://bugs.launchpad.net/keystone/+bug/1642692>`_]
-    When a `federation protocol` is deleted, all users that authenticated with
-    the `federation protocol` will also be deleted.

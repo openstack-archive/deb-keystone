@@ -1,7 +1,0 @@
----
-features:
- - >
-   [`blueprint support-federated-attr <https://blueprints.launchpad.net/keystone/+spec/support-federated-attr>`_]
-   Added new filters to the `list user` API (``GET /v3/users``) to support
-   querying federated identity attributes: ``idp_id``, ``protocol_id``, and
-   ``unique_id``.

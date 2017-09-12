@@ -1,6 +1,0 @@
-{
-    "identity_provider": {
-        "remote_ids": ["beta_id_1", "beta_id_2"],
-        "enabled": true
-    }
-}

@@ -1,7 +1,0 @@
----
-other:
-  - >
-    [`bug 1563101 <https://bugs.launchpad.net/keystone/+bug/1563101>`_]
-    The token provider driver interface has moved from
-    ``keystone.token.provider.Provider`` to ``keystone.token.providers.base.Provider``.
-    If implementing a custom token provider, subclass from the new location.

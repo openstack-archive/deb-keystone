@@ -1,6 +1,0 @@
-{
-    "policy": {
-        "blob": "{'foobar_user': 'role:compute-user'}",
-        "type": "application/json"
-    }
-}
